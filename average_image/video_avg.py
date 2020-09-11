@@ -11,11 +11,12 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 from bbox_utils import annotations_to_dataframe, get_frame_annotations, add_bbox_to_axes, resize_v_frames
 from constants import SDDVideoClasses, OBJECT_CLASS_COLOR_MAPPING
 from layers import MinPool2D
-from deep_networks_avg import get_vgg_layer_activations, get_resnet_layer_activations, get_densenet_layer_activations,\
+from deep_networks_avg import get_vgg_layer_activations, get_resnet_layer_activations, get_densenet_layer_activations, \
     get_densenet_filtered_layer_activations
 
 
@@ -199,7 +200,7 @@ def min_pool_video_opencv(v_frames, kernel_size=3, iterations=1, frame_join_pad=
     v_frames = F.interpolate(v_frames.permute(0, 3, 1, 2), size=pooled_dims)
 
     out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
-                         (pooled_dims[1]*2 + frame_join_pad * 3, pooled_dims[0] + frame_join_pad*2))
+                         (pooled_dims[1] * 2 + frame_join_pad * 3, pooled_dims[0] + frame_join_pad * 2))
 
     for frame in range(v_frames.size(0)):
         cat_frame = torch.stack((v_frames[frame], v_frames_pooled[frame]))
@@ -208,6 +209,41 @@ def min_pool_video_opencv(v_frames, kernel_size=3, iterations=1, frame_join_pad=
         out.write(joined_frame)
 
     out.release()
+
+
+def min_pool_subtracted_img_video_opencv(v_frames, average_frame, kernel_size=3, iterations=1, frame_join_pad=5,
+                                         desired_fps=6,
+                                         video_out_save_path=None):
+    average_frame_stacked = average_frame.repeat(v_frames.size(0), 1, 1, 1)
+    activation_masks_stacked = (average_frame_stacked - v_frames).mean(dim=-1).unsqueeze(dim=-1)
+
+    v_frames_pooled = min_pool_baseline(v_frames=activation_masks_stacked, kernel_size=kernel_size,
+                                        iterations=iterations)
+    v_frames_pooled = (v_frames_pooled.permute(0, 3, 1, 2) * 255).int()
+    pooled_dims = (v_frames_pooled.shape[2], v_frames_pooled.shape[3])
+    v_frames = (F.interpolate(v_frames.permute(0, 3, 1, 2), size=pooled_dims) * 255).int()
+
+    out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                         (640, 480))
+    # (pooled_dims[1] * 2 + frame_join_pad * 3, pooled_dims[0] + frame_join_pad * 2))
+
+    for i, frame in enumerate(range(v_frames.size(0))):
+        fig, (ax1, ax2) = plt.subplots(1, 2, sharex="all", sharey="all")
+        canvas = FigureCanvas(fig)
+        ax1.imshow(v_frames[frame].permute(1, 2, 0))  # * 255)
+        ax2.imshow(v_frames_pooled[frame].permute(1, 2, 0))  # * 255)
+
+        ax1.set_title(f"Video Frame: {i}")
+        ax2.set_title(f"Mask Frame: {i}")
+
+        canvas.draw()
+
+        buf = canvas.buffer_rgba()
+        out_frame = np.asarray(buf, dtype=np.uint8)[:, :, :-1]
+        out.write(out_frame)
+
+    out.release()
+
 
 # def min_pool_video_opencv(video_path, num_frames=30, kernel_size=3, iterations=1, frame_join_pad=5, desired_fps=6,
 #                           video_out_save_path=None):
@@ -311,8 +347,12 @@ if __name__ == '__main__':
 
         pooled_spatial_dim = (video_frames.size(1), video_frames.size(2))
 
-    min_pool_video_opencv(v_frames=video_frames, kernel_size=3, iterations=min_pool_itrs,
-                          video_out_save_path=plot_save_path + "video_cv1.avi")
+    avg_frame, ref_frame, activation_mask = get_result_triplet(v_frames=video_frames,
+                                                               reference_frame_number=frame_number)
+
+    min_pool_subtracted_img_video_opencv(v_frames=video_frames, average_frame=avg_frame, kernel_size=3,
+                                         iterations=min_pool_itrs,
+                                         video_out_save_path=plot_save_path + "video_cv1.avi")
 
     # avg_frame, ref_frame, activation_mask = get_result_triplet(v_frames=video_frames,
     #                                                            reference_frame_number=frame_number)
