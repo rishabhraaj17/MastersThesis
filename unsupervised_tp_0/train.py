@@ -135,7 +135,7 @@ if __name__ == '__main__':
     pin_memory = False
     lr = 0.001
     batch_size = 2
-    save_path = f"../Checkpoints/{datetime.now()}/"
+    save_path = f"../Checkpoints/{vid_label.value}_batch_size{batch_size}_{datetime.now()}.pt"
 
     sdd_dataset = SDDDatasetBuilder(root=base_path, video_label=vid_label, frames_per_clip=1, num_workers=10)
 

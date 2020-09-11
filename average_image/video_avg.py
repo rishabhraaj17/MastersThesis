@@ -2,7 +2,10 @@ import datetime
 import os
 from typing import Union, Optional
 
+import cv2 as cv
+import torch
 import torchvision
+from torchvision.utils import make_grid
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -113,18 +116,66 @@ def densenet_activations(v_frames, layer_number: int = 3, scale_factor: Optional
     return out.permute(0, 2, 3, 1)
 
 
+def optical_flow_and_plot(ref_frame, previous_frame, save_path, save_file_name):
+    ref_frame = ref_frame.numpy()
+    previous_frame = previous_frame.numpy()
+
+    ref_frame = cv.GaussianBlur(ref_frame, (5, 5), 0)
+    previous_frame = cv.GaussianBlur(previous_frame, (5, 5), 0)
+
+    prev_gray = cv.cvtColor(previous_frame, cv.COLOR_BGR2GRAY)
+    mask = np.zeros_like(previous_frame)
+    mask[..., 1] = 255
+    gray = cv.cvtColor(ref_frame, cv.COLOR_BGR2GRAY)
+    flow = cv.calcOpticalFlowFarneback(prev_gray, gray,
+                                       None,
+                                       0.5, 3, 15, 3, 5, 1.2, 0)
+    # Computes the magnitude and angle of the 2D vectors
+    magnitude, angle = cv.cartToPolar(flow[..., 0], flow[..., 1])
+
+    # Sets image hue according to the optical flow
+    # direction
+    mask[..., 0] = angle * 180 / np.pi / 2
+
+    # Sets image value according to the optical flow
+    # magnitude (normalized)
+    mask[..., 2] = cv.normalize(magnitude, None, 0, 1, cv.NORM_MINMAX)
+
+    # Converts HSV to RGB (BGR) color representation
+    rgb = cv.cvtColor(mask, cv.COLOR_HSV2BGR)
+
+    # ref_frame = torch.from_numpy(ref_frame)
+    # previous_frame = torch.from_numpy(previous_frame)
+    # rgb = torch.from_numpy(rgb)
+
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharex="all", sharey="all",
+                                        figsize=(ref_frame.shape[1]/100, ref_frame.shape[0]/100))
+
+    ax1.imshow(previous_frame)
+    ax2.imshow(ref_frame)
+    m_img = ax3.imshow(rgb)
+
+    ax1.set_title("Previous")
+    ax2.set_title("Current")
+    ax3.set_title("Optical Flow")
+
+    fig.savefig(save_path + save_file_name + "_flow" + ".png")
+    plt.show()
+
+
 if __name__ == '__main__':
     annotation_base_path = "../Datasets/SDD/annotations/"
     video_base_path = "../Datasets/SDD/videos/"
-    vid_label = SDDVideoClasses.HYANG
-    video_number = 4
+    vid_label = SDDVideoClasses.LITTLE
+    video_number = 0
     video_file_name = "video.mov"
     annotation_file_name = "annotations.txt"
     fps = 30
     start_sec = 12
     end_sec = 16
 
-    frame_number = 2
+    frame_number = 9
+    previous_frame = frame_number - 7
 
     # min_pool
     use_min_pool = False
@@ -132,8 +183,8 @@ if __name__ == '__main__':
 
     # vgg/resnet/densenet features
     inp_layers = 4  # 4 for densenet, 3 or 6 for vgg
-    use_dnn = True
-    resnet = True
+    use_dnn = False
+    resnet = False
     densenet = False
     scale_factor = 0.25
 
@@ -183,6 +234,8 @@ if __name__ == '__main__':
 
     avg_frame, ref_frame, activation_mask = get_result_triplet(v_frames=video_frames,
                                                                reference_frame_number=frame_number)
+    optical_flow_and_plot(ref_frame=ref_frame, previous_frame=video_frames[previous_frame], save_path=plot_save_path,
+                          save_file_name=plot_save_file_name)
 
     if use_dnn:
         avg_frame, ref_frame, activation_mask = avg_frame.mean(-1).unsqueeze(-1), \
