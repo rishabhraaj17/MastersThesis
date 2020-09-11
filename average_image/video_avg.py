@@ -4,6 +4,7 @@ from typing import Union, Optional
 
 import cv2 as cv
 import torch
+import torch.nn.functional as F
 import torchvision
 from torchvision.utils import make_grid
 import numpy as np
@@ -148,8 +149,12 @@ def optical_flow_and_plot(ref_frame, previous_frame, save_path, save_file_name):
     # previous_frame = torch.from_numpy(previous_frame)
     # rgb = torch.from_numpy(rgb)
 
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharex="all", sharey="all",
-                                        figsize=(ref_frame.shape[1]/100, ref_frame.shape[0]/100))
+    if ref_frame.shape[0] < ref_frame.shape[1]:
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharex="all", sharey="all",
+                                            figsize=(ref_frame.shape[1] / 100, ref_frame.shape[0] / 100))
+    else:
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharex="all", sharey="all",
+                                            figsize=(ref_frame.shape[0] / 100, ref_frame.shape[1] / 100))
 
     ax1.imshow(previous_frame)
     ax2.imshow(ref_frame)
@@ -160,6 +165,80 @@ def optical_flow_and_plot(ref_frame, previous_frame, save_path, save_file_name):
     ax3.set_title("Optical Flow")
 
     fig.savefig(save_path + save_file_name + "_flow" + ".png")
+    plt.show()
+
+
+# fixme: not working this way
+def min_pool_video(v_frames, kernel_size=3, iterations=1, desired_fps=6, video_out_save_path=None):
+    v_frames_pooled = min_pool_baseline(v_frames=v_frames, kernel_size=kernel_size, iterations=iterations)
+    pooled_dims = (v_frames_pooled.size(1), v_frames_pooled.size(2))
+    v_frames = F.interpolate(v_frames.permute(0, 3, 1, 2), size=pooled_dims).permute(0, 2, 3, 1)
+
+    video_out_frames = None
+    for frame in range(v_frames.size(0)):
+        cat_frame = torch.stack((v_frames[frame], v_frames_pooled[frame])).permute(0, 3, 1, 2)
+        joined_frame = make_grid(cat_frame, nrow=2, padding=5).unsqueeze(dim=0)
+        if video_out_frames is None:
+            clubbed_h, clubbed_w = joined_frame.size(2), joined_frame.size(3)
+            video_out_frames = torch.zeros(size=(0, 3, clubbed_h, clubbed_w))
+        video_out_frames = torch.cat((video_out_frames, joined_frame))
+
+    video_out_frames = video_out_frames.permute(0, 3, 2, 1)
+    if video_out_frames.size(1) % 2 != 0 or video_out_frames.size(2) % 2 != 0:
+        video_out_frames = F.interpolate(v_frames.permute(0, 3, 1, 2), size=(video_out_frames.size(1) + 1,
+                                                                             video_out_frames.size(2) + 1)) \
+            .permute(0, 2, 3, 1)
+    torchvision.io.write_video(video_out_save_path, video_out_frames, fps=desired_fps)
+
+
+def min_pool_video_opencv(v_frames, kernel_size=3, iterations=1, frame_join_pad=5, desired_fps=6,
+                          video_out_save_path=None):
+    v_frames_pooled = min_pool_baseline(v_frames=v_frames, kernel_size=kernel_size, iterations=iterations)
+    v_frames_pooled = v_frames_pooled.permute(0, 3, 1, 2)
+    pooled_dims = (v_frames_pooled.shape[2], v_frames_pooled.shape[3])
+    v_frames = F.interpolate(v_frames.permute(0, 3, 1, 2), size=pooled_dims)
+
+    out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                         (pooled_dims[1]*2 + frame_join_pad * 3, pooled_dims[0] + frame_join_pad*2))
+
+    for frame in range(v_frames.size(0)):
+        cat_frame = torch.stack((v_frames[frame], v_frames_pooled[frame]))
+        joined_frame = make_grid(cat_frame, nrow=2, padding=5).permute(1, 2, 0).numpy()
+        joined_frame = (joined_frame * 255).astype(np.uint8)
+        out.write(joined_frame)
+
+    out.release()
+
+# def min_pool_video_opencv(video_path, num_frames=30, kernel_size=3, iterations=1, frame_join_pad=5, desired_fps=6,
+#                           video_out_save_path=None):
+#     in_video = cv.VideoCapture(video_path)
+#
+#     v_frames = None
+#     for i in range(num_frames):
+#         ret, frame = in_video.read()
+#         if v_frames is None:
+#             v_frames = np.zeros(shape=(0, frame.shape[0], frame.shape[1], 3))
+#         v_frames = np.concatenate((v_frames, np.expand_dims(frame, axis=0)), axis=0)
+#
+#     v_frames = torch.from_numpy(v_frames)
+#     v_frames_pooled = min_pool_baseline(v_frames=v_frames, kernel_size=kernel_size, iterations=iterations)
+#     pooled_dims = (v_frames_pooled.size(1), v_frames_pooled.size(2))
+#     v_frames_pooled = v_frames_pooled.permute(0, 3, 1, 2)
+#     v_frames = F.interpolate(v_frames.permute(0, 3, 1, 2), size=pooled_dims)
+#
+#     out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+#                          (pooled_dims[1] + frame_join_pad * 3, pooled_dims[0] + frame_join_pad))
+#
+#     for frame in range(v_frames.size(0)):
+#         cat_frame = torch.stack((v_frames[frame], v_frames_pooled[frame]))
+#         joined_frame = make_grid(cat_frame/255.0, nrow=2, padding=5).permute(1, 2, 0).numpy()
+#         out.write(joined_frame)
+#
+#     out.release()
+
+
+def show_img(img):
+    plt.imshow(img)
     plt.show()
 
 
@@ -232,33 +311,36 @@ if __name__ == '__main__':
 
         pooled_spatial_dim = (video_frames.size(1), video_frames.size(2))
 
-    avg_frame, ref_frame, activation_mask = get_result_triplet(v_frames=video_frames,
-                                                               reference_frame_number=frame_number)
-    optical_flow_and_plot(ref_frame=ref_frame, previous_frame=video_frames[previous_frame], save_path=plot_save_path,
-                          save_file_name=plot_save_file_name)
+    min_pool_video_opencv(v_frames=video_frames, kernel_size=3, iterations=min_pool_itrs,
+                          video_out_save_path=plot_save_path + "video_cv1.avi")
 
-    if use_dnn:
-        avg_frame, ref_frame, activation_mask = avg_frame.mean(-1).unsqueeze(-1), \
-                                                ref_frame.mean(-1).unsqueeze(-1), \
-                                                np.expand_dims(activation_mask, axis=-1)
-
-    dnn_arch = None
-    if use_dnn:
-        if resnet:
-            dnn_arch = 'resnet'
-        elif densenet:
-            dnn_arch = 'densenet'
-        else:
-            dnn_arch = 'vgg'
-
-    plot_and_save(average=avg_frame, reference=ref_frame, mask=activation_mask, save_path=plot_save_path,
-                  num_frames=(end_sec - start_sec) * meta["video_fps"], video_label=str(vid_label.value),
-                  vid_number=video_number, annotations=annotations, save_file_name=plot_save_file_name,
-                  reference_frame_number=time_adjusted_frame_number, pedestrians_only=False,
-                  original_spatial_dim=original_spatial_dim, pooled_spatial_dim=pooled_spatial_dim,
-                  min_pool=use_min_pool, min_pool_iterations=min_pool_itrs, use_dnn=use_dnn, vgg_scale=1 / scale_factor,
-                  dnn_arch=dnn_arch)
-
-    print(f"Number of frames in batch: {video_frames.size(0)}, Meta: {meta},"
-          f" Min Pool Iterations: {min_pool_itrs if use_min_pool else None}\n\n"
-          f"{annotations}")
+    # avg_frame, ref_frame, activation_mask = get_result_triplet(v_frames=video_frames,
+    #                                                            reference_frame_number=frame_number)
+    # optical_flow_and_plot(ref_frame=ref_frame, previous_frame=video_frames[previous_frame], save_path=plot_save_path,
+    #                       save_file_name=plot_save_file_name)
+    #
+    # if use_dnn:
+    #     avg_frame, ref_frame, activation_mask = avg_frame.mean(-1).unsqueeze(-1), \
+    #                                             ref_frame.mean(-1).unsqueeze(-1), \
+    #                                             np.expand_dims(activation_mask, axis=-1)
+    #
+    # dnn_arch = None
+    # if use_dnn:
+    #     if resnet:
+    #         dnn_arch = 'resnet'
+    #     elif densenet:
+    #         dnn_arch = 'densenet'
+    #     else:
+    #         dnn_arch = 'vgg'
+    #
+    # plot_and_save(average=avg_frame, reference=ref_frame, mask=activation_mask, save_path=plot_save_path,
+    #               num_frames=(end_sec - start_sec) * meta["video_fps"], video_label=str(vid_label.value),
+    #               vid_number=video_number, annotations=annotations, save_file_name=plot_save_file_name,
+    #               reference_frame_number=time_adjusted_frame_number, pedestrians_only=False,
+    #               original_spatial_dim=original_spatial_dim, pooled_spatial_dim=pooled_spatial_dim,
+    #               min_pool=use_min_pool, min_pool_iterations=min_pool_itrs, use_dnn=use_dnn, vgg_scale=1 / scale_factor,
+    #               dnn_arch=dnn_arch)
+    #
+    # print(f"Number of frames in batch: {video_frames.size(0)}, Meta: {meta},"
+    #       f" Min Pool Iterations: {min_pool_itrs if use_min_pool else None}\n\n"
+    #       f"{annotations}")
