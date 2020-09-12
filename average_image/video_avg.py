@@ -222,15 +222,20 @@ def min_pool_subtracted_img_video_opencv(v_frames, average_frame, start_sec, ori
     pooled_dims = (v_frames_pooled.shape[2], v_frames_pooled.shape[3])
     v_frames = (F.interpolate(v_frames.permute(0, 3, 1, 2), size=pooled_dims) * 255).int()
 
+    if average_frame_stacked.shape[1] < average_frame_stacked.shape[2]:
+        original_dims = (average_frame_stacked.size(2)/100, average_frame_stacked.size(1)/100)
+    else:
+        original_dims = (average_frame_stacked.size(1) / 100, average_frame_stacked.size(2) / 100)
+
     out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
-                         (640, 480))
-    # (pooled_dims[1] * 2 + frame_join_pad * 3, pooled_dims[0] + frame_join_pad * 2))
+                         (average_frame_stacked.size(2), average_frame_stacked.size(1)))
 
     for i, frame in enumerate(range(v_frames.size(0))):
-        fig, (ax1, ax2) = plt.subplots(1, 2, sharex="all", sharey="all")
+        fig, (ax1, ax2) = plt.subplots(1, 2, sharex="all", sharey="all",
+                                       figsize=original_dims)
         canvas = FigureCanvas(fig)
-        ax1.imshow(v_frames[frame].permute(1, 2, 0))  # * 255)
-        ax2.imshow(v_frames_pooled[frame].permute(1, 2, 0))  # * 255)
+        ax1.imshow(v_frames[frame].permute(1, 2, 0))
+        ax2.imshow(v_frames_pooled[frame].permute(1, 2, 0), cmap='gray')
 
         ax1.set_title(f"Video Frame: {i}")
         ax2.set_title(f"Mask Frame: {i}")
