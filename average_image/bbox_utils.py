@@ -19,7 +19,7 @@ def get_frame_annotations(df: pd.DataFrame, frame_number: int):
 
 
 def add_bbox_to_axes(ax, annotations: List, show_lost: bool = False, only_pedestrians: bool = True,
-                     original_spatial_dim=None,
+                     original_spatial_dim=None, linewidth=None,
                      pooled_spatial_dim=None, min_pool: bool = False, use_dnn: bool = False):
     for annotation in annotations:
         x, y, width, height = bbox_to_matplotlib_representation(annotation[1:5],
@@ -31,12 +31,13 @@ def add_bbox_to_axes(ax, annotations: List, show_lost: bool = False, only_pedest
         if only_pedestrians:
             if annotation[-1] == ObjectClasses.PEDESTRIAN.value:
                 rect = patches.Rectangle(xy=(x, y), width=width, height=height,
-                                         edgecolor=OBJECT_CLASS_COLOR_MAPPING[ObjectClasses.PEDESTRIAN], fill=False)
+                                         edgecolor=OBJECT_CLASS_COLOR_MAPPING[ObjectClasses.PEDESTRIAN], fill=False,
+                                         linewidth=linewidth)
                 ax.add_patch(rect)
         else:
             rect = patches.Rectangle(xy=(x, y), width=width, height=height,
                                      edgecolor=OBJECT_CLASS_COLOR_MAPPING[ObjectClasses(annotation[-1])],
-                                     fill=False)
+                                     fill=False, linewidth=linewidth)
             ax.add_patch(rect)
 
 

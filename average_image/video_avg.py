@@ -211,9 +211,8 @@ def min_pool_video_opencv(v_frames, kernel_size=3, iterations=1, frame_join_pad=
     out.release()
 
 
-def min_pool_subtracted_img_video_opencv(v_frames, average_frame, kernel_size=3, iterations=1, frame_join_pad=5,
-                                         desired_fps=6,
-                                         video_out_save_path=None):
+def min_pool_subtracted_img_video_opencv(v_frames, average_frame, start_sec, original_fps, kernel_size=3, iterations=1,
+                                         desired_fps=6, video_out_save_path=None, annotations_df=None, show_bbox=False):
     average_frame_stacked = average_frame.repeat(v_frames.size(0), 1, 1, 1)
     activation_masks_stacked = (average_frame_stacked - v_frames).mean(dim=-1).unsqueeze(dim=-1)
 
@@ -236,6 +235,19 @@ def min_pool_subtracted_img_video_opencv(v_frames, average_frame, kernel_size=3,
         ax1.set_title(f"Video Frame: {i}")
         ax2.set_title(f"Mask Frame: {i}")
 
+        if show_bbox:
+            # sometimes we need +/- 1 for accurate bboxes
+            annot = get_frame_annotations(annotations_df, ((start_sec * original_fps) + i - 1))
+
+            add_bbox_to_axes(ax1, annotations=annot, only_pedestrians=False,
+                             original_spatial_dim=(average_frame_stacked.size(1), average_frame_stacked.size(2)),
+                             pooled_spatial_dim=(pooled_dims[0], pooled_dims[1]),
+                             min_pool=True, use_dnn=False, linewidth=0.2)
+
+            add_bbox_to_axes(ax2, annotations=annot, only_pedestrians=False,
+                             original_spatial_dim=(average_frame_stacked.size(1), average_frame_stacked.size(2)),
+                             pooled_spatial_dim=(pooled_dims[0], pooled_dims[1]),
+                             min_pool=True, use_dnn=False, linewidth=0.2)
         canvas.draw()
 
         buf = canvas.buffer_rgba()
@@ -279,15 +291,15 @@ def show_img(img):
 
 
 if __name__ == '__main__':
-    annotation_base_path = "../Datasets/SDD/annotations/"
-    video_base_path = "../Datasets/SDD/videos/"
-    vid_label = SDDVideoClasses.LITTLE
+    annotation_base_path = "/home/rishabh/TrajectoryPrediction/Datasets/SDD/annotations/"
+    video_base_path = "/home/rishabh/TrajectoryPrediction/Datasets/SDD/videos/"
+    vid_label = SDDVideoClasses.BOOKSTORE
     video_number = 0
     video_file_name = "video.mov"
     annotation_file_name = "annotations.txt"
     fps = 30
-    start_sec = 12
-    end_sec = 16
+    start_sec = 131
+    end_sec = 138
 
     frame_number = 9
     previous_frame = frame_number - 7
@@ -352,7 +364,8 @@ if __name__ == '__main__':
 
     min_pool_subtracted_img_video_opencv(v_frames=video_frames, average_frame=avg_frame, kernel_size=3,
                                          iterations=min_pool_itrs,
-                                         video_out_save_path=plot_save_path + "video_cv1.avi")
+                                         video_out_save_path=plot_save_path + f"video_cv1_{vid_label.value}_bbox.avi",
+                                         annotations_df=df, start_sec=start_sec, original_fps=fps, show_bbox=True)
 
     # avg_frame, ref_frame, activation_mask = get_result_triplet(v_frames=video_frames,
     #                                                            reference_frame_number=frame_number)
