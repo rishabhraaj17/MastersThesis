@@ -212,7 +212,8 @@ def min_pool_video_opencv(v_frames, kernel_size=3, iterations=1, frame_join_pad=
 
 
 def min_pool_subtracted_img_video_opencv(v_frames, average_frame, start_sec, original_fps, kernel_size=3, iterations=1,
-                                         desired_fps=6, video_out_save_path=None, annotations_df=None, show_bbox=False):
+                                         desired_fps=6, video_out_save_path=None, annotations_df=None, show_bbox=False,
+                                         video_label=None, vid_number=None):
     average_frame_stacked = average_frame.repeat(v_frames.size(0), 1, 1, 1)
     activation_masks_stacked = (average_frame_stacked - v_frames).mean(dim=-1).unsqueeze(dim=-1)
 
@@ -253,6 +254,12 @@ def min_pool_subtracted_img_video_opencv(v_frames, average_frame, start_sec, ori
                              original_spatial_dim=(average_frame_stacked.size(1), average_frame_stacked.size(2)),
                              pooled_spatial_dim=(pooled_dims[0], pooled_dims[1]),
                              min_pool=True, use_dnn=False, linewidth=0.2)
+
+            patches = [mpatches.Patch(color=val, label=key.value) for key, val in OBJECT_CLASS_COLOR_MAPPING.items()]
+            fig.legend(handles=patches, loc=2)
+
+        fig.suptitle(f"Video Class: {video_label}\nVideo Number: {vid_number}", fontsize=14, fontweight='bold')
+
         canvas.draw()
 
         buf = canvas.buffer_rgba()
@@ -311,7 +318,7 @@ if __name__ == '__main__':
 
     # min_pool
     use_min_pool = False
-    min_pool_itrs = 2
+    min_pool_itrs = 1
 
     # vgg/resnet/densenet features
     inp_layers = 4  # 4 for densenet, 3 or 6 for vgg
@@ -370,7 +377,8 @@ if __name__ == '__main__':
     min_pool_subtracted_img_video_opencv(v_frames=video_frames, average_frame=avg_frame, kernel_size=3,
                                          iterations=min_pool_itrs,
                                          video_out_save_path=plot_save_path + f"video_cv1_{vid_label.value}_bbox.avi",
-                                         annotations_df=df, start_sec=start_sec, original_fps=fps, show_bbox=True)
+                                         annotations_df=df, start_sec=start_sec, original_fps=fps, show_bbox=True,
+                                         vid_number=video_number, video_label=vid_label.value)
 
     # avg_frame, ref_frame, activation_mask = get_result_triplet(v_frames=video_frames,
     #                                                            reference_frame_number=frame_number)
