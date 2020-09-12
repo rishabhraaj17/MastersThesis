@@ -12,6 +12,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from tqdm import tqdm
 
 from bbox_utils import annotations_to_dataframe, get_frame_annotations, add_bbox_to_axes, resize_v_frames
 from constants import SDDVideoClasses, OBJECT_CLASS_COLOR_MAPPING
@@ -225,13 +226,15 @@ def min_pool_subtracted_img_video_opencv(v_frames, average_frame, start_sec, ori
 
     if average_frame_stacked.shape[1] < average_frame_stacked.shape[2]:
         original_dims = (average_frame_stacked.size(2)/100, average_frame_stacked.size(1)/100)
+        out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                             (average_frame_stacked.size(2), average_frame_stacked.size(1)))
     else:
         original_dims = (average_frame_stacked.size(1) / 100, average_frame_stacked.size(2) / 100)
+        out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                             (average_frame_stacked.size(1), average_frame_stacked.size(2)))
 
-    out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
-                         (average_frame_stacked.size(2), average_frame_stacked.size(1)))
-
-    for i, frame in enumerate(range(v_frames.size(0))):
+    print('Generating Video: ')
+    for i, frame in tqdm(enumerate(range(v_frames.size(0))), total=v_frames.size(0)):
         fig, (ax1, ax2) = plt.subplots(1, 2, sharex='none', sharey='none',
                                        figsize=original_dims)
         canvas = FigureCanvas(fig)
