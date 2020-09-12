@@ -220,7 +220,7 @@ def min_pool_subtracted_img_video_opencv(v_frames, average_frame, start_sec, ori
                                         iterations=iterations)
     v_frames_pooled = (v_frames_pooled.permute(0, 3, 1, 2) * 255).int()
     pooled_dims = (v_frames_pooled.shape[2], v_frames_pooled.shape[3])
-    v_frames = (F.interpolate(v_frames.permute(0, 3, 1, 2), size=pooled_dims) * 255).int()
+    v_frames = v_frames.permute(0, 3, 1, 2)
 
     if average_frame_stacked.shape[1] < average_frame_stacked.shape[2]:
         original_dims = (average_frame_stacked.size(2)/100, average_frame_stacked.size(1)/100)
@@ -231,7 +231,7 @@ def min_pool_subtracted_img_video_opencv(v_frames, average_frame, start_sec, ori
                          (average_frame_stacked.size(2), average_frame_stacked.size(1)))
 
     for i, frame in enumerate(range(v_frames.size(0))):
-        fig, (ax1, ax2) = plt.subplots(1, 2, sharex="all", sharey="all",
+        fig, (ax1, ax2) = plt.subplots(1, 2, sharex='none', sharey='none',
                                        figsize=original_dims)
         canvas = FigureCanvas(fig)
         ax1.imshow(v_frames[frame].permute(1, 2, 0))
@@ -247,7 +247,7 @@ def min_pool_subtracted_img_video_opencv(v_frames, average_frame, start_sec, ori
             add_bbox_to_axes(ax1, annotations=annot, only_pedestrians=False,
                              original_spatial_dim=(average_frame_stacked.size(1), average_frame_stacked.size(2)),
                              pooled_spatial_dim=(pooled_dims[0], pooled_dims[1]),
-                             min_pool=True, use_dnn=False, linewidth=0.2)
+                             min_pool=False, use_dnn=False, linewidth=0.2)
 
             add_bbox_to_axes(ax2, annotations=annot, only_pedestrians=False,
                              original_spatial_dim=(average_frame_stacked.size(1), average_frame_stacked.size(2)),
