@@ -291,8 +291,8 @@ def show_img(img):
 
 
 if __name__ == '__main__':
-    annotation_base_path = "/home/rishabh/TrajectoryPrediction/Datasets/SDD/annotations/"
-    video_base_path = "/home/rishabh/TrajectoryPrediction/Datasets/SDD/videos/"
+    annotation_base_path = "../Datasets/SDD/annotations/"
+    video_base_path = "../Datasets/SDD/videos/"
     vid_label = SDDVideoClasses.BOOKSTORE
     video_number = 0
     video_file_name = "video.mov"
