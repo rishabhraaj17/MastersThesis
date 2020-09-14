@@ -170,6 +170,101 @@ def optical_flow_and_plot(ref_frame, previous_frame, save_path, save_file_name):
     plt.show()
 
 
+def get_subtracted_img_for_frames(video_path, start_frame=0, end_frame=None):
+    video_frames, _, meta = get_frames(file=video_file, start=start_frame, end=end_frame // 30)
+    average_frame = video_frames.mean(dim=0)
+    average_frame_stacked = average_frame.repeat(video_frames.size(0), 1, 1, 1)
+    activation_masks_stacked = (average_frame_stacked - video_frames).mean(dim=-1).unsqueeze(dim=-1)
+    return activation_masks_stacked
+
+
+def optical_flow_subtraction_mask_video(video_path, video_label, annotations_df, vid_number, video_out_save_path,
+                                        start_frame=0, end_frame=None, desired_fps=6):
+    subtracted_img = get_subtracted_img_for_frames(video_path, start_frame, end_frame)
+    subtracted_img = (subtracted_img * 255).int().squeeze().numpy()
+    cap = cv.VideoCapture(video_path)
+    cap_count = 0
+
+    previous = None
+    hsv = None
+
+    original_dims = None
+    out = None
+
+    for frame_count in tqdm(range(0, end_frame)):
+        ret, frame = cap.read()
+        if previous is None:
+            previous = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+            hsv = np.zeros_like(frame)
+            hsv[..., 1] = 255
+            continue
+        if out is None:
+            if frame.shape[0] < frame.shape[1]:
+                original_dims = (frame.shape[1] / 100, frame.shape[0] / 100)
+                out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                                     (frame.shape[1], frame.shape[0]))
+            else:
+                original_dims = (frame.shape[0] / 100, frame.shape[1] / 100)
+                out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                                     (frame.shape[0], frame.shape[1]))
+        if cap_count < start_frame:
+            continue
+
+        next = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+        flow = cv.calcOpticalFlowFarneback(previous, next, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+        mag, ang = cv.cartToPolar(flow[..., 0], flow[..., 1])
+        hsv[..., 0] = ang * 180 / np.pi / 2
+        hsv[..., 2] = cv.normalize(mag, None, 0, 255, cv.NORM_MINMAX)  # 0-1 normalize
+        rgb = cv.cvtColor(hsv, cv.COLOR_HSV2BGR)
+
+        if frame.shape[0] < frame.shape[1]:
+            fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharex="all", sharey="all",
+                                                figsize=original_dims)
+        else:
+            fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharex="all", sharey="all",
+                                                figsize=original_dims)
+
+        canvas = FigureCanvas(fig)
+
+        ax1.imshow(frame)
+        ax2.imshow(subtracted_img[frame_count], cmap='gray')
+        ax3.imshow(rgb)
+
+        original_spatial_dim = (frame.shape[0], frame.shape[1])
+        annot = get_frame_annotations(annotations_df, frame_count)
+
+        add_bbox_to_axes(ax1, annotations=annot, only_pedestrians=False,
+                         original_spatial_dim=original_spatial_dim, pooled_spatial_dim=None,
+                         min_pool=False, use_dnn=False)
+        add_bbox_to_axes(ax2, annotations=annot, only_pedestrians=False,
+                         original_spatial_dim=original_spatial_dim, pooled_spatial_dim=None,
+                         min_pool=False, use_dnn=False)
+        # add_bbox_to_axes(ax3, annotations=annot, only_pedestrians=False,
+        #                  original_spatial_dim=original_spatial_dim, pooled_spatial_dim=None,
+        #                  min_pool=False, use_dnn=False)
+
+        patches = [mpatches.Patch(color=val, label=key.value) for key, val in OBJECT_CLASS_COLOR_MAPPING.items()]
+        fig.legend(handles=patches, loc=2)
+
+        fig.suptitle(f"Video Class: {video_label}\nVideo Number: {vid_number}", fontsize=14, fontweight='bold')
+
+        ax1.set_title("Frame")
+        ax2.set_title("Subtracted Image")
+        ax3.set_title("Optical Flow")
+
+        canvas.draw()
+
+        buf = canvas.buffer_rgba()
+        out_frame = np.asarray(buf, dtype=np.uint8)[:, :, :-1]
+        out.write(out_frame)
+
+        cap_count += 1
+        previous = next
+
+    cap.release()
+    out.release()
+
+
 def optical_flow_video(video_path, video_label, annotations_df, vid_number, video_out_save_path,
                        start_frame=0, end_frame=None, desired_fps=6):
     cap = cv.VideoCapture(video_path)
@@ -206,7 +301,6 @@ def optical_flow_video(video_path, video_label, annotations_df, vid_number, vide
         hsv[..., 0] = ang * 180 / np.pi / 2
         hsv[..., 2] = cv.normalize(mag, None, 0, 255, cv.NORM_MINMAX)  # 0-1 normalize
         rgb = cv.cvtColor(hsv, cv.COLOR_HSV2BGR)
-
 
         if frame.shape[0] < frame.shape[1]:
             fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharex="all", sharey="all",
@@ -438,7 +532,7 @@ if __name__ == '__main__':
     # else:
     #     plot_save_file_name = f"{vid_label.value}_{video_number}_{datetime.datetime.now().isoformat()}"
     #
-    # df = annotations_to_dataframe(annotation_file)
+    df = annotations_to_dataframe(annotation_file)
     # annotations = get_frame_annotations(df, time_adjusted_frame_number)
     #
     # video_frames, _, meta = get_frames(file=video_file, start=start_sec, end=end_sec)
@@ -469,9 +563,9 @@ if __name__ == '__main__':
     #                                      annotations_df=df, start_sec=start_sec, original_fps=fps, show_bbox=True,
     #                                      vid_number=video_number, video_label=vid_label.value)
 
-    optical_flow_video(video_path=video_file, video_label=vid_label.value, annotations_df=None, vid_number=video_number,
+    optical_flow_video(video_path=video_file, video_label=vid_label.value, annotations_df=df, vid_number=video_number,
                        video_out_save_path=plot_save_path + f"video_optical_flow_{vid_label.value}_0.avi",
-                       start_frame=0, end_frame=100, desired_fps=6)
+                       start_frame=0, end_frame=120, desired_fps=6)
 
     # avg_frame, ref_frame, activation_mask = get_result_triplet(v_frames=video_frames,
     #                                                            reference_frame_number=frame_number)
