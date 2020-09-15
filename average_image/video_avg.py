@@ -1,22 +1,27 @@
 import datetime
 import os
+from itertools import cycle
 from typing import Union, Optional
 
 import cv2 as cv
 import torch
 import torch.nn.functional as F
 import torchvision
+from skimage.segmentation import quickshift, felzenszwalb
+from sklearn import metrics
 from torchvision.utils import make_grid
 import numpy as np
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from sklearn.cluster import MeanShift, estimate_bandwidth, SpectralClustering, DBSCAN
+from skimage.color import rgb2lab
 from tqdm import tqdm
 
 from bbox_utils import annotations_to_dataframe, get_frame_annotations, add_bbox_to_axes, resize_v_frames
-from constants import SDDVideoClasses, OBJECT_CLASS_COLOR_MAPPING
-from layers import MinPool2D
+from constants import SDDVideoClasses, OBJECT_CLASS_COLOR_MAPPING, COLORS
+from layers import MinPool2D, min_pool2d_numpy, min_pool2d
 from deep_networks_avg import get_vgg_layer_activations, get_resnet_layer_activations, get_densenet_layer_activations, \
     get_densenet_filtered_layer_activations
 
@@ -174,12 +179,12 @@ def get_subtracted_img_for_frames(video_path, start_frame=0, end_frame=None):
     video_frames, _, meta = get_frames(file=video_file, start=start_frame, end=end_frame // 30)
     average_frame = video_frames.mean(dim=0)
     average_frame_stacked = average_frame.repeat(video_frames.size(0), 1, 1, 1)
-    activation_masks_stacked = (average_frame_stacked - video_frames).mean(dim=-1).unsqueeze(dim=-1)
+    activation_masks_stacked = (video_frames - average_frame_stacked).mean(dim=-1).unsqueeze(dim=-1)
     return activation_masks_stacked
 
 
 def optical_flow_subtraction_mask_video(video_path, video_label, annotations_df, vid_number, video_out_save_path,
-                                        start_frame=0, end_frame=None, desired_fps=6):
+                                        start_frame=0, end_frame=None, desired_fps=6, min_pool_kernel_size=None):
     subtracted_img = get_subtracted_img_for_frames(video_path, start_frame, end_frame)
     subtracted_img = (subtracted_img * 255).int().squeeze().numpy()
     cap = cv.VideoCapture(video_path)
@@ -218,35 +223,46 @@ def optical_flow_subtraction_mask_video(video_path, video_label, annotations_df,
         rgb = cv.cvtColor(hsv, cv.COLOR_HSV2BGR)
 
         if frame.shape[0] < frame.shape[1]:
-            fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharex="all", sharey="all",
+            fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharex="none", sharey="none",
                                                 figsize=original_dims)
         else:
-            fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharex="all", sharey="all",
+            fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharex="none", sharey="none",
                                                 figsize=original_dims)
 
         canvas = FigureCanvas(fig)
 
+        s_img = subtracted_img[frame_count]
+        if min_pool_kernel_size is not None:
+            # s_img = min_pool2d_numpy(s_img, kernel_size=min_pool_kernel_size)
+            # rgb = min_pool2d_numpy(rgb, kernel_size=min_pool_kernel_size)
+            s_img = min_pool2d(torch.from_numpy(s_img).unsqueeze(dim=0).float(), min_pool_kernel_size).squeeze() \
+                .int().numpy()
+            rgb = min_pool2d(torch.from_numpy(rgb).permute(2, 0, 1).float(), min_pool_kernel_size).permute(1, 2, 0) \
+                .int().numpy()
+
         ax1.imshow(frame)
-        ax2.imshow(subtracted_img[frame_count], cmap='gray')
+        ax2.imshow(s_img, cmap='gray')
         ax3.imshow(rgb)
 
         original_spatial_dim = (frame.shape[0], frame.shape[1])
+        pooled_dim = (s_img.shape[0], s_img.shape[1])
         annot = get_frame_annotations(annotations_df, frame_count)
 
         add_bbox_to_axes(ax1, annotations=annot, only_pedestrians=False,
                          original_spatial_dim=original_spatial_dim, pooled_spatial_dim=None,
-                         min_pool=False, use_dnn=False)
+                         min_pool=False, use_dnn=False, linewidth=0.2)
         add_bbox_to_axes(ax2, annotations=annot, only_pedestrians=False,
-                         original_spatial_dim=original_spatial_dim, pooled_spatial_dim=None,
-                         min_pool=False, use_dnn=False)
-        # add_bbox_to_axes(ax3, annotations=annot, only_pedestrians=False,
-        #                  original_spatial_dim=original_spatial_dim, pooled_spatial_dim=None,
-        #                  min_pool=False, use_dnn=False)
+                         original_spatial_dim=original_spatial_dim, pooled_spatial_dim=pooled_dim,
+                         min_pool=True, use_dnn=False, linewidth=0.2)
+        add_bbox_to_axes(ax3, annotations=annot, only_pedestrians=False,
+                         original_spatial_dim=original_spatial_dim, pooled_spatial_dim=pooled_dim,
+                         min_pool=True, use_dnn=False, linewidth=0.5)
 
         patches = [mpatches.Patch(color=val, label=key.value) for key, val in OBJECT_CLASS_COLOR_MAPPING.items()]
         fig.legend(handles=patches, loc=2)
 
-        fig.suptitle(f"Video Class: {video_label}\nVideo Number: {vid_number}", fontsize=14, fontweight='bold')
+        fig.suptitle(f"Video Class: {video_label}\nVideo Number: {vid_number}\nMinPool: "
+                     f"{True if min_pool_kernel_size is not None else False}", fontsize=14, fontweight='bold')
 
         ax1.set_title("Frame")
         ax2.set_title("Subtracted Image")
@@ -452,32 +468,259 @@ def min_pool_subtracted_img_video_opencv(v_frames, average_frame, start_sec, ori
     out.release()
 
 
-# def min_pool_video_opencv(video_path, num_frames=30, kernel_size=3, iterations=1, frame_join_pad=5, desired_fps=6,
-#                           video_out_save_path=None):
-#     in_video = cv.VideoCapture(video_path)
-#
-#     v_frames = None
-#     for i in range(num_frames):
-#         ret, frame = in_video.read()
-#         if v_frames is None:
-#             v_frames = np.zeros(shape=(0, frame.shape[0], frame.shape[1], 3))
-#         v_frames = np.concatenate((v_frames, np.expand_dims(frame, axis=0)), axis=0)
-#
-#     v_frames = torch.from_numpy(v_frames)
-#     v_frames_pooled = min_pool_baseline(v_frames=v_frames, kernel_size=kernel_size, iterations=iterations)
-#     pooled_dims = (v_frames_pooled.size(1), v_frames_pooled.size(2))
-#     v_frames_pooled = v_frames_pooled.permute(0, 3, 1, 2)
-#     v_frames = F.interpolate(v_frames.permute(0, 3, 1, 2), size=pooled_dims)
-#
-#     out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
-#                          (pooled_dims[1] + frame_join_pad * 3, pooled_dims[0] + frame_join_pad))
-#
-#     for frame in range(v_frames.size(0)):
-#         cat_frame = torch.stack((v_frames[frame], v_frames_pooled[frame]))
-#         joined_frame = make_grid(cat_frame/255.0, nrow=2, padding=5).permute(1, 2, 0).numpy()
-#         out.write(joined_frame)
-#
-#     out.release()
+def get_background_subtraction(video_path, start_frame=0, end_frame=60, method='mog2'):
+    cap = cv.VideoCapture(video_path)
+    cap_count = 0
+    kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
+
+    if method == 'knn':
+        algo = cv.createBackgroundSubtractorKNN()
+    else:
+        algo = cv.createBackgroundSubtractorMOG2()
+
+    out = None
+
+    for _ in tqdm(range(0, end_frame)):
+        ret, frame = cap.read()
+        if out is None:
+            out = np.zeros(shape=(0, frame.shape[0], frame.shape[1]))
+
+        if cap_count < start_frame:
+            continue
+
+        mask = algo.apply(frame)
+        mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
+
+        out = np.concatenate((out, np.expand_dims(mask, axis=0)), axis=0)
+    return out
+
+
+def mean_shift_clustering(video_path, start_frame=0, end_frame=None, min_pool_kernel_size=5):
+    subtracted_img = get_subtracted_img_for_frames(video_path, start_frame, end_frame)
+    subtracted_img = min_pool2d(subtracted_img.permute(0, 3, 1, 2), kernel_size=min_pool_kernel_size)
+    subtracted_img = (subtracted_img * 255).int().squeeze().numpy()
+
+    data_ = subtracted_img[0]
+
+    object_idx = (data_ > 0).nonzero()
+
+    intensities = data_[object_idx[0], object_idx[1]]
+    # data = np.stack((object_idx[1], object_idx[0], intensities)).transpose()
+    data = np.stack((object_idx[1], object_idx[0])).transpose()  # better
+
+    bandwidth = estimate_bandwidth(data, quantile=0.1, n_jobs=8)
+
+    ms = MeanShift(bandwidth=bandwidth, bin_seeding=False, cluster_all=True)
+    ms.fit(data)
+    labels = ms.labels_
+    cluster_centers = ms.cluster_centers_
+
+    labels_unique, points_per_cluster = np.unique(labels, return_counts=True)
+    cluster_distribution = dict(zip(labels_unique, points_per_cluster))
+    n_clusters_ = len(labels_unique)
+
+    print(cluster_distribution)
+    print("number of estimated clusters : %d" % n_clusters_)
+
+    plt.figure(1)
+    plt.clf()
+
+    colors = cycle('bgrcmykbgrcmykbgrcmykbgrcmyk')
+    for k, col in zip(range(n_clusters_), colors):
+        my_members = labels == k
+        cluster_center = cluster_centers[k]
+        plt.plot(data[my_members, 0], data[my_members, 1], col + '.')
+        plt.plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor=col,
+                 markeredgecolor='k', markersize=4)
+    plt.title('Estimated number of clusters: %d' % n_clusters_)
+    plt.show()
+
+    plt.imshow(data_, cmap='gray')
+    for k, col in zip(range(n_clusters_), colors):
+        cluster_center = cluster_centers[k]
+        plt.plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor=col,
+                 markeredgecolor='k', markersize=4)
+
+    plt.show()
+
+
+def mean_shift_clustering_video(video_path, start_frame=0, end_frame=None, min_pool_kernel_size=5,
+                                desired_fps=6, video_out_save_path=None, annotations_df=None, show_bbox=False,
+                                video_label=None, vid_number=None, background_subtraction=False,
+                                background_subtraction_method='mog2'):
+    if background_subtraction:
+        processed_img = get_background_subtraction(video_path, start_frame, end_frame,
+                                                   method=background_subtraction_method)
+        img_shape = processed_img.shape
+        processed_img = processed_img / 255
+        processed_img = min_pool2d(torch.from_numpy(processed_img).unsqueeze(1), kernel_size=min_pool_kernel_size)
+        processed_img = (processed_img * 255).int().squeeze().numpy()
+        start_idx = 1
+    else:
+        processed_img = get_subtracted_img_for_frames(video_path, start_frame, end_frame)
+        img_shape = processed_img.size()
+        processed_img = min_pool2d(processed_img.permute(0, 3, 1, 2), kernel_size=min_pool_kernel_size)
+        processed_img = (processed_img * 255).int().squeeze().numpy()
+        start_idx = 0
+
+    if background_subtraction:
+        mthd = background_subtraction_method
+    else:
+        mthd = 'Subtraction - Average Image'
+
+    if img_shape[1] < img_shape[2]:
+        original_dims = (img_shape[2] / 100, img_shape[1] / 100)
+        out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                             (img_shape[2], img_shape[1]))
+    else:
+        original_dims = (img_shape[1] / 100, img_shape[2] / 100)
+        out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                             (img_shape[1], img_shape[2]))
+
+    for fr in tqdm(range(start_idx, processed_img.shape[0])):
+        data_ = processed_img[fr]
+
+        object_idx = (data_ > 0).nonzero()
+        intensities = data_[object_idx[0], object_idx[1]]
+        # data = np.stack((object_idx[1], object_idx[0], intensities)).transpose()
+        data = np.stack((object_idx[1], object_idx[0])).transpose()  # better
+
+        bandwidth = estimate_bandwidth(data, quantile=0.1, n_jobs=8)
+        ms = MeanShift(bandwidth=bandwidth, bin_seeding=False, cluster_all=True)
+        ms.fit(data)
+        labels = ms.labels_
+        cluster_centers = ms.cluster_centers_
+
+        labels_unique, points_per_cluster = np.unique(labels, return_counts=True)
+        cluster_distribution = dict(zip(labels_unique, points_per_cluster))
+        n_clusters_ = len(labels_unique)
+
+        fig, ax = plt.subplots(1, 1, sharex='none', sharey='none',
+                               figsize=original_dims)
+        canvas = FigureCanvas(fig)
+        ax.imshow(data_, cmap='gray')
+
+        ax.set_title(f"Frame: {fr}")
+
+        colors = cycle('bgrcmykbgrcmykbgrcmykbgrcmyk')
+        for k, col in zip(range(n_clusters_), colors):
+            cluster_center = cluster_centers[k]
+            ax.plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor=col,
+                    markeredgecolor='k', markersize=8)
+
+        fig.suptitle(f"Video Class: {video_label}\nVideo Number: {vid_number}\nMethod: {mthd}",
+                     fontsize=14, fontweight='bold')
+
+        canvas.draw()
+
+        buf = canvas.buffer_rgba()
+        out_frame = np.asarray(buf, dtype=np.uint8)[:, :, :-1]
+        out.write(out_frame)
+    out.release()
+
+
+def mean_shift_clustering_with_optical_video(video_path, start_frame=0, end_frame=None, min_pool_kernel_size=5,
+                                             desired_fps=6, video_out_save_path=None, annotations_df=None,
+                                             show_bbox=False,
+                                             video_label=None, vid_number=None, background_subtraction=False,
+                                             background_subtraction_method='mog2'):
+    if background_subtraction:
+        processed_img = get_background_subtraction(video_path, start_frame, end_frame,
+                                                   method=background_subtraction_method)
+        img_shape = processed_img.shape
+        processed_img = processed_img / 255
+        processed_img = min_pool2d(torch.from_numpy(processed_img).unsqueeze(1), kernel_size=min_pool_kernel_size)
+        processed_img = (processed_img * 255).int().squeeze().numpy()
+        start_idx = 1
+    else:
+        processed_img = get_subtracted_img_for_frames(video_path, start_frame, end_frame)
+        img_shape = processed_img.size()
+        processed_img = min_pool2d(processed_img.permute(0, 3, 1, 2), kernel_size=min_pool_kernel_size)
+        processed_img = (processed_img * 255).int().squeeze().numpy()
+        start_idx = 0
+
+    if background_subtraction:
+        mthd = background_subtraction_method
+    else:
+        mthd = 'Subtraction - Average Image'
+
+    if img_shape[1] < img_shape[2]:
+        original_dims = (img_shape[2] / 100, img_shape[1] / 100)
+        out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                             (img_shape[2], img_shape[1]))
+    else:
+        original_dims = (img_shape[1] / 100, img_shape[2] / 100)
+        out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                             (img_shape[1], img_shape[2]))
+
+    cap = cv.VideoCapture(video_path)
+    cap_count = 0
+
+    previous = None
+    hsv = None
+
+    for fr in tqdm(range(start_idx, processed_img.shape[0])):
+        ret, frame = cap.read()
+        if previous is None:
+            previous = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+            hsv = np.zeros_like(frame)
+            hsv[..., 1] = 255
+            continue
+
+        if cap_count < start_frame:
+            continue
+
+        next = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+        flow = cv.calcOpticalFlowFarneback(previous, next, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+        flow = min_pool2d(torch.from_numpy(flow).permute(2, 0, 1), kernel_size=min_pool_kernel_size).permute(1, 2, 0)\
+            .numpy()
+
+        data_ = processed_img[fr]
+
+        object_idx = (data_ > 0).nonzero()
+        intensities = data_[object_idx[0], object_idx[1]]
+
+        flow_idx = flow[object_idx[0], object_idx[1]]
+
+        # data = np.stack((object_idx[1], object_idx[0], intensities)).transpose()
+        data = np.stack((object_idx[1], object_idx[0], flow_idx[..., 1], flow_idx[..., 0])).transpose()  # better
+
+        bandwidth = estimate_bandwidth(data, quantile=0.1, n_jobs=8)
+        ms = MeanShift(bandwidth=bandwidth, bin_seeding=False, cluster_all=True)
+        ms.fit(data)
+        labels = ms.labels_
+        cluster_centers = ms.cluster_centers_
+
+        labels_unique, points_per_cluster = np.unique(labels, return_counts=True)
+        cluster_distribution = dict(zip(labels_unique, points_per_cluster))
+        n_clusters_ = len(labels_unique)
+
+        fig, ax = plt.subplots(1, 1, sharex='none', sharey='none',
+                               figsize=original_dims)
+        canvas = FigureCanvas(fig)
+        ax.imshow(data_, cmap='gray')
+
+        ax.set_title(f"Frame: {fr}")
+
+        colors = cycle('bgrcmykbgrcmykbgrcmykbgrcmyk')
+        for k, col in zip(range(n_clusters_), colors):
+            cluster_center = cluster_centers[k]
+            ax.plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor=col,
+                    markeredgecolor='k', markersize=8)
+
+        fig.suptitle(f"Video Class: {video_label}\nVideo Number: {vid_number}\nMethod: {mthd}",
+                     fontsize=14, fontweight='bold')
+
+        canvas.draw()
+
+        buf = canvas.buffer_rgba()
+        out_frame = np.asarray(buf, dtype=np.uint8)[:, :, :-1]
+        out.write(out_frame)
+
+        cap_count += 1
+        previous = next
+
+    out.release()
 
 
 def show_img(img):
@@ -563,9 +806,33 @@ if __name__ == '__main__':
     #                                      annotations_df=df, start_sec=start_sec, original_fps=fps, show_bbox=True,
     #                                      vid_number=video_number, video_label=vid_label.value)
 
-    optical_flow_video(video_path=video_file, video_label=vid_label.value, annotations_df=df, vid_number=video_number,
-                       video_out_save_path=plot_save_path + f"video_optical_flow_{vid_label.value}_0.avi",
-                       start_frame=0, end_frame=120, desired_fps=6)
+    # optical_flow_subtraction_mask_video(video_path=video_file, video_label=vid_label.value, annotations_df=df,
+    #                                     vid_number=video_number,
+    #                                     video_out_save_path=plot_save_path + f"video_optical_flow_{vid_label.value}"
+    #                                                                          f"_subtracted_img_with_min_pool_0_bbox.avi",
+    #                                     start_frame=0, end_frame=120, desired_fps=6, min_pool_kernel_size=10)
+
+    # mean_shift_clustering(video_path=video_file, start_frame=0, end_frame=90, min_pool_kernel_size=10)
+
+    # mean_shift_clustering_video(video_path=video_file, start_frame=0, end_frame=90, min_pool_kernel_size=3,
+    #                             desired_fps=2, video_out_save_path=plot_save_path + f"video_clustering_bg_sub"
+    #                                                                                 f"_{vid_label.value}_mog2_3.avi",
+    #                             annotations_df=df, video_label=vid_label.value, vid_number=video_number,
+    #                             background_subtraction=True, background_subtraction_method='mog2')
+
+    # mean_shift_clustering_video(video_path=video_file, start_frame=0, end_frame=90, min_pool_kernel_size=6,
+    #                             desired_fps=2, video_out_save_path=plot_save_path + f"video_clustering_bg_sub"
+    #                                                                                 f"_{vid_label.value}_knn_6.avi",
+    #                             annotations_df=df, video_label=vid_label.value, vid_number=video_number,
+    #                             background_subtraction=True, background_subtraction_method='knn')
+
+    mean_shift_clustering_with_optical_video(video_path=video_file, start_frame=0, end_frame=90,
+                                             min_pool_kernel_size=3,
+                                             desired_fps=2,
+                                             video_out_save_path=plot_save_path + f"video_clustering_bg_sub_optical_flw"
+                                                                                  f"_{vid_label.value}_mog2_3_exp.avi",
+                                             annotations_df=df, video_label=vid_label.value, vid_number=video_number,
+                                             background_subtraction=True, background_subtraction_method='mog2')
 
     # avg_frame, ref_frame, activation_mask = get_result_triplet(v_frames=video_frames,
     #                                                            reference_frame_number=frame_number)
