@@ -55,5 +55,57 @@ def bbox_to_matplotlib_representation(coordinates: List, original_spatial_dim=No
     return x, y, w, h
 
 
+def scale_annotations(annotations, original_scale, new_scale):
+    scaled_annotations = []
+    for annot in annotations:
+        x_min, y_min, x_max, y_max = annot[1:5]
+        x, y, w, h = x_min, y_min, (x_max - x_min), (y_max - y_min)
+        o_w, o_h = original_scale
+        c_w, c_h = new_scale
+        x = (c_w * x) // o_w
+        y = (c_h * y) // o_h
+        w = (c_w * w) // o_w
+        h = (c_h * h) // o_h
+        scaled_annotations.append([x, y, x+w, y+h])
+    return scaled_annotations
+
+
 def resize_v_frames(v_frames, scale_factor: float = 0.5, size: Optional[Tuple] = None):
     return F.interpolate(input=v_frames, size=size, scale_factor=scale_factor, mode='bilinear')
+
+
+class CoordinateHolder(object):
+    def __init__(self, coordinate):
+        super(CoordinateHolder, self).__init__()
+        self.a = coordinate[0]
+        self.b = coordinate[1]
+        self.c = coordinate[2]
+        self.d = coordinate[3]
+
+    def __eq__(self, other):
+        if not isinstance(other, CoordinateHolder):
+            return NotImplemented
+
+        return self.a == other.a and self.b == other.b and self.c == other.c and self.d == other.d
+
+
+class CoordinateHolder2(object):
+    def __init__(self, coordinate):
+        super(CoordinateHolder2, self).__init__()
+        self.a = coordinate[0]
+        self.b = coordinate[1]
+
+    def __eq__(self, other):
+        if not isinstance(other, CoordinateHolder2):
+            return NotImplemented
+
+        return self.a == other.a and self.b == other.b
+
+
+if __name__ == '__main__':
+    a = CoordinateHolder((1, 3, 8, 9))
+    b = CoordinateHolder((10, 6, 2, 1))
+    c = CoordinateHolder((9, 4, 8, 9))
+
+    l = [a, b]
+    print(c in l)
