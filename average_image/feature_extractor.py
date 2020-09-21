@@ -69,7 +69,7 @@ class FeatureExtractor(object):
     def plot_all_steps(self, nrows, ncols, plot_dims, original_frame, processed_img, threshold_image,
                        optical_flow_image, frame_annotation, num_clusters, cluster_centers, frame_evaluation,
                        frame_number, video_label, video_number, video_out_save_path):
-        original_shape = (original_frame.shape[0], original_frame[1])
+        original_shape = (original_frame.shape[0], original_frame.shape[1])
         downscaled_shape = (processed_img.shape[0], processed_img.shape[1])
         fig, axs = plt.subplots(nrows, ncols, sharex='none', sharey='none',
                                 figsize=plot_dims)
@@ -168,12 +168,14 @@ class FeatureExtractor(object):
                      fontsize=14, fontweight='bold')
         fig.savefig(video_out_save_path + f"frame_{frame_number}.png")
 
-    def get_per_frame_results(self, processed_data, video_label, video_number, video_out_save_path, annotations_df,
-                              plot_scale_factor: int = 1):
-        if processed_data[1] < processed_data[2]:
-            original_dims = (processed_data[2] / 100 * plot_scale_factor, processed_data[1] / 100 * plot_scale_factor)
+    def get_per_frame_results(self, processed_data, video_label, video_number, frames_out_save_path, annotations_df,
+                              plot_scale_factor: int = 1, plot: bool = True, with_optical_flow: bool = True):
+        if processed_data.shape[1] < processed_data.shape[2]:
+            original_dims = (processed_data.shape[2] / 100 * plot_scale_factor, processed_data.shape[1] / 100 *
+                             plot_scale_factor)
         else:
-            original_dims = (processed_data[1] / 100 * plot_scale_factor, processed_data[2] / 100 * plot_scale_factor)
+            original_dims = (processed_data.shape[1] / 100 * plot_scale_factor, processed_data.shape[2] / 100 *
+                             plot_scale_factor)
 
         cap = cv.VideoCapture(self.video_path)
         cap_count = 0
@@ -194,25 +196,30 @@ class FeatureExtractor(object):
 
             flow, rgb = self.get_optical_flow(previous_frame=previous, next_frame=next_frame)
 
-            data, data_, max_0, max_1, min_0, min_1, threshold_img = self._prepare_data_xyuv(flow, fr, processed_data)
+            if with_optical_flow:
+                data, data_, max_0, max_1, min_0, min_1, threshold_img = self._prepare_data_xyuv(flow, fr,
+                                                                                                 processed_data)
+                mean_shift, n_clusters_ = self._perform_clustering(data, max_0, max_1, min_0, min_1, bandwidth=0.1)
+            else:
+                data, data_, threshold_img = self._prepare_data_xy(fr, processed_data)
+                mean_shift, n_clusters_ = self._perform_clustering(data, 0, 0, 0, 0, renormalize=False, bandwidth=0.1)
 
-            mean_shift, n_clusters_ = self._perform_clustering(data, max_0, max_1, min_0, min_1)
-
-            annotation_ = self._process_frame_annotation(annotations_df, data_, fr)
+            annotation_, annotation_full = self._process_frame_annotation(annotations_df, data_, fr)
             gt_bbox_cluster_center_dict.update({fr: {'gt_bbox': annotation_,
                                                      'cluster_centers': mean_shift.cluster_centers}})
             frame_results = evaluate_clustering_per_frame(fr, {'gt_bbox': annotation_,
                                                                'cluster_centers': mean_shift.cluster_centers})
             pre_rec = precision_recall(frame_results)
-            pr_for_frames.update({fr: pre_rec})
+            pr_for_frames.update(pre_rec)
 
-            fig = self.plot_all_steps(nrows=2, ncols=3, plot_dims=original_dims, original_frame=frame,
-                                      processed_img=data_,
-                                      threshold_image=threshold_img, optical_flow_image=rgb,
-                                      frame_annotation=annotation_,
-                                      num_clusters=n_clusters_, cluster_centers=mean_shift.cluster_centers,
-                                      frame_evaluation=pre_rec, video_out_save_path=video_out_save_path,
-                                      frame_number=fr, video_label=video_label, video_number=video_number)
+            if plot:
+                fig = self.plot_all_steps(nrows=2, ncols=3, plot_dims=original_dims, original_frame=frame,
+                                          processed_img=data_,
+                                          threshold_image=threshold_img, optical_flow_image=rgb,
+                                          frame_annotation=annotation_full,
+                                          num_clusters=n_clusters_, cluster_centers=mean_shift.cluster_centers,
+                                          frame_evaluation=pre_rec, video_out_save_path=frames_out_save_path,
+                                          frame_number=fr, video_label=video_label, video_number=video_number)
 
             cap_count += 1
             previous = next_frame
@@ -242,7 +249,7 @@ class FeatureExtractor(object):
         return data, data_, max_0, max_1, min_0, min_1, threshold_img
 
     @staticmethod
-    def _prepare_data_xy(flow, fr, processed_data, use_intensities=False):
+    def _prepare_data_xy(fr, processed_data, use_intensities=False):
         data_ = processed_data[fr]
         data_ = np.abs(data_)
         threshold_img = np.zeros_like(data_)
@@ -256,12 +263,12 @@ class FeatureExtractor(object):
         return data, data_, threshold_img
 
     @staticmethod
-    def _perform_clustering(data, max_0, max_1, min_0, min_1, renormalize=True):
-        mean_shift = MeanShiftClustering(data=data, bandwidth=0.11)
-        mean_shift_dict = {'max0': max_0,
-                           'min0': min_0,
-                           'max1': max_1,
-                           'min1': min_1}
+    def _perform_clustering(data, max_0, max_1, min_0, min_1, renormalize=True, bandwidth: float = 0.1):
+        mean_shift = MeanShiftClustering(data=data, bandwidth=bandwidth)
+        mean_shift_dict = {'max_0': max_0,
+                           'min_0': min_0,
+                           'max_1': max_1,
+                           'min_1': min_1}
         mean_shift.cluster(renormalize=renormalize, options=mean_shift_dict)
         labels_unique, points_per_cluster = np.unique(mean_shift.labels, return_counts=True)
         mean_shift.cluster_distribution = dict(zip(labels_unique, points_per_cluster))
@@ -272,18 +279,18 @@ class FeatureExtractor(object):
         annotation = get_frame_annotations(annotations_df, frame_number=fr)  # check-out +/- 1
         annotation = preprocess_annotations(annotation)
         annotation_ = scale_annotations(annotation, self.original_shape, (data_.shape[0], data_.shape[1]))
-        return annotation_
+        return annotation_, annotation
 
     def make_video(self, processed_data, video_label, video_number, video_out_save_path, annotations_df,
-                   plot_scale_factor: int = 1, desired_fps=5):
-        if processed_data[1] < processed_data[2]:
-            original_dims = (processed_data[2] / 100 * plot_scale_factor, processed_data[1] / 100 * plot_scale_factor)
+                   plot_scale_factor: int = 1, desired_fps=5, with_optical_flow: bool = True):
+        if processed_data.shape[1] < processed_data.shape[2]:
+            original_dims = (processed_data.shape[2] / 100 * plot_scale_factor, processed_data.shape[1] / 100 * plot_scale_factor)
             out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
-                                 (processed_data[2], processed_data[1]))
+                                 (processed_data.shape[2], processed_data.shape[1]))
         else:
-            original_dims = (processed_data[1] / 100 * plot_scale_factor, processed_data[2] / 100 * plot_scale_factor)
+            original_dims = (processed_data.shape[1] / 100 * plot_scale_factor, processed_data.shape[2] / 100 * plot_scale_factor)
             out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
-                                 (processed_data[1], processed_data[2]))
+                                 (processed_data.shape[1], processed_data.shape[2]))
 
         cap = cv.VideoCapture(self.video_path)
         cap_count = 0
@@ -304,11 +311,15 @@ class FeatureExtractor(object):
 
             flow, rgb = self.get_optical_flow(previous_frame=previous, next_frame=next_frame)
 
-            data, data_, max_0, max_1, min_0, min_1, threshold_img = self._prepare_data_xyuv(flow, fr, processed_data)
+            if with_optical_flow:
+                data, data_, max_0, max_1, min_0, min_1, threshold_img = self._prepare_data_xyuv(flow, fr,
+                                                                                                 processed_data)
+                mean_shift, n_clusters_ = self._perform_clustering(data, max_0, max_1, min_0, min_1, bandwidth=0.1)
+            else:
+                data, data_, threshold_img = self._prepare_data_xy(fr, processed_data)
+                mean_shift, n_clusters_ = self._perform_clustering(data, 0, 0, 0, 0, renormalize=False, bandwidth=0.1)
 
-            mean_shift, n_clusters_ = self._perform_clustering(data, max_0, max_1, min_0, min_1)
-
-            annotation_ = self._process_frame_annotation(annotations_df, data_, fr)
+            annotation_, annotation_full = self._process_frame_annotation(annotations_df, data_, fr)
             gt_bbox_cluster_center_dict.update({fr: {'gt_bbox': annotation_,
                                                      'cluster_centers': mean_shift.cluster_centers}})
             frame_results = evaluate_clustering_per_frame(fr, {'gt_bbox': annotation_,
@@ -319,7 +330,7 @@ class FeatureExtractor(object):
             fig = self.plot_all_steps(nrows=2, ncols=3, plot_dims=original_dims, original_frame=frame,
                                       processed_img=data_,
                                       threshold_image=threshold_img, optical_flow_image=rgb,
-                                      frame_annotation=annotation_,
+                                      frame_annotation=annotation_full,
                                       num_clusters=n_clusters_, cluster_centers=mean_shift.cluster_centers,
                                       frame_evaluation=pre_rec, video_out_save_path=video_out_save_path,
                                       frame_number=fr, video_label=video_label, video_number=video_number)

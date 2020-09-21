@@ -46,12 +46,7 @@ def bbox_to_matplotlib_representation(coordinates: List, original_spatial_dim=No
     x_min, y_min, x_max, y_max = coordinates
     x, y, w, h = x_min, y_min, (x_max - x_min), (y_max - y_min)
     if min_pool or use_dnn:
-        o_w, o_h = original_spatial_dim
-        c_w, c_h = pooled_spatial_dim
-        x = (c_w * x) // o_w
-        y = (c_h * y) // o_h
-        w = (c_w * w) // o_w
-        h = (c_h * h) // o_h
+        h, w, x, y = _process_scale(h, pooled_spatial_dim, original_spatial_dim, w, x, y)
     return x, y, w, h
 
 
@@ -60,14 +55,19 @@ def scale_annotations(annotations, original_scale, new_scale):
     for annot in annotations:
         x_min, y_min, x_max, y_max = annot[1:5]
         x, y, w, h = x_min, y_min, (x_max - x_min), (y_max - y_min)
-        o_w, o_h = original_scale
-        c_w, c_h = new_scale
-        x = (c_w * x) // o_w
-        y = (c_h * y) // o_h
-        w = (c_w * w) // o_w
-        h = (c_h * h) // o_h
+        h, w, x, y = _process_scale(h, new_scale, original_scale, w, x, y)
         scaled_annotations.append([x, y, x+w, y+h])
     return scaled_annotations
+
+
+def _process_scale(h, new_scale, original_scale, w, x, y):
+    o_w, o_h = original_scale
+    c_w, c_h = new_scale
+    x = (c_w * x) // o_w
+    y = (c_h * y) // o_h
+    w = (c_w * w) // o_w
+    h = (c_h * h) // o_h
+    return h, w, x, y
 
 
 def resize_v_frames(v_frames, scale_factor: float = 0.5, size: Optional[Tuple] = None):
@@ -78,7 +78,7 @@ def preprocess_annotations(annotations):
     ann = []
     for a in annotations:
         if a[6] != 1:
-            ann.append(a)
+            ann.append(a.tolist())
     return ann
 
 

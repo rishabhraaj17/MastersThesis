@@ -154,3 +154,29 @@ def compare_recall(pr_results_1, pr_results_2, avg_img, lab1, lab2):
 def plot_precision_recall(pr_results_1, pr_results_2, avg_img, lab1, lab2):
     compare_precision(pr_results_1, pr_results_2, avg_img, lab1, lab2)
     compare_recall(pr_results_1, pr_results_2, avg_img, lab1, lab2)
+
+
+def precision_recall_one_sequence(results, average_image):
+    method = 'Average Image' if average_image else 'MOG2'
+    width = 0.35
+    label_frame = []
+    recall_1 = []
+    recall_2 = []
+    for frame, result in results.items():
+        label_frame.append(frame)
+        recall_1.append(results[frame]['precision'])
+        recall_2.append(results[frame]['recall'])
+
+    x = np.arange(len(label_frame))
+
+    fig, ax = plt.subplots()
+    ax.set_title(f'Precision - Recall -> {method}')
+    rects1 = ax.bar(x - width / 2, recall_1, width, label="Precision")
+    rects2 = ax.bar(x + width / 2, recall_2, width, label="Recall")
+    ax.set_xticks(x)
+    ax.set_xticklabels(label_frame)
+    ax.legend()
+
+    # fig.tight_layout()
+
+    plt.show()
