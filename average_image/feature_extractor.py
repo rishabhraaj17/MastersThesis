@@ -68,7 +68,7 @@ class FeatureExtractor(object):
 
     def plot_all_steps(self, nrows, ncols, plot_dims, original_frame, processed_img, threshold_image,
                        optical_flow_image, frame_annotation, num_clusters, cluster_centers, frame_evaluation,
-                       frame_number, video_label, video_number, video_out_save_path):
+                       frame_number, video_label, video_number, video_out_save_path, video_mode=False):
         original_shape = (original_frame.shape[0], original_frame.shape[1])
         downscaled_shape = (processed_img.shape[0], processed_img.shape[1])
         fig, axs = plt.subplots(nrows, ncols, sharex='none', sharey='none',
@@ -111,7 +111,8 @@ class FeatureExtractor(object):
                      f"\nPrecision: {frame_evaluation[frame_number]['precision']}"
                      f"\nRecall: {frame_evaluation[frame_number]['recall']}",
                      fontsize=14, fontweight='bold')
-        fig.savefig(video_out_save_path + f"frame_{frame_number}.png")
+        if not video_mode:
+            fig.savefig(video_out_save_path + f"frame_{frame_number}.png")
 
         return fig
 
@@ -325,7 +326,7 @@ class FeatureExtractor(object):
             frame_results = evaluate_clustering_per_frame(fr, {'gt_bbox': annotation_,
                                                                'cluster_centers': mean_shift.cluster_centers})
             pre_rec = precision_recall(frame_results)
-            pr_for_frames.update({fr: pre_rec})
+            pr_for_frames.update(pre_rec)
 
             fig = self.plot_all_steps(nrows=2, ncols=3, plot_dims=original_dims, original_frame=frame,
                                       processed_img=data_,
@@ -333,7 +334,8 @@ class FeatureExtractor(object):
                                       frame_annotation=annotation_full,
                                       num_clusters=n_clusters_, cluster_centers=mean_shift.cluster_centers,
                                       frame_evaluation=pre_rec, video_out_save_path=video_out_save_path,
-                                      frame_number=fr, video_label=video_label, video_number=video_number)
+                                      frame_number=fr, video_label=video_label, video_number=video_number,
+                                      video_mode=True)
 
             canvas = FigureCanvas(fig)
             canvas.draw()
