@@ -74,6 +74,14 @@ def resize_v_frames(v_frames, scale_factor: float = 0.5, size: Optional[Tuple] =
     return F.interpolate(input=v_frames, size=size, scale_factor=scale_factor, mode='bilinear')
 
 
+def preprocess_annotations(annotations):
+    ann = []
+    for a in annotations:
+        if a[6] != 1:
+            ann.append(a)
+    return ann
+
+
 class CoordinateHolder(object):
     def __init__(self, coordinate):
         super(CoordinateHolder, self).__init__()
@@ -103,9 +111,9 @@ class CoordinateHolder2(object):
 
 
 if __name__ == '__main__':
-    a = CoordinateHolder((1, 3, 8, 9))
+    a = CoordinateHolder((100, 35, 89, 95))
     b = CoordinateHolder((10, 6, 2, 1))
     c = CoordinateHolder((9, 4, 8, 9))
 
     l = [a, b]
-    print(c in l)
+    print(a in l)

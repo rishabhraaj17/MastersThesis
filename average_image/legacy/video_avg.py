@@ -8,6 +8,7 @@ import cv2 as cv
 import torch
 import torch.nn.functional as F
 import torchvision
+from matplotlib import cm
 from skimage.transform import resize
 from skimage.segmentation import quickshift, felzenszwalb
 from sklearn import metrics
@@ -24,7 +25,7 @@ from tqdm import tqdm
 
 from bbox_utils import annotations_to_dataframe, get_frame_annotations, add_bbox_to_axes, resize_v_frames, \
     scale_annotations, CoordinateHolder, CoordinateHolder2
-from constants import SDDVideoClasses, OBJECT_CLASS_COLOR_MAPPING, COLORS
+from constants import SDDVideoClasses, OBJECT_CLASS_COLOR_MAPPING, COLORS, COLORS2
 from layers import MinPool2D, min_pool2d_numpy, min_pool2d
 from deep_networks_avg import get_vgg_layer_activations, get_resnet_layer_activations, get_densenet_layer_activations, \
     get_densenet_filtered_layer_activations
@@ -472,7 +473,8 @@ def min_pool_subtracted_img_video_opencv(v_frames, average_frame, start_sec, ori
     out.release()
 
 
-def get_background_subtraction(video_path, start_frame=0, end_frame=60, method='mog2'):
+def get_background_subtraction(video_path, start_frame=0, end_frame=60, method='mog2', history=120,
+                               detect_shadows=True):
     cap = cv.VideoCapture(video_path)
     cap_count = 0
     kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
@@ -480,7 +482,8 @@ def get_background_subtraction(video_path, start_frame=0, end_frame=60, method='
     if method == 'knn':
         algo = cv.createBackgroundSubtractorKNN()
     else:
-        algo = cv.createBackgroundSubtractorMOG2()
+        # algo = cv.createBackgroundSubtractorMOG2(detectShadows=detect_shadows, history=history)
+        algo = cv.createBackgroundSubtractorMOG2(detectShadows=detect_shadows, history=history, varThreshold=80)
 
     out = None
 
@@ -588,7 +591,8 @@ def mean_shift_clustering_video(video_path, start_frame=0, end_frame=None, min_p
 
         object_idx = (data_ > 50).nonzero()
 
-        intensities = data_[object_idx[0], object_idx[1]]  # when needed create same size array and copy values at same loc
+        intensities = data_[
+            object_idx[0], object_idx[1]]  # when needed create same size array and copy values at same loc
         # data = np.stack((object_idx[1], object_idx[0], intensities)).transpose()
         data = np.stack((object_idx[1], object_idx[0])).transpose()  # better
 
@@ -762,6 +766,72 @@ def pca_cluster_center(cluster_centers):
     return cc
 
 
+def normalize(x):
+    max_ = np.max(x)
+    min_ = np.min(x)
+    return (x - min_) / (max_ - min_), max_, min_
+
+
+def denormalize(x, max_, min_):
+    return x * (max_ - min_) + min_
+
+
+def compare_precision(pr_results_1, pr_results_2, avg_img):
+    method = 'Average Image' if avg_img else 'MOG2'
+    width = 0.35
+    label_frame = []
+    precision_1 = []
+    precision_2 = []
+    for (frame, result), (frame_, result_) in zip(pr_results_1.items(), pr_results_2.items()):
+        label_frame.append(frame)
+        precision_1.append(result[frame]['precision'])
+        precision_2.append(result_[frame]['precision'])
+
+    x = np.arange(len(label_frame))
+
+    fig, ax = plt.subplots()
+    # rects1 = ax.bar(x - width / 2, precision_1, width, label='Without Optical Flow')
+    rects1 = ax.bar(x - width / 2, precision_1, width, label='With no min-pool - (x, y, u, v)')
+    rects2 = ax.bar(x + width / 2, precision_2, width, label='With 3x min-pool - (x, y, u, v)')
+    # rects2 = ax.bar(x + width / 2, precision_2, width, label='With Optical Flow')
+    ax.set_title(f'Precision - {method}')
+    ax.set_xticks(x)
+    ax.set_xticklabels(label_frame)
+    ax.legend()
+
+    # fig.tight_layout()
+
+    plt.show()
+
+
+def compare_recall(pr_results_1, pr_results_2, avg_img):
+    method = 'Average Image' if avg_img else 'MOG2'
+    width = 0.35
+    label_frame = []
+    recall_1 = []
+    recall_2 = []
+    for (frame, result), (frame_, result_) in zip(pr_results_1.items(), pr_results_2.items()):
+        label_frame.append(frame)
+        recall_1.append(result[frame]['recall'])
+        recall_2.append(result_[frame]['recall'])
+
+    x = np.arange(len(label_frame))
+
+    fig, ax = plt.subplots()
+    ax.set_title(f'Recall - {method}')
+    # rects1 = ax.bar(x - width / 2, recall_1, width, label='Without Optical Flow')
+    rects1 = ax.bar(x - width / 2, recall_1, width, label='With no min-pool - (x, y, u, v)')
+    rects2 = ax.bar(x + width / 2, recall_2, width, label='With 3x min-pool - (x, y, u, v)')
+    # rects2 = ax.bar(x + width / 2, recall_2, width, label='With Optical Flow')
+    ax.set_xticks(x)
+    ax.set_xticklabels(label_frame)
+    ax.legend()
+
+    # fig.tight_layout()
+
+    plt.show()
+
+
 def mean_shift_clustering_with_optical_frames(video_path, start_frame=0, end_frame=None, min_pool_kernel_size=5,
                                               desired_fps=6, video_out_save_path=None, annotations_df=None,
                                               show_bbox=False,
@@ -800,12 +870,14 @@ def mean_shift_clustering_with_optical_frames(video_path, start_frame=0, end_fra
     cap = cv.VideoCapture(video_path)
     cap_count = 0
     original_scale = (img_shape[1], img_shape[2])
+    min_pooled_shape = (processed_img[0].shape[0], processed_img[0].shape[1])
 
     previous = None
     previous_pooled = False
     hsv = None
 
     gt_bbox_cluster_center_dict = {}
+    pr_for_frames = {}
 
     for fr in tqdm(range(start_idx, processed_img.shape[0])):
         ret, frame = cap.read()
@@ -821,11 +893,13 @@ def mean_shift_clustering_with_optical_frames(video_path, start_frame=0, end_fra
         next = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
 
         if not previous_pooled:
-            previous = (min_pool2d(torch.from_numpy(previous / 255).unsqueeze(0), kernel_size=min_pool_kernel_size)
-                        .squeeze() * 255).int().numpy()
+            # previous = (min_pool2d(torch.from_numpy(previous / 255).unsqueeze(0), kernel_size=min_pool_kernel_size)
+            #             .squeeze() * 255).int().numpy()
+            previous = resize(previous, output_shape=min_pooled_shape)
             previous_pooled = True
-        next = (min_pool2d(torch.from_numpy(next / 255).unsqueeze(0), kernel_size=min_pool_kernel_size).squeeze()
-                * 255).int().numpy()
+        # next = (min_pool2d(torch.from_numpy(next / 255).unsqueeze(0), kernel_size=min_pool_kernel_size).squeeze()
+        #         * 255).int().numpy()
+        next = resize(next, output_shape=min_pooled_shape)
 
         flow = cv.calcOpticalFlowFarneback(previous, next, None, 0.5, 3, 15, 3, 5, 1.2, 0)
         # flow = min_pool2d(torch.from_numpy(flow).permute(2, 0, 1), kernel_size=min_pool_kernel_size).permute(1, 2, 0)\
@@ -842,17 +916,31 @@ def mean_shift_clustering_with_optical_frames(video_path, start_frame=0, end_fra
         data_ = np.abs(data_)
         thresholded_img = np.zeros_like(data_)
 
-        object_idx = (data_ > 50).nonzero()
+        object_idx = (data_ > 0).nonzero()  # note: for bg
         intensities = data_[object_idx[0], object_idx[1]]
 
         flow_idx = flow[object_idx[0], object_idx[1]]
+        flow_idx_normalized_0, f_max_0, f_min_0 = normalize(flow_idx[..., 0])
+        flow_idx_normalized_1, f_max_1, f_min_1 = normalize(flow_idx[..., 1])
+
         thresholded_img[object_idx[0], object_idx[1]] = data_[object_idx[0], object_idx[1]]
+
+        object_idx_normalized_0, max_0, min_0 = normalize(object_idx[0])
+        object_idx_normalized_1, max_1, min_1 = normalize(object_idx[1])
+
+        # data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx[..., 0],
+        #                  flow_idx[..., 1])).transpose()
+        # data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx[..., 1],
+        #                  flow_idx[..., 0])).transpose()  # better - increased recall in general, sometimes better/bad pr
+
+        data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                         flow_idx_normalized_0)).transpose()
 
         # data = np.stack((object_idx[1], object_idx[0], intensities)).transpose()
         # data = np.stack((object_idx[1], object_idx[0])).transpose()  # better
         # data = np.stack((object_idx[1], object_idx[0], flow_idx[..., 0], flow_idx[..., 1])).transpose()
 
-        data = np.stack((flow_idx[..., 0], flow_idx[..., 1])).transpose()
+        # data = np.stack((flow_idx[..., 0], flow_idx[..., 1])).transpose()
         # data = flow.reshape(-1, 2)
 
         bandwidth = estimate_bandwidth(data, quantile=0.1, n_jobs=8)
@@ -860,6 +948,11 @@ def mean_shift_clustering_with_optical_frames(video_path, start_frame=0, end_fra
         ms.fit(data)
         labels = ms.labels_
         cluster_centers = ms.cluster_centers_
+        cc_0 = denormalize(cluster_centers[..., 0], max_1, min_1)  # maybe for portrait images we need to switch?
+        cc_1 = denormalize(cluster_centers[..., 1], max_0, min_0)
+        cluster_centers[..., 0] = cc_0
+        cluster_centers[..., 1] = cc_1
+
         # cluster_centers = pca_cluster_center(cluster_centers) # ??
         # scaled_cluster_centers = scale_cluster_center(cluster_centers, (data_.shape[0], data_.shape[1]),
         #                                               (frame.shape[0], frame.shape[1])) # fixme
@@ -867,7 +960,7 @@ def mean_shift_clustering_with_optical_frames(video_path, start_frame=0, end_fra
         labels_unique, points_per_cluster = np.unique(labels, return_counts=True)
         cluster_distribution = dict(zip(labels_unique, points_per_cluster))
         n_clusters_ = len(labels_unique)
-        print(cluster_distribution)
+        # print(cluster_distribution)
 
         annot_ = get_frame_annotations(annotations_df, frame_number=fr)  # check-out +/- 1
         annot = scale_annotations(annot_, original_scale, (data_.shape[0], data_.shape[1]))
@@ -877,6 +970,444 @@ def mean_shift_clustering_with_optical_frames(video_path, start_frame=0, end_fra
                                                            'cluster_centers': cluster_centers})
 
         pre_rec = precision_recall(frame_results)
+        pr_for_frames.update({fr: pre_rec})
+
+        # fig, (ax1, ax2) = plt.subplots(1, 2, sharex='all', sharey='all',
+        #                                figsize=original_dims)
+        # ax1.imshow(data_, cmap='gray')
+        # ax2.imshow(resize(frame, output_shape=(data_.shape[0], data_.shape[1])))
+        #
+        # ax1.set_title(f"Processed Frame: {fr}")
+        # ax2.set_title(f"Frame: {fr}")
+        #
+        # add_bbox_to_axes(ax2, annotations=annot_, only_pedestrians=False,
+        #                  original_spatial_dim=original_scale,
+        #                  pooled_spatial_dim=(data_.shape[0], data_.shape[1]),
+        #                  min_pool=True, use_dnn=False)
+        #
+        # colors = cycle('bgrcmykbgrcmykbgrcmykbgrcmyk')
+        # for k, col in zip(range(n_clusters_), colors):
+        #     cluster_center = cluster_centers[k]
+        #     ax1.plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor=col,
+        #              markeredgecolor='k', markersize=8)
+        #     ax2.plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor=col,
+        #              markeredgecolor='k', markersize=8)
+
+        # all steps
+        # fig, axs = plt.subplots(2, 3, sharex='none', sharey='none',
+        #                         figsize=original_dims)
+        # axs[0, 0].imshow(frame)
+        # axs[0, 1].imshow(data_, cmap='gray')
+        # axs[0, 2].imshow(thresholded_img, cmap='gray')
+        # axs[1, 0].imshow(data_, cmap='gray')
+        # axs[1, 1].imshow(resize(frame, output_shape=(data_.shape[0], data_.shape[1])))
+        # # axs[1, 2].imshow(thresholded_img, cmap='gray')
+        # axs[1, 2].imshow(rgb)
+        #
+        # axs[0, 0].set_title('Image')
+        # axs[0, 1].set_title('Processed Image')
+        # axs[0, 2].set_title('Thresholded Image')
+        # axs[1, 0].set_title('Clustered - Subtracted')
+        # axs[1, 1].set_title('Clustered - Image')
+        # axs[1, 2].set_title('Optical Flow')
+        # # axs[1, 2].set_title('Clustered - Thresholded')
+        #
+        # add_bbox_to_axes(axs[0, 0], annotations=annot_, only_pedestrians=False,
+        #                  original_spatial_dim=original_scale,
+        #                  pooled_spatial_dim=(data_.shape[0], data_.shape[1]),
+        #                  min_pool=False, use_dnn=False)
+        # add_bbox_to_axes(axs[0, 1], annotations=annot_, only_pedestrians=False,
+        #                  original_spatial_dim=original_scale,
+        #                  pooled_spatial_dim=(data_.shape[0], data_.shape[1]),
+        #                  min_pool=True, use_dnn=False)
+        # add_bbox_to_axes(axs[1, 1], annotations=annot_, only_pedestrians=False,
+        #                  original_spatial_dim=original_scale,
+        #                  pooled_spatial_dim=(data_.shape[0], data_.shape[1]),
+        #                  min_pool=True, use_dnn=False)
+        #
+        # colors = cycle('bgrcmykbgrcmykbgrcmykbgrcmyk')
+        # for k, col in zip(range(n_clusters_), colors):
+        #     cluster_center = cluster_centers[k]
+        #     axs[1, 0].plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor=col,
+        #                    markeredgecolor='k', markersize=8)
+        #     axs[1, 1].plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor=col,
+        #                    markeredgecolor='k', markersize=8)
+        #     # axs[1, 2].plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor=col,
+        #     #                markeredgecolor='k', markersize=8)
+        #
+        # fig.suptitle(f"Video Class: {video_label}\nVideo Number: {vid_number}\nMethod: {mthd}"
+        #              f"\nPrecision: {pre_rec[fr]['precision']}\nRecall: {pre_rec[fr]['recall']}",
+        #              fontsize=14, fontweight='bold')
+
+        cap_count += 1
+        previous = next
+        # fig.savefig(video_out_save_path + f"frame_{fr}.png")
+
+    return gt_bbox_cluster_center_dict, pr_for_frames
+
+
+def mean_shift_clustering_with_min_pooled_optical_frames(video_path, start_frame=0, end_frame=None,
+                                                         min_pool_kernel_size=5,
+                                                         desired_fps=6, video_out_save_path=None, annotations_df=None,
+                                                         show_bbox=False,
+                                                         video_label=None, vid_number=None,
+                                                         background_subtraction=False,
+                                                         background_subtraction_method='mog2'):
+    if background_subtraction:
+        processed_img = get_background_subtraction(video_path, start_frame, end_frame,
+                                                   method=background_subtraction_method, history=120,
+                                                   detect_shadows=True)
+        img_shape = processed_img.shape
+        # processed_img = processed_img / 255
+        # processed_img = min_pool2d(torch.from_numpy(processed_img).unsqueeze(1), kernel_size=min_pool_kernel_size)
+        # processed_img = (processed_img * 255).int().squeeze().numpy()
+        start_idx = 1
+    else:
+        processed_img = get_subtracted_img_for_frames(video_path, start_frame, end_frame)
+        img_shape = processed_img.size()
+        processed_img = min_pool2d(processed_img.permute(0, 3, 1, 2), kernel_size=min_pool_kernel_size)
+        processed_img = (processed_img * 255).int().squeeze().numpy()
+        start_idx = 0
+
+    if background_subtraction:
+        mthd = background_subtraction_method
+    else:
+        mthd = 'Subtraction - Average Image'
+
+    # if img_shape[1] < img_shape[2]:
+    #     original_dims = (img_shape[2] / 100 * 2, img_shape[1] / 100 * 2)
+    # else:
+    #     original_dims = (img_shape[1] / 100 * 2, img_shape[2] / 100 * 2)
+
+    if img_shape[1] < img_shape[2]:
+        original_dims = (img_shape[2] / 100, img_shape[1] / 100)
+    else:
+        original_dims = (img_shape[1] / 100, img_shape[2] / 100)
+
+    cap = cv.VideoCapture(video_path)
+    cap_count = 0
+    original_scale = (img_shape[1], img_shape[2])
+    min_pooled_shape = (processed_img[0].shape[0], processed_img[0].shape[1])
+
+    previous = None
+    previous_pooled = False
+    hsv = None
+
+    gt_bbox_cluster_center_dict = {}
+    pr_for_frames = {}
+
+    for fr in tqdm(range(start_idx, processed_img.shape[0])):
+        ret, frame = cap.read()
+        if previous is None:
+            previous = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+            # hsv = np.zeros_like(frame)
+            # hsv[..., 1] = 255
+            continue
+
+        if cap_count < start_frame:
+            continue
+
+        next = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+
+        # if not previous_pooled:
+        #     previous = (min_pool2d(torch.from_numpy(previous / 255).unsqueeze(0), kernel_size=min_pool_kernel_size)
+        #                 .squeeze() * 255).int().numpy()
+        #     # previous = resize(previous, output_shape=min_pooled_shape)
+        #     previous_pooled = True
+        # next = (min_pool2d(torch.from_numpy(next / 255).unsqueeze(0), kernel_size=min_pool_kernel_size).squeeze()
+        #         * 255).int().numpy()
+        # # next = resize(next, output_shape=min_pooled_shape)
+
+        flow = cv.calcOpticalFlowFarneback(previous, next, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+        # flow = min_pool2d(torch.from_numpy(flow).permute(2, 0, 1), kernel_size=min_pool_kernel_size).permute(1, 2, 0)\
+        #     .numpy()
+
+        hsv = np.zeros((next.shape[0], next.shape[1], 3), dtype=np.uint8)
+        hsv[..., 1] = 255
+        mag, ang = cv.cartToPolar(flow[..., 0], flow[..., 1])
+        hsv[..., 0] = ang * 180 / np.pi / 2
+        hsv[..., 2] = cv.normalize(mag, None, 0, 255, cv.NORM_MINMAX)  # 0-1 normalize
+        rgb = cv.cvtColor(hsv, cv.COLOR_HSV2BGR)
+
+        data_ = processed_img[fr]
+        data_ = np.abs(data_)
+        thresholded_img = np.zeros_like(data_)
+
+        object_idx = (data_ > 0).nonzero()  # note: for bg
+        intensities = data_[object_idx[0], object_idx[1]]
+
+        flow_idx = flow[object_idx[0], object_idx[1]]
+        flow_idx_normalized_0, f_max_0, f_min_0 = normalize(flow_idx[..., 0])
+        flow_idx_normalized_1, f_max_1, f_min_1 = normalize(flow_idx[..., 1])
+
+        thresholded_img[object_idx[0], object_idx[1]] = data_[object_idx[0], object_idx[1]]
+
+        object_idx_normalized_0, max_0, min_0 = normalize(object_idx[0])
+        object_idx_normalized_1, max_1, min_1 = normalize(object_idx[1])
+
+        # data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx[..., 0],
+        #                  flow_idx[..., 1])).transpose()
+        # data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx[..., 1],
+        #                  flow_idx[..., 0])).transpose()  # better - increased recall in general, sometimes better/bad pr
+
+        data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                         flow_idx_normalized_0)).transpose()
+
+        # data = np.stack((object_idx[1], object_idx[0], intensities)).transpose()
+        # data = np.stack((object_idx[1], object_idx[0])).transpose()  # better
+        # data = np.stack((object_idx[1], object_idx[0], flow_idx[..., 0], flow_idx[..., 1])).transpose()
+
+        # data = np.stack((flow_idx[..., 0], flow_idx[..., 1])).transpose()
+        # data = flow.reshape(-1, 2)
+
+        # bandwidth = estimate_bandwidth(data, quantile=0.1, n_jobs=8)
+        bandwidth = 0.12
+        ms = MeanShift(bandwidth=bandwidth, bin_seeding=False, cluster_all=True, min_bin_freq=3, max_iter=600)
+        ms.fit(data)
+        labels = ms.labels_
+        cluster_centers = ms.cluster_centers_
+        cc_0 = denormalize(cluster_centers[..., 0], max_1, min_1)  # maybe for portrait images we need to switch?
+        cc_1 = denormalize(cluster_centers[..., 1], max_0, min_0)
+        cluster_centers[..., 0] = cc_0
+        cluster_centers[..., 1] = cc_1
+
+        # cluster_centers = pca_cluster_center(cluster_centers) # ??
+        # scaled_cluster_centers = scale_cluster_center(cluster_centers, (data_.shape[0], data_.shape[1]),
+        #                                               (frame.shape[0], frame.shape[1])) # fixme
+
+        labels_unique, points_per_cluster = np.unique(labels, return_counts=True)
+        cluster_distribution = dict(zip(labels_unique, points_per_cluster))
+        n_clusters_ = len(labels_unique)
+        # print(cluster_distribution)
+
+        annot_ = get_frame_annotations(annotations_df, frame_number=fr)  # check-out +/- 1
+        annot_ = preprocess_annotations(annot_)
+        annot = scale_annotations(annot_, original_scale, (data_.shape[0], data_.shape[1]))
+        gt_bbox_cluster_center_dict.update({fr: {'gt_bbox': annot,
+                                                 'cluster_centers': cluster_centers}})
+        frame_results = evaluate_clustering_per_frame(fr, {'gt_bbox': annot,
+                                                           'cluster_centers': cluster_centers})
+
+        pre_rec = precision_recall(frame_results)
+        pr_for_frames.update({fr: pre_rec})
+
+        # fig, (ax1, ax2) = plt.subplots(1, 2, sharex='all', sharey='all',
+        #                                figsize=original_dims)
+        # ax1.imshow(data_, cmap='gray')
+        # ax2.imshow(resize(frame, output_shape=(data_.shape[0], data_.shape[1])))
+        #
+        # ax1.set_title(f"Processed Frame: {fr}")
+        # ax2.set_title(f"Frame: {fr}")
+        #
+        # add_bbox_to_axes(ax2, annotations=annot_, only_pedestrians=False,
+        #                  original_spatial_dim=original_scale,
+        #                  pooled_spatial_dim=(data_.shape[0], data_.shape[1]),
+        #                  min_pool=True, use_dnn=False)
+        #
+        # colors = cycle('bgrcmykbgrcmykbgrcmykbgrcmyk')
+        # for k, col in zip(range(n_clusters_), colors):
+        #     cluster_center = cluster_centers[k]
+        #     ax1.plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor=col,
+        #              markeredgecolor='k', markersize=8)
+        #     ax2.plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor=col,
+        #              markeredgecolor='k', markersize=8)
+
+        # all steps
+        fig, axs = plt.subplots(2, 3, sharex='none', sharey='none',
+                                figsize=original_dims)
+        axs[0, 0].imshow(frame)
+        axs[0, 1].imshow(data_, cmap='binary')
+        axs[0, 2].imshow(thresholded_img, cmap='binary')
+        axs[1, 0].imshow(data_, cmap='binary')
+        axs[1, 1].imshow(resize(frame, output_shape=(data_.shape[0], data_.shape[1])))
+        axs[1, 2].imshow(thresholded_img, cmap='binary')
+        # axs[1, 2].imshow(rgb)
+
+        axs[0, 0].set_title('Image')
+        axs[0, 1].set_title('Processed Image')
+        axs[0, 2].set_title('Thresholded Image')
+        axs[1, 0].set_title('Clustered - Subtracted')
+        axs[1, 1].set_title('Clustered - Image')
+        # axs[1, 2].set_title('Optical Flow')
+        axs[1, 2].set_title('Clustered - Thresholded')
+
+        add_bbox_to_axes(axs[0, 0], annotations=annot_, only_pedestrians=False,
+                         original_spatial_dim=original_scale,
+                         pooled_spatial_dim=(data_.shape[0], data_.shape[1]),
+                         min_pool=False, use_dnn=False)
+        add_bbox_to_axes(axs[0, 1], annotations=annot_, only_pedestrians=False,
+                         original_spatial_dim=original_scale,
+                         pooled_spatial_dim=(data_.shape[0], data_.shape[1]),
+                         min_pool=True, use_dnn=False)
+        add_bbox_to_axes(axs[1, 1], annotations=annot_, only_pedestrians=False,
+                         original_spatial_dim=original_scale,
+                         pooled_spatial_dim=(data_.shape[0], data_.shape[1]),
+                         min_pool=True, use_dnn=False)
+
+        # colors = cycle('bgrcmykbgrcmykbgrcmykbgrcmyk')
+        # colors = cycle(COLORS2)
+        colors = cm.rainbow(np.linspace(0, 1, 50))
+        marker = cycle('o*v^><12348sphH+xXD')
+        for k, col, m in zip(range(n_clusters_), colors, marker):
+            cluster_center = cluster_centers[k]
+            axs[1, 0].plot(cluster_center[0], cluster_center[1], m, markerfacecolor=col,  # 'o'
+                           markeredgecolor='k', markersize=8)
+            axs[1, 1].plot(cluster_center[0], cluster_center[1], m, markerfacecolor=col,
+                           markeredgecolor='k', markersize=8)
+            axs[1, 2].plot(cluster_center[0], cluster_center[1], m, markerfacecolor=col,
+                           markeredgecolor='k', markersize=8)
+
+        fig.suptitle(f"Video Class: {video_label}\nVideo Number: {vid_number}\nMethod: {mthd}"
+                     f"\nPrecision: {pre_rec[fr]['precision']}\nRecall: {pre_rec[fr]['recall']}"
+                     f"\nClusters Found: {n_clusters_}",
+                     fontsize=14, fontweight='bold')
+
+        cap_count += 1
+        previous = next
+        fig.savefig(video_out_save_path + f"frame_{fr}.png")
+
+    return gt_bbox_cluster_center_dict, pr_for_frames
+
+
+def mean_shift_clustering_without_optical_frames(video_path, start_frame=0, end_frame=None, min_pool_kernel_size=5,
+                                                 desired_fps=6, video_out_save_path=None, annotations_df=None,
+                                                 show_bbox=False,
+                                                 video_label=None, vid_number=None, background_subtraction=False,
+                                                 background_subtraction_method='mog2'):
+    if background_subtraction:
+        processed_img = get_background_subtraction(video_path, start_frame, end_frame,
+                                                   method=background_subtraction_method)
+        img_shape = processed_img.shape
+        processed_img = processed_img / 255
+        processed_img = min_pool2d(torch.from_numpy(processed_img).unsqueeze(1), kernel_size=min_pool_kernel_size)
+        processed_img = (processed_img * 255).int().squeeze().numpy()
+        start_idx = 1
+    else:
+        processed_img = get_subtracted_img_for_frames(video_path, start_frame, end_frame)
+        img_shape = processed_img.size()
+        processed_img = min_pool2d(processed_img.permute(0, 3, 1, 2), kernel_size=min_pool_kernel_size)
+        processed_img = (processed_img * 255).int().squeeze().numpy()
+        start_idx = 0
+
+    if background_subtraction:
+        mthd = background_subtraction_method
+    else:
+        mthd = 'Subtraction - Average Image'
+
+    # if img_shape[1] < img_shape[2]:
+    #     original_dims = (img_shape[2] / 100 * 2, img_shape[1] / 100 * 2)
+    # else:
+    #     original_dims = (img_shape[1] / 100 * 2, img_shape[2] / 100 * 2)
+
+    if img_shape[1] < img_shape[2]:
+        original_dims = (img_shape[2] / 100, img_shape[1] / 100)
+    else:
+        original_dims = (img_shape[1] / 100, img_shape[2] / 100)
+
+    cap = cv.VideoCapture(video_path)
+    cap_count = 0
+    original_scale = (img_shape[1], img_shape[2])
+    min_pooled_shape = (processed_img[0].shape[0], processed_img[0].shape[1])
+
+    previous = None
+    previous_pooled = False
+    hsv = None
+
+    gt_bbox_cluster_center_dict = {}
+    pr_for_frames = {}
+
+    for fr in tqdm(range(start_idx, processed_img.shape[0])):
+        ret, frame = cap.read()
+        if previous is None:
+            previous = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+            # hsv = np.zeros_like(frame)
+            # hsv[..., 1] = 255
+            continue
+
+        if cap_count < start_frame:
+            continue
+
+        next = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+
+        if not previous_pooled:
+            # previous = (min_pool2d(torch.from_numpy(previous / 255).unsqueeze(0), kernel_size=min_pool_kernel_size)
+            #             .squeeze() * 255).int().numpy()
+            previous = resize(previous, output_shape=min_pooled_shape)
+            previous_pooled = True
+        # next = (min_pool2d(torch.from_numpy(next / 255).unsqueeze(0), kernel_size=min_pool_kernel_size).squeeze()
+        #         * 255).int().numpy()
+        next = resize(next, output_shape=min_pooled_shape)
+
+        flow = cv.calcOpticalFlowFarneback(previous, next, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+        # flow = min_pool2d(torch.from_numpy(flow).permute(2, 0, 1), kernel_size=min_pool_kernel_size).permute(1, 2, 0)\
+        #     .numpy()
+
+        hsv = np.zeros((next.shape[0], next.shape[1], 3), dtype=np.uint8)
+        hsv[..., 1] = 255
+        mag, ang = cv.cartToPolar(flow[..., 0], flow[..., 1])
+        hsv[..., 0] = ang * 180 / np.pi / 2
+        hsv[..., 2] = cv.normalize(mag, None, 0, 255, cv.NORM_MINMAX)  # 0-1 normalize
+        rgb = cv.cvtColor(hsv, cv.COLOR_HSV2BGR)
+
+        data_ = processed_img[fr]
+        data_ = np.abs(data_)
+        thresholded_img = np.zeros_like(data_)
+
+        object_idx = (data_ > 0).nonzero()
+        intensities = data_[object_idx[0], object_idx[1]]
+
+        flow_idx = flow[object_idx[0], object_idx[1]]
+        flow_idx_normalized_0, f_max_0, f_min_0 = normalize(flow_idx[..., 0])
+        flow_idx_normalized_1, f_max_1, f_min_1 = normalize(flow_idx[..., 1])
+
+        thresholded_img[object_idx[0], object_idx[1]] = data_[object_idx[0], object_idx[1]]
+
+        object_idx_normalized_0, max_0, min_0 = normalize(object_idx[0])
+        object_idx_normalized_1, max_1, min_1 = normalize(object_idx[1])
+
+        # data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx[..., 0],
+        #                  flow_idx[..., 1])).transpose()
+        # data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx[..., 1],
+        #                  flow_idx[..., 0])).transpose()  # better - increased recall in general, sometimes better/bad pr
+
+        # data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+        #                  flow_idx_normalized_0)).transpose()
+
+        # data = np.stack((object_idx[1], object_idx[0], intensities)).transpose()
+        data = np.stack((object_idx[1], object_idx[0])).transpose()  # better
+        # data = np.stack((object_idx[1], object_idx[0], flow_idx[..., 0], flow_idx[..., 1])).transpose()
+
+        # data = np.stack((flow_idx[..., 0], flow_idx[..., 1])).transpose()
+        # data = flow.reshape(-1, 2)
+
+        bandwidth = estimate_bandwidth(data, quantile=0.1, n_jobs=8)
+        ms = MeanShift(bandwidth=bandwidth, bin_seeding=False, cluster_all=True)
+        ms.fit(data)
+        labels = ms.labels_
+        cluster_centers = ms.cluster_centers_
+        # cc_0 = denormalize(cluster_centers[..., 0], max_1, min_1)  # maybe for portrait images we need to switch?
+        # cc_1 = denormalize(cluster_centers[..., 1], max_0, min_0)
+        # cluster_centers[..., 0] = cc_0
+        # cluster_centers[..., 1] = cc_1
+
+        # cluster_centers = pca_cluster_center(cluster_centers) # ??
+        # scaled_cluster_centers = scale_cluster_center(cluster_centers, (data_.shape[0], data_.shape[1]),
+        #                                               (frame.shape[0], frame.shape[1])) # fixme
+
+        labels_unique, points_per_cluster = np.unique(labels, return_counts=True)
+        cluster_distribution = dict(zip(labels_unique, points_per_cluster))
+        n_clusters_ = len(labels_unique)
+        # print(cluster_distribution)
+
+        annot_ = get_frame_annotations(annotations_df, frame_number=fr)  # check-out +/- 1
+        annot = scale_annotations(annot_, original_scale, (data_.shape[0], data_.shape[1]))
+        gt_bbox_cluster_center_dict.update({fr: {'gt_bbox': annot,
+                                                 'cluster_centers': cluster_centers}})
+        frame_results = evaluate_clustering_per_frame(fr, {'gt_bbox': annot,
+                                                           'cluster_centers': cluster_centers})
+
+        pre_rec = precision_recall(frame_results)
+        pr_for_frames.update({fr: pre_rec})
 
         # fig, (ax1, ax2) = plt.subplots(1, 2, sharex='all', sharey='all',
         #                                figsize=original_dims)
@@ -907,14 +1438,16 @@ def mean_shift_clustering_with_optical_frames(video_path, start_frame=0, end_fra
         axs[0, 2].imshow(thresholded_img, cmap='gray')
         axs[1, 0].imshow(data_, cmap='gray')
         axs[1, 1].imshow(resize(frame, output_shape=(data_.shape[0], data_.shape[1])))
-        axs[1, 2].imshow(thresholded_img, cmap='gray')
+        # axs[1, 2].imshow(thresholded_img, cmap='gray')
+        axs[1, 2].imshow(rgb)
 
         axs[0, 0].set_title('Image')
         axs[0, 1].set_title('Processed Image')
         axs[0, 2].set_title('Thresholded Image')
         axs[1, 0].set_title('Clustered - Subtracted')
         axs[1, 1].set_title('Clustered - Image')
-        axs[1, 2].set_title('Clustered - Thresholded')
+        axs[1, 2].set_title('Optical Flow')
+        # axs[1, 2].set_title('Clustered - Thresholded')
 
         add_bbox_to_axes(axs[0, 0], annotations=annot_, only_pedestrians=False,
                          original_spatial_dim=original_scale,
@@ -936,8 +1469,8 @@ def mean_shift_clustering_with_optical_frames(video_path, start_frame=0, end_fra
                            markeredgecolor='k', markersize=8)
             axs[1, 1].plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor=col,
                            markeredgecolor='k', markersize=8)
-            axs[1, 2].plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor=col,
-                           markeredgecolor='k', markersize=8)
+            # axs[1, 2].plot(cluster_center[0], cluster_center[1], 'o', markerfacecolor=col,
+            #                markeredgecolor='k', markersize=8)
 
         fig.suptitle(f"Video Class: {video_label}\nVideo Number: {vid_number}\nMethod: {mthd}"
                      f"\nPrecision: {pre_rec[fr]['precision']}\nRecall: {pre_rec[fr]['recall']}",
@@ -947,7 +1480,7 @@ def mean_shift_clustering_with_optical_frames(video_path, start_frame=0, end_fra
         previous = next
         fig.savefig(video_out_save_path + f"frame_{fr}.png")
 
-    return gt_bbox_cluster_center_dict
+    return gt_bbox_cluster_center_dict, pr_for_frames
 
 
 def point_in_rect(point, rect):
@@ -992,6 +1525,14 @@ def evaluate_clustering(gt_bbox_cluster_center_dict_):
     return result_dict
 
 
+def preprocess_annotations(annotations):
+    ann = []
+    for a in annotations:
+        if a[6] != 1:
+            ann.append(a)
+    return ann
+
+
 def evaluate_clustering_per_frame(frame, frame_dict):  # use this inside above
     result_dict = {}
     matched_cluster_centers = []
@@ -1002,27 +1543,46 @@ def evaluate_clustering_per_frame(frame, frame_dict):  # use this inside above
     total_annot = len(frame_dict['gt_bbox'])
     cc_cordinate_holder = CoordinateHolder if len(frame_dict['cluster_centers'][0]) == 4 else CoordinateHolder2
     for annotation in frame_dict['gt_bbox']:
-        annt = CoordinateHolder(annotation)
-        if annt in matched_annotation:
+        # annt = CoordinateHolder(annotation)
+        # if annt in matched_annotation:
+        #     continue
+        if check_presence(annotation, matched_annotation):
             continue
         for cluster_center in frame_dict['cluster_centers']:
-            cc = cc_cordinate_holder(cluster_center)
-            if cc in matched_cluster_centers:
+            # cc = cc_cordinate_holder(cluster_center)
+            # if cc in matched_cluster_centers:
+            #     continue
+            if check_presence(cluster_center, matched_cluster_centers):
                 continue
             point = (cluster_center[0], cluster_center[1])
             rect = annotation
             cluster_center_in_box = point_in_rect(point, rect)
             if cluster_center_in_box:
-                cluster_center_in_bbox_count += 1
-                gt_annotation_matched += 1
-                matched_cluster_centers.append(cc_cordinate_holder(cluster_center))
-                matched_annotation.append(CoordinateHolder(annotation))
+                # cluster_center_in_bbox_count += 1
+                # gt_annotation_matched += 1
+                # matched_cluster_centers.append(cc_cordinate_holder(cluster_center))
+                # matched_annotation.append(CoordinateHolder(annotation))
+                if not check_presence(cluster_center, matched_cluster_centers):
+                    matched_cluster_centers.append(cluster_center)
+                if not check_presence(annotation, matched_annotation):
+                    # cluster_center_in_bbox_count += 1
+                    # gt_annotation_matched += 1
+                    matched_annotation.append(annotation)
                 continue
-    result_dict.update({frame: {'gt_annotation_matched': gt_annotation_matched,
-                                'cluster_center_in_bbox_count': cluster_center_in_bbox_count,
+    # result_dict.update({frame: {'gt_annotation_matched': gt_annotation_matched,
+    #                             'cluster_center_in_bbox_count': cluster_center_in_bbox_count,
+    #                             'total_cluster_centers': total_cluster_centers,
+    #                             'total_annotations': total_annot}})
+
+    result_dict.update({frame: {'gt_annotation_matched': len(matched_annotation),
+                                'cluster_center_in_bbox_count': len(matched_cluster_centers),
                                 'total_cluster_centers': total_cluster_centers,
                                 'total_annotations': total_annot}})
     return result_dict
+
+
+def check_presence(item, item_list):
+    return any(set(i).intersection(set(item)) for i in item_list)
 
 
 def precision_recall(result_dict):
@@ -1056,11 +1616,42 @@ def show_img(img):
     plt.show()
 
 
+def clustering_with_optical_flow(video_path, start_frame=0, end_frame=None, min_pool_kernel_size=5):
+    cap = cv.VideoCapture(video_path)
+    cap_count = 0
+    original_scale = None
+
+    previous = None
+    previous_pooled = False
+    hsv = None
+
+    for fr in tqdm(range(start_frame, end_frame)):
+        ret, frame = cap.read()
+        if previous is None:
+            previous = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+            hsv = np.zeros_like(frame)
+            hsv[..., 1] = 255
+            original_scale = (frame.shape[0], frame.shape[1])
+            continue
+
+        if cap_count < start_frame:
+            continue
+
+        next = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+        flow = cv.calcOpticalFlowFarneback(previous, next, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+        hsv[..., 1] = 255
+        mag, ang = cv.cartToPolar(flow[..., 0], flow[..., 1])
+        hsv[..., 0] = ang * 180 / np.pi / 2
+        hsv[..., 2] = cv.normalize(mag, None, 0, 255, cv.NORM_MINMAX)  # 0-1 normalize
+        rgb = cv.cvtColor(hsv, cv.COLOR_HSV2BGR)
+        pass
+
+
 if __name__ == '__main__':
-    annotation_base_path = "../Datasets/SDD/annotations/"
-    video_base_path = "../Datasets/SDD/videos/"
-    vid_label = SDDVideoClasses.BOOKSTORE
-    video_number = 0
+    annotation_base_path = "/home/rishabh/TrajectoryPrediction/Datasets/SDD/annotations/"
+    video_base_path = "/home/rishabh/TrajectoryPrediction/Datasets/SDD/videos/"
+    vid_label = SDDVideoClasses.GATES
+    video_number = 4
     video_file_name = "video.mov"
     annotation_file_name = "annotations.txt"
     fps = 30
@@ -1086,7 +1677,7 @@ if __name__ == '__main__':
                       annotation_file_name
 
     time_adjusted_frame_number = (start_sec * fps) + frame_number
-    plot_save_path = "../Plots/outputs/"
+    plot_save_path = "../../Plots/outputs/"
     # if use_min_pool:
     #     plot_save_file_name = f"min_pooling/{vid_label.value}_{video_number}_min_pool_{min_pool_itrs}" \
     #                           f"_{datetime.datetime.now().isoformat()}"
@@ -1182,10 +1773,24 @@ if __name__ == '__main__':
     #
     # print(pr_res)
 
-    gt_bbox_cluster_center_dict = mean_shift_clustering_with_optical_frames \
+    # gt_bbox_cluster_center_dict, sequence_pr = mean_shift_clustering_with_optical_frames \
+    #     (video_path=video_file, start_frame=0,
+    #      end_frame=30,
+    #      min_pool_kernel_size=3,
+    #      desired_fps=2,
+    #      video_out_save_path=plot_save_path + 'clustering/' +
+    #                          f"clustering_subtracted_video_number_{vid_label.value}"
+    #                          f"video_abs{vid_label.value}",
+    #      annotations_df=df,
+    #      video_label=vid_label.value,
+    #      vid_number=video_number,
+    #      background_subtraction=True,
+    #      background_subtraction_method='mog2')
+
+    gt_bbox_cluster_center_dict_, sequence_pr_ = mean_shift_clustering_with_min_pooled_optical_frames \
         (video_path=video_file, start_frame=0,
-         end_frame=90,
-         min_pool_kernel_size=10,
+         end_frame=30,
+         min_pool_kernel_size=2,
          desired_fps=2,
          video_out_save_path=plot_save_path + 'clustering/' +
                              f"clustering_subtracted_video_number_{vid_label.value}"
@@ -1193,8 +1798,25 @@ if __name__ == '__main__':
          annotations_df=df,
          video_label=vid_label.value,
          vid_number=video_number,
-         background_subtraction=False,
+         background_subtraction=True,
          background_subtraction_method='mog2')
+
+    # gt_bbox_cluster_center_dict_, sequence_pr_ = mean_shift_clustering_without_optical_frames \
+    #     (video_path=video_file, start_frame=0,
+    #      end_frame=30,
+    #      min_pool_kernel_size=3,
+    #      desired_fps=2,
+    #      video_out_save_path=plot_save_path + 'clustering/' +
+    #                          f"clustering_subtracted_video_number_{vid_label.value}"
+    #                          f"video_abs{vid_label.value}",
+    #      annotations_df=df,
+    #      video_label=vid_label.value,
+    #      vid_number=video_number,
+    #      background_subtraction=True,
+    #      background_subtraction_method='mog2')
+
+    # compare_precision(pr_results_1=sequence_pr_, pr_results_2=sequence_pr, avg_img=False)
+    # compare_recall(pr_results_1=sequence_pr_, pr_results_2=sequence_pr, avg_img=False)
 
     # avg_frame, ref_frame, activation_mask = get_result_triplet(v_frames=video_frames,
     #                                                            reference_frame_number=frame_number)
