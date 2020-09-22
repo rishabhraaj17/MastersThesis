@@ -91,6 +91,7 @@ def post_evaluation(eval_file):
         precision_list.append(metric['precision'])
         recall_list.append(metric['recall'])
 
+    print(f"Video : {results['video_label']}, Number: {results['video_number']}")
     total_precision = np.array(precision_list)
     total_recall = np.array(recall_list)
     print(f"Average Precision: {total_precision.sum()/total_precision.shape[0]}"
@@ -100,8 +101,8 @@ def post_evaluation(eval_file):
 if __name__ == '__main__':
     annotation_base_path = "/home/rishabh/TrajectoryPrediction/Datasets/SDD/annotations/"
     video_base_path = "/home/rishabh/TrajectoryPrediction/Datasets/SDD/videos/"
-    vid_label = SDDVideoClasses.GATES
-    video_number = 4
+    vid_label = SDDVideoClasses.HYANG
+    video_number = 9
     video_file_name = "video.mov"
     annotation_file_name = "annotations.txt"
     base_save_path = "../Plots/outputs/"
@@ -133,11 +134,11 @@ if __name__ == '__main__':
     #                                    plot_scale_factor=1, precision_recall=False,
     #                                    with_optical_flow=True)
 
-    # frames_count = 2100
-    # evaluate(mog2=mog2_, num_frames=frames_count, video_label=vid_label.value, vid_number=video_number,
-    #          frames_out_save_path=frames_save_path, annotations_df=df,
-    #          plot_scale_factor=1, plot=False, precision_recall=True,
-    #          with_optical_flow=True, evaluation_save_path_=evaluation_save_path, history=frames_count,
-    #          detect_shadows=True, var_threshold=100)
+    frames_count = 550
+    evaluate(mog2=mog2_, num_frames=frames_count, video_label=vid_label.value, vid_number=video_number,
+             frames_out_save_path=frames_save_path, annotations_df=df,
+             plot_scale_factor=1, plot=False, precision_recall=True,
+             with_optical_flow=True, evaluation_save_path_=evaluation_save_path, history=frames_count,
+             detect_shadows=True, var_threshold=100)
 
-    post_evaluation(f"{evaluation_save_path_last}.pt")
+    # post_evaluation(f"{base_save_path}clustering/video_label_deathCircle_video_number_2_evaluation_1.pt")
