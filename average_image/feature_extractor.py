@@ -52,7 +52,8 @@ class FeatureExtractor(object):
     def get_min_pooled_activations(self, kernel_size: int, iterations: int = 1):
         return NotImplemented
 
-    def get_optical_flow(self, previous_frame, next_frame):
+    @staticmethod
+    def get_optical_flow(previous_frame, next_frame):
         flow = cv.calcOpticalFlowFarneback(previous_frame, next_frame, None, 0.5, 3, 15, 3, 5, 1.2, 0)
         hsv = np.zeros((next_frame.shape[0], next_frame.shape[1], 3), dtype=np.uint8)
         hsv[..., 1] = 255
@@ -228,9 +229,82 @@ class FeatureExtractor(object):
         cap.release()
         return gt_bbox_cluster_center_dict, pr_for_frames
 
+    def evaluate_sequence(self, num_frames, video_label, video_number, frames_out_save_path, annotations_df,
+                          plot_scale_factor: int = 1, plot: bool = True, with_optical_flow: bool = True,
+                          history: int = 120,
+                          detect_shadows: bool = True, var_threshold: int = 100):
+        original_dims = None
+        cap = cv.VideoCapture(self.video_path)
+        cap_count = 0
+        previous = None
+
+        gt_bbox_cluster_center_dict = {}
+        pr_for_frames = {}
+
+        kernel = self._core_setup_algo(detect_shadows, history, var_threshold)
+
+        for fr in tqdm(range(0, num_frames)):
+            ret, frame = cap.read()
+            if previous is None or original_dims is None:
+                if frame.shape[0] < frame.shape[1]:
+                    original_dims = (frame.shape[1] / 100 * plot_scale_factor, frame.shape[0] / 100 *
+                                     plot_scale_factor)
+                    self.original_shape = (frame.shape[1], frame.shape[0])
+                else:
+                    original_dims = (frame.shape[0] / 100 * plot_scale_factor, frame.shape[1] / 100 *
+                                     plot_scale_factor)
+                    self.original_shape = (frame.shape[0], frame.shape[1])
+                previous = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+                processed_data = self._core_processing(frame, kernel)
+                continue
+
+            if cap_count < self.start_frame:
+                continue
+
+            processed_data = self._core_processing(frame, kernel)
+
+            next_frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+
+            flow, rgb = self.get_optical_flow(previous_frame=previous, next_frame=next_frame)
+
+            if with_optical_flow:
+                data, data_, max_0, max_1, min_0, min_1, threshold_img = self._prepare_data_xyuv(flow, fr,
+                                                                                                 processed_data,
+                                                                                                 evaluation_mode=True)
+                mean_shift, n_clusters_ = self._perform_clustering(data, max_0, max_1, min_0, min_1, bandwidth=0.1)
+            else:
+                data, data_, threshold_img = self._prepare_data_xy(fr, processed_data, evaluation_mode=True)
+                mean_shift, n_clusters_ = self._perform_clustering(data, 0, 0, 0, 0, renormalize=False, bandwidth=0.1)
+
+            annotation_, annotation_full = self._process_frame_annotation(annotations_df, data_, fr)
+            gt_bbox_cluster_center_dict.update({fr: {'gt_bbox': annotation_,
+                                                     'cluster_centers': mean_shift.cluster_centers}})
+            frame_results = evaluate_clustering_per_frame(fr, {'gt_bbox': annotation_,
+                                                               'cluster_centers': mean_shift.cluster_centers})
+            pre_rec = precision_recall(frame_results)
+            pr_for_frames.update(pre_rec)
+
+            if plot:
+                fig = self.plot_all_steps(nrows=2, ncols=3, plot_dims=original_dims, original_frame=frame,
+                                          processed_img=data_,
+                                          threshold_image=threshold_img, optical_flow_image=rgb,
+                                          frame_annotation=annotation_full,
+                                          num_clusters=n_clusters_, cluster_centers=mean_shift.cluster_centers,
+                                          frame_evaluation=pre_rec, video_out_save_path=frames_out_save_path,
+                                          frame_number=fr, video_label=video_label, video_number=video_number)
+
+            cap_count += 1
+            previous = next_frame
+
+        cap.release()
+        return gt_bbox_cluster_center_dict, pr_for_frames
+
     @staticmethod
-    def _prepare_data_xyuv(flow, fr, processed_data, use_intensities=False):
-        data_ = processed_data[fr]
+    def _prepare_data_xyuv(flow, fr, processed_data, use_intensities=False, evaluation_mode: bool = False):
+        if evaluation_mode:
+            data_ = processed_data
+        else:
+            data_ = processed_data[fr]
         data_ = np.abs(data_)
         threshold_img = np.zeros_like(data_)
         object_idx = (data_ > 0).nonzero()
@@ -250,8 +324,11 @@ class FeatureExtractor(object):
         return data, data_, max_0, max_1, min_0, min_1, threshold_img
 
     @staticmethod
-    def _prepare_data_xy(fr, processed_data, use_intensities=False):
-        data_ = processed_data[fr]
+    def _prepare_data_xy(fr, processed_data, use_intensities=False, evaluation_mode: bool = False):
+        if evaluation_mode:
+            data_ = processed_data
+        else:
+            data_ = processed_data[fr]
         data_ = np.abs(data_)
         threshold_img = np.zeros_like(data_)
         object_idx = (data_ > 0).nonzero()
@@ -285,11 +362,13 @@ class FeatureExtractor(object):
     def make_video(self, processed_data, video_label, video_number, video_out_save_path, annotations_df,
                    plot_scale_factor: int = 1, desired_fps=5, with_optical_flow: bool = True):
         if processed_data.shape[1] < processed_data.shape[2]:
-            original_dims = (processed_data.shape[2] / 100 * plot_scale_factor, processed_data.shape[1] / 100 * plot_scale_factor)
+            original_dims = (
+                processed_data.shape[2] / 100 * plot_scale_factor, processed_data.shape[1] / 100 * plot_scale_factor)
             out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
                                  (processed_data.shape[2], processed_data.shape[1]))
         else:
-            original_dims = (processed_data.shape[1] / 100 * plot_scale_factor, processed_data.shape[2] / 100 * plot_scale_factor)
+            original_dims = (
+                processed_data.shape[1] / 100 * plot_scale_factor, processed_data.shape[2] / 100 * plot_scale_factor)
             out = cv.VideoWriter(video_out_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
                                  (processed_data.shape[1], processed_data.shape[2]))
 
@@ -355,6 +434,12 @@ class FeatureExtractor(object):
     def to_numpy_int(data):
         return (data * 255).int().squeeze().numpy()
 
+    def _core_setup_algo(self, detect_shadows, history, var_threshold):
+        return NotImplemented
+
+    def _core_processing(self, frame, kernel):
+        return NotImplemented
+
 
 class AverageImageSubtraction(FeatureExtractor):
     def __init__(self, video_path):
@@ -393,6 +478,10 @@ class BackgroundSubtraction(FeatureExtractor):
     def get_activations(self):
         return NotImplemented
 
+    def get_activations_from_preloaded_frames(self, start_sec, end_sec, history=120, detect_shadows=True,
+                                              var_threshold=100):
+        return NotImplemented
+
     def get_min_pooled_activations(self, kernel_size: int, iterations: int = 1, as_numpy_int: bool = True):
         self.foreground_masks = self.foreground_masks / 255
         self.foreground_masks = min_pool2d(torch.from_numpy(self.foreground_masks).unsqueeze(1),
@@ -415,6 +504,28 @@ class BackgroundSubtraction(FeatureExtractor):
             out = np.concatenate((out, np.expand_dims(mask, axis=0)), axis=0)
         return out
 
+    def _process_preloaded_frames(self, frames, kernel):
+        out = None
+        for frame in tqdm(range(0, frames.shape[0])):
+            if out is None:
+                out = np.zeros(shape=(0, frame.shape[1], frame.shape[2]))
+                self.original_shape = (frame.shape[1], frame.shape[2])
+
+            mask = self.algo.apply(frames[frame])
+            mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
+
+            out = np.concatenate((out, np.expand_dims(mask, axis=0)), axis=0)
+        return out
+
+    def _core_processing(self, frame, kernel):
+        mask = self.algo.apply(frame)
+        mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
+
+        return mask
+
+    def _core_setup_algo(self, detect_shadows, history, var_threshold):
+        return NotImplemented
+
 
 class MOG2(BackgroundSubtraction):
     def __init__(self, video_path, start_frame, end_frame):
@@ -424,15 +535,25 @@ class MOG2(BackgroundSubtraction):
     def get_activations(self, history=120, detect_shadows=True, var_threshold=100):
         cap = cv.VideoCapture(self.video_path)
         cap_count = 0
-        kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
+        kernel = self._core_setup_algo(detect_shadows, history, var_threshold)
+        out = self._process_frames(cap, cap_count, kernel)
+        return out
 
+    def get_activations_from_preloaded_frames(self, start_sec, end_sec, history=120, detect_shadows=True,
+                                              var_threshold=100):
+        frames, _, _ = self.get_frames(start=start_sec, end=end_sec, dtype='int')
+        frames = frames.numpy()
+        kernel = self._core_setup_algo(detect_shadows, history, var_threshold)
+        return self._process_preloaded_frames(frames, kernel)
+
+    def _core_setup_algo(self, detect_shadows, history, var_threshold):
+        kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
         if var_threshold is None:
             self.algo = cv.createBackgroundSubtractorMOG2(detectShadows=detect_shadows, history=history)
         else:
             self.algo = cv.createBackgroundSubtractorMOG2(detectShadows=detect_shadows, history=history,
                                                           varThreshold=var_threshold)
-        out = self._process_frames(cap, cap_count, kernel)
-        return out
+        return kernel
 
 
 class KNNBased(BackgroundSubtraction):
@@ -443,6 +564,20 @@ class KNNBased(BackgroundSubtraction):
     def get_activations(self, history=120, detect_shadows=True, var_threshold=100):
         cap = cv.VideoCapture(self.video_path)
         cap_count = 0
+        kernel = self._core_setup_algo(detect_shadows, history, var_threshold)
+
+        out = self._process_frames(cap, cap_count, kernel)
+        return out
+
+    def get_activations_from_preloaded_frames(self, start_sec, end_sec, history=120, detect_shadows=True,
+                                              var_threshold=100):
+        frames, _, _ = self.get_frames(start=start_sec, end=end_sec, dtype='int')
+        frames = frames.numpy()
+        kernel = self._core_setup_algo(detect_shadows, history, var_threshold)
+
+        return self._process_preloaded_frames(frames, kernel)
+
+    def _core_setup_algo(self, detect_shadows, history, var_threshold):
         kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
 
         if var_threshold is None:
@@ -450,8 +585,7 @@ class KNNBased(BackgroundSubtraction):
         else:
             self.algo = cv.createBackgroundSubtractorKNN(detectShadows=detect_shadows, history=history,
                                                          dist2Threshold=var_threshold)
-        out = self._process_frames(cap, cap_count, kernel)
-        return out
+        return kernel
 
 
 class DNNFeatureExtractors(FeatureExtractor):
