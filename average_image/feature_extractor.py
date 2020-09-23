@@ -33,6 +33,7 @@ class FeatureExtractor(object):
         self.end_sec = 0
         self.method = None
         self.original_shape = None
+        self.algo = None
 
     def get_frames(self, start: Union[int, float], end: Union[int, float], dtype: str = 'float'):
         self.start_sec, self.end_sec = start, end
@@ -134,7 +135,7 @@ class FeatureExtractor(object):
     def plot_3(self, nrows, ncols, plot_dims, original_frame, processed_img, threshold_image,
                frame_annotation, num_clusters, cluster_centers, frame_evaluation,
                frame_number, video_label, video_number, video_out_save_path):
-        original_shape = (original_frame.shape[0], original_frame[1])
+        original_shape = (original_frame.shape[0], original_frame.shape[1])
         downscaled_shape = (processed_img.shape[0], processed_img.shape[1])
         fig, axs = plt.subplots(nrows, ncols, sharex='none', sharey='none',
                                 figsize=plot_dims)
@@ -169,6 +170,78 @@ class FeatureExtractor(object):
                      f"\nRecall: {frame_evaluation[frame_number]['recall']}",
                      fontsize=14, fontweight='bold')
         fig.savefig(video_out_save_path + f"frame_{frame_number}.png")
+
+    def plot_frame_processed_with_of(self, nrows, ncols, plot_dims, original_frame, processed_img, optical_flow_image,
+                                     frame_annotation, frame_number, video_label, video_number, video_out_save_path,
+                                     show_bbox=False):
+        original_shape = (original_frame.shape[0], original_frame.shape[1])
+        downscaled_shape = (processed_img.shape[0], processed_img.shape[1])
+        fig, axs = plt.subplots(nrows, ncols, sharex='none', sharey='none',
+                                figsize=plot_dims)
+        axs[0].imshow(original_frame)
+        axs[1].imshow(processed_img, cmap='binary')
+        axs[2].imshow(optical_flow_image)
+
+        axs[0].set_title('Image')
+        axs[1].set_title('MOG2')
+        axs[2].set_title('Optical Flow')
+
+        if show_bbox:
+            add_bbox_to_axes(axs[0], annotations=frame_annotation, only_pedestrians=False,
+                             original_spatial_dim=original_shape,
+                             pooled_spatial_dim=downscaled_shape,
+                             min_pool=False, use_dnn=False)
+            add_bbox_to_axes(axs[1], annotations=frame_annotation, only_pedestrians=False,
+                             original_spatial_dim=original_shape,
+                             pooled_spatial_dim=downscaled_shape,
+                             min_pool=True, use_dnn=False)
+            # add_bbox_to_axes(axs[2], annotations=frame_annotation, only_pedestrians=False,
+            #                  original_spatial_dim=original_shape,
+            #                  pooled_spatial_dim=downscaled_shape,
+            #                  min_pool=True, use_dnn=False)
+
+            patches = [mpatches.Patch(color=val, label=key.value) for key, val in OBJECT_CLASS_COLOR_MAPPING.items()]
+            fig.legend(handles=patches, loc=2)
+
+        fig.suptitle(f"Video Class: {video_label}\nVideo Number: {video_number}\nMethod: {self.method}",
+                     fontsize=14, fontweight='bold')
+        fig.savefig(video_out_save_path + f"fpof_frame_{frame_number}.png")
+
+    def plot_mog2_steps(self, nrows, ncols, plot_dims, original_frame, processed_img,
+                        frame_annotation, frame_number, video_label, video_number, video_out_save_path,
+                        show_bbox=False):
+        original_shape = (original_frame.shape[0], original_frame.shape[1])
+        downscaled_shape = (processed_img.shape[0], processed_img.shape[1])
+        fig, axs = plt.subplots(nrows, ncols, sharex='none', sharey='none',
+                                figsize=plot_dims)
+        axs[0].imshow(original_frame)
+        axs[1].imshow(processed_img, cmap='binary')
+        axs[2].imshow(self.algo.getBackgroundImage())
+
+        axs[0].set_title('Image')
+        axs[1].set_title('MOG2')
+        axs[2].set_title('Background Image')
+
+        if show_bbox:
+            add_bbox_to_axes(axs[0], annotations=frame_annotation, only_pedestrians=False,
+                             original_spatial_dim=original_shape,
+                             pooled_spatial_dim=downscaled_shape,
+                             min_pool=False, use_dnn=False)
+            add_bbox_to_axes(axs[1], annotations=frame_annotation, only_pedestrians=False,
+                             original_spatial_dim=original_shape,
+                             pooled_spatial_dim=downscaled_shape,
+                             min_pool=True, use_dnn=False)
+            # add_bbox_to_axes(axs[2], annotations=frame_annotation, only_pedestrians=False,
+            #                  original_spatial_dim=original_shape,
+            #                  pooled_spatial_dim=downscaled_shape,
+            #                  min_pool=True, use_dnn=False)
+
+            patches = [mpatches.Patch(color=val, label=key.value) for key, val in OBJECT_CLASS_COLOR_MAPPING.items()]
+            fig.legend(handles=patches, loc=2)
+
+        fig.suptitle(f"Video Class: {video_label}\nVideo Number: {video_number}\nMethod: {self.method}",
+                     fontsize=14, fontweight='bold')
+        fig.savefig(video_out_save_path + f"fpof_frame_{frame_number}.png")
 
     def get_per_frame_results(self, processed_data, video_label, video_number, frames_out_save_path, annotations_df,
                               plot_scale_factor: int = 1, plot: bool = True, with_optical_flow: bool = True):
@@ -298,6 +371,101 @@ class FeatureExtractor(object):
 
         cap.release()
         return gt_bbox_cluster_center_dict, pr_for_frames
+
+    def generate_processed_image_with_optical_flow(self, num_frames, video_label, video_number, frames_out_save_path,
+                                                   annotations_df,
+                                                   plot_scale_factor: int = 1, plot: bool = True,
+                                                   history: int = 120,
+                                                   detect_shadows: bool = True, var_threshold: int = 100,
+                                                   show_bbox: bool = False):
+        original_dims = None
+        cap = cv.VideoCapture(self.video_path)
+        cap_count = 0
+        previous = None
+
+        kernel = self._core_setup_algo(detect_shadows, history, var_threshold)
+
+        for fr in tqdm(range(0, num_frames)):
+            ret, frame = cap.read()
+            if previous is None or original_dims is None:
+                if frame.shape[0] < frame.shape[1]:
+                    original_dims = (frame.shape[1] / 100 * plot_scale_factor, frame.shape[0] / 100 *
+                                     plot_scale_factor)
+                    self.original_shape = (frame.shape[1], frame.shape[0])
+                else:
+                    original_dims = (frame.shape[0] / 100 * plot_scale_factor, frame.shape[1] / 100 *
+                                     plot_scale_factor)
+                    self.original_shape = (frame.shape[0], frame.shape[1])
+                previous = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+                processed_data = self._core_processing(frame, kernel)
+                continue
+
+            if cap_count < self.start_frame:
+                continue
+
+            processed_data = self._core_processing(frame, kernel)
+
+            next_frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+
+            flow, rgb = self.get_optical_flow(previous_frame=previous, next_frame=next_frame)
+
+            annotation_, annotation_full = self._process_frame_annotation(annotations_df, processed_data, fr)
+
+            if plot:
+                self.plot_frame_processed_with_of(nrows=1, ncols=3, plot_dims=original_dims, original_frame=frame,
+                                                  processed_img=processed_data,
+                                                  optical_flow_image=rgb, frame_annotation=annotation_full,
+                                                  frame_number=fr, video_label=video_label, video_number=video_number,
+                                                  video_out_save_path=frames_out_save_path, show_bbox=show_bbox)
+
+            cap_count += 1
+            previous = next_frame
+
+        cap.release()
+
+    def generate_mog2_steps(self, num_frames, video_label, video_number, frames_out_save_path,
+                            annotations_df,
+                            plot_scale_factor: int = 1, plot: bool = True,
+                            history: int = 120,
+                            detect_shadows: bool = True, var_threshold: int = 100,
+                            show_bbox: bool = False):
+        original_dims = None
+        cap = cv.VideoCapture(self.video_path)
+        cap_count = 0
+
+        kernel = self._core_setup_algo(detect_shadows, history, var_threshold)
+
+        for fr in tqdm(range(0, num_frames)):
+            ret, frame = cap.read()
+            if original_dims is None:
+                if frame.shape[0] < frame.shape[1]:
+                    original_dims = (frame.shape[1] / 100 * plot_scale_factor, frame.shape[0] / 100 *
+                                     plot_scale_factor)
+                    self.original_shape = (frame.shape[1], frame.shape[0])
+                else:
+                    original_dims = (frame.shape[0] / 100 * plot_scale_factor, frame.shape[1] / 100 *
+                                     plot_scale_factor)
+                    self.original_shape = (frame.shape[0], frame.shape[1])
+                processed_data = self._core_processing(frame, kernel)
+                continue
+
+            if cap_count < self.start_frame:
+                continue
+
+            processed_data = self._core_processing(frame, kernel)
+
+            annotation_, annotation_full = self._process_frame_annotation(annotations_df, processed_data, fr)
+
+            if plot:
+                self.plot_mog2_steps(nrows=1, ncols=3, plot_dims=original_dims, original_frame=frame,
+                                     processed_img=processed_data,
+                                     frame_annotation=annotation_full,
+                                     frame_number=fr, video_label=video_label, video_number=video_number,
+                                     video_out_save_path=frames_out_save_path, show_bbox=show_bbox)
+
+            cap_count += 1
+
+        cap.release()
 
     @staticmethod
     def _prepare_data_xyuv(flow, fr, processed_data, use_intensities=False, evaluation_mode: bool = False):

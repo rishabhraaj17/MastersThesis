@@ -1109,14 +1109,14 @@ def mean_shift_clustering_with_min_pooled_optical_frames(video_path, start_frame
 
         next = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
 
-        # if not previous_pooled:
-        #     previous = (min_pool2d(torch.from_numpy(previous / 255).unsqueeze(0), kernel_size=min_pool_kernel_size)
-        #                 .squeeze() * 255).int().numpy()
-        #     # previous = resize(previous, output_shape=min_pooled_shape)
-        #     previous_pooled = True
-        # next = (min_pool2d(torch.from_numpy(next / 255).unsqueeze(0), kernel_size=min_pool_kernel_size).squeeze()
-        #         * 255).int().numpy()
-        # # next = resize(next, output_shape=min_pooled_shape)
+        if not previous_pooled:
+            previous = (min_pool2d(torch.from_numpy(previous / 255).unsqueeze(0), kernel_size=min_pool_kernel_size)
+                        .squeeze() * 255).int().numpy()
+            # previous = resize(previous, output_shape=min_pooled_shape)
+            previous_pooled = True
+        next = (min_pool2d(torch.from_numpy(next / 255).unsqueeze(0), kernel_size=min_pool_kernel_size).squeeze()
+                * 255).int().numpy()
+        # next = resize(next, output_shape=min_pooled_shape)
 
         flow = cv.calcOpticalFlowFarneback(previous, next, None, 0.5, 3, 15, 3, 5, 1.2, 0)
         # flow = min_pool2d(torch.from_numpy(flow).permute(2, 0, 1), kernel_size=min_pool_kernel_size).permute(1, 2, 0)\
@@ -1133,7 +1133,7 @@ def mean_shift_clustering_with_min_pooled_optical_frames(video_path, start_frame
         data_ = np.abs(data_)
         thresholded_img = np.zeros_like(data_)
 
-        object_idx = (data_ > 0).nonzero()  # note: for bg
+        object_idx = (data_ > 50).nonzero()  # note: for bg
         intensities = data_[object_idx[0], object_idx[1]]
 
         flow_idx = flow[object_idx[0], object_idx[1]]
@@ -1161,7 +1161,7 @@ def mean_shift_clustering_with_min_pooled_optical_frames(video_path, start_frame
         # data = flow.reshape(-1, 2)
 
         # bandwidth = estimate_bandwidth(data, quantile=0.1, n_jobs=8)
-        bandwidth = 0.12
+        bandwidth = 0.1
         ms = MeanShift(bandwidth=bandwidth, bin_seeding=False, cluster_all=True, min_bin_freq=3, max_iter=600)
         ms.fit(data)
         labels = ms.labels_
@@ -1264,7 +1264,7 @@ def mean_shift_clustering_with_min_pooled_optical_frames(video_path, start_frame
 
         cap_count += 1
         previous = next
-        fig.savefig(video_out_save_path + f"frame_{fr}.png")
+        # fig.savefig(video_out_save_path + f"frame_{fr}.png")
 
     return gt_bbox_cluster_center_dict, pr_for_frames
 
@@ -1789,16 +1789,16 @@ if __name__ == '__main__':
 
     gt_bbox_cluster_center_dict_, sequence_pr_ = mean_shift_clustering_with_min_pooled_optical_frames \
         (video_path=video_file, start_frame=0,
-         end_frame=30,
-         min_pool_kernel_size=2,
+         end_frame=60,
+         min_pool_kernel_size=10,
          desired_fps=2,
-         video_out_save_path=plot_save_path + 'clustering/' +
+         video_out_save_path='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/' + 'clustering/' +
                              f"clustering_subtracted_video_number_{vid_label.value}"
                              f"video_abs{vid_label.value}",
          annotations_df=df,
          video_label=vid_label.value,
          vid_number=video_number,
-         background_subtraction=True,
+         background_subtraction=False,
          background_subtraction_method='mog2')
 
     # gt_bbox_cluster_center_dict_, sequence_pr_ = mean_shift_clustering_without_optical_frames \

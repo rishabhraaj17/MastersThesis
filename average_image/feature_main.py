@@ -71,6 +71,22 @@ def evaluate(mog2, num_frames, video_label, vid_number, frames_out_save_path, an
         precision_recall_one_sequence(pr_for_frames, average_image=False)
 
 
+def plot_frame_processed_image_optical_flow(mog2, video_label, vid_number, frames_out_save_path, annotations_df,
+                                            plot_scale_factor: int = 1, plot: bool = True, history: int = 120,
+                                            detect_shadows: bool = True, var_threshold: int = 100,
+                                            show_bbox: bool = False):
+    # mog2.generate_processed_image_with_optical_flow(num_frames=20, video_label=video_label, video_number=vid_number,
+    #                                                 frames_out_save_path=frames_out_save_path,
+    #                                                 annotations_df=annotations_df, plot_scale_factor=plot_scale_factor,
+    #                                                 plot=plot, history=history, detect_shadows=detect_shadows,
+    #                                                 var_threshold=var_threshold, show_bbox=show_bbox)
+    mog2.generate_mog2_steps(num_frames=20, video_label=video_label, video_number=vid_number,
+                             frames_out_save_path=frames_out_save_path,
+                             annotations_df=annotations_df, plot_scale_factor=plot_scale_factor,
+                             plot=plot, history=history, detect_shadows=detect_shadows,
+                             var_threshold=var_threshold, show_bbox=show_bbox)
+
+
 def post_evaluation_tb(eval_file):
     results = torch.load(eval_file)
     writer = SummaryWriter(comment=os.path.split(eval_file)[0])
@@ -94,15 +110,15 @@ def post_evaluation(eval_file):
     print(f"Video : {results['video_label']}, Number: {results['video_number']}")
     total_precision = np.array(precision_list)
     total_recall = np.array(recall_list)
-    print(f"Average Precision: {total_precision.sum()/total_precision.shape[0]}"
-          f"\nAverage Recall: {total_recall.sum()/total_recall.shape[0]}")
+    print(f"Average Precision: {total_precision.sum() / total_precision.shape[0]}"
+          f"\nAverage Recall: {total_recall.sum() / total_recall.shape[0]}")
 
 
 if __name__ == '__main__':
     annotation_base_path = "/home/rishabh/TrajectoryPrediction/Datasets/SDD/annotations/"
     video_base_path = "/home/rishabh/TrajectoryPrediction/Datasets/SDD/videos/"
-    vid_label = SDDVideoClasses.HYANG
-    video_number = 9
+    vid_label = SDDVideoClasses.GATES
+    video_number = 4
     video_file_name = "video.mov"
     annotation_file_name = "annotations.txt"
     base_save_path = "../Plots/outputs/"
@@ -121,24 +137,28 @@ if __name__ == '__main__':
     evaluation_save_path_last = f"{base_save_path}clustering/video_label_{vid_label.value}_video_number_" \
                                 f"{video_number}_evaluation"
 
-    mog2_ = MOG2(video_path=video_file_path, start_frame=0, end_frame=90)
+    mog2_ = MOG2(video_path=video_file_path, start_frame=0, end_frame=60)
 
     # TODO: verify (x,y) once again
     # mog2_optical_flow_clustering_per_frame(mog2=mog2_, video_label=vid_label.value, vid_number=video_number,
     #                                        frames_out_save_path=frames_save_path, annotations_df=df,
-    #                                        plot_scale_factor=1, plot=False, precision_recall=True,
+    #                                        plot_scale_factor=1, plot=True, precision_recall=False,
     #                                        with_optical_flow=True)
 
     # mog2_optical_flow_clustering_video(mog2=mog2_, video_label=vid_label.value, vid_number=video_number,
     #                                    video_out_save_path=video_save_path, annotations_df=df,
     #                                    plot_scale_factor=1, precision_recall=False,
     #                                    with_optical_flow=True)
+    #
+    # frames_count = 550
+    # evaluate(mog2=mog2_, num_frames=frames_count, video_label=vid_label.value, vid_number=video_number,
+    #          frames_out_save_path=frames_save_path, annotations_df=df,
+    #          plot_scale_factor=1, plot=False, precision_recall=True,
+    #          with_optical_flow=True, evaluation_save_path_=evaluation_save_path, history=frames_count,
+    #          detect_shadows=True, var_threshold=100)
 
-    frames_count = 550
-    evaluate(mog2=mog2_, num_frames=frames_count, video_label=vid_label.value, vid_number=video_number,
-             frames_out_save_path=frames_save_path, annotations_df=df,
-             plot_scale_factor=1, plot=False, precision_recall=True,
-             with_optical_flow=True, evaluation_save_path_=evaluation_save_path, history=frames_count,
-             detect_shadows=True, var_threshold=100)
+    # post_evaluation(f"{base_save_path}clustering/video_label_gates_video_number_4_evaluation_1.pt")
 
-    # post_evaluation(f"{base_save_path}clustering/video_label_deathCircle_video_number_2_evaluation_1.pt")
+    plot_frame_processed_image_optical_flow(mog2_, vid_label, video_number, frames_save_path, df,
+                                            plot_scale_factor=1, plot=True, history=5, detect_shadows=True,
+                                            var_threshold=20, show_bbox=False)
