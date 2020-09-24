@@ -1,6 +1,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import PIL.Image as Image
 from sklearn.decomposition import PCA
+
+from constants import SDDVideoClasses, SDDVideoDatasets
 
 
 def show_img(img):
@@ -180,3 +184,70 @@ def precision_recall_one_sequence(results, average_image):
     # fig.tight_layout()
 
     plt.show()
+
+
+class SDDMeta(object):
+    def __init__(self, path):
+        self.path = path
+        columns = ['File', 'Dataset', 'Nr', 'Version', 'Feet', 'Inch', 'Meters', 'Pixel X', 'Pixel Y',
+                   'Pixel Dist', 'Average', 'Diff', 'Ratio']
+        self.data = pd.DataFrame(pd.read_csv(path, sep='\t', header=None).values[1:], columns=columns)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, item: int):
+        return self.data.loc[item]
+
+    def get_meta(self, dataset: SDDVideoDatasets, sequence: int, version: str = 'A'):
+        where_dataset = self.data['Dataset'] == dataset.value
+        where_sequence = self.data['Nr'] == str(sequence)
+        where_version = self.data['Version'] == version
+
+        out = self.data.loc[where_dataset & where_sequence & where_version]
+        return out, out.to_numpy()
+
+    def get_new_scale(self, img_path, dataset: SDDVideoDatasets, sequence: int, desired_ratio: float = 0.1,
+                      version: str = 'A'):
+        ratio = self.get_meta(dataset, sequence, version)[0]['Ratio']
+        im: Image = Image.open(img_path)
+        w, h = im.width, im.height
+        out_w, out_h = self.calculate_scale(w, h, ratio, desired_ratio)
+        return out_w, out_h
+
+    def get_new_scale_from_img(self, img, dataset: SDDVideoDatasets, sequence: int, desired_ratio: float = 0.1,
+                               version: str = 'A'):
+        ratio = float(self.get_meta(dataset, sequence, version)[0]['Ratio'].to_numpy()[0])
+        w, h = img.shape[0], img.shape[1]
+        out_w, out_h = self.calculate_scale(w, h, ratio, desired_ratio)
+        return int(out_w), int(out_h)  # Quantization
+
+    @staticmethod
+    def calculate_scale(w, h, ratio, desired_ratio):
+        img_x = w * ratio
+        img_y = h * ratio
+        out_w = img_x / desired_ratio
+        out_h = img_y / desired_ratio
+        return out_w, out_h
+
+    def test_scale_logic(self):
+        ratio = 0.03976968
+        desired_ratio = 0.1
+        w, h = 1325, 1973
+        out_w, out_h = self.calculate_scale(w, h, ratio, desired_ratio)
+        print(out_w, out_h)
+        out_w, out_h = self.calculate_scale(out_w, out_h, desired_ratio, ratio)
+        print(out_w, out_h)
+
+
+if __name__ == '__main__':
+    pd.options.display.max_columns = None
+    p = '/home/rishabh/TrajectoryPrediction/Datasets/SDD/H_SDD.txt'
+    meta = SDDMeta(p)
+    # print(meta.get_meta(SDDVideoClasses.GATES, 0, 'A')[0])
+    meta.test_scale_logic()
+
+    # im_path = '/home/rishabh/TrajectoryPrediction/Datasets/SDD/annotations/gates/video0/reference.jpg'
+    #
+    # im_ = Image.open(im_path)
+    # print(im_.info)

@@ -12,6 +12,17 @@ class SDDVideoClasses(Enum):
     QUAD = "quad"
 
 
+class SDDVideoDatasets(Enum):
+    BOOKSTORE = "Bookstore"
+    COUPA = "Coupa"
+    DEATH_CIRCLE = "deathCircle"
+    GATES = "Gates"
+    HYANG = "Hyang"
+    LITTLE = "Little"
+    NEXUS = "Nexus"
+    QUAD = "Quad"
+
+
 class ObjectClasses(Enum):
     PEDESTRIAN = "Pedestrian"
     BUS = "Bus"
@@ -25,7 +36,7 @@ OBJECT_CLASS_COLOR_MAPPING = {
     ObjectClasses.PEDESTRIAN: 'b',
     ObjectClasses.BUS: 'g',
     ObjectClasses.BIKER: 'black',
-    ObjectClasses.CAR: 'white',
+    ObjectClasses.CAR: 'purple',
     ObjectClasses.SKATER: 'pink',
     ObjectClasses.CART: 'yellow'
 }

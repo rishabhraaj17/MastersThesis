@@ -6,7 +6,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from bbox_utils import annotations_to_dataframe
-from constants import SDDVideoClasses
+from constants import SDDVideoClasses, SDDVideoDatasets
 from feature_extractor import MOG2
 from utils import precision_recall_one_sequence
 
@@ -118,14 +118,18 @@ if __name__ == '__main__':
     annotation_base_path = "/home/rishabh/TrajectoryPrediction/Datasets/SDD/annotations/"
     video_base_path = "/home/rishabh/TrajectoryPrediction/Datasets/SDD/videos/"
     vid_label = SDDVideoClasses.GATES
-    video_number = 4
+    dataset_type = SDDVideoDatasets.GATES
+    video_number = 2
     video_file_name = "video.mov"
     annotation_file_name = "annotations.txt"
+    reference_img_name = "reference.jpg"
     base_save_path = "../Plots/outputs/"
 
     video_file_path = f"{video_base_path}{str(vid_label.value)}/video{str(video_number)}/{video_file_name}"
     annotation_file_path = f"{annotation_base_path}{str(vid_label.value)}/video{str(video_number)}/" \
                            f"{annotation_file_name}"
+    reference_img_path = f"{annotation_base_path}{str(vid_label.value)}/video{str(video_number)}/" \
+                         f"{reference_img_name}"
 
     df = annotations_to_dataframe(annotation_file_path)
     frames_save_path = f"{base_save_path}clustering/per_frame_video_label_{vid_label.value}_video_number_" \
@@ -162,7 +166,16 @@ if __name__ == '__main__':
     # plot_frame_processed_image_optical_flow(mog2_, vid_label, video_number, frames_save_path, df,
     #                                         plot_scale_factor=1, plot=True, history=5, detect_shadows=True,
     #                                         var_threshold=20, show_bbox=False)
+    gates_list = [62, 112]
+    little_list = [100, 114]
+    death_circle_list = []
 
-    mog2_.keyframe_based_clustering(0, 5, f"{base_save_path}clustering/cluster_video_label_{vid_label.value}"
-                                          f"_video_number_{video_number}", df, [29, 81], video_label=vid_label.value,
-                                    video_number=video_number, n=20)
+    # mog2_.keyframe_based_clustering(0, 5, f"{base_save_path}clustering/cluster_video_label_{vid_label.value}"
+    #                                       f"_video_number_{video_number}", df, [19, 64], video_label=vid_label,
+    #                                 video_number=video_number, n=20)
+
+    sdd_meta_path = '/home/rishabh/TrajectoryPrediction/Datasets/SDD/H_SDD.txt'
+    mog2_.keyframe_based_rescaled_clustering(0, 5, f"{base_save_path}clustering/cluster_video_label_{vid_label.value}"
+                                                   f"_video_number_{video_number}", df, [10, 24], video_label=vid_label,
+                                             video_number=video_number, n=20, sdd_meta_path=sdd_meta_path,
+                                             dataset_type=dataset_type)

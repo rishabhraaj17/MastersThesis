@@ -14,12 +14,12 @@ from tqdm import tqdm
 
 from bbox_utils import add_bbox_to_axes, resize_v_frames, get_frame_annotations, preprocess_annotations, \
     scale_annotations
-from constants import OBJECT_CLASS_COLOR_MAPPING
+from constants import OBJECT_CLASS_COLOR_MAPPING, SDDVideoClasses
 from deep_networks_avg import get_vgg_layer_activations, get_resnet_layer_activations, \
     get_densenet_filtered_layer_activations
 from feature_clustering import MeanShiftClustering
 from layers import min_pool2d
-from utils import precision_recall, evaluate_clustering_per_frame, normalize
+from utils import precision_recall, evaluate_clustering_per_frame, normalize, SDDMeta
 
 
 class FeatureExtractor(object):
@@ -70,7 +70,8 @@ class FeatureExtractor(object):
 
     def plot_all_steps(self, nrows, ncols, plot_dims, original_frame, processed_img, threshold_image,
                        optical_flow_image, frame_annotation, num_clusters, cluster_centers, frame_evaluation,
-                       frame_number, video_label, video_number, video_out_save_path, video_mode=False):
+                       frame_number, video_label, video_number, video_out_save_path, video_mode=False,
+                       all_objects=None):
         original_shape = (original_frame.shape[0], original_frame.shape[1])
         downscaled_shape = (processed_img.shape[0], processed_img.shape[1])
         fig, axs = plt.subplots(nrows, ncols, sharex='none', sharey='none',
@@ -109,9 +110,62 @@ class FeatureExtractor(object):
         patches = [mpatches.Patch(color=val, label=key.value) for key, val in OBJECT_CLASS_COLOR_MAPPING.items()]
         fig.legend(handles=patches, loc=2)
 
-        fig.suptitle(f"Video Class: {video_label}\nVideo Number: {video_number}\nMethod: {self.method}"
+        fig.suptitle(f"Video Class: {video_label} | Video Number: {video_number} | Method: {self.method}"
                      f"\nPrecision: {frame_evaluation[frame_number]['precision']}"
-                     f"\nRecall: {frame_evaluation[frame_number]['recall']}",
+                     f" | Recall: {frame_evaluation[frame_number]['recall']}\n"
+                     f"Objects Count: {all_objects}",
+                     fontsize=14, fontweight='bold')
+        if not video_mode:
+            fig.savefig(video_out_save_path + f"frame_{frame_number}.png")
+
+        return fig
+
+    def plot_all_steps_rescaled(self, nrows, ncols, plot_dims, original_frame, processed_img, threshold_image,
+                                optical_flow_image, frame_annotation, num_clusters, cluster_centers, frame_evaluation,
+                                frame_number, video_label, video_number, video_out_save_path, video_mode=False,
+                                all_objects=None):
+        original_shape = self.original_shape
+        downscaled_shape = (processed_img.shape[0], processed_img.shape[1])
+        fig, axs = plt.subplots(nrows, ncols, sharex='none', sharey='none',
+                                figsize=plot_dims)
+        axs[0, 0].imshow(original_frame)
+        axs[0, 1].imshow(processed_img, cmap='binary')
+        axs[0, 2].imshow(threshold_image, cmap='binary')
+        axs[1, 0].imshow(processed_img, cmap='binary')
+        axs[1, 1].imshow(resize(original_frame, output_shape=downscaled_shape))
+        axs[1, 2].imshow(optical_flow_image)
+        # axs[1, 2].imshow(thresholded_img, cmap='binary')
+
+        axs[0, 0].set_title('Image')
+        axs[0, 1].set_title('Processed Image')
+        axs[0, 2].set_title('Threshold Image')
+        axs[1, 0].set_title('Clustered - Processed')
+        axs[1, 1].set_title('Clustered - Image')
+        axs[1, 2].set_title('Optical Flow')
+        # axs[1, 2].set_title('Clustered - Thresholded')
+
+        add_bbox_to_axes(axs[0, 0], annotations=frame_annotation, only_pedestrians=False,
+                         original_spatial_dim=original_shape,
+                         pooled_spatial_dim=downscaled_shape,
+                         min_pool=True, use_dnn=False)
+        add_bbox_to_axes(axs[0, 1], annotations=frame_annotation, only_pedestrians=False,
+                         original_spatial_dim=original_shape,
+                         pooled_spatial_dim=downscaled_shape,
+                         min_pool=True, use_dnn=False)
+        add_bbox_to_axes(axs[1, 1], annotations=frame_annotation, only_pedestrians=False,
+                         original_spatial_dim=original_shape,
+                         pooled_spatial_dim=downscaled_shape,
+                         min_pool=True, use_dnn=False)
+
+        self.project_cluster_centers(axs, cluster_centers, num_clusters)
+
+        patches = [mpatches.Patch(color=val, label=key.value) for key, val in OBJECT_CLASS_COLOR_MAPPING.items()]
+        fig.legend(handles=patches, loc=2)
+
+        fig.suptitle(f"Video Class: {video_label} | Video Number: {video_number} | Method: {self.method}"
+                     f"\nPrecision: {frame_evaluation[frame_number]['precision']}"
+                     f" | Recall: {frame_evaluation[frame_number]['recall']}\n"
+                     f"Objects Count: {all_objects}",
                      fontsize=14, fontweight='bold')
         if not video_mode:
             fig.savefig(video_out_save_path + f"frame_{frame_number}.png")
@@ -672,7 +726,7 @@ class BackgroundSubtraction(FeatureExtractor):
             out = np.concatenate((out, np.expand_dims(mask, axis=0)), axis=0)
         return out
 
-    def _process_preloaded_frames(self, frames, kernel):
+    def _process_preloaded_frames(self, frames, kernel):  # todo: set original_shape somewhere else
         out = None
         for frame in tqdm(range(0, frames.shape[0])):
             if out is None:
@@ -685,12 +739,12 @@ class BackgroundSubtraction(FeatureExtractor):
             out = np.concatenate((out, np.expand_dims(mask, axis=0)), axis=0)
         return out
 
-    def _process_preloaded_n_frames(self, n, frames, kernel, algo):
+    def _process_preloaded_n_frames(self, n, frames, kernel, algo):  # todo: set original_shape somewhere else
         out = None
         for frame in range(0, n):
             if out is None:
                 out = np.zeros(shape=(0, frames[0].shape[0], frames[0].shape[1]))
-                self.original_shape = (frames[0].shape[0], frames[0].shape[1])
+                # self.original_shape = (frames[0].shape[0], frames[0].shape[1])
 
             mask = algo.apply(frames[frame])
             mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
@@ -736,30 +790,6 @@ class MOG2(BackgroundSubtraction):
                                                           varThreshold=var_threshold)
         return kernel
 
-    # def keyframe_based_experiment(self, start_sec, end_sec):
-    #     frames, _, _ = self.get_frames(start=start_sec, end=end_sec, dtype='int')
-    #     frames = frames.numpy()
-    #
-    #     kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
-    #     n = 50
-    #     bg_models = []
-    #     for group in range(frames.shape[0]//n):
-    #         algo = cv.createBackgroundSubtractorMOG2(history=n)
-    #         _ = self._process_preloaded_n_frames(n, frames[group*n:group*n + n], kernel, algo)
-    #         bg_models.append(algo)
-    #
-    #     for i, model in enumerate(bg_models):
-    #         frame_number = (n*i + n) % frames.shape[0]
-    #         mask = model.apply(frames[frame_number], learningRate=0)
-    #         mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
-    #         fig, axs = plt.subplots(1, 2, sharex='none', sharey='none')
-    #         axs[0].imshow(frames[(n*i + n) % frames.shape[0]])
-    #         axs[1].imshow(mask, cmap='binary')
-    #
-    #         axs[0].set_title(f'Image: {frame_number}')
-    #         axs[1].set_title(f'Mask: {frame_number}')
-    #         plt.show()
-
     def keyframe_based_experiment(self, start_sec, end_sec, save_path):
         frames, _, _ = self.get_frames(start=start_sec, end=end_sec, dtype='int')
         frames = frames.numpy()
@@ -797,10 +827,13 @@ class MOG2(BackgroundSubtraction):
             if fr in eval_frames:
                 selected_frames = [int((step * i) + fr) % len(frames) for i in range(1, n + 1)]
                 frames_building_model = [frames[int((step * i) + fr) % len(frames)] for i in range(1, n + 1)]
-                algo = cv.createBackgroundSubtractorMOG2(history=n, varThreshold=90)
+
+                algo = cv.createBackgroundSubtractorMOG2(history=n, varThreshold=100)
+
                 _ = self._process_preloaded_n_frames(n, frames_building_model, kernel, algo)
 
                 mask = algo.apply(frames[fr], learningRate=0)
+
                 mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
 
                 previous = cv.cvtColor(frames[fr - 1], cv.COLOR_BGR2GRAY)
@@ -822,34 +855,11 @@ class MOG2(BackgroundSubtraction):
                 if frames[fr].shape[0] < frames[fr].shape[1]:
                     original_dims = (frames[fr].shape[1] / 100 * 1, frames[fr].shape[0] / 100 *
                                      1)
-                    self.original_shape = (frames[fr].shape[1], frames[fr].shape[0])
                 else:
                     original_dims = (frames[fr].shape[0] / 100 * 1, frames[fr].shape[1] / 100 *
                                      1)
-                    self.original_shape = (frames[fr].shape[0], frames[fr].shape[1])
-                #
-                # fig, axs = plt.subplots(1, 3, sharex='none', sharey='none',
-                #                         figsize=original_dims)
-                # axs[0].imshow(frames[fr])
-                # axs[1].imshow(mask, cmap='binary')
-                # axs[2].imshow(mask, cmap='binary')
-                #
-                # axs[0].set_title(f'Image: {fr}')
-                # axs[1].set_title(f'Mask: {fr}')
-                # axs[2].set_title(f'Clustered: {fr}')
-                #
-                # colors = cm.rainbow(np.linspace(0, 1, 50))
-                # marker = cycle('o*v^><12348sphH+xXD')
-                # for k, col, m in zip(range(n_clusters_), colors, marker):
-                #     cluster_center = mean_shift.cluster_centers[k]
-                #     axs[2].plot(cluster_center[0], cluster_center[1], m, markerfacecolor=col,  # 'o'
-                #                 markeredgecolor='k', markersize=8)
-                #
-                # fig.suptitle(f"\nPrecision: {pre_rec[fr]['precision']}"
-                #              f"\nRecall: {pre_rec[fr]['recall']}",
-                #              fontsize=14, fontweight='bold')
-                #
-                # fig.savefig(save_path + f"frame_{fr}.png")
+
+                self.original_shape = (frames[fr].shape[0], frames[fr].shape[1])
 
                 self.plot_all_steps(nrows=2, ncols=3, plot_dims=original_dims, original_frame=frames[fr],
                                     processed_img=data_,
@@ -857,8 +867,74 @@ class MOG2(BackgroundSubtraction):
                                     frame_annotation=annotation_full,
                                     num_clusters=n_clusters_, cluster_centers=mean_shift.cluster_centers,
                                     frame_evaluation=pre_rec, video_out_save_path=save_path,
-                                    frame_number=fr, video_label=video_label, video_number=video_number,
-                                    video_mode=False)
+                                    frame_number=fr, video_label=video_label.value, video_number=video_number,
+                                    video_mode=False, all_objects=len(annotation_))
+
+    def keyframe_based_rescaled_clustering(self, start_sec, end_sec, save_path, annotations_df, eval_frames, video_label,
+                                  video_number, n, sdd_meta_path, dataset_type):
+        frames, _, _ = self.get_frames(start=start_sec, end=end_sec, dtype='int')
+        sdd_meta = SDDMeta(sdd_meta_path)
+        new_scale = sdd_meta.get_new_scale_from_img(frames[0], dataset_type, video_number)
+        new_scale_channels = new_scale[0], new_scale[1], 3
+        # frames = torch.nn.functional.interpolate(frames, size=new_scale)  # memory-issue
+        frames = frames.numpy()
+
+        kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
+        # frames_to_save = np.random.choice(len(frames), 2)
+        step = len(frames) / (n + 1)
+        for fr in tqdm(range(frames.shape[0])):
+            if fr in eval_frames:
+                selected_frames = [int((step * i) + fr) % len(frames) for i in range(1, n + 1)]
+                frames_building_model = [(resize(frames[int((step * i) + fr) % len(frames)],
+                                                 output_shape=new_scale) * 255).astype(np.uint8)
+                                         for i in range(1, n + 1)]
+
+                # algo = cv.createBackgroundSubtractorMOG2(history=n, varThreshold=50)
+                algo = cv.createBackgroundSubtractorMOG2(history=n)
+
+                _ = self._process_preloaded_n_frames(n, frames_building_model, kernel, algo)
+
+                if frames.shape[1] < frames.shape[2]:
+                    original_dims = (frames.shape[2] / 100 * 1, frames.shape[1] / 100 *
+                                     1)
+                else:
+                    original_dims = (frames.shape[1] / 100 * 1, frames.shape[2] / 100 *
+                                     1)
+
+                self.original_shape = (frames.shape[1], frames.shape[2])
+
+                mask = algo.apply((resize(frames[fr], output_shape=new_scale) * 255).astype(np.uint8), learningRate=0)
+
+                mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
+
+                previous = cv.cvtColor((resize(frames[fr - 1], output_shape=new_scale) * 255).astype(np.uint8),
+                                       cv.COLOR_BGR2GRAY)
+                next_frame = cv.cvtColor((resize(frames[fr], output_shape=new_scale) * 255).astype(np.uint8),
+                                         cv.COLOR_BGR2GRAY)
+
+                flow, rgb = self.get_optical_flow(previous_frame=previous, next_frame=next_frame)
+
+                data, data_, max_0, max_1, min_0, min_1, threshold_img = self._prepare_data_xyuv(flow, fr,
+                                                                                                 mask,
+                                                                                                 evaluation_mode=True)
+                mean_shift, n_clusters_ = self._perform_clustering(data, max_0, max_1, min_0, min_1, bandwidth=0.1)
+
+                annotation_, annotation_full = self._process_frame_annotation(annotations_df, data_, fr)
+
+                frame_results = evaluate_clustering_per_frame(fr, {'gt_bbox': annotation_,
+                                                                   'cluster_centers': mean_shift.cluster_centers})
+                pre_rec = precision_recall(frame_results)
+
+                in_frame = (resize(frames[fr], output_shape=new_scale) * 255).astype(np.uint8)
+
+                self.plot_all_steps_rescaled(nrows=2, ncols=3, plot_dims=original_dims, original_frame=in_frame,
+                                             processed_img=data_,
+                                             threshold_image=threshold_img, optical_flow_image=rgb,
+                                             frame_annotation=annotation_full,
+                                             num_clusters=n_clusters_, cluster_centers=mean_shift.cluster_centers,
+                                             frame_evaluation=pre_rec, video_out_save_path=save_path,
+                                             frame_number=fr, video_label=video_label.value, video_number=video_number,
+                                             video_mode=False, all_objects=len(annotation_))
 
 
 class KNNBased(BackgroundSubtraction):
