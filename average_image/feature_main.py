@@ -159,6 +159,10 @@ if __name__ == '__main__':
 
     # post_evaluation(f"{base_save_path}clustering/video_label_gates_video_number_4_evaluation_1.pt")
 
-    plot_frame_processed_image_optical_flow(mog2_, vid_label, video_number, frames_save_path, df,
-                                            plot_scale_factor=1, plot=True, history=5, detect_shadows=True,
-                                            var_threshold=20, show_bbox=False)
+    # plot_frame_processed_image_optical_flow(mog2_, vid_label, video_number, frames_save_path, df,
+    #                                         plot_scale_factor=1, plot=True, history=5, detect_shadows=True,
+    #                                         var_threshold=20, show_bbox=False)
+
+    mog2_.keyframe_based_clustering(0, 5, f"{base_save_path}clustering/cluster_video_label_{vid_label.value}"
+                                          f"_video_number_{video_number}", df, [29, 81], video_label=vid_label.value,
+                                    video_number=video_number, n=20)
