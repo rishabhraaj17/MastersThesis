@@ -6,7 +6,7 @@ from torchvision.datasets.utils import list_dir
 from torchvision.datasets.folder import make_dataset
 from torchvision.datasets.video_utils import VideoClips
 
-from constants import SDDVideoClasses
+from average_image.constants import SDDVideoClasses
 
 
 class SDDDatasetBuilder(VisionDataset):

@@ -8,7 +8,7 @@ from tqdm import tqdm
 from bbox_utils import annotations_to_dataframe
 from constants import SDDVideoClasses, SDDVideoDatasets
 from feature_extractor import MOG2
-from utils import precision_recall_one_sequence
+from utils import precision_recall_one_sequence, plot_precision_recall
 
 
 def mog2_optical_flow_clustering_per_frame(mog2, video_label, vid_number, frames_out_save_path, annotations_df,
@@ -115,11 +115,11 @@ def post_evaluation(eval_file):
 
 
 if __name__ == '__main__':
-    annotation_base_path = "/home/rishabh/TrajectoryPrediction/Datasets/SDD/annotations/"
-    video_base_path = "/home/rishabh/TrajectoryPrediction/Datasets/SDD/videos/"
+    annotation_base_path = "../Datasets/SDD/annotations/"
+    video_base_path = "../Datasets/SDD/videos/"
     vid_label = SDDVideoClasses.GATES
     dataset_type = SDDVideoDatasets.GATES
-    video_number = 2
+    video_number = 4
     video_file_name = "video.mov"
     annotation_file_name = "annotations.txt"
     reference_img_name = "reference.jpg"
@@ -170,12 +170,24 @@ if __name__ == '__main__':
     little_list = [100, 114]
     death_circle_list = []
 
-    # mog2_.keyframe_based_clustering(0, 5, f"{base_save_path}clustering/cluster_video_label_{vid_label.value}"
-    #                                       f"_video_number_{video_number}", df, [19, 64], video_label=vid_label,
-    #                                 video_number=video_number, n=20)
+    # res1 = mog2_.keyframe_based_clustering(0, 1, f"{base_save_path}clustering/cluster_video_label_{vid_label.value}"
+    #                                              f"_video_number_{video_number}", df, [1, 2], video_label=vid_label,
+    #                                        video_number=video_number, n=20, use_color=False, plot=True,
+    #                                        weighted_of=False)
 
-    sdd_meta_path = '/home/rishabh/TrajectoryPrediction/Datasets/SDD/H_SDD.txt'
-    mog2_.keyframe_based_rescaled_clustering(0, 5, f"{base_save_path}clustering/cluster_video_label_{vid_label.value}"
-                                                   f"_video_number_{video_number}", df, [10, 24], video_label=vid_label,
-                                             video_number=video_number, n=20, sdd_meta_path=sdd_meta_path,
-                                             dataset_type=dataset_type)
+    mog2_.evaluate_clustering_algos(start_sec=0, end_sec=1, n=20, eval_frames=[1, 10], annotations_df=df)
+
+    # res2 = mog2_.keyframe_based_clustering(0, 1, f"{base_save_path}clustering/cluster_video_label_{vid_label.value}"
+    #                                              f"_video_number_{video_number}_c", df, [], video_label=vid_label,
+    #                                        video_number=video_number, n=20, use_color=False, plot=False,
+    #                                        weighted_of=False)
+
+    # precision_recall_one_sequence(res2, False)
+
+    # plot_precision_recall(res1, res2, False, 'With weighted OF by mag', 'Usual')
+
+    # sdd_meta_path = '/home/rishabh/TrajectoryPrediction/Datasets/SDD/H_SDD.txt'
+    # mog2_.keyframe_based_rescaled_clustering(0, 5, f"{base_save_path}clustering/cluster_video_label_{vid_label.value}"
+    #                                                f"_video_number_{video_number}", df, [10, 24], video_label=vid_label,
+    #                                          video_number=video_number, n=20, sdd_meta_path=sdd_meta_path,
+    #                                          dataset_type=dataset_type)

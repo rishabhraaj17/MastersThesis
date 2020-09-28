@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from torchvision.models.vgg import vgg13_bn, vgg19_bn, vgg11_bn
 import matplotlib.pyplot as plt
 import numpy as np
+from pl_bolts.models.autoencoders import AE
 
 vgg_decoder_arch = {'E': [512, 512, 512, 512, 'U', 256, 256, 256, 256, 'U', 128, 128, 'U', 64, 64],
                     'D': [512, 512, 512, 'U', 256, 256, 256, 'U', 128, 128, 'U', 64, 64],
@@ -196,6 +197,35 @@ def show(img):
     plt.show()
 
 
+class VanillaAE(AE):
+
+    def _forward_unimplemented(self, *input: Any) -> None:
+        pass
+
+    def __init__(self, input_height, enc_type='resnet18', first_conv=False, maxpool1=False, enc_out_dim=512,
+                 kl_coeff=0.1, latent_dim=256, lr=1e-4, **kwargs):
+        super(VanillaAE, self).__init__(input_height=input_height, enc_type=enc_type, first_conv=first_conv,
+                                        maxpool1=maxpool1, enc_out_dim=enc_out_dim, kl_coeff=kl_coeff,
+                                        latent_dim=latent_dim, lr=lr, **kwargs)
+
+    def forward(self, x):
+        feats = self.encoder(x)
+        z = self.fc(feats)
+        x_hat = self.decoder(z)
+        return x_hat
+
+    def step(self, batch, batch_idx):
+        x, y = batch
+
+        feats = self.encoder(x)
+        z = self.fc(feats)
+        x_hat = self.decoder(z)
+
+        loss = F.mse_loss(x_hat, x, reduction='mean')
+
+        return loss, {"loss": loss}
+
+
 if __name__ == '__main__':
     # inp = torch.randn((1, 512, 243, 177))
     # out = make_layers(vgg_decoder_arch, batch_norm=True, input_size=(1945, 1422))
@@ -203,8 +233,9 @@ if __name__ == '__main__':
 
     from torchvision.utils import make_grid
 
-    inp = torch.randn((3, 3, 1945, 1422))
-    inp = F.interpolate(inp, scale_factor=0.25).cuda()
+    inp = torch.randn((1, 3, 1945, 1422))
+    # inp = F.interpolate(inp, scale_factor=0.25)
+    inp = F.interpolate(inp, size=(640, 480))
     print(inp.size())
     # encoder = vgg11_bn
     # decoder = make_layers(vgg_decoder_arch['A'], batch_norm=True)
@@ -215,5 +246,10 @@ if __name__ == '__main__':
     # # xx = vgg(inp, torch.zeros((3, 1, h, w)).cuda())
     # xx = vgg(inp)
     # print(xx.size())
-    gg = make_grid(inp, nrow=3, padding=10)
-    show(gg)
+    # gg = make_grid(inp, nrow=3, padding=10)
+    # show(gg)
+    ae = VanillaAE(input_height=inp.size(2), enc_type='resnet50', enc_out_dim=2048, latent_dim=2048)
+    print(ae)
+    # ae = ae.from_pretrained(checkpoint_name='resnet50-imagenet')
+    out = ae(inp)
+    print(out.size())

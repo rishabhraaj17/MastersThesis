@@ -47,7 +47,7 @@ def point_in_rect(point, rect):
     return False
 
 
-def evaluate_clustering_per_frame(frame, frame_dict):  # use this inside above
+def evaluate_clustering_per_frame_old_(frame, frame_dict):  # use this inside above
     result_dict = {}
     matched_cluster_centers = []
     matched_annotation = []
@@ -69,6 +69,80 @@ def evaluate_clustering_per_frame(frame, frame_dict):  # use this inside above
                     matched_cluster_centers.append(cluster_center)
                 if not check_presence(annotation, matched_annotation):
                     matched_annotation.append(annotation)
+                continue
+
+    result_dict.update({frame: {'gt_annotation_matched': len(matched_annotation),
+                                'cluster_center_in_bbox_count': len(matched_cluster_centers),
+                                'total_cluster_centers': total_cluster_centers,
+                                'total_annotations': total_annot}})
+    return result_dict
+
+
+def evaluate_clustering_non_cc(frame, frame_dict, one_to_one=False):  # use this for clustering that don't have c_center
+    result_dict = {}
+    matched_cluster_centers = []
+    matched_annotation = []
+
+    total_cluster_centers = len(frame_dict['cluster_centers'])
+    total_annot = len(frame_dict['gt_bbox'])
+
+    for a_i, annotation in enumerate(frame_dict['gt_bbox']):
+        if check_presence(annotation, matched_annotation):
+            continue
+        for c_i, cluster_center in enumerate(frame_dict['cluster_centers']):
+            if check_presence(cluster_center, matched_cluster_centers):
+                continue
+            point = (cluster_center[0], cluster_center[1])
+            rect = annotation
+            cluster_center_in_box = point_in_rect(point, rect)
+            if cluster_center_in_box:
+                if one_to_one:
+                    if not check_presence(annotation, matched_annotation):
+                        matched_annotation.append(annotation)
+                        if not check_presence(cluster_center, matched_cluster_centers):
+                            matched_cluster_centers.append(cluster_center)
+                else:
+                    if not check_presence(cluster_center, matched_cluster_centers):
+                        matched_cluster_centers.append(cluster_center)
+                    if not check_presence(annotation, matched_annotation):
+                        matched_annotation.append(annotation)
+                continue
+
+    result_dict.update({frame: {'gt_annotation_matched': len(matched_annotation),
+                                'cluster_center_in_bbox_count': len(matched_cluster_centers),
+                                'total_cluster_centers': total_cluster_centers,
+                                'total_annotations': total_annot}})
+    return result_dict
+
+
+def evaluate_clustering_per_frame(frame, frame_dict, one_to_one=False):  # use this inside above
+    result_dict = {}
+    matched_cluster_centers = []
+    matched_annotation = []
+
+    total_cluster_centers = frame_dict['cluster_centers'].shape[0]
+    total_annot = len(frame_dict['gt_bbox'])
+
+    for a_i, annotation in enumerate(frame_dict['gt_bbox']):
+        if check_presence(annotation, matched_annotation):
+            continue
+        for c_i, cluster_center in enumerate(frame_dict['cluster_centers']):
+            if check_presence(cluster_center, matched_cluster_centers):
+                continue
+            point = (cluster_center[0], cluster_center[1])
+            rect = annotation
+            cluster_center_in_box = point_in_rect(point, rect)
+            if cluster_center_in_box:
+                if one_to_one:
+                    if not check_presence(annotation, matched_annotation):
+                        matched_annotation.append(annotation)
+                        if not check_presence(cluster_center, matched_cluster_centers):
+                            matched_cluster_centers.append(cluster_center)
+                else:
+                    if not check_presence(cluster_center, matched_cluster_centers):
+                        matched_cluster_centers.append(cluster_center)
+                    if not check_presence(annotation, matched_annotation):
+                        matched_annotation.append(annotation)
                 continue
 
     result_dict.update({frame: {'gt_annotation_matched': len(matched_annotation),
@@ -111,8 +185,8 @@ def compare_precision(pr_results_1, pr_results_2, avg_img, lab1, lab2):
     precision_2 = []
     for (frame, result), (frame_, result_) in zip(pr_results_1.items(), pr_results_2.items()):
         label_frame.append(frame)
-        precision_1.append(result[frame]['precision'])
-        precision_2.append(result_[frame]['precision'])
+        precision_1.append(result['precision'])
+        precision_2.append(result_['precision'])
 
     x = np.arange(len(label_frame))
 
@@ -137,8 +211,8 @@ def compare_recall(pr_results_1, pr_results_2, avg_img, lab1, lab2):
     recall_2 = []
     for (frame, result), (frame_, result_) in zip(pr_results_1.items(), pr_results_2.items()):
         label_frame.append(frame)
-        recall_1.append(result[frame]['recall'])
-        recall_2.append(result_[frame]['recall'])
+        recall_1.append(result['recall'])
+        recall_2.append(result_['recall'])
 
     x = np.arange(len(label_frame))
 

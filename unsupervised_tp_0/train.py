@@ -8,7 +8,7 @@ from torchvision.models import vgg11_bn
 from torchvision.utils import make_grid
 from tqdm import tqdm
 
-from constants import SDDVideoClasses
+from average_image.constants import SDDVideoClasses
 from unsupervised_tp_0.dataset import SDDDatasetBuilder, SDDTrainDataset, SDDValidationDataset
 from unsupervised_tp_0.model import make_layers, vgg_decoder_arch, UnsupervisedTP, VanillaAutoEncoder
 
@@ -132,9 +132,9 @@ if __name__ == '__main__':
     base_path = "../Datasets/SDD/"
     vid_label = SDDVideoClasses.LITTLE
     num_workers = 6
-    pin_memory = False
+    pin_memory = True
     lr = 0.001
-    batch_size = 2
+    batch_size = 6
     save_path = f"../Checkpoints/{vid_label.value}_batch_size{batch_size}_{datetime.now()}.pt"
 
     sdd_dataset = SDDDatasetBuilder(root=base_path, video_label=vid_label, frames_per_clip=1, num_workers=10)
@@ -154,4 +154,4 @@ if __name__ == '__main__':
     net = VanillaAutoEncoder(encoder, decoder, pretrained=True)
     net = net.to(device)
 
-    train(model=net, train_data_loader=train_loader, val_data_loader=val_loader, lr=lr, epochs=10, save_path=save_path)
+    train(model=net, train_data_loader=train_loader, val_data_loader=val_loader, lr=lr, epochs=1, save_path=save_path)
