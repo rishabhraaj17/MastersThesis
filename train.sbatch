@@ -10,4 +10,4 @@
 #SBATCH --error=/usr/stud/rajr/storage/slurm/rajr/logs/vanilla_vgg_vae_1_epoch/slurm-%j.out
 
 source /usr/stud/rajr/anaconda3/bin/activate py38
-srun python unsupervised_tp_0/train.py
+srun python unsupervised_tp_0/train.py --pin_memory --batch_norm --pretrained --epochs 1 --dataset_root /usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/ --save_path /usr/stud/rajr/storage/slurm/rajr/logs/vanilla_vgg_vae_1_epoch/checkpoint/

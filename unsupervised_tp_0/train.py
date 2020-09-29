@@ -1,4 +1,6 @@
+import argparse
 from datetime import datetime
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -21,6 +23,27 @@ LOSS_RECONSTRUCTION = torch.nn.MSELoss()
 OPTIMIZER = torch.optim.Adam
 
 SUMMARY_WRITER = SummaryWriter()
+
+
+def get_args_parser():
+    parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
+    parser.add_argument('--lr', default=1e-4, type=float)
+    parser.add_argument('--num_workers', default=6, type=int)
+    parser.add_argument('--data_loader_num_workers', default=8, type=int)
+    parser.add_argument('--batch_size', default=6, type=int)
+    parser.add_argument('--weight_decay', default=1e-4, type=float)
+    parser.add_argument('--epochs', default=30, type=int)
+
+    parser.add_argument('--pin_memory', action='store_true')
+    parser.add_argument('--batch_norm', action='store_true', help='Use batch_norm or not')
+    parser.add_argument('--pretrained', action='store_true', help='Use pretrained encoder')
+
+    parser.add_argument('--save_path', type=str, default="../Checkpoints/",
+                        help="Path to save outputs")
+    parser.add_argument('--dataset_root', type=str, default="../Datasets/SDD/",
+                        help="Path to dataset root")
+
+    return parser
 
 
 def train_one_epoch(model, data_loader, optimizer, scale_factor=0.25):
@@ -128,30 +151,38 @@ def train(model, train_data_loader, val_data_loader, lr, epochs=50, weight_decay
         print(f"Train Loss: {train_loss}, Validation Loss: {val_loss}")
 
 
-if __name__ == '__main__':
-    base_path = "../Datasets/SDD/"
-    vid_label = SDDVideoClasses.LITTLE
-    num_workers = 6
-    pin_memory = True
-    lr = 0.001
-    batch_size = 6
-    save_path = f"../Checkpoints/{vid_label.value}_batch_size{batch_size}_{datetime.now()}.pt"
+def main(args, video_label):
+    save_path = f"{args.save_path}{video_label.value}_batch_size{args.batch_size}_{datetime.now()}.pt"
 
-    sdd_dataset = SDDDatasetBuilder(root=base_path, video_label=vid_label, frames_per_clip=1, num_workers=10)
+    sdd_dataset = SDDDatasetBuilder(root=args.dataset_root, video_label=video_label, frames_per_clip=1,
+                                    num_workers=args.data_loader_num_workers)
 
     train_dataset = SDDTrainDataset(sdd_dataset.video_clips, sdd_dataset.samples, sdd_dataset.transform,
                                     sdd_dataset.train_indices)
-    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers,
-                              pin_memory=pin_memory, drop_last=True)
+    train_loader = DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=False,
+                              num_workers=args.num_workers,
+                              pin_memory=args.pin_memory, drop_last=True)
 
     val_dataset = SDDValidationDataset(sdd_dataset.video_clips, sdd_dataset.samples, sdd_dataset.transform,
                                        sdd_dataset.val_indices)
-    val_loader = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers,
-                            pin_memory=pin_memory, drop_last=True)
+    val_loader = DataLoader(dataset=val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers,
+                            pin_memory=args.pin_memory, drop_last=True)
 
     encoder = vgg11_bn
-    decoder = make_layers(vgg_decoder_arch['A'], batch_norm=True)
-    net = VanillaAutoEncoder(encoder, decoder, pretrained=True)
+    decoder = make_layers(vgg_decoder_arch['A'], batch_norm=args.batch_norm)
+    net = VanillaAutoEncoder(encoder, decoder, pretrained=args.pretrained)
     net = net.to(device)
 
-    train(model=net, train_data_loader=train_loader, val_data_loader=val_loader, lr=lr, epochs=1, save_path=save_path)
+    train(model=net, train_data_loader=train_loader, val_data_loader=val_loader, lr=args.lr, epochs=args.epochs,
+          save_path=save_path, weight_decay=args.weight_decay)
+
+
+if __name__ == '__main__':
+    vid_label = SDDVideoClasses.LITTLE
+
+    parser_ = argparse.ArgumentParser('Training Script', parents=[get_args_parser()])
+    args = parser_.parse_args()
+    if args.save_path:
+        Path(args.save_path).mkdir(parents=True, exist_ok=True)
+
+    main(args, video_label=vid_label)

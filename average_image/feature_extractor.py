@@ -425,7 +425,8 @@ class FeatureExtractor(object):
             gt_bbox_cluster_center_dict.update({fr: {'gt_bbox': annotation_,
                                                      'cluster_centers': mean_shift.cluster_centers}})
             frame_results = evaluate_clustering_per_frame(fr, {'gt_bbox': annotation_,
-                                                               'cluster_centers': mean_shift.cluster_centers})
+                                                               'cluster_centers': mean_shift.cluster_centers},
+                                                          one_to_one=True)
             pre_rec = precision_recall(frame_results)
             pr_for_frames.update(pre_rec)
 
@@ -986,18 +987,25 @@ class MOG2(BackgroundSubtraction):
                 fig.savefig(save_path + f"frame_{fr}.png")
 
     def keyframe_based_clustering(self, start_sec, end_sec, save_path, annotations_df, eval_frames, video_label,
-                                  video_number, n, use_color, plot, weighted_of):
+                                  video_number, n, use_color, plot, weighted_of, frame_gap):
         frames, _, _ = self.get_frames(start=start_sec, end=end_sec, dtype='int')
         frames = frames.numpy()
 
         kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
         # frames_to_save = np.random.choice(len(frames), 2)
-        step = len(frames) / (n + 1)
+        # step = len(frames) / (n + 1)
+        step = n // 2
         pr_res = {}
+        total_frames = frames.shape[0]
         for fr in tqdm(range(frames.shape[0])):
-            if fr in eval_frames:
-                selected_frames = [int((step * i) + fr) % len(frames) for i in range(1, n + 1)]
-                frames_building_model = [frames[int((step * i) + fr) % len(frames)] for i in range(1, n + 1)]
+            if fr not in eval_frames:
+                selected_past = [(fr - i * frame_gap) % total_frames for i in range(1, step+1)]
+                selected_future = [(fr + i * frame_gap) % total_frames for i in range(1, step + 1)]
+                selected_frames = selected_past + selected_future
+                # selected_frames = [int((step * i) + fr) % len(frames) for i in range(1, n + 1)]
+                # frames_building_model = [frames[int((step * i) + fr) % len(frames)] for i in range(1, n + 1)]
+                frames_building_model = [frames[s] for s in selected_frames]
+
 
                 algo = cv.createBackgroundSubtractorMOG2(history=n, varThreshold=100)
                 # algo = cv.bgsegm.createBackgroundSubtractorGMG(initializationFrames=n)
