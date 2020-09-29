@@ -1,5 +1,6 @@
 from typing import Optional, Any
 
+import torch
 from torch.utils.data import Dataset
 from torchvision.datasets.vision import VisionDataset
 from torchvision.datasets.utils import list_dir
@@ -91,6 +92,21 @@ class SDDValidationDataset(SDDBaseDataset):
         super(SDDValidationDataset, self).__init__(video_clips, samples, transform, indices)
 
 
+class SDDSimpleDataset(Dataset):
+    def __init__(self, video_frames, fps, step_factor):
+        step = fps * step_factor
+
+        self.video_frames = video_frames
+        self.selected_frames = [i for i in range(self.video_frames.shape[0]) if not i % step]
+        self.video_frames = self.video_frames[self.selected_frames]
+
+    def __len__(self):
+        return len(self.video_frames)
+
+    def __getitem__(self, item):
+        return self.video_frames[item]
+
+
 class SDDDataset(VisionDataset):
 
     def __init__(self, root: str, video_label: SDDVideoClasses, frames_per_clip: int, step_between_clips: int = 1,
@@ -156,7 +172,13 @@ if __name__ == '__main__':
     base_path = "../Datasets/SDD/"
     vid_label = SDDVideoClasses.LITTLE
 
-    sdd = SDDDatasetBuilder(root=base_path, video_label=vid_label, frames_per_clip=3, num_workers=0)
-    sdd_train = SDDTrainDataset(sdd.video_clips, sdd.samples, sdd.transform, sdd.train_indices)
-    sdd_val = SDDValidationDataset(sdd.video_clips, sdd.samples, sdd.transform, sdd.val_indices)
-    print(sdd_train.__getitem__(0))
+    # sdd = SDDDatasetBuilder(root=base_path, video_label=vid_label, frames_per_clip=3, num_workers=0)
+    # sdd_train = SDDTrainDataset(sdd.video_clips, sdd.samples, sdd.transform, sdd.train_indices)
+    # sdd_val = SDDValidationDataset(sdd.video_clips, sdd.samples, sdd.transform, sdd.val_indices)
+    # print(sdd_train.__getitem__(0))
+
+    frames = torch.randn((300, 3, 720, 640))
+    sdd = SDDSimpleDataset(frames, 30, 0.4)
+    sdd_loader = torch.utils.data.DataLoader(sdd, 10)
+    a = next(iter(sdd_loader))
+    print(a.size())
