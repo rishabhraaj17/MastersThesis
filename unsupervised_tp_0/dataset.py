@@ -33,8 +33,10 @@ def resize_frames(frame, frame_annotation, size: Optional[Union[Tuple, int]] = N
         frame = F.interpolate(frame, scale_factor=scale, mode='bilinear', align_corners=False,
                               recompute_scale_factor=False)
     new_shape = frame.shape[2], frame.shape[3]
+    # track_id = None
     frame_annotation, frame_centers = scale_annotations(frame_annotation, original_scale=original_shape,
-                                                        new_scale=new_shape)
+                                                        new_scale=new_shape, return_track_id=False,
+                                                        tracks_with_annotations=True)
     return frame, frame_annotation, frame_centers
 
 
@@ -230,10 +232,24 @@ class SDDSimpleDataset(Dataset):
         video = video.permute(0, 3, 1, 2)
 
         centers = None
+        track_ids = None
         if self.transform is not None:
             video, label, centers = self.transform(video, label, scale=self.scale)
 
         return video, label, centers
+
+
+class FeaturesDataset(Dataset):
+    def __init__(self, x, y):
+        super(FeaturesDataset, self).__init__()
+        self.x = x
+        self.y = y
+
+    def __len__(self):
+        return len(self.x) or len(self.y)
+
+    def __getitem__(self, item):
+        return self.x[item], self.y[item]
 
 
 class SDDDataset(VisionDataset):

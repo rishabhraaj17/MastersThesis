@@ -67,14 +67,20 @@ def scale_annotations_(annotations, original_scale, new_scale):
     return scaled_annotations
 
 
-def scale_annotations(annotations, original_scale, new_scale):
+def scale_annotations(annotations, original_scale, new_scale, return_track_id=False, tracks_with_annotations=False):
     bbox = annotations[:, 1:5].astype(np.int)
     x_min, y_min, x_max, y_max = bbox[:, 0], bbox[:, 1], bbox[:, 2], bbox[:, 3]
     x, y, w, h = x_min, y_min, (x_max - x_min), (y_max - y_min)
     h, w, x, y = _process_scale(h, new_scale, original_scale, w, x, y)
     x_min_, y_min_, x_max_, y_max_ = x, y, x + w, y + h
-    scaled_annotations = np.vstack((x_min_, y_min_, x_max_, y_max_)).T
+    if tracks_with_annotations:
+        scaled_annotations = np.vstack((x_min_, y_min_, x_max_, y_max_, annotations[:, 0].astype(np.int))).T
+    else:
+        scaled_annotations = np.vstack((x_min_, y_min_, x_max_, y_max_)).T
     scaled_centers = cal_centers(scaled_annotations)
+    if return_track_id:
+        track_id = annotations[:, 0].astype(np.int)
+        return scaled_annotations, scaled_centers, track_id
     return scaled_annotations, scaled_centers
 
 

@@ -22,7 +22,8 @@ from deep_networks_avg import get_vgg_layer_activations, get_resnet_layer_activa
 from feature_clustering import MeanShiftClustering, HierarchicalClustering, AffinityPropagationClustering, \
     DBSCANClustering, OPTICSClustering, Clustering, BirchClustering
 from layers import min_pool2d
-from utils import precision_recall, evaluate_clustering_per_frame, normalize, SDDMeta, evaluate_clustering_non_cc
+from utils import precision_recall, evaluate_clustering_per_frame, normalize, SDDMeta, evaluate_clustering_non_cc, \
+    AgentFeatures
 
 
 class FeatureExtractor(object):
@@ -616,6 +617,49 @@ class FeatureExtractor(object):
         return data, data_, max_0, max_1, min_0, min_1
 
     @staticmethod
+    def _prepare_data_xyuv_for_all_object_of_interest(flow, fr, processed_data, annotations, use_intensities=False,
+                                                      evaluation_mode: bool = False, return_options: bool = False,
+                                                      track_ids=None):
+        if evaluation_mode:
+            data_ = processed_data
+        else:
+            data_ = processed_data[fr]
+        data_ = np.abs(data_)
+        mask = np.zeros_like(data_)
+        all_agent_features = []
+        for id in range(annotations.shape[0]):
+            mask[annotations[id][1]:annotations[id][3], annotations[id][0]:annotations[id][2]] = \
+                data_[annotations[id][1]:annotations[id][3], annotations[id][0]:annotations[id][2]]
+            object_idx = (mask > 0).nonzero()
+            if object_idx[0].size != 0:
+                intensities = mask[object_idx[0], object_idx[1]]
+                flow_idx = flow[object_idx[0], object_idx[1]]
+                flow_idx_normalized_0, f_max_0, f_min_0 = normalize(flow_idx[..., 0])
+                flow_idx_normalized_1, f_max_1, f_min_1 = normalize(flow_idx[..., 1])
+                object_idx_normalized_0, max_0, min_0 = normalize(object_idx[0])
+                object_idx_normalized_1, max_1, min_1 = normalize(object_idx[1])
+                if use_intensities:
+                    data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                                     flow_idx_normalized_0, intensities)).transpose()
+                else:
+                    data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                                     flow_idx_normalized_0)).transpose()
+                options = {
+                    'max_0': max_0,
+                    'min_0': min_0,
+                    'max_1': max_1,
+                    'min_1': min_1,
+                    'f_max_0': f_max_0,
+                    'f_min_0': f_min_0,
+                    'f_max_1': f_max_1,
+                    'f_min_1': f_min_1
+                }
+                all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id][-1].item(),
+                                                        frame_number=fr,
+                                                        normalize_params=options))
+        return all_agent_features
+
+    @staticmethod
     def _prepare_data_xy_weighted_uv(flow, fr, processed_data, mag, use_intensities=False,
                                      evaluation_mode: bool = False,
                                      weight: float = 1.0):
@@ -976,8 +1020,9 @@ class BackgroundSubtraction(FeatureExtractor):
 
     def keyframe_based_clustering_from_frames(self, frames, n, frames_to_build_model, original_shape, annotation,
                                               equal_time_distributed=False, var_threshold=100, use_color=False,
-                                              use_last_n_to_build_model=True, object_of_interest_only=True,
-                                              classic_clustering=False):
+                                              use_last_n_to_build_model=False, object_of_interest_only=False,
+                                              classic_clustering=False, track_ids=None,
+                                              all_object_of_interest_only=False):
         self.original_shape = original_shape
         frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
 
@@ -1022,8 +1067,8 @@ class BackgroundSubtraction(FeatureExtractor):
                                                         all_results_out=True)
             if use_color:
                 data, data_, max_0, max_1, min_0, min_1, threshold_img = \
-                    self._prepare_data_xyuv_color(frames[fr],
-                                                  flow, fr,
+                    self._prepare_data_xyuv_color(frames[interest_fr],
+                                                  flow, interest_fr,
                                                   mask,
                                                   evaluation_mode
                                                   =True,
@@ -1031,13 +1076,21 @@ class BackgroundSubtraction(FeatureExtractor):
             else:
                 if object_of_interest_only:
                     data, data_, max_0, max_1, min_0, min_1, options = \
-                        self._prepare_data_xyuv_for_object_of_interest(flow, fr,
-                                                                       mask, annotation=annotation[fr],
+                        self._prepare_data_xyuv_for_object_of_interest(flow, interest_fr,
+                                                                       mask, annotation=annotation[interest_fr],
                                                                        evaluation_mode=True,
                                                                        return_options=True)
+                elif all_object_of_interest_only:
+                    all_agent_features = \
+                        self._prepare_data_xyuv_for_all_object_of_interest(flow, interest_fr,
+                                                                           mask, annotations=annotation[interest_fr],
+                                                                           evaluation_mode=True,
+                                                                           return_options=True,
+                                                                           track_ids=track_ids)
+                    data_all_frames.update({interest_fr:all_agent_features})
                 else:
                     data, data_, max_0, max_1, min_0, min_1, threshold_img, options = \
-                        self._prepare_data_xyuv(flow, fr,
+                        self._prepare_data_xyuv(flow, interest_fr,
                                                 mask,
                                                 evaluation_mode=True,
                                                 return_options=True)
@@ -1045,12 +1098,11 @@ class BackgroundSubtraction(FeatureExtractor):
                 cluster_algo, n_clusters_ = self._perform_clustering(data, max_0, max_1, min_0, min_1, bandwidth=0.1,
                                                                      min_bin_freq=3, max_iter=300)
 
-                data_all_frames.update({fr: {'data': data, 'cluster_center': cluster_algo.cluster_centers,
-                                             'n_clusters': n_clusters_}})
-            else:
-                # re normalize data
-
-                data_all_frames.update({fr: {'data': data}})
+                data_all_frames.update({interest_fr: {'data': data, 'cluster_center': cluster_algo.cluster_centers,
+                                                      'n_clusters': n_clusters_}})
+            # else:
+            #     # todo: re normalize data
+            #     data_all_frames.update({interest_fr: {'data': data}})
         return data_all_frames
 
     def _core_processing(self, frame, kernel):

@@ -10,17 +10,7 @@ import torch.nn.functional as F
 from feature_extractor import MOG2
 from constants import FeaturesMode, SDDVideoClasses
 from unsupervised_tp_0.dataset import SDDSimpleDataset, resize_frames
-
-
-class AgentFeatures(object):
-    def __init__(self, features, track_id, frame_number):
-        super(AgentFeatures, self).__init__()
-        self.frame_number = frame_number
-        self.features = features
-        self.track_id = track_id
-
-    def __repr__(self):
-        print(f"Frame: {self.frame_number}, Track ID: {self.track_id}, Features: {self.features.shape}")
+from utils import BasicTrainData
 
 
 class SimpleModel(pl.LightningModule):
@@ -80,18 +70,21 @@ class SimpleModel(pl.LightningModule):
         frames, bbox, centers = data
         frames, bbox, centers = frames.squeeze(), bbox.squeeze(), centers.squeeze()
         feature_extractor = MOG2.for_frames()
-        features_dict = feature_extractor. \
+        features_ = feature_extractor. \
             keyframe_based_clustering_from_frames(frames=frames, n=None, use_last_n_to_build_model=True,
                                                   frames_to_build_model=self.num_frames_to_build_bg_sub_model,
                                                   original_shape=self.original_frame_shape, annotation=bbox,
                                                   classic_clustering=classic_clustering, object_of_interest_only=False,
-                                                  var_threshold=None)
+                                                  var_threshold=None, track_ids=None,
+                                                  all_object_of_interest_only=True)
         features, cluster_centers = None, None
         if mode == FeaturesMode.UV:
-            features, cluster_centers = self._process_features(features_dict, uv=True,
-                                                               classic_clustering=classic_clustering)
+            # features, cluster_centers = self._process_features(features_, uv=True,
+            #                                                    classic_clustering=classic_clustering)
+            features = self._process_complex_features(features_, uv=True)
+            x, y = self._extract_trainable_features(features)
         if mode == FeaturesMode.XYUV:
-            features, cluster_centers = self._process_features(features_dict, uv=False,
+            features, cluster_centers = self._process_features(features_, uv=False,
                                                                classic_clustering=classic_clustering)
         return features, cluster_centers, centers
 
@@ -110,6 +103,37 @@ class SimpleModel(pl.LightningModule):
             for key, value in features_dict.items():
                 features = np.concatenate((value['data'][:, f:], features))
         return features, cluster_centers
+
+    def _process_complex_features(self, features_dict: dict, uv=True):
+        if uv:
+            f = 2
+        else:
+            f = 4
+        train_data = {}
+        per_frame_data = []
+        total_frames = len(features_dict)
+        for frame in range(total_frames):
+            pair_0 = features_dict[frame]
+            pair_1 = features_dict[(frame + self.num_frames_to_build_bg_sub_model) % total_frames]
+            for i in pair_0:
+                for j in pair_1:
+                    if i == j:
+                        per_frame_data.append(BasicTrainData(frame=frame, track_id=i.track_id,
+                                                             pair_0_features=i.features,
+                                                             pair_1_features=j.features))
+            train_data.update({frame: per_frame_data})
+            per_frame_data = []
+        return train_data
+
+    def _extract_trainable_features(self, train_data):
+        x = []
+        y = []
+        for key, value in train_data.items():
+            for data in value:
+                x.append(data.pair_0_features)
+                y.append(data.pair_1_features)
+        return x, y
+
 
     def center_based_loss(self, pred, current_center):
         pred_center = current_center + pred

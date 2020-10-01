@@ -458,3 +458,28 @@ if __name__ == '__main__':
     #                   '/little/video0/annotation_augmented.csv')
     # dff.drop(dff.columns[[0]], axis=1)
     print()
+
+
+class AgentFeatures(object):
+    def __init__(self, features, track_id, frame_number, normalize_params):
+        super(AgentFeatures, self).__init__()
+        self.frame_number = frame_number
+        self.features = features
+        self.track_id = track_id
+        self.normalize_params = normalize_params
+
+    def __repr__(self):
+        pass  # auto-printing??
+        #  print(f"Frame: {self.frame_number}, Track ID: {self.track_id}, Features: {self.features.shape}")
+
+    def __eq__(self, other):
+        return self.track_id == other.track_id
+
+
+class BasicTrainData(object):
+    def __init__(self, frame, track_id, pair_0_features, pair_1_features):
+        super(BasicTrainData, self).__init__()
+        self.frame = frame
+        self.track_id = track_id
+        self.pair_0_features = pair_0_features
+        self.pair_1_features = pair_1_features
