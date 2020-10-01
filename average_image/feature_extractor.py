@@ -541,7 +541,8 @@ class FeatureExtractor(object):
         cap.release()
 
     @staticmethod
-    def _prepare_data_xyuv(flow, fr, processed_data, use_intensities=False, evaluation_mode: bool = False):
+    def _prepare_data_xyuv(flow, fr, processed_data, use_intensities=False, evaluation_mode: bool = False,
+                           return_options=False):
         if evaluation_mode:
             data_ = processed_data
         else:
@@ -562,7 +563,57 @@ class FeatureExtractor(object):
         else:
             data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
                              flow_idx_normalized_0)).transpose()
+        if return_options:
+            options = {
+                'max_0': max_0,
+                'min_0': min_0,
+                'max_1': max_1,
+                'min_1': min_1,
+                'f_max_0': f_max_0,
+                'f_min_0': f_min_0,
+                'f_max_1': f_max_1,
+                'f_min_1': f_min_1
+            }
+            return data, data_, max_0, max_1, min_0, min_1, threshold_img, options
         return data, data_, max_0, max_1, min_0, min_1, threshold_img
+
+    @staticmethod
+    def _prepare_data_xyuv_for_object_of_interest(flow, fr, processed_data, annotation, use_intensities=False,
+                                                  evaluation_mode: bool = False, return_options: bool = False):
+        if evaluation_mode:
+            data_ = processed_data
+        else:
+            data_ = processed_data[fr]
+        data_ = np.abs(data_)
+        mask = np.zeros_like(data_)
+        mask[annotation[1]:annotation[3], annotation[0]:annotation[2]] = \
+            data_[annotation[1]:annotation[3], annotation[0]:annotation[2]]
+        object_idx = (mask > 0).nonzero()
+        intensities = mask[object_idx[0], object_idx[1]]
+        flow_idx = flow[object_idx[0], object_idx[1]]
+        flow_idx_normalized_0, f_max_0, f_min_0 = normalize(flow_idx[..., 0])
+        flow_idx_normalized_1, f_max_1, f_min_1 = normalize(flow_idx[..., 1])
+        object_idx_normalized_0, max_0, min_0 = normalize(object_idx[0])
+        object_idx_normalized_1, max_1, min_1 = normalize(object_idx[1])
+        if use_intensities:
+            data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                             flow_idx_normalized_0, intensities)).transpose()
+        else:
+            data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                             flow_idx_normalized_0)).transpose()
+        if return_options:
+            options = {
+                'max_0': max_0,
+                'min_0': min_0,
+                'max_1': max_1,
+                'min_1': min_1,
+                'f_max_0': f_max_0,
+                'f_min_0': f_min_0,
+                'f_max_1': f_max_1,
+                'f_min_1': f_min_1
+            }
+            return data, data_, max_0, max_1, min_0, min_1, options
+        return data, data_, max_0, max_1, min_0, min_1
 
     @staticmethod
     def _prepare_data_xy_weighted_uv(flow, fr, processed_data, mag, use_intensities=False,
@@ -749,7 +800,7 @@ class FeatureExtractor(object):
     def _process_frame_annotation(self, annotations_df, data_, fr):
         annotation = get_frame_annotations(annotations_df, frame_number=fr)  # check-out +/- 1
         annotation = preprocess_annotations(annotation)
-        annotation_ = scale_annotations(annotation, self.original_shape, (data_.shape[0], data_.shape[1]))
+        annotation_, _ = scale_annotations(annotation, self.original_shape, (data_.shape[0], data_.shape[1]))
         return annotation_, annotation
 
     def make_video(self, processed_data, video_label, video_number, video_out_save_path, annotations_df,
@@ -923,6 +974,85 @@ class BackgroundSubtraction(FeatureExtractor):
             out = np.concatenate((out, np.expand_dims(mask, axis=0)), axis=0)
         return out
 
+    def keyframe_based_clustering_from_frames(self, frames, n, frames_to_build_model, original_shape, annotation,
+                                              equal_time_distributed=False, var_threshold=100, use_color=False,
+                                              use_last_n_to_build_model=True, object_of_interest_only=True,
+                                              classic_clustering=False):
+        self.original_shape = original_shape
+        frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
+
+        kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
+        if n is not None:
+            if equal_time_distributed:
+                step = n // 2
+            else:
+                step = len(frames) / (n + 1)
+        else:
+            n = frames_to_build_model
+        total_frames = frames.shape[0]
+        data_all_frames = {}
+        # for fr in tqdm(range(frames.shape[0])):
+        for fr in range(frames.shape[0]):
+            if use_last_n_to_build_model:
+                # selected_frames = [(fr - i - 1) % total_frames for i in range(frames_to_build_model)]
+                selected_frames = [(fr + i) % total_frames for i in range(frames_to_build_model)]
+                frames_building_model = [frames[s] for s in selected_frames]
+            elif equal_time_distributed:
+                selected_past = [(fr - i * frames_to_build_model) % total_frames for i in range(1, step + 1)]
+                selected_future = [(fr + i * frames_to_build_model) % total_frames for i in range(1, step + 1)]
+                selected_frames = selected_past + selected_future
+                frames_building_model = [frames[s] for s in selected_frames]
+            else:
+                selected_frames = [int((step * i) + fr) % len(frames) for i in range(1, n + 1)]
+                frames_building_model = [frames[int((step * i) + fr) % len(frames)] for i in range(1, n + 1)]
+
+            algo = cv.createBackgroundSubtractorMOG2(history=n, varThreshold=var_threshold)
+            _ = self._process_preloaded_n_frames(n, frames_building_model, kernel, algo)
+
+            # jump to the next desirable frame
+            interest_fr = (fr + frames_to_build_model) % total_frames
+            mask = algo.apply(frames[interest_fr], learningRate=0)
+            mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
+
+            # flow between n and n+k
+            previous = cv.cvtColor(frames[fr], cv.COLOR_BGR2GRAY)
+            next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+
+            flow, rgb, mag, ang = self.get_optical_flow(previous_frame=previous, next_frame=next_frame,
+                                                        all_results_out=True)
+            if use_color:
+                data, data_, max_0, max_1, min_0, min_1, threshold_img = \
+                    self._prepare_data_xyuv_color(frames[fr],
+                                                  flow, fr,
+                                                  mask,
+                                                  evaluation_mode
+                                                  =True,
+                                                  lab_space=True)
+            else:
+                if object_of_interest_only:
+                    data, data_, max_0, max_1, min_0, min_1, options = \
+                        self._prepare_data_xyuv_for_object_of_interest(flow, fr,
+                                                                       mask, annotation=annotation[fr],
+                                                                       evaluation_mode=True,
+                                                                       return_options=True)
+                else:
+                    data, data_, max_0, max_1, min_0, min_1, threshold_img, options = \
+                        self._prepare_data_xyuv(flow, fr,
+                                                mask,
+                                                evaluation_mode=True,
+                                                return_options=True)
+            if classic_clustering:
+                cluster_algo, n_clusters_ = self._perform_clustering(data, max_0, max_1, min_0, min_1, bandwidth=0.1,
+                                                                     min_bin_freq=3, max_iter=300)
+
+                data_all_frames.update({fr: {'data': data, 'cluster_center': cluster_algo.cluster_centers,
+                                             'n_clusters': n_clusters_}})
+            else:
+                # re normalize data
+
+                data_all_frames.update({fr: {'data': data}})
+        return data_all_frames
+
     def _core_processing(self, frame, kernel):
         mask = self.algo.apply(frame)
         mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
@@ -937,6 +1067,10 @@ class MOG2(BackgroundSubtraction):
     def __init__(self, video_path, start_frame, end_frame):
         super(MOG2, self).__init__(video_path=video_path, start_frame=start_frame, end_frame=end_frame)
         self.method = "MOG2"
+
+    @classmethod
+    def for_frames(cls):
+        return cls(video_path=None, start_frame=None, end_frame=None)
 
     def get_activations(self, history=120, detect_shadows=True, var_threshold=100):
         cap = cv.VideoCapture(self.video_path)
@@ -999,13 +1133,12 @@ class MOG2(BackgroundSubtraction):
         total_frames = frames.shape[0]
         for fr in tqdm(range(frames.shape[0])):
             if fr not in eval_frames:
-                selected_past = [(fr - i * frame_gap) % total_frames for i in range(1, step+1)]
+                selected_past = [(fr - i * frame_gap) % total_frames for i in range(1, step + 1)]
                 selected_future = [(fr + i * frame_gap) % total_frames for i in range(1, step + 1)]
                 selected_frames = selected_past + selected_future
                 # selected_frames = [int((step * i) + fr) % len(frames) for i in range(1, n + 1)]
                 # frames_building_model = [frames[int((step * i) + fr) % len(frames)] for i in range(1, n + 1)]
                 frames_building_model = [frames[s] for s in selected_frames]
-
 
                 algo = cv.createBackgroundSubtractorMOG2(history=n, varThreshold=100)
                 # algo = cv.bgsegm.createBackgroundSubtractorGMG(initializationFrames=n)

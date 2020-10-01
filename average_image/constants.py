@@ -32,6 +32,16 @@ class ObjectClasses(Enum):
     CART = "Cart"
 
 
+class FeaturesMode(Enum):
+    XY = 0
+    UV = 1
+    XYUV = 2
+    XYUVRGB = 3
+    XYUVI = 4
+    XYI = 5
+    # maybe weighted ones
+
+
 OBJECT_CLASS_COLOR_MAPPING = {
     ObjectClasses.PEDESTRIAN: 'b',
     ObjectClasses.BUS: 'g',

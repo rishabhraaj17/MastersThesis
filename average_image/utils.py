@@ -1,10 +1,17 @@
+import os
+from typing import Optional, Any
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import PIL.Image as Image
+from matplotlib import patches
 from sklearn.decomposition import PCA
+from torchvision.datasets.folder import make_dataset
+from torchvision.datasets.utils import list_dir
 
-from constants import SDDVideoClasses, SDDVideoDatasets
+from bbox_utils import annotations_to_dataframe
+from constants import SDDVideoClasses, SDDVideoDatasets, OBJECT_CLASS_COLOR_MAPPING, ObjectClasses
 
 
 def show_img(img):
@@ -229,6 +236,21 @@ def compare_recall(pr_results_1, pr_results_2, avg_img, lab1, lab2):
     plt.show()
 
 
+# Only for 1 now
+def object_of_interest_mask(img, annotation):
+    bbox = annotation[0]
+    mask = np.zeros(shape=(img.shape[1], img.shape[2]))
+    mask[bbox[1]:bbox[3], bbox[0]:bbox[2]] = 1
+    return mask
+
+
+def features_from_crop(feature_img, features, annotation):
+    bbox = annotation[0]
+    mask = np.zeros_like(feature_img)
+    mask[bbox[1]:bbox[3], bbox[0]:bbox[2]] = feature_img[bbox[1]:bbox[3], bbox[0]:bbox[2]]
+    return NotImplemented
+
+
 def plot_precision_recall(pr_results_1, pr_results_2, avg_img, lab1, lab2):
     compare_precision(pr_results_1, pr_results_2, avg_img, lab1, lab2)
     compare_recall(pr_results_1, pr_results_2, avg_img, lab1, lab2)
@@ -258,6 +280,105 @@ def precision_recall_one_sequence(results, average_image):
     # fig.tight_layout()
 
     plt.show()
+
+
+def cal_centers(b_box):
+    x_min = b_box[:, 0]
+    y_min = b_box[:, 1]
+    x_max = b_box[:, 2]
+    y_max = b_box[:, 3]
+    x_mid = (x_min + (x_max - x_min) / 2.).astype('int')
+    y_mid = (y_min + (y_max - y_min) / 2.).astype('int')
+
+    return np.vstack((x_mid, y_mid)).T
+
+
+def renormalize_features(features, options):
+    # todo: verify
+    cc_0 = denormalize(features[..., 0], options['max_0'], options['min_0'])
+    cc_1 = denormalize(features[..., 1], options['max_1'], options['min_1'])
+    of_0 = denormalize(features[..., 0], options['f_max_0'], options['f_min_0'])
+    of_1 = denormalize(features[..., 1], options['f_max_1'], options['f_min_1'])
+    features[..., 0] = cc_0
+    features[..., 1] = cc_1
+    features[..., 2] = of_0
+    features[..., 3] = of_1
+    return features
+
+
+def plot_with_bbox(img, box, linewidth=None):
+    fig, axs = plt.subplots(1, 1, sharex='none', sharey='none',
+                            figsize=(12, 10))
+    axs.imshow(img)
+    # for box in bbox:
+    rect = patches.Rectangle(xy=(box[0], box[1]), width=box[2] - box[0], height=box[3] - box[1],
+                             edgecolor=OBJECT_CLASS_COLOR_MAPPING[ObjectClasses.PEDESTRIAN], fill=False,
+                             linewidth=linewidth)
+    axs.add_patch(rect)
+    plt.show()
+
+
+def add_bbox_to_image(ax, bbox, linewidth=None):
+    for box in bbox:
+        rect = patches.Rectangle(xy=(box[0], box[1]), width=box[2] - box[0], height=box[3] - box[1],
+                                 edgecolor=OBJECT_CLASS_COLOR_MAPPING[ObjectClasses.PEDESTRIAN], fill=False,
+                                 linewidth=linewidth)
+        ax.add_patch(rect)
+
+
+def add_centers_to_image(ax, center):
+    center_x = center[:, 0]
+    center_y = center[:, 1]
+    ax.plot(center_x, center_y, 'o', markerfacecolor='g', markersize=2, markeredgecolor='k')
+
+
+def plot_one_with_center(img, ax, bbox, center, lw=None):
+    ax.imshow(img)
+    add_bbox_to_image(ax, bbox, lw)
+    add_centers_to_image(ax, center)
+
+
+def plot_with_centers(img_tensor, bbox, centers, nrows=2, ncols=2):
+    fig, axs = plt.subplots(nrows, ncols, sharex='none', sharey='none',
+                            figsize=(12, 10))
+    img_idx = [i for i in range(nrows * ncols)]
+    k = 0
+    for r in range(nrows):
+        for c in range(ncols):
+            im = (img_tensor[img_idx[k]].permute(1, 2, 0) * 255.0).numpy().astype(np.uint8)
+            plot_one_with_center(im, axs[r, c], bbox[img_idx[k]], centers[img_idx[k]], lw=None)
+            k += 1
+
+    plt.show()
+
+
+class SDDAnnotations(object):
+    def __init__(self, root: str, video_label: SDDVideoClasses, transform: Optional[Any] = None):
+        _mid_path = video_label.value
+        annotation_path = root + "annotations/" + _mid_path
+
+        classes = list(sorted(list_dir(annotation_path),
+                              key=lambda x: int(x[-1]) if len(x) == 6 else int(x[-2:])))
+        class_to_idx = {classes[i]: i for i in range(len(classes))}
+        self.samples = make_dataset(directory=annotation_path, class_to_idx=class_to_idx,
+                                    extensions=('txt',))
+        self.annotation_list = [x[0] for x in self.samples]
+        self.annotation_list_idx = [x[1] for x in self.samples]
+        self.transform = transform
+
+        meta_file = 'H_SDD.txt'
+        self.sdd_meta = SDDMeta(root + meta_file)
+
+    def augment_annotations(self):
+        for annotation_path in self.annotation_list:
+            df = annotations_to_dataframe(annotation_path)
+            bbox = df[['x_min', 'y_min', 'x_max', 'y_max']].to_numpy()
+            centers = cal_centers(bbox)
+            df['bbox_center_x'] = centers[:, 0]
+            df['bbox_center_y'] = centers[:, 1]
+            save_path = os.path.join(os.path.split(annotation_path)[0], 'annotation_augmented.csv')
+            df.to_csv(save_path)
+            print(f'Generated for {annotation_path}')
 
 
 class SDDMeta(object):
@@ -316,12 +437,24 @@ class SDDMeta(object):
 
 if __name__ == '__main__':
     pd.options.display.max_columns = None
-    p = '/home/rishabh/TrajectoryPrediction/Datasets/SDD/H_SDD.txt'
-    meta = SDDMeta(p)
-    # print(meta.get_meta(SDDVideoClasses.GATES, 0, 'A')[0])
-    meta.test_scale_logic()
+    p = '../Datasets/SDD/H_SDD.txt'
+    # meta = SDDMeta(p)
+    # m = meta.get_meta(SDDVideoDatasets.LITTLE, 0)
+    # print(m[0]['Ratio'].to_numpy())
+    # print(float(m[1][-1, -1]))
+    # # print(meta.get_meta(SDDVideoClasses.GATES, 0, 'A')[0])
+    # meta.test_scale_logic()
 
     # im_path = '/home/rishabh/TrajectoryPrediction/Datasets/SDD/annotations/gates/video0/reference.jpg'
     #
     # im_ = Image.open(im_path)
     # print(im_.info)
+
+    root_ = '../Datasets/SDD/'
+    vid_label = SDDVideoClasses.QUAD
+    sdd_annotations = SDDAnnotations(root_, vid_label)
+    # sdd_annotations.augment_annotations()
+    # dff = pd.read_csv('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/annotations'
+    #                   '/little/video0/annotation_augmented.csv')
+    # dff.drop(dff.columns[[0]], axis=1)
+    print()

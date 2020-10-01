@@ -1,5 +1,6 @@
 from typing import List, Optional, Tuple
 
+import numpy as np
 import torch.nn.functional as F
 import pandas as pd
 import matplotlib.patches as patches
@@ -15,6 +16,12 @@ def annotations_to_dataframe(file: str):
 
 def get_frame_annotations(df: pd.DataFrame, frame_number: int):
     idx: pd.DataFrame = df.loc[df["frame"] == frame_number]
+    return idx.to_numpy()
+
+
+def get_frame_by_track_annotations(df: pd.DataFrame, frame_number: int, track_id: int):
+    filtered_by_track_id = df.loc[df["track_id"] == track_id]
+    idx: pd.DataFrame = filtered_by_track_id.loc[filtered_by_track_id["frame"] == frame_number]
     return idx.to_numpy()
 
 
@@ -50,14 +57,36 @@ def bbox_to_matplotlib_representation(coordinates: List, original_spatial_dim=No
     return x, y, w, h
 
 
-def scale_annotations(annotations, original_scale, new_scale):
+def scale_annotations_(annotations, original_scale, new_scale):
     scaled_annotations = []
     for annot in annotations:
         x_min, y_min, x_max, y_max = annot[1:5]
         x, y, w, h = x_min, y_min, (x_max - x_min), (y_max - y_min)
         h, w, x, y = _process_scale(h, new_scale, original_scale, w, x, y)
-        scaled_annotations.append([x, y, x+w, y+h])
+        scaled_annotations.append([x, y, x + w, y + h])
     return scaled_annotations
+
+
+def scale_annotations(annotations, original_scale, new_scale):
+    bbox = annotations[:, 1:5].astype(np.int)
+    x_min, y_min, x_max, y_max = bbox[:, 0], bbox[:, 1], bbox[:, 2], bbox[:, 3]
+    x, y, w, h = x_min, y_min, (x_max - x_min), (y_max - y_min)
+    h, w, x, y = _process_scale(h, new_scale, original_scale, w, x, y)
+    x_min_, y_min_, x_max_, y_max_ = x, y, x + w, y + h
+    scaled_annotations = np.vstack((x_min_, y_min_, x_max_, y_max_)).T
+    scaled_centers = cal_centers(scaled_annotations)
+    return scaled_annotations, scaled_centers
+
+
+def cal_centers(b_box):
+    x_min = b_box[:, 0]
+    y_min = b_box[:, 1]
+    x_max = b_box[:, 2]
+    y_max = b_box[:, 3]
+    x_mid = (x_min + (x_max - x_min) / 2.).astype('int')
+    y_mid = (y_min + (y_max - y_min) / 2.).astype('int')
+
+    return np.vstack((x_mid, y_mid)).T
 
 
 def _process_scale(h, new_scale, original_scale, w, x, y):

@@ -722,7 +722,7 @@ def mean_shift_clustering_with_optical_video(video_path, start_frame=0, end_fram
         n_clusters_ = len(labels_unique)
 
         annot = get_frame_annotations(annotations_df, frame_number=fr)  # check-out +/- 1
-        annot = scale_annotations(annot, original_scale, (data_.shape[0], data_.shape[1]))
+        annot, _ = scale_annotations(annot, original_scale, (data_.shape[0], data_.shape[1]))
         gt_bbox_cluster_center_dict.update({fr: {'gt_bbox': annot,
                                                  'cluster_centers': cluster_centers}})
 
@@ -963,7 +963,7 @@ def mean_shift_clustering_with_optical_frames(video_path, start_frame=0, end_fra
         # print(cluster_distribution)
 
         annot_ = get_frame_annotations(annotations_df, frame_number=fr)  # check-out +/- 1
-        annot = scale_annotations(annot_, original_scale, (data_.shape[0], data_.shape[1]))
+        annot, _ = scale_annotations(annot_, original_scale, (data_.shape[0], data_.shape[1]))
         gt_bbox_cluster_center_dict.update({fr: {'gt_bbox': annot,
                                                  'cluster_centers': cluster_centers}})
         frame_results = evaluate_clustering_per_frame(fr, {'gt_bbox': annot,
@@ -1182,7 +1182,7 @@ def mean_shift_clustering_with_min_pooled_optical_frames(video_path, start_frame
 
         annot_ = get_frame_annotations(annotations_df, frame_number=fr)  # check-out +/- 1
         annot_ = preprocess_annotations(annot_)
-        annot = scale_annotations(annot_, original_scale, (data_.shape[0], data_.shape[1]))
+        annot, _ = scale_annotations(annot_, original_scale, (data_.shape[0], data_.shape[1]))
         gt_bbox_cluster_center_dict.update({fr: {'gt_bbox': annot,
                                                  'cluster_centers': cluster_centers}})
         frame_results = evaluate_clustering_per_frame(fr, {'gt_bbox': annot,
@@ -1400,7 +1400,7 @@ def mean_shift_clustering_without_optical_frames(video_path, start_frame=0, end_
         # print(cluster_distribution)
 
         annot_ = get_frame_annotations(annotations_df, frame_number=fr)  # check-out +/- 1
-        annot = scale_annotations(annot_, original_scale, (data_.shape[0], data_.shape[1]))
+        annot, _ = scale_annotations(annot_, original_scale, (data_.shape[0], data_.shape[1]))
         gt_bbox_cluster_center_dict.update({fr: {'gt_bbox': annot,
                                                  'cluster_centers': cluster_centers}})
         frame_results = evaluate_clustering_per_frame(fr, {'gt_bbox': annot,

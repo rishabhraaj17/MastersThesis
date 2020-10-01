@@ -1,4 +1,5 @@
 import argparse
+import warnings
 from datetime import datetime
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from torchvision.utils import make_grid
 from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
+from average_image.utils import show_img
 from log import get_logger, initialize_logging
 from unsupervised_tp_0.dataset import SDDDatasetBuilder, SDDTrainDataset, SDDValidationDataset
 from unsupervised_tp_0.model import make_layers, vgg_decoder_arch, UnsupervisedTP, VanillaAutoEncoder
@@ -32,9 +34,9 @@ logger = get_logger(__name__)
 def get_args_parser():
     parser = argparse.ArgumentParser('Reconstruction Networks', add_help=False)
     parser.add_argument('--lr', default=1e-4, type=float)
-    parser.add_argument('--num_workers', default=6, type=int)
+    parser.add_argument('--num_workers', default=0, type=int)
     parser.add_argument('--data_loader_num_workers', default=10, type=int)
-    parser.add_argument('--batch_size', default=8, type=int)
+    parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=30, type=int)
 
@@ -46,6 +48,9 @@ def get_args_parser():
                         help="Path to save outputs")
     parser.add_argument('--dataset_root', type=str, default="../Datasets/SDD/",
                         help="Path to dataset root")
+    parser.add_argument('--checkpoint_path', type=str,
+                        default="../Checkpoints/quad_batch_size8_2020-09-29 22:57:04.020244.pt",
+                        help="Path to checkpoint")
 
     return parser
 
@@ -156,11 +161,26 @@ def train(model, train_data_loader, val_data_loader, lr, epochs=50, weight_decay
                               'loss': best_loss}
                 torch.save(checkpoint, save_path)
 
-        logger.info(f"Train Loss: {train_loss}, Validation Loss: {val_loss}")
-        print(f"Train Loss: {train_loss}, Validation Loss: {val_loss}")
+        logger.info(f"Epoch: {epoch}/{epochs}, Train Loss: {train_loss}, Validation Loss: {val_loss}")
+        print(f"Epoch: {epoch}/{epochs}, Train Loss: {train_loss}, Validation Loss: {val_loss}")
 
 
-def main(args, video_label):
+def inference(model, data_loader, scale_factor=0.25, checkpoint_path=None):
+    saved_dict = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(saved_dict['model'])
+    for i, batch in tqdm(enumerate(data_loader), total=len(data_loader.dataset)):
+        frames, _, _ = batch
+        frames = frames.float().squeeze() / 255.0
+        frames = frames.to(device)
+        frames = F.interpolate(frames, scale_factor=scale_factor)
+
+        with torch.no_grad():
+            out = model(frames)
+            out = out.permute(0, 2, 3, 1)
+            show_img(out[0].cpu())
+
+
+def main(args, video_label, inference_mode=False):
     logger.info(f"Setting up DataLoaders...")
     save_path = f"{args.save_path}{video_label.value}_batch_size{args.batch_size}_{datetime.now()}.pt"
 
@@ -187,18 +207,25 @@ def main(args, video_label):
     net = net.to(device)
 
     logger.info(f"Train Network: {net.__class__.__name__}")
-    logger.info(f"Starting Training")
 
-    train(model=net, train_data_loader=train_loader, val_data_loader=val_loader, lr=args.lr, epochs=args.epochs,
-          save_path=save_path, weight_decay=args.weight_decay)
+    if inference_mode:
+        logger.info(f"Starting Inference")
+        inference(model=net, data_loader=val_loader, checkpoint_path=args.checkpoint_path)
+    else:
+        logger.info(f"Starting Training")
+        train(model=net, train_data_loader=train_loader, val_data_loader=val_loader, lr=args.lr, epochs=args.epochs,
+              save_path=save_path, weight_decay=args.weight_decay)
 
 
 if __name__ == '__main__':
-    vid_label = SDDVideoClasses.QUAD
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
 
-    parser_ = argparse.ArgumentParser('Training Script', parents=[get_args_parser()])
-    args = parser_.parse_args()
-    if args.save_path:
-        Path(args.save_path).mkdir(parents=True, exist_ok=True)
+        vid_label = SDDVideoClasses.QUAD
 
-    main(args, video_label=vid_label)
+        parser_ = argparse.ArgumentParser('Training Script', parents=[get_args_parser()])
+        args = parser_.parse_args()
+        if args.save_path:
+            Path(args.save_path).mkdir(parents=True, exist_ok=True)
+
+        main(args, video_label=vid_label, inference_mode=True)
