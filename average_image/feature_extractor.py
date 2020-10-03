@@ -579,14 +579,19 @@ class FeatureExtractor(object):
         return data, data_, max_0, max_1, min_0, min_1, threshold_img
 
     @staticmethod
-    def _prepare_data_xyuv_for_object_of_interest(flow, fr, processed_data, annotation, use_intensities=False,
-                                                  evaluation_mode: bool = False, return_options: bool = False):
+    def _prepare_data_xyuv_for_object_of_interest(flow, fr, processed_data, data_frame_num, use_intensities=False,
+                                                  evaluation_mode: bool = False, return_options: bool = False,
+                                                  original_shape=None, new_shape=None, df=None):  # fixme
         if evaluation_mode:
             data_ = processed_data
         else:
             data_ = processed_data[fr]
         data_ = np.abs(data_)
         mask = np.zeros_like(data_)
+        frame_annotation = get_frame_annotations(df, data_frame_num)
+        annotation, _ = scale_annotations(frame_annotation, original_scale=original_shape,
+                                          new_scale=new_shape, return_track_id=False,
+                                          tracks_with_annotations=True)
         mask[annotation[1]:annotation[3], annotation[0]:annotation[2]] = \
             data_[annotation[1]:annotation[3], annotation[0]:annotation[2]]
         object_idx = (mask > 0).nonzero()
@@ -617,9 +622,9 @@ class FeatureExtractor(object):
         return data, data_, max_0, max_1, min_0, min_1
 
     @staticmethod
-    def _prepare_data_xyuv_for_all_object_of_interest(flow, fr, processed_data, annotations, use_intensities=False,
+    def _prepare_data_xyuv_for_all_object_of_interest(flow, fr, processed_data, data_frame_num, use_intensities=False,
                                                       evaluation_mode: bool = False, return_options: bool = False,
-                                                      track_ids=None):
+                                                      track_ids=None, original_shape=None, new_shape=None, df=None):
         if evaluation_mode:
             data_ = processed_data
         else:
@@ -627,6 +632,10 @@ class FeatureExtractor(object):
         data_ = np.abs(data_)
         mask = np.zeros_like(data_)
         all_agent_features = []
+        frame_annotation = get_frame_annotations(df, data_frame_num)
+        annotations, _ = scale_annotations(frame_annotation, original_scale=original_shape,
+                                           new_scale=new_shape, return_track_id=False,
+                                           tracks_with_annotations=True)
         for id in range(annotations.shape[0]):
             mask[annotations[id][1]:annotations[id][3], annotations[id][0]:annotations[id][2]] = \
                 data_[annotations[id][1]:annotations[id][3], annotations[id][0]:annotations[id][2]]
@@ -644,6 +653,8 @@ class FeatureExtractor(object):
                 else:
                     data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
                                      flow_idx_normalized_0)).transpose()
+                if np.isnan(data).any():
+                    continue
                 options = {
                     'max_0': max_0,
                     'min_0': min_0,
@@ -1018,11 +1029,12 @@ class BackgroundSubtraction(FeatureExtractor):
             out = np.concatenate((out, np.expand_dims(mask, axis=0)), axis=0)
         return out
 
-    def keyframe_based_clustering_from_frames(self, frames, n, frames_to_build_model, original_shape, annotation,
+    def keyframe_based_clustering_from_frames(self, frames, n, frames_to_build_model, original_shape, resized_shape,
                                               equal_time_distributed=False, var_threshold=100, use_color=False,
                                               use_last_n_to_build_model=False, object_of_interest_only=False,
                                               classic_clustering=False, track_ids=None,
-                                              all_object_of_interest_only=False):
+                                              all_object_of_interest_only=False,
+                                              frame_numbers=None, df=None):
         self.original_shape = original_shape
         frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
 
@@ -1037,7 +1049,7 @@ class BackgroundSubtraction(FeatureExtractor):
         total_frames = frames.shape[0]
         data_all_frames = {}
         # for fr in tqdm(range(frames.shape[0])):
-        for fr in range(frames.shape[0]):
+        for fr, actual_fr in zip(range(frames.shape[0]), frame_numbers):
             if use_last_n_to_build_model:
                 # selected_frames = [(fr - i - 1) % total_frames for i in range(frames_to_build_model)]
                 selected_frames = [(fr + i) % total_frames for i in range(frames_to_build_model)]
@@ -1056,6 +1068,7 @@ class BackgroundSubtraction(FeatureExtractor):
 
             # jump to the next desirable frame
             interest_fr = (fr + frames_to_build_model) % total_frames
+            actual_interest_fr = (((actual_fr + frames_to_build_model) % total_frames) + frame_numbers[0]).item()
             mask = algo.apply(frames[interest_fr], learningRate=0)
             mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
 
@@ -1077,17 +1090,23 @@ class BackgroundSubtraction(FeatureExtractor):
                 if object_of_interest_only:
                     data, data_, max_0, max_1, min_0, min_1, options = \
                         self._prepare_data_xyuv_for_object_of_interest(flow, interest_fr,
-                                                                       mask, annotation=annotation[interest_fr],
+                                                                       mask, data_frame_num=actual_interest_fr,
                                                                        evaluation_mode=True,
-                                                                       return_options=True)
+                                                                       return_options=True,
+                                                                       original_shape=original_shape,
+                                                                       new_shape=resized_shape,
+                                                                       df=df)
                 elif all_object_of_interest_only:
                     all_agent_features = \
                         self._prepare_data_xyuv_for_all_object_of_interest(flow, interest_fr,
-                                                                           mask, annotations=annotation[interest_fr],
+                                                                           mask, data_frame_num=actual_interest_fr,
                                                                            evaluation_mode=True,
                                                                            return_options=True,
-                                                                           track_ids=track_ids)
-                    data_all_frames.update({interest_fr:all_agent_features})
+                                                                           track_ids=track_ids,
+                                                                           original_shape=original_shape,
+                                                                           new_shape=resized_shape,
+                                                                           df=df)
+                    data_all_frames.update({interest_fr: all_agent_features})
                 else:
                     data, data_, max_0, max_1, min_0, min_1, threshold_img, options = \
                         self._prepare_data_xyuv(flow, interest_fr,

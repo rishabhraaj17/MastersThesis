@@ -10,7 +10,7 @@ from torchvision.datasets.utils import list_dir
 from torchvision.datasets.folder import make_dataset
 from torchvision.datasets.video_utils import VideoClips
 
-from average_image.constants import SDDVideoClasses
+from average_image.constants import SDDVideoClasses, FeaturesMode
 from bbox_utils import get_frame_annotations, scale_annotations, get_frame_by_track_annotations
 from utils import SDDMeta, plot_with_centers, object_of_interest_mask
 
@@ -34,10 +34,10 @@ def resize_frames(frame, frame_annotation, size: Optional[Union[Tuple, int]] = N
                               recompute_scale_factor=False)
     new_shape = frame.shape[2], frame.shape[3]
     # track_id = None
-    frame_annotation, frame_centers = scale_annotations(frame_annotation, original_scale=original_shape,
-                                                        new_scale=new_shape, return_track_id=False,
-                                                        tracks_with_annotations=True)
-    return frame, frame_annotation, frame_centers
+    # frame_annotation, frame_centers = scale_annotations(frame_annotation, original_scale=original_shape,
+    #                                                     new_scale=new_shape, return_track_id=False,
+    #                                                     tracks_with_annotations=True)
+    return frame, original_shape, new_shape  # frame_annotation, frame_centers
 
 
 class SDDDatasetBuilder(VisionDataset):
@@ -140,7 +140,8 @@ class SDDSimpleDataset(Dataset):
                  step_between_clips: int = 1, frame_rate: Optional[float] = None, fold: int = 1, train: bool = True,
                  transform: Any = None, _precomputed_metadata: bool = None, num_workers: int = 1, _video_width: int = 0,
                  _video_height: int = 0, _video_min_dimension: int = 0, _audio_samples: int = 0, scale: float = 1.0,
-                 single_track_mode: bool = False, track_id: int = 0):
+                 single_track_mode: bool = False, track_id: int = 0, video_number_to_use: int = 0,
+                 multiple_videos: bool = False):
         _mid_path = video_label.value
         video_path = root + "videos/" + _mid_path
         annotation_path = root + "annotations/" + _mid_path
@@ -171,9 +172,13 @@ class SDDSimpleDataset(Dataset):
         self.annotation_list = sort_list(self.annotation_list, self.annotation_list_idx)
         self.annotation_list_idx = sorted(self.annotation_list_idx)
 
-        # restricted to number of videos
-        video_list_subset = self.video_list[:num_videos]
-        video_list_idx_subset = self.video_list_idx[:num_videos]
+        if multiple_videos:
+            # restricted to number of videos
+            video_list_subset = self.video_list[:num_videos]
+            video_list_idx_subset = self.video_list_idx[:num_videos]
+        else:
+            video_list_subset = [self.video_list[video_number_to_use]]
+            video_list_idx_subset = [self.video_list_idx[video_number_to_use]]
 
         video_clips = VideoClips(video_list_subset,
                                  frames_per_clip,
@@ -197,13 +202,17 @@ class SDDSimpleDataset(Dataset):
         meta_file = 'H_SDD.txt'
         self.sdd_meta = SDDMeta(root + meta_file)
 
+        # fixme: to process list of videos
         annotation_path = self.annotation_list[video_list_idx_subset[0]]
+
         self.annotations_df = self._read_annotation_file(annotation_path)
         # todo: make it work for more than one video
 
         self.scale = scale
         self.single_track_mode = single_track_mode
         self.track_id = track_id
+        self.original_shape = None
+        self.new_scale = None
 
         # self.video_frames = video_frames
         # self.selected_frames = [i for i in range(self.video_frames.shape[0]) if not i % step]
@@ -225,25 +234,47 @@ class SDDSimpleDataset(Dataset):
 
     def __getitem__(self, item):
         video, audio, info, video_idx = self.video_clips.get_clip(item)
-        if self.single_track_mode:
-            label = get_frame_by_track_annotations(self.annotations_df, item, track_id=self.track_id)
-        else:
-            label = get_frame_annotations(self.annotations_df, item)
+        # Dont read annotation here as stacking is not possible when number of objects differ
+        # if self.single_track_mode:
+        #     label = get_frame_by_track_annotations(self.annotations_df, item, track_id=self.track_id)
+        # else:
+        #     label = get_frame_annotations(self.annotations_df, item)
         video = video.permute(0, 3, 1, 2)
 
-        centers = None
-        track_ids = None
+        # centers = None
+        label = None
+        new_scale = None
+        original_shape = None
+        # track_ids = None
         if self.transform is not None:
-            video, label, centers = self.transform(video, label, scale=self.scale)
+            # video, label, centers = self.transform(video, label, scale=self.scale)
+            video, original_shape, new_scale = self.transform(video, label, scale=self.scale)
+            if self.original_shape is None or self.new_scale is None:
+                self.original_shape = original_shape
+                self.new_scale = new_scale
 
-        return video, label, centers
+        return video, item
 
 
 class FeaturesDataset(Dataset):
-    def __init__(self, x, y):
+    def __init__(self, x, y, preprocess: bool, mode: FeaturesMode):
         super(FeaturesDataset, self).__init__()
         self.x = x
         self.y = y
+        self.mode = mode
+        if preprocess:
+            self._preprocess()
+
+    def _preprocess(self):
+        x_, y_ = [], []
+        if self.mode.value == FeaturesMode.UV.value:
+            for i, j in zip(self.x, self.y):
+                x_.append(i[:, 2:])
+                y_.append(j[:, 2:])
+        else:
+            return NotImplemented
+        self.x = x_
+        self.y = y_
 
     def __len__(self):
         return len(self.x) or len(self.y)
