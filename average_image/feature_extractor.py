@@ -14,16 +14,16 @@ from skimage import color
 from sklearn.cluster import cluster_optics_dbscan
 from tqdm import tqdm
 
-from bbox_utils import add_bbox_to_axes, resize_v_frames, get_frame_annotations, preprocess_annotations, \
+from average_image.bbox_utils import add_bbox_to_axes, resize_v_frames, get_frame_annotations, preprocess_annotations, \
     scale_annotations
-from constants import OBJECT_CLASS_COLOR_MAPPING, SDDVideoClasses
-from deep_networks_avg import get_vgg_layer_activations, get_resnet_layer_activations, \
+from average_image.constants import OBJECT_CLASS_COLOR_MAPPING, SDDVideoClasses
+from average_image.deep_networks_avg import get_vgg_layer_activations, get_resnet_layer_activations, \
     get_densenet_filtered_layer_activations
-from feature_clustering import MeanShiftClustering, HierarchicalClustering, AffinityPropagationClustering, \
-    DBSCANClustering, OPTICSClustering, Clustering, BirchClustering
-from layers import min_pool2d
-from utils import precision_recall, evaluate_clustering_per_frame, normalize, SDDMeta, evaluate_clustering_non_cc, \
-    AgentFeatures
+from average_image.feature_clustering import MeanShiftClustering, HierarchicalClustering,\
+    AffinityPropagationClustering, DBSCANClustering, OPTICSClustering, Clustering, BirchClustering
+from average_image.layers import min_pool2d
+from average_image.utils import precision_recall, evaluate_clustering_per_frame, normalize, SDDMeta, \
+    evaluate_clustering_non_cc, AgentFeatures
 
 
 class FeatureExtractor(object):
@@ -624,7 +624,8 @@ class FeatureExtractor(object):
     @staticmethod
     def _prepare_data_xyuv_for_all_object_of_interest(flow, fr, processed_data, data_frame_num, use_intensities=False,
                                                       evaluation_mode: bool = False, return_options: bool = False,
-                                                      track_ids=None, original_shape=None, new_shape=None, df=None):
+                                                      track_ids=None, original_shape=None, new_shape=None, df=None,
+                                                      do_clustering=False):
         if evaluation_mode:
             data_ = processed_data
         else:
@@ -665,9 +666,19 @@ class FeatureExtractor(object):
                     'f_max_1': f_max_1,
                     'f_min_1': f_min_1
                 }
-                all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id][-1].item(),
-                                                        frame_number=fr,
-                                                        normalize_params=options))
+                if do_clustering:
+                    cluster_algo, n_clusters_ = FeatureExtractor._perform_clustering(data, max_0, max_1, min_0, min_1,
+                                                                                     bandwidth=0.1, renormalize=True,
+                                                                                     min_bin_freq=3, max_iter=300)
+                    all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id][-1].item(),
+                                                            frame_number=fr,
+                                                            normalize_params=options,
+                                                            cluster_centers=cluster_algo.cluster_centers,
+                                                            cluster_labels=cluster_algo.labels))
+                else:
+                    all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id][-1].item(),
+                                                            frame_number=fr,
+                                                            normalize_params=options))
         return all_agent_features
 
     @staticmethod
@@ -1033,7 +1044,7 @@ class BackgroundSubtraction(FeatureExtractor):
                                               equal_time_distributed=False, var_threshold=100, use_color=False,
                                               use_last_n_to_build_model=False, object_of_interest_only=False,
                                               classic_clustering=False, track_ids=None,
-                                              all_object_of_interest_only=False,
+                                              all_object_of_interest_only=False, time_gap_within_frames=3,
                                               frame_numbers=None, df=None):
         self.original_shape = original_shape
         frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
@@ -1055,8 +1066,8 @@ class BackgroundSubtraction(FeatureExtractor):
                 selected_frames = [(fr + i) % total_frames for i in range(frames_to_build_model)]
                 frames_building_model = [frames[s] for s in selected_frames]
             elif equal_time_distributed:
-                selected_past = [(fr - i * frames_to_build_model) % total_frames for i in range(1, step + 1)]
-                selected_future = [(fr + i * frames_to_build_model) % total_frames for i in range(1, step + 1)]
+                selected_past = [(fr - i * time_gap_within_frames) % total_frames for i in range(1, step + 1)]
+                selected_future = [(fr + i * time_gap_within_frames) % total_frames for i in range(1, step + 1)]
                 selected_frames = selected_past + selected_future
                 frames_building_model = [frames[s] for s in selected_frames]
             else:
@@ -1088,6 +1099,7 @@ class BackgroundSubtraction(FeatureExtractor):
                                                   lab_space=True)
             else:
                 if object_of_interest_only:
+                    # Add classic clustering in them
                     data, data_, max_0, max_1, min_0, min_1, options = \
                         self._prepare_data_xyuv_for_object_of_interest(flow, interest_fr,
                                                                        mask, data_frame_num=actual_interest_fr,
@@ -1105,23 +1117,15 @@ class BackgroundSubtraction(FeatureExtractor):
                                                                            track_ids=track_ids,
                                                                            original_shape=original_shape,
                                                                            new_shape=resized_shape,
-                                                                           df=df)
+                                                                           df=df, do_clustering=classic_clustering)
                     data_all_frames.update({interest_fr: all_agent_features})
                 else:
+                    # Add classic clustering in them
                     data, data_, max_0, max_1, min_0, min_1, threshold_img, options = \
                         self._prepare_data_xyuv(flow, interest_fr,
                                                 mask,
                                                 evaluation_mode=True,
                                                 return_options=True)
-            if classic_clustering:
-                cluster_algo, n_clusters_ = self._perform_clustering(data, max_0, max_1, min_0, min_1, bandwidth=0.1,
-                                                                     min_bin_freq=3, max_iter=300)
-
-                data_all_frames.update({interest_fr: {'data': data, 'cluster_center': cluster_algo.cluster_centers,
-                                                      'n_clusters': n_clusters_}})
-            # else:
-            #     # todo: re normalize data
-            #     data_all_frames.update({interest_fr: {'data': data}})
         return data_all_frames
 
     def _core_processing(self, frame, kernel):

@@ -1,6 +1,6 @@
 import argparse
 import warnings
-from typing import Any, Tuple, Union
+from typing import Any, Tuple, Union, List
 
 import torch
 import torch.nn as nn
@@ -8,7 +8,7 @@ import torch.nn as nn
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 
-from constants import SDDVideoClasses
+from average_image.constants import SDDVideoClasses
 from log import initialize_logging, get_logger
 from unsupervised_tp_0.dataset import resize_frames, SDDSimpleDataset
 from unsupervised_tp_0.train import LOSS_RECONSTRUCTION, get_args_parser
@@ -115,8 +115,13 @@ class SegNetUp3(nn.Module):
 
 
 class SegNet(pl.LightningModule):
-    def __init__(self, n_classes=3, in_channels=3, is_unpooling=True, lr=1e-5):
+    def __init__(self, n_classes=3, in_channels=3, is_unpooling=True, lr=1e-5, batch_size=2, train_loader=None,
+                 val_loader=None):
         super(SegNet, self).__init__()
+
+        self.val_loader = val_loader
+        self.train_loader = train_loader
+        self.save_hyperparameters('lr', 'batch_size')
 
         self.in_channels = in_channels
         self.is_unpooling = is_unpooling
@@ -151,7 +156,8 @@ class SegNet(pl.LightningModule):
         return up1
 
     def _one_step(self, batch):
-        frames, _, _ = batch
+        frames, _ = batch
+        frames = frames.squeeze(1)
         out = self(frames)
         reconstruction_loss = LOSS_RECONSTRUCTION(out, frames)
         return reconstruction_loss
@@ -168,6 +174,12 @@ class SegNet(pl.LightningModule):
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)
+
+    def train_dataloader(self) -> DataLoader:
+        return self.train_loader
+
+    def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
+        return self.val_loader
 
     def init_vgg16_params(self, vgg16):
         blocks = [self.down1, self.down2, self.down3, self.down4, self.down5]
@@ -205,13 +217,13 @@ class SegNet(pl.LightningModule):
                 l2.bias.data = l1.bias.data
 
 
-def main(args, model, video_label, train_video_num, val_video_num, inference_mode=False):
+def main(args, video_label, train_video_num, val_video_num, inference_mode=False):
     logger.info(f"Setting up DataLoaders...")
 
     train_dataset = SDDSimpleDataset(root=args.dataset_root, video_label=video_label, frames_per_clip=1,
                                      num_workers=args.data_loader_num_workers,
                                      num_videos=1, video_number_to_use=train_video_num,
-                                     step_between_clips=1, transform=resize_frames, scale=0.5, frame_rate=30,
+                                     step_between_clips=1, transform=resize_frames, scale=0.25, frame_rate=30,
                                      single_track_mode=False, track_id=5, multiple_videos=False)
     train_loader = DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=False,
                               num_workers=args.num_workers,
@@ -220,12 +232,14 @@ def main(args, model, video_label, train_video_num, val_video_num, inference_mod
     val_dataset = SDDSimpleDataset(root=args.dataset_root, video_label=video_label, frames_per_clip=1,
                                    num_workers=args.data_loader_num_workers,
                                    num_videos=1, video_number_to_use=val_video_num,
-                                   step_between_clips=1, transform=resize_frames, scale=0.5, frame_rate=30,
+                                   step_between_clips=1, transform=resize_frames, scale=0.25, frame_rate=30,
                                    single_track_mode=False, track_id=5, multiple_videos=False)
     val_loader = DataLoader(dataset=val_dataset, batch_size=args.batch_size * 2, shuffle=False,
                             num_workers=args.num_workers,
                             pin_memory=args.pin_memory, drop_last=True)
     logger.info(f"DataLoaders built successfully")
+
+    model = SegNet(train_loader=train_loader, val_loader=val_loader)
 
     logger.info(f"Train Network: {model.__class__.__name__}")
 
@@ -234,8 +248,8 @@ def main(args, model, video_label, train_video_num, val_video_num, inference_mod
         return NotImplemented
     else:
         logger.info(f"Starting Training")
-        trainer = pl.Trainer(gpus=1, max_epochs=20)
-        trainer.fit(model=model, train_dataloader=train_loader, val_dataloaders=val_loader)
+        trainer = pl.Trainer(auto_scale_batch_size=False, gpus=1, max_epochs=args.epochs)
+        trainer.fit(model=model)
 
 
 if __name__ == '__main__':
@@ -247,7 +261,7 @@ if __name__ == '__main__':
         parser_ = argparse.ArgumentParser('Training Script', parents=[get_args_parser()])
         parsed_args = parser_.parse_args()
 
-        main(parsed_args, model=SegNet(), video_label=vid_label, inference_mode=False, train_video_num=0,
+        main(parsed_args, video_label=vid_label, inference_mode=False, train_video_num=0,
              val_video_num=1)
 
     # m = SegNet().to(device)

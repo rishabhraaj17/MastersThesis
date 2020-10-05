@@ -7,13 +7,14 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 
-from feature_extractor import MOG2
-from constants import FeaturesMode, SDDVideoClasses
+from average_image.feature_extractor import MOG2
+from average_image.constants import FeaturesMode, SDDVideoClasses
 from log import initialize_logging, get_logger
 from unsupervised_tp_0.dataset import SDDSimpleDataset, resize_frames, FeaturesDataset
-from utils import BasicTrainData
+from average_image.utils import BasicTrainData, BasicTestData
 
 initialize_logging()
 logger = get_logger(__name__)
@@ -91,9 +92,12 @@ class SimpleModel(pl.LightningModule):
         return {'loss': loss, 'log': tensorboard_logs}
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr)
+        opt = torch.optim.Adam(self.parameters(), lr=self.lr)
+        scheduler = ReduceLROnPlateau(opt)
+        return [opt], [scheduler]
 
-    def preprocess_data(self, data_loader, mode: FeaturesMode, annotation_df, classic_clustering=False):
+    def preprocess_data(self, data_loader, mode: FeaturesMode, annotation_df, classic_clustering=False,
+                        test_mode=False):
         # original_shape=None, resize_shape=None):
         x_, y_ = [], []
         for data in tqdm(data_loader):
@@ -104,7 +108,7 @@ class SimpleModel(pl.LightningModule):
             frames = frames.squeeze()
             feature_extractor = MOG2.for_frames()
             features_ = feature_extractor. \
-                keyframe_based_clustering_from_frames(frames=frames, n=None, use_last_n_to_build_model=True,
+                keyframe_based_clustering_from_frames(frames=frames, n=30, use_last_n_to_build_model=False,
                                                       frames_to_build_model=self.num_frames_to_build_bg_sub_model,
                                                       original_shape=data_loader.dataset.original_shape,
                                                       resized_shape=data_loader.dataset.new_scale,
@@ -112,13 +116,14 @@ class SimpleModel(pl.LightningModule):
                                                       object_of_interest_only=False,
                                                       var_threshold=None, track_ids=None,
                                                       all_object_of_interest_only=True,
+                                                      equal_time_distributed=True,
                                                       frame_numbers=frame_numbers,
                                                       df=annotation_df)
             features, cluster_centers = None, None
             if mode == FeaturesMode.UV:
                 # features, cluster_centers = self._process_features(features_, uv=True,
                 #                                                    classic_clustering=classic_clustering)
-                features = self._process_complex_features(features_, uv=True)
+                features = self._process_complex_features(features_, uv=True, test_mode=test_mode)
                 x, y = self._extract_trainable_features(features)
                 x_ += x
                 y_ += y
@@ -144,7 +149,7 @@ class SimpleModel(pl.LightningModule):
                 features = np.concatenate((value['data'][:, f:], features))
         return features, cluster_centers
 
-    def _process_complex_features(self, features_dict: dict, uv=True):
+    def _process_complex_features(self, features_dict: dict, uv=True, test_mode=False):
         if uv:
             f = 2
         else:
@@ -157,22 +162,46 @@ class SimpleModel(pl.LightningModule):
             pair_1 = features_dict[(frame + self.num_frames_to_build_bg_sub_model) % total_frames]
             for i in pair_0:
                 for j in pair_1:
-                    if i == j:
-                        per_frame_data.append(BasicTrainData(frame=frame, track_id=i.track_id,
-                                                             pair_0_features=i.features,
-                                                             pair_1_features=j.features))
+                    if i == j and i.track_id == 8:  # bad readability
+                        if test_mode:
+                            per_frame_data.append(BasicTestData(frame=frame, track_id=i.track_id,
+                                                                pair_0_features=i.features,
+                                                                pair_1_features=j.features,
+                                                                pair_0_normalize=i.normalize_params,
+                                                                pair_1_normalize=j.normalize_params))
+                        else:
+                            per_frame_data.append(BasicTrainData(frame=frame, track_id=i.track_id,
+                                                                 pair_0_features=i.features,
+                                                                 pair_1_features=j.features))
             train_data.update({frame: per_frame_data})
             per_frame_data = []
         return train_data
 
     def _extract_trainable_features(self, train_data):
-        x = []
-        y = []
+        x_ = []
+        y_ = []
         for key, value in train_data.items():
             for data in value:
-                x.append(data.pair_0_features)
-                y.append(data.pair_1_features)
-        return x, y
+                x_.append(data.pair_0_features)
+                y_.append(data.pair_1_features)
+        return x_, y_
+
+    def _extract_test_features(self, train_data):
+        frame = []
+        track_id = []
+        x_ = []
+        y_ = []
+        x_normalize = []
+        y_normalize = []
+        for key, value in train_data.items():
+            for data in value:
+                x_.append(data.pair_0_features)
+                y_.append(data.pair_1_features)
+                x_normalize.append(data.pair_0_normalize)
+                y_normalize.append(data.pair_1_normalize)
+                frame.append(data.frame)
+                track_id.append(data.track_id)
+        return x_, y_, x_normalize, y_normalize, track_id, frame
 
     def center_based_loss(self, pred_center, target_center):
         # pred_center = current_center + pred
@@ -194,9 +223,23 @@ class SimpleModel(pl.LightningModule):
     def val_dataloader(self):
         return torch.utils.data.DataLoader(val_dataset, 1)
 
+    def test_sample(self, batch):
+        x_, y_, x_norm_dict_, y_norm_dict_, track_id_, frame_num = batch
+        features1, features2 = x_.squeeze().float(), y_.squeeze().float()
+        pred = self(x_)
+        pred = self(features1[:, 2:])
+        current_center = self._calculate_mean(features1[:, :2])
+        pred_displacement = self._calculate_mean(pred)
+        pred_center = current_center + pred_displacement
+
 
 if __name__ == '__main__':
     compute_features = False
+    time_distributed = False
+    resume = False
+    single_track = True
+
+    test = False
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
@@ -208,47 +251,72 @@ if __name__ == '__main__':
         net = SimpleModel(num_frames_to_build_bg_sub_model=12)
         save_path = f'{save_base_path}{vid_label.value}/video{video_number}/'
 
-        train_vid_label = SDDVideoClasses.GATES
-        train_vid_num = 5
+        train_vid_label = SDDVideoClasses.QUAD
+        train_vid_num = 0
         train_dataset_path = f'{save_base_path}{train_vid_label.value}/video{train_vid_num}/'
 
-        inference_vid_label = SDDVideoClasses.LITTLE
-        inference_vid_num = 0
+        inference_vid_label = SDDVideoClasses.QUAD
+        inference_vid_num = 1
         inference_dataset_path = f'{save_base_path}{inference_vid_label.value}/video{inference_vid_num}/'
+
+        if time_distributed:
+            file_name = 'time_distributed_features.pt'
+        elif single_track:
+            file_name = 'time_distributed_selected_track_features.pt'
+        else:
+            file_name = 'features.pt'
 
         if compute_features:
             sdd_simple = SDDSimpleDataset(root=base_path, video_label=vid_label, frames_per_clip=1, num_workers=8,
                                           num_videos=1, video_number_to_use=video_number,
                                           step_between_clips=1, transform=resize_frames, scale=0.5, frame_rate=30,
                                           single_track_mode=False, track_id=5, multiple_videos=True)
-            sdd_loader = torch.utils.data.DataLoader(sdd_simple, 256)
+            sdd_loader = torch.utils.data.DataLoader(sdd_simple, 64)
 
             logger.info('Computing Features')
-            x, y = net.preprocess_data(sdd_loader, FeaturesMode.UV, annotation_df=sdd_simple.annotations_df)
+            if test:
+                x, y, x_norm_dict, y_norm_dict, track_id, frame = net.preprocess_data(sdd_loader, FeaturesMode.UV,
+                                                                                      annotation_df=
+                                                                                      sdd_simple.annotations_df,
+                                                                                      classic_clustering=False,
+                                                                                      test_mode=test)
+                features_save_dict = {'x': x, 'y': y, 'x_norm_dict': x_norm_dict, 'y_norm_dict': y_norm_dict,
+                                      'track_id': track_id, 'frame': frame}
+            else:
+                x, y = net.preprocess_data(sdd_loader, FeaturesMode.UV, annotation_df=sdd_simple.annotations_df,
+                                           classic_clustering=False, test_mode=test)
+                features_save_dict = {'x': x, 'y': y}
 
             logger.info(f'Saving the features for video {vid_label.value}, video {video_number}')
             if save_path:
                 Path(save_path).mkdir(parents=True, exist_ok=True)
-            torch.save({'x': x, 'y': y}, save_path+'features.pt')
+            torch.save(features_save_dict, save_path + 'time_distributed_selected_track_features.pt')
+        else:
+            logger.info('Setting up DataLoaders')
+            train_feats = torch.load(train_dataset_path + file_name)
+            train_x, train_y = train_feats['x'], train_feats['y']
 
-        logger.info('Setting up DataLoaders')
-        train_feats = torch.load(train_dataset_path + 'features.pt')
-        train_x, train_y = train_feats['x'], train_feats['y']
+            inference_feats = torch.load(inference_dataset_path + file_name)
+            inference_x, inference_y = inference_feats['x'], inference_feats['y']
 
-        inference_feats = torch.load(inference_dataset_path + 'features.pt')
-        inference_x, inference_y = inference_feats['x'], inference_feats['y']
+            # Split Val and Test
+            split_percent = 0.2
+            val_length = int(split_percent * len(inference_x))
+            test_length = len(inference_x) - val_length
 
-        # Split Val and Test
-        split_percent = 0.2
-        val_length = int(split_percent * len(inference_x))
-        test_length = len(inference_x) - val_length
+            inference_dataset = FeaturesDataset(inference_x, inference_y, mode=FeaturesMode.UV, preprocess=False)
+            val_dataset, test_dataset = torch.utils.data.random_split(inference_dataset, [val_length, test_length])
 
-        inference_dataset = FeaturesDataset(inference_x, inference_y, mode=FeaturesMode.UV, preprocess=False)
-        val_dataset, test_dataset = torch.utils.data.random_split(inference_dataset, [val_length, test_length])
+            logger.info('Setting up network')
 
-        logger.info('Setting up network')
+            if test:
+                pass
+            else:
+                if resume:
+                    resume_path = 'lightning_logs/version_2/checkpoints/epoch=0.ckpt'
+                    trainer = pl.Trainer(gpus=1, max_epochs=20, resume_from_checkpoint=resume_path)
+                else:
+                    trainer = pl.Trainer(gpus=1, max_epochs=100)
 
-        trainer = pl.Trainer(gpus=1, max_epochs=20)
-
-        logger.info('Starting training')
-        trainer.fit(net)
+                logger.info('Starting training')
+                trainer.fit(net)

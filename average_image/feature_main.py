@@ -5,10 +5,10 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from bbox_utils import annotations_to_dataframe
-from constants import SDDVideoClasses, SDDVideoDatasets
-from feature_extractor import MOG2
-from utils import precision_recall_one_sequence, plot_precision_recall
+from average_image.bbox_utils import annotations_to_dataframe
+from average_image.constants import SDDVideoClasses, SDDVideoDatasets
+from average_image.feature_extractor import MOG2
+from average_image.utils import precision_recall_one_sequence, plot_precision_recall
 
 
 def mog2_optical_flow_clustering_per_frame(mog2, video_label, vid_number, frames_out_save_path, annotations_df,

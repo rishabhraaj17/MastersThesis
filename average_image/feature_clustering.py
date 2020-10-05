@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.cluster import estimate_bandwidth, MeanShift, AffinityPropagation, Birch, OPTICS, DBSCAN, \
     AgglomerativeClustering
 
-from utils import denormalize, pca_cluster_center
+from average_image.utils import denormalize, pca_cluster_center
 
 
 class Clustering(object):

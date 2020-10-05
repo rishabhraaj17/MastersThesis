@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import pandas as pd
 import matplotlib.patches as patches
 
-from constants import ObjectClasses, ANNOTATION_COLUMNS, OBJECT_CLASS_COLOR_MAPPING
+from average_image.constants import ObjectClasses, ANNOTATION_COLUMNS, OBJECT_CLASS_COLOR_MAPPING
 
 
 def annotations_to_dataframe(file: str):

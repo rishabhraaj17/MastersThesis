@@ -23,12 +23,12 @@ from sklearn.cluster import MeanShift, estimate_bandwidth, SpectralClustering, D
 from skimage.color import rgb2lab
 from tqdm import tqdm
 
-from bbox_utils import annotations_to_dataframe, get_frame_annotations, add_bbox_to_axes, resize_v_frames, \
-    scale_annotations, CoordinateHolder, CoordinateHolder2
-from constants import SDDVideoClasses, OBJECT_CLASS_COLOR_MAPPING, COLORS, COLORS2
-from layers import MinPool2D, min_pool2d_numpy, min_pool2d
-from deep_networks_avg import get_vgg_layer_activations, get_resnet_layer_activations, get_densenet_layer_activations, \
-    get_densenet_filtered_layer_activations
+from average_image.bbox_utils import annotations_to_dataframe, get_frame_annotations, add_bbox_to_axes, \
+    resize_v_frames, scale_annotations, CoordinateHolder, CoordinateHolder2
+from average_image.constants import SDDVideoClasses, OBJECT_CLASS_COLOR_MAPPING, COLORS, COLORS2
+from average_image.layers import MinPool2D, min_pool2d_numpy, min_pool2d
+from average_image.deep_networks_avg import get_vgg_layer_activations, get_resnet_layer_activations, \
+    get_densenet_layer_activations, get_densenet_filtered_layer_activations
 
 
 def plot_and_save(average, reference, mask, save_path: str, num_frames: int, video_label: str, vid_number: int,

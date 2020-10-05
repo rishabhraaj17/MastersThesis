@@ -10,8 +10,8 @@ from sklearn.decomposition import PCA
 from torchvision.datasets.folder import make_dataset
 from torchvision.datasets.utils import list_dir
 
-from bbox_utils import annotations_to_dataframe
-from constants import SDDVideoClasses, SDDVideoDatasets, OBJECT_CLASS_COLOR_MAPPING, ObjectClasses
+from average_image.bbox_utils import annotations_to_dataframe
+from average_image.constants import SDDVideoClasses, SDDVideoDatasets, OBJECT_CLASS_COLOR_MAPPING, ObjectClasses
 
 
 def show_img(img):
@@ -461,12 +461,14 @@ if __name__ == '__main__':
 
 
 class AgentFeatures(object):
-    def __init__(self, features, track_id, frame_number, normalize_params):
+    def __init__(self, features, track_id, frame_number, normalize_params, cluster_centers=None, cluster_labels=None):
         super(AgentFeatures, self).__init__()
         self.frame_number = frame_number
         self.features = features
         self.track_id = track_id
         self.normalize_params = normalize_params
+        self.cluster_centers = cluster_centers
+        self.cluster_labels = cluster_labels
 
     def __repr__(self):
         pass  # auto-printing??
@@ -483,3 +485,14 @@ class BasicTrainData(object):
         self.track_id = track_id
         self.pair_0_features = pair_0_features
         self.pair_1_features = pair_1_features
+
+
+class BasicTestData(object):
+    def __init__(self, frame, track_id, pair_0_features, pair_1_features, pair_0_normalize, pair_1_normalize):
+        super(BasicTestData, self).__init__()
+        self.frame = frame
+        self.track_id = track_id
+        self.pair_0_features = pair_0_features
+        self.pair_1_features = pair_1_features
+        self.pair_1_normalize = pair_1_normalize
+        self.pair_0_normalize = pair_0_normalize

@@ -11,8 +11,8 @@ from torchvision.datasets.folder import make_dataset
 from torchvision.datasets.video_utils import VideoClips
 
 from average_image.constants import SDDVideoClasses, FeaturesMode
-from bbox_utils import get_frame_annotations, scale_annotations, get_frame_by_track_annotations
-from utils import SDDMeta, plot_with_centers, object_of_interest_mask
+from average_image.bbox_utils import get_frame_annotations, scale_annotations, get_frame_by_track_annotations
+from average_image.utils import SDDMeta, plot_with_centers, object_of_interest_mask
 
 import warnings
 
