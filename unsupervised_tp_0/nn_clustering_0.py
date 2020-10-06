@@ -14,7 +14,7 @@ from average_image.feature_extractor import MOG2
 from average_image.constants import FeaturesMode, SDDVideoClasses
 from log import initialize_logging, get_logger
 from unsupervised_tp_0.dataset import SDDSimpleDataset, resize_frames, FeaturesDataset
-from average_image.utils import BasicTrainData, BasicTestData
+from average_image.utils import BasicTrainData, BasicTestData, plot_extracted_features_and_verify_flow
 
 initialize_logging()
 logger = get_logger(__name__)
@@ -65,10 +65,9 @@ class SimpleModel(pl.LightningModule):
         self.mode = mode
 
     def forward(self, x):
-        # features, cluster_centers, centers = self.preprocess_data(x, self.mode)
         return self.layers(x)
 
-    def _one_step(self, batch):
+    def _one_step_old(self, batch):
         # features, cluster_centers, centers = self.preprocess_data(batch, self.mode)
         features1, features2 = batch
         features1, features2 = features1.squeeze().float(), features2.squeeze().float()
@@ -79,6 +78,21 @@ class SimpleModel(pl.LightningModule):
         # true_center = self._calculate_mean(features2[:, :2])
         # loss = self.center_based_loss(pred_center=pred_center, target_center=true_center)
         loss = self.cluster_center_loss(points=features2[:, :2], pred_center=pred_center)
+        return loss
+
+    def _one_step(self, batch):
+        features1, features2 = batch
+        features1, features2 = features1.squeeze().float(), features2.squeeze().float()
+        pred = self(features1[:, :2])
+        current_center = self._calculate_mean(features1[:, :2])
+        # center of predicted points
+        pred_center = self._calculate_mean(pred)
+        # move points based on optical flow
+        shifted_points = pred + features1[:, 2:]
+        # the pred center and actual center should be close
+        reg = self.center_based_loss(pred_center, current_center)
+        # center should be close to shifted points
+        loss = self.cluster_center_loss(points=shifted_points, pred_center=pred_center)
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -97,7 +111,7 @@ class SimpleModel(pl.LightningModule):
         return [opt], [scheduler]
 
     def preprocess_data(self, data_loader, mode: FeaturesMode, annotation_df, classic_clustering=False,
-                        test_mode=False):
+                        test_mode=False, equal_time_distributed=True):
         # original_shape=None, resize_shape=None):
         x_, y_ = [], []
         for data in tqdm(data_loader):
@@ -116,9 +130,10 @@ class SimpleModel(pl.LightningModule):
                                                       object_of_interest_only=False,
                                                       var_threshold=None, track_ids=None,
                                                       all_object_of_interest_only=True,
-                                                      equal_time_distributed=True,
+                                                      equal_time_distributed=equal_time_distributed,
                                                       frame_numbers=frame_numbers,
                                                       df=annotation_df)
+            plot_extracted_features_and_verify_flow(features_, frames)
             features, cluster_centers = None, None
             if mode == FeaturesMode.UV:
                 # features, cluster_centers = self._process_features(features_, uv=True,
@@ -162,7 +177,7 @@ class SimpleModel(pl.LightningModule):
             pair_1 = features_dict[(frame + self.num_frames_to_build_bg_sub_model) % total_frames]
             for i in pair_0:
                 for j in pair_1:
-                    if i == j and i.track_id == 8:  # bad readability
+                    if i == j:  # and i.track_id == 8:  # bad readability
                         if test_mode:
                             per_frame_data.append(BasicTestData(frame=frame, track_id=i.track_id,
                                                                 pair_0_features=i.features,
@@ -234,10 +249,11 @@ class SimpleModel(pl.LightningModule):
 
 
 if __name__ == '__main__':
-    compute_features = False
-    time_distributed = False
+    compute_features = True
+
+    time_distributed = True
     resume = False
-    single_track = True
+    single_track = False
 
     test = False
     with warnings.catch_warnings():
@@ -269,9 +285,9 @@ if __name__ == '__main__':
         if compute_features:
             sdd_simple = SDDSimpleDataset(root=base_path, video_label=vid_label, frames_per_clip=1, num_workers=8,
                                           num_videos=1, video_number_to_use=video_number,
-                                          step_between_clips=1, transform=resize_frames, scale=0.5, frame_rate=30,
-                                          single_track_mode=False, track_id=5, multiple_videos=True)
-            sdd_loader = torch.utils.data.DataLoader(sdd_simple, 64)
+                                          step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
+                                          single_track_mode=False, track_id=5, multiple_videos=False)
+            sdd_loader = torch.utils.data.DataLoader(sdd_simple, 32)
 
             logger.info('Computing Features')
             if test:
@@ -279,18 +295,21 @@ if __name__ == '__main__':
                                                                                       annotation_df=
                                                                                       sdd_simple.annotations_df,
                                                                                       classic_clustering=False,
-                                                                                      test_mode=test)
+                                                                                      test_mode=test,
+                                                                                      equal_time_distributed=
+                                                                                      time_distributed)
                 features_save_dict = {'x': x, 'y': y, 'x_norm_dict': x_norm_dict, 'y_norm_dict': y_norm_dict,
                                       'track_id': track_id, 'frame': frame}
             else:
                 x, y = net.preprocess_data(sdd_loader, FeaturesMode.UV, annotation_df=sdd_simple.annotations_df,
-                                           classic_clustering=False, test_mode=test)
+                                           classic_clustering=False, test_mode=test,
+                                           equal_time_distributed=time_distributed)
                 features_save_dict = {'x': x, 'y': y}
 
             logger.info(f'Saving the features for video {vid_label.value}, video {video_number}')
             if save_path:
                 Path(save_path).mkdir(parents=True, exist_ok=True)
-            torch.save(features_save_dict, save_path + 'time_distributed_selected_track_features.pt')
+            torch.save(features_save_dict, save_path + file_name)
         else:
             logger.info('Setting up DataLoaders')
             train_feats = torch.load(train_dataset_path + file_name)

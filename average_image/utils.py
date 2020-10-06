@@ -1,11 +1,12 @@
 import os
+from itertools import cycle
 from typing import Optional, Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import PIL.Image as Image
-from matplotlib import patches
+from matplotlib import patches, cm
 from sklearn.decomposition import PCA
 from torchvision.datasets.folder import make_dataset
 from torchvision.datasets.utils import list_dir
@@ -293,16 +294,11 @@ def cal_centers(b_box):
     return np.vstack((x_mid, y_mid)).T
 
 
-def renormalize_features(features, options):
-    # todo: verify
-    cc_0 = denormalize(features[..., 0], options['max_0'], options['min_0'])
-    cc_1 = denormalize(features[..., 1], options['max_1'], options['min_1'])
+def renormalize_optical_flow(features, options):
     of_0 = denormalize(features[..., 0], options['f_max_0'], options['f_min_0'])
     of_1 = denormalize(features[..., 1], options['f_max_1'], options['f_min_1'])
-    features[..., 0] = cc_0
-    features[..., 1] = cc_1
-    features[..., 2] = of_0
-    features[..., 3] = of_1
+    features[..., 0] = of_0
+    features[..., 1] = of_1
     return features
 
 
@@ -349,6 +345,119 @@ def plot_with_centers(img_tensor, bbox, centers, nrows=2, ncols=2):
             plot_one_with_center(im, axs[r, c], bbox[img_idx[k]], centers[img_idx[k]], lw=None)
             k += 1
 
+    plt.show()
+
+
+def plot_with_one_bbox(img, box):
+    fig, axs = plt.subplots(1, 1, sharex='none', sharey='none',
+                            figsize=(12, 10))
+    axs.imshow(img)
+    rect = patches.Rectangle(xy=(box[0], box[1]), width=box[2] - box[0], height=box[3] - box[1],
+                             edgecolor=OBJECT_CLASS_COLOR_MAPPING[ObjectClasses.PEDESTRIAN], fill=False,
+                             linewidth=None)
+    axs.add_patch(rect)
+    plt.show()
+
+
+def renormalize_any_cluster(cluster_centers, options):
+    cc_0 = denormalize(cluster_centers[..., 0], options['max_1'], options['min_1'])
+    cc_1 = denormalize(cluster_centers[..., 1], options['max_0'], options['min_0'])
+    cluster_centers[..., 0] = cc_0
+    cluster_centers[..., 1] = cc_1
+    return cluster_centers
+
+
+def plot_extracted_features(frame_object_list, img=None):
+    object_points = []
+    for obj in frame_object_list:
+        renormalized_ = renormalize_any_cluster(obj.features[:, :2], obj.normalize_params).astype(np.int)
+        object_points.append([renormalized_[:, 0], renormalized_[:, 1]])
+
+    if img is not None:
+        plt.imshow(img)
+
+    colors = cm.rainbow(np.linspace(0, 1, 20))
+    # colors = cycle('bgrcmykbgrcmykbgrcmykbgrcmyk')
+    for obj_, col in zip(object_points, colors):
+        plt.plot(obj_[0], obj_[1], 'o', markerfacecolor=col, markersize=1, markeredgecolor='k', markeredgewidth=0.2)
+        plt.plot(int(obj_[0].mean()), int(obj_[1].mean()), '*', markerfacecolor='r', markersize=5, markeredgecolor='k',
+                 markeredgewidth=0.2)
+
+    plt.show()
+
+
+def plot_extracted_features_and_verify_flow(features, frames, batch_size=32):
+    total_frames = len(features)
+    for fr in range(total_frames):
+        of_frame_num = (fr + 12) % total_frames
+
+        if of_frame_num < fr:
+            break
+
+        current_frame = features[fr]
+        current_image = (frames[fr].permute(1, 2, 0) * 255).int().numpy()
+
+        of_frame = features[of_frame_num]
+        of_frame_image = (frames[of_frame_num].permute(1, 2, 0) * 255).int().numpy()
+
+        current_x_y = []
+        current_u_v = []
+        for obj in current_frame:
+            re_normalized_x_y = renormalize_any_cluster(obj.features[:, :2], obj.normalize_params).astype(np.int)
+            re_normalized_u_v = renormalize_optical_flow(obj.features[:, 2:], obj.normalize_params).astype(np.int)
+            current_x_y.append([re_normalized_x_y[:, 0], re_normalized_x_y[:, 1]])
+            current_u_v.append([re_normalized_u_v[:, 0], re_normalized_u_v[:, 1]])
+
+        future_of_x_y = []
+        for f_obj in of_frame:
+            re_normalized_x_y_f = renormalize_any_cluster(f_obj.features[:, :2], f_obj.normalize_params).astype(np.int)
+            future_of_x_y.append([re_normalized_x_y_f[:, 0], re_normalized_x_y_f[:, 1]])
+
+        fig, axs = plt.subplots(1, 3, sharex='none', sharey='none',
+                                figsize=(12, 10))
+        axs[0].imshow(current_image)
+        axs[1].imshow(of_frame_image)
+        axs[2].imshow(of_frame_image)
+
+        axs[0].set_title(f'Frame {fr}')
+        axs[1].set_title('Optical Flow Shifted')
+        axs[2].set_title(f'Frame {of_frame_num}')
+
+        colors = cm.rainbow(np.linspace(0, 1, 20))
+        for obj_, col in zip(current_x_y, colors):
+            axs[0].plot(obj_[0], obj_[1], 'o', markerfacecolor=col, markersize=1, markeredgecolor='k',
+                        markeredgewidth=0.2)
+            axs[0].plot(int(obj_[0].mean()), int(obj_[1].mean()), '*', markerfacecolor='r', markersize=5,
+                        markeredgecolor='k',
+                        markeredgewidth=0.2)
+
+        shifted_x_y = []
+        for xy, uv in zip(current_x_y, current_u_v):  # check which indices to sum
+            x_ = xy[0] + uv[0]
+            y_ = xy[1] + uv[1]
+            shifted_x_y.append([x_, y_])
+
+        for obj_, col in zip(shifted_x_y, colors):
+            axs[1].plot(obj_[0], obj_[1], 'o', markerfacecolor=col, markersize=1, markeredgecolor='k',
+                        markeredgewidth=0.2)
+            axs[1].plot(int(obj_[0].mean()), int(obj_[1].mean()), '*', markerfacecolor='r', markersize=5,
+                        markeredgecolor='k',
+                        markeredgewidth=0.2)
+
+        for obj_, col in zip(future_of_x_y, colors):
+            axs[2].plot(obj_[0], obj_[1], 'o', markerfacecolor=col, markersize=1, markeredgecolor='k',
+                        markeredgewidth=0.2)
+            axs[2].plot(int(obj_[0].mean()), int(obj_[1].mean()), '*', markerfacecolor='r', markersize=5,
+                        markeredgecolor='k',
+                        markeredgewidth=0.2)
+
+        plt.show()
+
+
+def plot_points_only(x, y):
+    plt.plot(x, y, 'o', markerfacecolor='r', markersize=5, markeredgecolor='k', markeredgewidth=0.2)
+    plt.plot(x.mean(), y.mean(), 'x', markerfacecolor='b', markersize=8, markeredgecolor='k',
+             markeredgewidth=0.2)
     plt.show()
 
 
@@ -461,7 +570,8 @@ if __name__ == '__main__':
 
 
 class AgentFeatures(object):
-    def __init__(self, features, track_id, frame_number, normalize_params, cluster_centers=None, cluster_labels=None):
+    def __init__(self, features, track_id, frame_number, normalize_params, optical_flow_frame_num,
+                 cluster_centers=None, cluster_labels=None):
         super(AgentFeatures, self).__init__()
         self.frame_number = frame_number
         self.features = features
@@ -469,6 +579,7 @@ class AgentFeatures(object):
         self.normalize_params = normalize_params
         self.cluster_centers = cluster_centers
         self.cluster_labels = cluster_labels
+        self.optical_flow_frame_num = optical_flow_frame_num
 
     def __repr__(self):
         pass  # auto-printing??

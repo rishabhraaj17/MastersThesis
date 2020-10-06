@@ -15,15 +15,15 @@ from sklearn.cluster import cluster_optics_dbscan
 from tqdm import tqdm
 
 from average_image.bbox_utils import add_bbox_to_axes, resize_v_frames, get_frame_annotations, preprocess_annotations, \
-    scale_annotations
+    scale_annotations, get_frame_annotations_and_skip_lost
 from average_image.constants import OBJECT_CLASS_COLOR_MAPPING, SDDVideoClasses
 from average_image.deep_networks_avg import get_vgg_layer_activations, get_resnet_layer_activations, \
     get_densenet_filtered_layer_activations
-from average_image.feature_clustering import MeanShiftClustering, HierarchicalClustering,\
+from average_image.feature_clustering import MeanShiftClustering, HierarchicalClustering, \
     AffinityPropagationClustering, DBSCANClustering, OPTICSClustering, Clustering, BirchClustering
 from average_image.layers import min_pool2d
 from average_image.utils import precision_recall, evaluate_clustering_per_frame, normalize, SDDMeta, \
-    evaluate_clustering_non_cc, AgentFeatures
+    evaluate_clustering_non_cc, AgentFeatures, plot_extracted_features, plot_points_only
 
 
 class FeatureExtractor(object):
@@ -625,22 +625,23 @@ class FeatureExtractor(object):
     def _prepare_data_xyuv_for_all_object_of_interest(flow, fr, processed_data, data_frame_num, use_intensities=False,
                                                       evaluation_mode: bool = False, return_options: bool = False,
                                                       track_ids=None, original_shape=None, new_shape=None, df=None,
-                                                      do_clustering=False):
+                                                      do_clustering=False, optical_flow_frame_num=None):
         if evaluation_mode:
             data_ = processed_data
         else:
             data_ = processed_data[fr]
         data_ = np.abs(data_)
-        mask = np.zeros_like(data_)
         all_agent_features = []
-        frame_annotation = get_frame_annotations(df, data_frame_num)
+        frame_annotation = get_frame_annotations_and_skip_lost(df, data_frame_num)
         annotations, _ = scale_annotations(frame_annotation, original_scale=original_shape,
                                            new_scale=new_shape, return_track_id=False,
                                            tracks_with_annotations=True)
-        for id in range(annotations.shape[0]):
-            mask[annotations[id][1]:annotations[id][3], annotations[id][0]:annotations[id][2]] = \
-                data_[annotations[id][1]:annotations[id][3], annotations[id][0]:annotations[id][2]]
+        for id_ in range(annotations.shape[0]):
+            mask = np.zeros_like(data_)
+            mask[annotations[id_][1]:annotations[id_][3], annotations[id_][0]:annotations[id_][2]] = \
+                data_[annotations[id_][1]:annotations[id_][3], annotations[id_][0]:annotations[id_][2]]
             object_idx = (mask > 0).nonzero()
+            # plot_points_only(object_idx[0], object_idx[1])
             if object_idx[0].size != 0:
                 intensities = mask[object_idx[0], object_idx[1]]
                 flow_idx = flow[object_idx[0], object_idx[1]]
@@ -670,15 +671,18 @@ class FeatureExtractor(object):
                     cluster_algo, n_clusters_ = FeatureExtractor._perform_clustering(data, max_0, max_1, min_0, min_1,
                                                                                      bandwidth=0.1, renormalize=True,
                                                                                      min_bin_freq=3, max_iter=300)
-                    all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id][-1].item(),
+                    all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id_][-1].item(),
                                                             frame_number=fr,
                                                             normalize_params=options,
                                                             cluster_centers=cluster_algo.cluster_centers,
-                                                            cluster_labels=cluster_algo.labels))
+                                                            cluster_labels=cluster_algo.labels,
+                                                            optical_flow_frame_num=optical_flow_frame_num))
                 else:
-                    all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id][-1].item(),
+                    all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id_][-1].item(),
                                                             frame_number=fr,
-                                                            normalize_params=options))
+                                                            normalize_params=options,
+                                                            optical_flow_frame_num=optical_flow_frame_num))
+
         return all_agent_features
 
     @staticmethod
@@ -1060,7 +1064,7 @@ class BackgroundSubtraction(FeatureExtractor):
         total_frames = frames.shape[0]
         data_all_frames = {}
         # for fr in tqdm(range(frames.shape[0])):
-        for fr, actual_fr in zip(range(frames.shape[0]), frame_numbers):
+        for fr, actual_fr in tqdm(zip(range(frames.shape[0]), frame_numbers), total=frames.shape[0]):
             if use_last_n_to_build_model:
                 # selected_frames = [(fr - i - 1) % total_frames for i in range(frames_to_build_model)]
                 selected_frames = [(fr + i) % total_frames for i in range(frames_to_build_model)]
@@ -1078,17 +1082,41 @@ class BackgroundSubtraction(FeatureExtractor):
             _ = self._process_preloaded_n_frames(n, frames_building_model, kernel, algo)
 
             # jump to the next desirable frame
-            interest_fr = (fr + frames_to_build_model) % total_frames
-            actual_interest_fr = (((actual_fr + frames_to_build_model) % total_frames) + frame_numbers[0]).item()
+            # interest_fr = (fr + frames_to_build_model) % total_frames
+            # actual_interest_fr = (((actual_fr + frames_to_build_model) % total_frames) + frame_numbers[0]).item()
+
+            # optical flow between current frame and 0.4 seconds ahead
+            interest_fr = fr % total_frames
+            actual_interest_fr = ((actual_fr % total_frames) + frame_numbers[0]).item()
+
+            of_interest_fr = (fr + frames_to_build_model) % total_frames
+            actual_of_interest_fr = (((actual_fr + frames_to_build_model) % total_frames) + frame_numbers[0]).item()
+
             mask = algo.apply(frames[interest_fr], learningRate=0)
             mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
 
             # flow between n and n+k
-            previous = cv.cvtColor(frames[fr], cv.COLOR_BGR2GRAY)
-            next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+            # previous = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+            # next_frame = cv.cvtColor(frames[of_interest_fr], cv.COLOR_BGR2GRAY)
+            #
+            # flow, rgb, mag, ang = self.get_optical_flow(previous_frame=previous, next_frame=next_frame,
+            #                                             all_results_out=True)
 
-            flow, rgb, mag, ang = self.get_optical_flow(previous_frame=previous, next_frame=next_frame,
-                                                        all_results_out=True)
+            # do not go in circle for flow estimation
+            if of_interest_fr < interest_fr:
+                break
+
+            # flow between consecutive frames
+            frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))
+            flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))
+            for of_i in range(interest_fr, of_interest_fr):
+                previous = cv.cvtColor(frames[of_i], cv.COLOR_BGR2GRAY)
+                next_frame = cv.cvtColor(frames[of_i + 1], cv.COLOR_BGR2GRAY)
+
+                flow_per_frame, rgb, mag, ang = self.get_optical_flow(previous_frame=previous, next_frame=next_frame,
+                                                                      all_results_out=True)
+                flow += flow_per_frame
+
             if use_color:
                 data, data_, max_0, max_1, min_0, min_1, threshold_img = \
                     self._prepare_data_xyuv_color(frames[interest_fr],
@@ -1117,8 +1145,11 @@ class BackgroundSubtraction(FeatureExtractor):
                                                                            track_ids=track_ids,
                                                                            original_shape=original_shape,
                                                                            new_shape=resized_shape,
-                                                                           df=df, do_clustering=classic_clustering)
+                                                                           df=df, do_clustering=classic_clustering,
+                                                                           optical_flow_frame_num=
+                                                                           frames_used_in_of_estimation)
                     data_all_frames.update({interest_fr: all_agent_features})
+                    # plot_extracted_features(all_agent_features, frames[actual_interest_fr])
                 else:
                     # Add classic clustering in them
                     data, data_, max_0, max_1, min_0, min_1, threshold_img, options = \

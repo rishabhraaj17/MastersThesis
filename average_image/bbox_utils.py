@@ -19,6 +19,12 @@ def get_frame_annotations(df: pd.DataFrame, frame_number: int):
     return idx.to_numpy()
 
 
+def get_frame_annotations_and_skip_lost(df: pd.DataFrame, frame_number: int):
+    idx: pd.DataFrame = df.loc[df["frame"] == frame_number]
+    idx: pd.DataFrame = idx.loc[idx["lost"] != 1]
+    return idx.to_numpy()
+
+
 def get_frame_by_track_annotations(df: pd.DataFrame, frame_number: int, track_id: int):
     filtered_by_track_id = df.loc[df["track_id"] == track_id]
     idx: pd.DataFrame = filtered_by_track_id.loc[filtered_by_track_id["frame"] == frame_number]

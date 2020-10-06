@@ -241,3 +241,4 @@ Plots
 Checkpoints
 unsupervised_tp_0/runs
 unsupervised_tp_0/lightning_logs
+lightning_logs

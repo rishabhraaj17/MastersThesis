@@ -4,9 +4,12 @@ from typing import Any, Tuple, Union, List
 
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
+from torchvision.utils import make_grid
 
 import pytorch_lightning as pl
-from torch.utils.data import DataLoader
+
+import matplotlib.pyplot as plt
 
 from average_image.constants import SDDVideoClasses
 from log import initialize_logging, get_logger
@@ -115,13 +118,13 @@ class SegNetUp3(nn.Module):
 
 
 class SegNet(pl.LightningModule):
-    def __init__(self, n_classes=3, in_channels=3, is_unpooling=True, lr=1e-5, batch_size=2, train_loader=None,
+    def __init__(self, n_classes=3, in_channels=3, is_unpooling=True, lr=1e-5, train_loader=None,
                  val_loader=None):
         super(SegNet, self).__init__()
 
         self.val_loader = val_loader
         self.train_loader = train_loader
-        self.save_hyperparameters('lr', 'batch_size')
+        self.save_hyperparameters('lr')
 
         self.in_channels = in_channels
         self.is_unpooling = is_unpooling
@@ -239,14 +242,20 @@ def main(args, video_label, train_video_num, val_video_num, inference_mode=False
                             pin_memory=args.pin_memory, drop_last=True)
     logger.info(f"DataLoaders built successfully")
 
-    model = SegNet(train_loader=train_loader, val_loader=val_loader)
-
-    logger.info(f"Train Network: {model.__class__.__name__}")
-
     if inference_mode:
+        model = SegNet.load_from_checkpoint('../lightning_logs/version_254245/checkpoints/epoch=19.ckpt')
+        logger.info(f"Inference Network: {model.__class__.__name__}")
         logger.info(f"Starting Inference")
-        return NotImplemented
+        model.eval()
+        frames, _ = next(iter(train_loader))
+        frames = frames.squeeze(1)
+        pred = model(frames)
+        plot = make_grid(torch.cat((frames, pred)), nrow=2)
+        plt.imshow(plot.permute(1, 2, 0).detach().numpy())
+        plt.show()
     else:
+        model = SegNet(train_loader=train_loader, val_loader=val_loader)
+        logger.info(f"Train Network: {model.__class__.__name__}")
         logger.info(f"Starting Training")
         trainer = pl.Trainer(auto_scale_batch_size=False, gpus=1, max_epochs=args.epochs)
         trainer.fit(model=model)
