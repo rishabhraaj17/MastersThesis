@@ -360,11 +360,14 @@ def plot_with_one_bbox(img, box):
 
 
 def renormalize_any_cluster(cluster_centers, options):
+    out = np.zeros_like(cluster_centers)
     cc_0 = denormalize(cluster_centers[..., 0], options['max_1'], options['min_1'])
     cc_1 = denormalize(cluster_centers[..., 1], options['max_0'], options['min_0'])
-    cluster_centers[..., 0] = cc_0
-    cluster_centers[..., 1] = cc_1
-    return cluster_centers
+    # cluster_centers[..., 0] = cc_0
+    # cluster_centers[..., 1] = cc_1
+    out[..., 0] = cc_0
+    out[..., 1] = cc_1
+    return out
 
 
 def plot_extracted_features(frame_object_list, img=None):

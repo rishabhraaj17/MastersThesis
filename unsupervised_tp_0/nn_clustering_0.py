@@ -133,7 +133,7 @@ class SimpleModel(pl.LightningModule):
                                                       equal_time_distributed=equal_time_distributed,
                                                       frame_numbers=frame_numbers,
                                                       df=annotation_df)
-            plot_extracted_features_and_verify_flow(features_, frames)
+            # plot_extracted_features_and_verify_flow(features_, frames)
             features, cluster_centers = None, None
             if mode == FeaturesMode.UV:
                 # features, cluster_centers = self._process_features(features_, uv=True,
@@ -261,17 +261,17 @@ if __name__ == '__main__':
 
         base_path = "../Datasets/SDD/"
         save_base_path = "../Datasets/SDD_Features/"
-        vid_label = SDDVideoClasses.LITTLE
+        vid_label = SDDVideoClasses.GATES
         video_number = 0
 
         net = SimpleModel(num_frames_to_build_bg_sub_model=12)
         save_path = f'{save_base_path}{vid_label.value}/video{video_number}/'
 
-        train_vid_label = SDDVideoClasses.QUAD
+        train_vid_label = SDDVideoClasses.GATES
         train_vid_num = 0
         train_dataset_path = f'{save_base_path}{train_vid_label.value}/video{train_vid_num}/'
 
-        inference_vid_label = SDDVideoClasses.QUAD
+        inference_vid_label = SDDVideoClasses.GATES
         inference_vid_num = 1
         inference_dataset_path = f'{save_base_path}{inference_vid_label.value}/video{inference_vid_num}/'
 
@@ -287,7 +287,7 @@ if __name__ == '__main__':
                                           num_videos=1, video_number_to_use=video_number,
                                           step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
                                           single_track_mode=False, track_id=5, multiple_videos=False)
-            sdd_loader = torch.utils.data.DataLoader(sdd_simple, 32)
+            sdd_loader = torch.utils.data.DataLoader(sdd_simple, 128)
 
             logger.info('Computing Features')
             if test:

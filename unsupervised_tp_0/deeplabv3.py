@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 
 
 class DeepLab(pl.LightningModule):
-    def __init__(self, num_classes=3, pretrained=True, lr=1e-5, train_loader=None,
+    def __init__(self, num_classes=3, pretrained=False, lr=1e-5, train_loader=None,
                  val_loader=None):
         super(DeepLab, self).__init__()
         self.deep_lab = deeplabv3_resnet50(pretrained=pretrained, num_classes=num_classes)
@@ -79,20 +79,21 @@ def main(args, video_label, train_video_num, val_video_num, inference_mode=False
                                    num_videos=1, video_number_to_use=val_video_num,
                                    step_between_clips=1, transform=resize_frames, scale=0.75, frame_rate=30,
                                    single_track_mode=False, track_id=5, multiple_videos=False)
-    val_loader = DataLoader(dataset=val_dataset, batch_size=args.batch_size * 2, shuffle=False,
+    val_loader = DataLoader(dataset=val_dataset, batch_size=args.batch_size, shuffle=False,
                             num_workers=args.num_workers,
                             pin_memory=args.pin_memory, drop_last=True)
     logger.info(f"DataLoaders built successfully")
 
     if inference_mode:
-        model = DeepLab.load_from_checkpoint('')
+        model = DeepLab.load_from_checkpoint('../lightning_logs/version_254348/checkpoints/epoch=5.ckpt',
+                                             )
         logger.info(f"Inference Network: {model.__class__.__name__}")
         logger.info(f"Starting Inference")
         model.eval()
         frames, _ = next(iter(train_loader))
         frames = frames.squeeze(1)
         pred = model(frames)
-        plot = make_grid(torch.cat((frames, pred)), nrow=2)
+        plot = make_grid(torch.cat((frames, pred['out'])), nrow=2)
         plt.imshow(plot.permute(1, 2, 0).detach().numpy())
         plt.show()
     else:
@@ -112,5 +113,5 @@ if __name__ == '__main__':
         parser_ = argparse.ArgumentParser('Training Script', parents=[get_args_parser()])
         parsed_args = parser_.parse_args()
 
-        main(parsed_args, video_label=vid_label, inference_mode=False, train_video_num=3,
+        main(parsed_args, video_label=vid_label, inference_mode=True, train_video_num=3,
              val_video_num=4)
