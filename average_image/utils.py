@@ -6,7 +6,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import PIL.Image as Image
+import torch
 from matplotlib import patches, cm
+import matplotlib.patches as mpatches
 from sklearn.decomposition import PCA
 from torchvision.datasets.folder import make_dataset
 from torchvision.datasets.utils import list_dir
@@ -179,6 +181,12 @@ def normalize(x):
     max_ = np.max(x)
     min_ = np.min(x)
     return (x - min_) / (max_ - min_), max_, min_
+
+
+def rescale_featues(x, max_range, min_range):
+    max_val = np.max(x)
+    min_val = np.min(x)
+    return (max_range - min_range) / (max_val - min_val) * (x - max_val) + max_range
 
 
 def denormalize(x, max_, min_):
@@ -389,7 +397,500 @@ def plot_extracted_features(frame_object_list, img=None):
     plt.show()
 
 
-def plot_extracted_features_and_verify_flow(features, frames, batch_size=32):
+def plot_points_predicted_and_true(predicted_points, true_points, actual_points=None):
+    plt.plot(predicted_points[..., 0], predicted_points[..., 1], 'o', markerfacecolor='orange', markersize=5,
+             markeredgecolor='k',
+             markeredgewidth=0.2, label='Predicted Position')
+    plt.plot((predicted_points[..., 0].mean()), (predicted_points[..., 1].mean()), '*', markerfacecolor='orange',
+             markersize=10,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    plt.plot(true_points[..., 0], true_points[..., 1], '^', markerfacecolor='g', markersize=5, markeredgecolor='k',
+             markeredgewidth=0.2, label='True Position')
+    plt.plot((true_points[..., 0].mean()), (true_points[..., 1].mean()), '*', markerfacecolor='g',
+             markersize=10,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    if actual_points is not None:
+        plt.plot(actual_points[..., 0], actual_points[..., 1], 'p', markerfacecolor='blue', markersize=5,
+                 markeredgecolor='k',
+                 markeredgewidth=0.2, label='Position prior shift')
+        plt.plot((actual_points[..., 0].mean()), (actual_points[..., 1].mean()), '*', markerfacecolor='blue',
+                 markersize=10,
+                 markeredgecolor='k', markeredgewidth=0.2)
+
+    plt.legend(loc="upper left")
+    plt.show()
+
+
+def plot_points_predicted_and_true_center_only(predicted_points, true_points, actual_points=None, img=None):
+    if img is not None:
+        plt.imshow(img)
+    plt.plot((predicted_points[..., 0]), (predicted_points[..., 1]), '*', markerfacecolor='orange',
+             markersize=3,
+             markeredgecolor='k', markeredgewidth=0.2, label='Predicted Center')
+
+    # plt.plot(true_points[..., 0], true_points[..., 1], '^', markerfacecolor='g', markersize=1, markeredgecolor='k',
+    #          markeredgewidth=0.2, label='True Position')
+    plt.plot((true_points[..., 0].mean()), (true_points[..., 1].mean()), '*', markerfacecolor='g',
+             markersize=3,
+             markeredgecolor='k', markeredgewidth=0.2, label='True Position')
+
+    if actual_points is not None:
+        plt.plot((actual_points[..., 0].mean()), (actual_points[..., 1].mean()), '*', markerfacecolor='blue',
+                 markersize=3,
+                 markeredgecolor='k', markeredgewidth=0.2, label='Center prior shift')
+
+    plt.legend(loc="upper left")
+    plt.show()
+
+
+def trajectory_length(trajectory):
+    length = len(trajectory)
+    trajectory_len = 0
+    for i in range(length - 1):
+        trajectory_len += np.linalg.norm(trajectory[i] - trajectory[i + 1], 2)
+    return trajectory_len
+
+
+def plot_points_predicted_and_true_center_only_rnn(predicted_points, true_points, actual_points=None, imgs=None):
+    fig, axs = plt.subplots(2, 3, sharex='none', sharey='none',
+                            figsize=(12, 9))
+    if imgs is not None:
+        axs[0, 0].imshow(imgs[0])
+        axs[0, 1].imshow(imgs[1])
+        axs[0, 2].imshow(imgs[2])
+        axs[1, 0].imshow(imgs[3])
+        axs[1, 1].imshow(imgs[4])
+        axs[1, 2].imshow(imgs[0])
+
+        axs[0, 0].set_title('T = 0')
+        axs[0, 1].set_title('T = 1')
+        axs[0, 2].set_title('T = 2')
+        axs[1, 0].set_title('T = 3')
+        axs[1, 1].set_title('T = 4')
+        axs[1, 2].set_title('Image T = 0')
+
+        m_size = 3
+    else:
+        m_size = 9
+
+    axs[0, 0].plot((predicted_points[0][..., 0]), (predicted_points[0][..., 1]), '*', markerfacecolor='orange',
+                   markersize=m_size,
+                   markeredgecolor='k', markeredgewidth=0.2)
+
+    axs[0, 0].plot((true_points[0][..., 0].mean()), (true_points[0][..., 1].mean()), '*', markerfacecolor='g',
+                   markersize=m_size,
+                   markeredgecolor='k', markeredgewidth=0.2)
+
+    if actual_points is not None:
+        axs[0, 0].plot((actual_points[0][..., 0].mean()), (actual_points[0][..., 1].mean()), '*',
+                       markerfacecolor='blue',
+                       markersize=m_size,
+                       markeredgecolor='k', markeredgewidth=0.2)
+
+    axs[0, 1].plot((predicted_points[1][..., 0]), (predicted_points[1][..., 1]), '*', markerfacecolor='orange',
+                   markersize=m_size,
+                   markeredgecolor='k', markeredgewidth=0.2)
+
+    axs[0, 1].plot((true_points[1][..., 0].mean()), (true_points[1][..., 1].mean()), '*', markerfacecolor='g',
+                   markersize=m_size,
+                   markeredgecolor='k', markeredgewidth=0.2)
+
+    if actual_points is not None:
+        axs[0, 1].plot((actual_points[1][..., 0].mean()), (actual_points[1][..., 1].mean()), '*',
+                       markerfacecolor='blue',
+                       markersize=m_size,
+                       markeredgecolor='k', markeredgewidth=0.2)
+
+    axs[0, 2].plot((predicted_points[2][..., 0]), (predicted_points[2][..., 1]), '*', markerfacecolor='orange',
+                   markersize=m_size,
+                   markeredgecolor='k', markeredgewidth=0.2)
+
+    axs[0, 2].plot((true_points[2][..., 0].mean()), (true_points[2][..., 1].mean()), '*', markerfacecolor='g',
+                   markersize=m_size,
+                   markeredgecolor='k', markeredgewidth=0.2)
+
+    if actual_points is not None:
+        axs[0, 2].plot((actual_points[2][..., 0].mean()), (actual_points[2][..., 1].mean()), '*',
+                       markerfacecolor='blue',
+                       markersize=m_size,
+                       markeredgecolor='k', markeredgewidth=0.2)
+
+    axs[1, 0].plot((predicted_points[3][..., 0]), (predicted_points[3][..., 1]), '*', markerfacecolor='orange',
+                   markersize=m_size,
+                   markeredgecolor='k', markeredgewidth=0.2)
+
+    axs[1, 0].plot((true_points[3][..., 0].mean()), (true_points[3][..., 1].mean()), '*', markerfacecolor='g',
+                   markersize=m_size,
+                   markeredgecolor='k', markeredgewidth=0.2)
+
+    if actual_points is not None:
+        axs[1, 0].plot((actual_points[3][..., 0].mean()), (actual_points[3][..., 1].mean()), '*',
+                       markerfacecolor='blue',
+                       markersize=m_size,
+                       markeredgecolor='k', markeredgewidth=0.2)
+
+    axs[1, 1].plot((predicted_points[4][..., 0]), (predicted_points[4][..., 1]), '*', markerfacecolor='orange',
+                   markersize=m_size,
+                   markeredgecolor='k', markeredgewidth=0.2)
+
+    axs[1, 1].plot((true_points[4][..., 0].mean()), (true_points[4][..., 1].mean()), '*', markerfacecolor='g',
+                   markersize=m_size,
+                   markeredgecolor='k', markeredgewidth=0.2)
+
+    if actual_points is not None:
+        axs[1, 1].plot((actual_points[4][..., 0].mean()), (actual_points[4][..., 1].mean()), '*',
+                       markerfacecolor='blue',
+                       markersize=m_size,
+                       markeredgecolor='k', markeredgewidth=0.2)
+
+    legends_dict = {'orange': 'Predicted Center',
+                    'g': 'Optical Flow Center',
+                    'blue': 'Center prior shift'}
+
+    patches = [mpatches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=patches, loc=2)
+
+    plt.show()
+
+
+def plot_trajectory_rnn(predicted_points, true_points, actual_points=None, imgs=None, gt=False):
+    fig, axs = plt.subplots(1, 1, sharex='none', sharey='none',
+                            figsize=(12, 9))
+    if imgs is not None:
+        axs.imshow(imgs[0])
+
+        axs.set_title('Image')
+
+        m_size = 3
+    else:
+        m_size = 9
+
+    if gt:
+        gt_text = 'GT Trajectory'
+    else:
+        gt_text = 'Optical Flow Trajectory'
+
+    # axs.plot((predicted_points[..., 0]), (predicted_points[..., 1]), '*', markerfacecolor='orange',
+    #          markersize=m_size,
+    #          markeredgecolor='k', markeredgewidth=0.2)
+    #
+    # axs.plot((true_points[..., 0]), (true_points[..., 1]), '*', markerfacecolor='g',
+    #          markersize=m_size,
+    #          markeredgecolor='k', markeredgewidth=0.2)
+    #
+    # if actual_points is not None:
+    #     axs.plot((actual_points[0][..., 0]), (actual_points[0][..., 1]), '*',
+    #              markerfacecolor='blue',
+    #              markersize=m_size,
+    #              markeredgecolor='k', markeredgewidth=0.2)
+
+    axs.plot((predicted_points[..., 0]), (predicted_points[..., 1]), color='orange')
+
+    axs.plot((predicted_points[..., 0]), (predicted_points[..., 1]), '*', markerfacecolor='red',
+             markersize=m_size,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    axs.plot((true_points[..., 0]), (true_points[..., 1]), color='g')
+
+    axs.plot((true_points[..., 0]), (true_points[..., 1]), '*', markerfacecolor='aqua',
+             markersize=m_size,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    if actual_points is not None:
+        axs.plot((actual_points[0][..., 0]), (actual_points[0][..., 1]), '*',
+                 markerfacecolor='blue',
+                 markersize=m_size,
+                 markeredgecolor='k', markeredgewidth=0.2)
+
+    legends_dict = {'orange': 'Predicted Trajectory',
+                    'g': gt_text,
+                    'blue': 'Center at T=0'}
+
+    patches = [mpatches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=patches, loc=2)
+
+    plt.show()
+
+
+def plot_trajectory_rnn_tb(predicted_points, true_points, actual_points=None, imgs=None, gt=False):
+    fig, axs = plt.subplots(1, 1, sharex='none', sharey='none',
+                            figsize=(12, 9))
+    if imgs is not None:
+        axs.imshow(imgs[0])
+
+        axs.set_title('Image')
+
+        m_size = 3
+    else:
+        m_size = 9
+
+    if gt:
+        gt_text = 'GT Trajectory'
+    else:
+        gt_text = 'Optical Flow Trajectory'
+
+    axs.plot((predicted_points[..., 0]), (predicted_points[..., 1]), color='orange')
+
+    axs.plot((predicted_points[..., 0]), (predicted_points[..., 1]), '*', markerfacecolor='red',
+             markersize=m_size,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    axs.plot((true_points[..., 0]), (true_points[..., 1]), color='g')
+
+    axs.plot((true_points[..., 0]), (true_points[..., 1]), '*', markerfacecolor='aqua',
+             markersize=m_size,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    if actual_points is not None:
+        axs.plot((actual_points[0][..., 0]), (actual_points[0][..., 1]), '*',
+                 markerfacecolor='blue',
+                 markersize=m_size,
+                 markeredgecolor='k', markeredgewidth=0.2)
+
+    legends_dict = {'orange': 'Predicted Trajectory',
+                    'g': gt_text,
+                    'blue': 'Center at T=0'}
+
+    patches = [mpatches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=patches, loc=2)
+
+    return fig
+
+def plot_trajectory_rnn_compare(predicted_points, predicted_points_gt, true_points, true_points_of, of_l2, gt_l2,
+                                actual_points=None, imgs=None, gt=False, m_ratio=None, save_path=None, show=False):
+    fig, axs = plt.subplots(1, 1, sharex='none', sharey='none',
+                            figsize=(12, 9))
+    if imgs is not None:
+        axs.imshow(imgs[0])
+
+        axs.set_title('Image')
+
+        m_size = 3
+    else:
+        m_size = 9
+
+    # if gt:
+    #     gt_text = 'GT Trajectory'
+    # else:
+    #     gt_text = 'Optical Flow Trajectory'
+
+    axs.plot((predicted_points[..., 0]), (predicted_points[..., 1]), color='orange')
+
+    axs.plot((predicted_points[..., 0]), (predicted_points[..., 1]), '*', markerfacecolor='red',
+             markersize=m_size,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    axs.plot((predicted_points_gt[..., 0]), (predicted_points_gt[..., 1]), color='magenta')
+
+    axs.plot((predicted_points_gt[..., 0]), (predicted_points_gt[..., 1]), '*', markerfacecolor='red',
+             markersize=m_size,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    axs.plot((true_points[..., 0]), (true_points[..., 1]), color='g')
+
+    axs.plot((true_points[..., 0]), (true_points[..., 1]), '*', markerfacecolor='aqua',
+             markersize=m_size,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    axs.plot((true_points_of[..., 0]), (true_points_of[..., 1]), color='navy')
+
+    axs.plot((true_points_of[..., 0]), (true_points_of[..., 1]), '*', markerfacecolor='aqua',
+             markersize=m_size,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    if actual_points is not None:
+        axs.plot((actual_points[0][..., 0]), (actual_points[0][..., 1]), '*',
+                 markerfacecolor='blue',
+                 markersize=m_size,
+                 markeredgecolor='k', markeredgewidth=0.2)
+
+    legends_dict = {'orange': 'OF Predicted Trajectory',
+                    'navy': 'OF Trajectory',
+                    'magenta': 'GT Predicted Trajectory',
+                    'g': 'GT Trajectory',
+                    'blue': 'Center at T=0'}
+
+    ade = compute_ade(predicted_points, true_points_of)
+    fde = compute_fde(predicted_points, true_points_of)
+
+    ade_gt = compute_ade(predicted_points_gt, true_points)
+    fde_gt = compute_fde(predicted_points_gt, true_points)
+
+    fig.suptitle(f'Optical Flow L2 bw points: {of_l2}'
+                 f'\nGT L2 bw points: {gt_l2}\n'
+                 f'OF - ADE: {ade} |  FDE: {fde}\n'
+                 f'GT - ADE: {ade_gt} |  FDE: {fde_gt}\n'
+                 f'[m]OF - ADE: {ade * m_ratio} |  FDE: {fde * m_ratio}\n'
+                 f'[m]GT - ADE: {ade_gt * m_ratio} |  FDE: {fde_gt * m_ratio}')
+
+    patches = [mpatches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=patches, loc=2)
+
+    if save_path is not None:
+        fig.savefig(f"{save_path}.png")
+
+    if show:
+        plt.show()
+
+
+def plot_trajectory_rnn_compare_side_by_side(predicted_points, predicted_points_gt, true_points, true_points_of, of_l2,
+                                             gt_l2,
+                                             actual_points=None, imgs=None, gt=False, m_ratio=None, save_path=None,
+                                             show=False):
+    fig, (axs, axs_gt) = plt.subplots(1, 2, sharex='none', sharey='none',
+                                      figsize=(12, 9))
+    if imgs is not None:
+        axs.imshow(imgs[0])
+
+        axs.set_title('OF Based')
+
+        axs_gt.imshow(imgs[0])
+
+        axs_gt.set_title('GT Based')
+
+        m_size = 3
+    else:
+        m_size = 9
+
+    # if gt:
+    #     gt_text = 'GT Trajectory'
+    # else:
+    #     gt_text = 'Optical Flow Trajectory'
+
+    axs.plot((predicted_points[..., 0]), (predicted_points[..., 1]), color='orange')
+
+    axs.plot((predicted_points[..., 0]), (predicted_points[..., 1]), '*', markerfacecolor='red',
+             markersize=m_size,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    axs_gt.plot((predicted_points_gt[..., 0]), (predicted_points_gt[..., 1]), color='magenta')
+
+    axs_gt.plot((predicted_points_gt[..., 0]), (predicted_points_gt[..., 1]), '*', markerfacecolor='red',
+                markersize=m_size,
+                markeredgecolor='k', markeredgewidth=0.2)
+
+    axs_gt.plot((true_points[..., 0]), (true_points[..., 1]), color='g')
+
+    axs_gt.plot((true_points[..., 0]), (true_points[..., 1]), '*', markerfacecolor='aqua',
+                markersize=m_size,
+                markeredgecolor='k', markeredgewidth=0.2)
+
+    axs.plot((true_points_of[..., 0]), (true_points_of[..., 1]), color='navy')
+
+    axs.plot((true_points_of[..., 0]), (true_points_of[..., 1]), '*', markerfacecolor='aqua',
+             markersize=m_size,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    if actual_points is not None:
+        axs.plot((actual_points[0][..., 0]), (actual_points[0][..., 1]), '*',
+                 markerfacecolor='blue',
+                 markersize=m_size,
+                 markeredgecolor='k', markeredgewidth=0.2)
+        axs_gt.plot((actual_points[0][..., 0]), (actual_points[0][..., 1]), '*',
+                    markerfacecolor='blue',
+                    markersize=m_size,
+                    markeredgecolor='k', markeredgewidth=0.2)
+
+    legends_dict = {'orange': 'OF Predicted Trajectory',
+                    'navy': 'OF Trajectory',
+                    'magenta': 'GT Predicted Trajectory',
+                    'g': 'GT Trajectory',
+                    'blue': 'Center at T=0'}
+
+    ade = compute_ade(predicted_points, true_points_of)
+    fde = compute_fde(predicted_points, true_points_of)
+
+    ade_gt = compute_ade(predicted_points_gt, true_points)
+    fde_gt = compute_fde(predicted_points_gt, true_points)
+
+    fig.suptitle(f'Optical Flow L2 bw points: {of_l2}'
+                 f'\nGT L2 bw points: {gt_l2}\n'
+                 f'OF - ADE: {ade} |  FDE: {fde}\n'
+                 f'GT - ADE: {ade_gt} |  FDE: {fde_gt}\n'
+                 f'[m]OF - ADE: {ade * m_ratio} |  FDE: {fde * m_ratio}\n'
+                 f'[m]GT - ADE: {ade_gt * m_ratio} |  FDE: {fde_gt * m_ratio}')
+
+    patches = [mpatches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=patches, loc=2)
+
+    if save_path is not None:
+        fig.savefig(f"{save_path}.png")
+
+    if show:
+        plt.show()
+
+
+def compute_ade(predicted_trajs, gt_traj):
+    error = np.linalg.norm(predicted_trajs - gt_traj, axis=-1)
+    ade = np.mean(error, axis=-1)
+    return ade.flatten()
+
+
+def compute_fde(predicted_trajs, gt_traj):
+    final_error = np.linalg.norm(predicted_trajs[-1] - gt_traj[-1], axis=-1)
+    # final_error = np.linalg.norm(predicted_trajs[:, :, -1] - gt_traj[-1], axis=-1)
+    return final_error.flatten()
+
+
+def plot_and_compare_points_predicted_and_true(predicted_points, true_points,
+                                               predicted_points_1, true_points_1, actual_points=None,
+                                               actual_points_1=None):
+    f, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 8))
+    ax1.plot(predicted_points[..., 0], predicted_points[..., 1], 'o', markerfacecolor='orange', markersize=5,
+             markeredgecolor='k',
+             markeredgewidth=0.2, label='Predicted Position')
+    ax1.plot((predicted_points[..., 0].mean()), (predicted_points[..., 1].mean()), '*', markerfacecolor='orange',
+             markersize=10,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    ax1.plot(true_points[..., 0], true_points[..., 1], '^', markerfacecolor='g', markersize=5, markeredgecolor='k',
+             markeredgewidth=0.2, label='True Position')
+    ax1.plot((true_points[..., 0].mean()), (true_points[..., 1].mean()), '*', markerfacecolor='g',
+             markersize=10,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    if actual_points is not None:
+        ax1.plot(actual_points[..., 0], actual_points[..., 1], 'p', markerfacecolor='blue', markersize=5,
+                 markeredgecolor='k',
+                 markeredgewidth=0.2, label='Actual Position')
+        ax1.plot((actual_points[..., 0].mean()), (actual_points[..., 1].mean()), '*', markerfacecolor='blue',
+                 markersize=10,
+                 markeredgecolor='k', markeredgewidth=0.2)
+
+    ax2.plot(predicted_points_1[..., 0], predicted_points_1[..., 1], 'o', markerfacecolor='orange', markersize=5,
+             markeredgecolor='k',
+             markeredgewidth=0.2)
+    ax2.plot((predicted_points_1[..., 0].mean()), (predicted_points_1[..., 1].mean()), '*', markerfacecolor='orange',
+             markersize=10,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    ax2.plot(true_points_1[..., 0], true_points_1[..., 1], '^', markerfacecolor='g', markersize=5, markeredgecolor='k',
+             markeredgewidth=0.2)
+    ax2.plot((true_points_1[..., 0].mean()), (true_points_1[..., 1].mean()), '*', markerfacecolor='g',
+             markersize=10,
+             markeredgecolor='k', markeredgewidth=0.2)
+
+    if actual_points is not None:
+        ax2.plot(actual_points_1[..., 0], actual_points_1[..., 1], 'p', markerfacecolor='blue', markersize=5,
+                 markeredgecolor='k',
+                 markeredgewidth=0.2)
+        ax2.plot((actual_points_1[..., 0].mean()), (actual_points_1[..., 1].mean()), '*', markerfacecolor='blue',
+                 markersize=10,
+                 markeredgecolor='k', markeredgewidth=0.2)
+
+    # print(f'Predicted Center: {(predicted_points[..., 0].mean()), (predicted_points[..., 1].mean())}, '
+    #       f'True Center: {(true_points[..., 0].mean()), (true_points[..., 1].mean())}')
+
+    ax1.set_title('Un-normalized')
+    ax2.set_title('Normalized')
+
+    f.legend(loc="upper left")
+    plt.show()
+
+
+def plot_extracted_features_and_verify_flow(features, frames, batch_size=32, normalized=False):
     total_frames = len(features)
     for fr in range(total_frames):
         of_frame_num = (fr + 12) % total_frames
@@ -406,15 +907,26 @@ def plot_extracted_features_and_verify_flow(features, frames, batch_size=32):
         current_x_y = []
         current_u_v = []
         for obj in current_frame:
-            re_normalized_x_y = renormalize_any_cluster(obj.features[:, :2], obj.normalize_params).astype(np.int)
-            re_normalized_u_v = renormalize_optical_flow(obj.features[:, 2:], obj.normalize_params).astype(np.int)
-            current_x_y.append([re_normalized_x_y[:, 0], re_normalized_x_y[:, 1]])
-            current_u_v.append([re_normalized_u_v[:, 0], re_normalized_u_v[:, 1]])
+            if normalized:
+                re_normalized_x_y = renormalize_any_cluster(obj.features[:, :2], obj.normalize_params).astype(np.int)
+                re_normalized_u_v = renormalize_optical_flow(obj.features[:, 2:4], obj.normalize_params).astype(np.int)
+                current_x_y.append([re_normalized_x_y[:, 0], re_normalized_x_y[:, 1]])
+                current_u_v.append([re_normalized_u_v[:, 0], re_normalized_u_v[:, 1]])
+            else:
+                x_y_ = obj.features[:, :2].astype(np.int)
+                u_v_ = obj.features[:, 2:4].astype(np.int)
+                current_x_y.append([x_y_[:, 0], x_y_[:, 1]])
+                current_u_v.append([u_v_[:, 0], u_v_[:, 1]])
 
         future_of_x_y = []
         for f_obj in of_frame:
-            re_normalized_x_y_f = renormalize_any_cluster(f_obj.features[:, :2], f_obj.normalize_params).astype(np.int)
-            future_of_x_y.append([re_normalized_x_y_f[:, 0], re_normalized_x_y_f[:, 1]])
+            if normalized:
+                re_normalized_x_y_f = renormalize_any_cluster(f_obj.features[:, :2], f_obj.normalize_params).astype(
+                    np.int)
+                future_of_x_y.append([re_normalized_x_y_f[:, 0], re_normalized_x_y_f[:, 1]])
+            else:
+                x_y_f_ = f_obj.features[:, :2].astype(np.int)
+                future_of_x_y.append([x_y_f_[:, 0], x_y_f_[:, 1]])
 
         fig, axs = plt.subplots(1, 3, sharex='none', sharey='none',
                                 figsize=(12, 10))
@@ -547,33 +1059,8 @@ class SDDMeta(object):
         print(out_w, out_h)
 
 
-if __name__ == '__main__':
-    pd.options.display.max_columns = None
-    p = '../Datasets/SDD/H_SDD.txt'
-    # meta = SDDMeta(p)
-    # m = meta.get_meta(SDDVideoDatasets.LITTLE, 0)
-    # print(m[0]['Ratio'].to_numpy())
-    # print(float(m[1][-1, -1]))
-    # # print(meta.get_meta(SDDVideoClasses.GATES, 0, 'A')[0])
-    # meta.test_scale_logic()
-
-    # im_path = '/home/rishabh/TrajectoryPrediction/Datasets/SDD/annotations/gates/video0/reference.jpg'
-    #
-    # im_ = Image.open(im_path)
-    # print(im_.info)
-
-    root_ = '../Datasets/SDD/'
-    vid_label = SDDVideoClasses.QUAD
-    sdd_annotations = SDDAnnotations(root_, vid_label)
-    # sdd_annotations.augment_annotations()
-    # dff = pd.read_csv('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/annotations'
-    #                   '/little/video0/annotation_augmented.csv')
-    # dff.drop(dff.columns[[0]], axis=1)
-    print()
-
-
 class AgentFeatures(object):
-    def __init__(self, features, track_id, frame_number, normalize_params, optical_flow_frame_num,
+    def __init__(self, features, track_id, frame_number, normalize_params, optical_flow_frame_num, bbox_center,
                  cluster_centers=None, cluster_labels=None):
         super(AgentFeatures, self).__init__()
         self.frame_number = frame_number
@@ -583,6 +1070,7 @@ class AgentFeatures(object):
         self.cluster_centers = cluster_centers
         self.cluster_labels = cluster_labels
         self.optical_flow_frame_num = optical_flow_frame_num
+        self.bbox_center = bbox_center
 
     def __repr__(self):
         pass  # auto-printing??
@@ -593,12 +1081,20 @@ class AgentFeatures(object):
 
 
 class BasicTrainData(object):
-    def __init__(self, frame, track_id, pair_0_features, pair_1_features):
+    def __init__(self, frame, track_id, pair_0_features, pair_1_features, bbox_center_t0, bbox_center_t1,
+                 frame_t0, frame_t1):
         super(BasicTrainData, self).__init__()
         self.frame = frame
         self.track_id = track_id
         self.pair_0_features = pair_0_features
         self.pair_1_features = pair_1_features
+        self.bbox_center_t0 = bbox_center_t0
+        self.bbox_center_t1 = bbox_center_t1
+        self.frame_t0 = frame_t0
+        self.frame_t1 = frame_t1
+
+    def __eq__(self, other):
+        return self.track_id == other.track_id
 
 
 class BasicTestData(object):
@@ -610,3 +1106,28 @@ class BasicTestData(object):
         self.pair_1_features = pair_1_features
         self.pair_1_normalize = pair_1_normalize
         self.pair_0_normalize = pair_0_normalize
+
+
+if __name__ == '__main__':
+    pd.options.display.max_columns = None
+    p = '../Datasets/SDD/H_SDD.txt'
+    meta = SDDMeta(p)
+    m = meta.get_meta(SDDVideoDatasets.LITTLE, 0)
+    print(m[0]['Ratio'].to_numpy())
+    # print(float(m[1][-1, -1]))
+    # # print(meta.get_meta(SDDVideoClasses.GATES, 0, 'A')[0])
+    # meta.test_scale_logic()
+
+    # im_path = '/home/rishabh/TrajectoryPrediction/Datasets/SDD/annotations/gates/video0/reference.jpg'
+    #
+    # im_ = Image.open(im_path)
+    # print(im_.info)
+
+    # root_ = '../Datasets/SDD/'
+    # vid_label = SDDVideoClasses.QUAD
+    # sdd_annotations = SDDAnnotations(root_, vid_label)
+    # # sdd_annotations.augment_annotations()
+    # # dff = pd.read_csv('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/annotations'
+    # #                   '/little/video0/annotation_augmented.csv')
+    # # dff.drop(dff.columns[[0]], axis=1)
+    print()

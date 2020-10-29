@@ -283,6 +283,19 @@ class FeaturesDataset(Dataset):
         return self.x[item], self.y[item]
 
 
+class FeaturesDatasetExtra(FeaturesDataset):
+    def __init__(self, x, y, frames, track_ids, bbox_center_x, bbox_center_y, preprocess: bool, mode: FeaturesMode):
+        super(FeaturesDatasetExtra, self).__init__(x, y, preprocess, mode)
+        self.frames = frames
+        self.track_ids = track_ids
+        self.bbox_center_x = bbox_center_x
+        self.bbox_center_y = bbox_center_y
+
+    def __getitem__(self, item):
+        return self.x[item], self.y[item], self.frames[item], self.track_ids[item], \
+               self.bbox_center_x[item], self.bbox_center_y[item]
+
+
 class SDDDataset(VisionDataset):
 
     def __init__(self, root: str, video_label: SDDVideoClasses, frames_per_clip: int, step_between_clips: int = 1,
