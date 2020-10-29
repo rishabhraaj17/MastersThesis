@@ -46,8 +46,10 @@ def features_collate_fn(batch):
 class SimpleModel(pl.LightningModule):
     def __init__(self, meta=None, original_frame_shape=None, num_frames_to_build_bg_sub_model=12, lr=1e-5,
                  mode=FeaturesMode.UV, layers_mode=None, meta_video=None, meta_train_video_number=None,
-                 meta_val_video_number=None, time_steps=5):
+                 meta_val_video_number=None, time_steps=5, train_dataset=None, val_dataset=None):
         super(SimpleModel, self).__init__()
+        self.val_dataset = val_dataset
+        self.train_dataset = train_dataset
         if mode == FeaturesMode.UV:
             in_features = 2
         elif mode == FeaturesMode.XYUV:
@@ -101,74 +103,21 @@ class SimpleModel(pl.LightningModule):
         self.train_ratio = float(self.meta.get_meta(meta_video, meta_train_video_number)[0]['Ratio'].to_numpy()[0])
         self.val_ratio = float(self.meta.get_meta(meta_video, meta_val_video_number)[0]['Ratio'].to_numpy()[0])
         self.ts = time_steps
+        self.rnn_mode = True if layers_mode == 'rnn' else False
 
         self.save_hyperparameters('lr', 'time_steps')
 
-    def forward(self, x):
-        features1, features2, frame_, track_id = x
+    def forward(self, x, cx=None, hx=None):
+        if self.rnn_mode:
+            block_1 = self.block_1(x)
+            hx, cx = self.rnn_cell(block_1, (hx, cx))
+            out = self.block_2(hx)
+        else:
+            out = self.layers(x)
+        return out
 
-        hx, cx = torch.zeros(size=(1, 32), device=self.device), torch.zeros(size=(1, 32), device=self.device)
-
-        last_input_velocity = None
-        last_pred_center = None
-        pred_centers = []
-        moved_points_by_true_of_list = []
-
-        if len(features1) == self.ts:
-            for idx_i, i in enumerate(range(self.ts)):
-                feat1, feat2 = features1[i].squeeze().float(), features2[i].squeeze().float()
-                try:
-                    center_xy, center_true_uv, center_past_uv = self.find_center_point(feat1)
-                except IndexError:
-                    print('Bad Data')
-                    break
-                if idx_i == 0:
-                    last_input_velocity = center_past_uv.unsqueeze(0)
-                    last_pred_center = center_xy
-                block_1 = self.block_1(last_input_velocity)
-                hx, cx = self.rnn_cell(block_1, (hx, cx))
-                block_2 = self.block_2(hx)
-
-                moved_points_by_true_of = feat1[:, :2] + feat1[:, 2:4]
-                moved_points_by_true_of_list.append(moved_points_by_true_of)
-                # pred_center = center_xy + block_2
-                pred_center = last_pred_center + block_2
-                # pred_center = last_pred_center + (block_2 * 0.4)  # velocity * time
-                last_input_velocity = block_2
-                last_pred_center = pred_center
-                pred_centers.append(pred_center)
-
-        return pred_centers, moved_points_by_true_of_list
-
-    def _one_step_rnn_old(self, batch):
-        features1, features2, frame_, track_id = batch
-
-        hx, cx = torch.zeros(size=(1, 32), device=self.device), torch.zeros(size=(1, 32), device=self.device)
-
-        total_loss = torch.tensor(data=0, dtype=torch.float32, device=self.device)
-        for i in range(self.ts):
-            if len(features1) == self.ts:
-
-                feat1, feat2 = features1[i].squeeze().float(), features2[i].squeeze().float()
-                try:
-                    center_xy, center_true_uv, center_past_uv = self.find_center_point(feat1)
-                except IndexError:
-                    print('Bad Data')
-                    continue
-                block_1 = self.block_1(center_past_uv.unsqueeze(0))
-                hx, cx = self.rnn_cell(block_1, (hx, cx))
-                block_2 = self.block_2(hx)
-
-                moved_points_by_true_of = feat1[:, :2] + feat1[:, 2:4]
-                pred_center = center_xy + block_2
-                total_loss += self.cluster_center_loss_meters(points=moved_points_by_true_of,
-                                                              pred_center=pred_center.squeeze(0))
-            else:
-                total_loss = torch.zeros(size=(5, 5), device=self.device, requires_grad=True).mean()
-
-        return total_loss / len(features1)
-
-    def _one_step_rnn(self, batch):
+    def _one_step_rnn(self, batch, log_plot=False, of_based=True, gt_all_points_based=False,
+                      gt_bbox_center_based=False, center_based_loss=False):
         features1, features2, frame_, track_id, bbox_center1, bbox_center2 = batch
 
         hx, cx = torch.zeros(size=(1, 32), device=self.device), torch.zeros(size=(1, 32), device=self.device)
@@ -183,6 +132,16 @@ class SimpleModel(pl.LightningModule):
         ade = None
         fde = None
         fig = None
+        shifted_points = None
+
+        if of_based and not center_based_loss:
+            criterion = self.cluster_center_loss_meters
+        elif of_based and center_based_loss:
+            criterion = self.cluster_center_points_center_loss_meters
+        elif gt_all_points_based:
+            criterion = self.cluster_center_loss_meters
+        else:
+            criterion = self.cluster_center_points_center_loss_meters_bbox_gt
 
         if len(features1) == self.ts:
             for idx_i, i in enumerate(range(self.ts)):
@@ -190,38 +149,31 @@ class SimpleModel(pl.LightningModule):
                                                        bbox_center1[i].float(), bbox_center2[i].float()
                 try:
                     center_xy, center_true_uv, center_past_uv = self.find_center_point(feat1)
-                    # moved_points_by_true_of = feat2[:, :2]  # for gt based
-                    # moved_points_by_true_of = bb_center2  # for bbox_center gt based
+                    if gt_all_points_based:
+                        shifted_points = feat2[:, :2]
+                    if gt_bbox_center_based:
+                        shifted_points = bb_center2
                 except IndexError:
                     bad_data = True
-                    print('Bad Data')
                     break
+
                 if idx_i == 0:
                     last_input_velocity = center_past_uv.unsqueeze(0)
                     last_pred_center = center_xy
-                block_1 = self.block_1(last_input_velocity)
-                hx, cx = self.rnn_cell(block_1, (hx, cx))
-                block_2 = self.block_2(hx)
 
-                moved_points_by_true_of = feat1[:, :2] + feat1[:, 2:4]  # for of based
-                moved_points_by_true_of_list.append(moved_points_by_true_of)
-                # pred_center = center_xy + block_2
+                block_2 = self(cx=cx, hx=hx, last_input_velocity=last_input_velocity)
+
+                if of_based:
+                    shifted_points = feat1[:, :2] + feat1[:, 2:4]
+
+                moved_points_by_true_of_list.append(shifted_points)
                 pred_center = last_pred_center + block_2
-                # pred_center = last_pred_center + (block_2 * 0.4)  # velocity * time
                 last_input_velocity = block_2
                 last_pred_center = pred_center
                 pred_centers.append(pred_center.squeeze(0))
                 actual_points_list.append(feat1[:, :2].detach().cpu().mean(dim=0).numpy())
 
-                total_loss += self.cluster_center_loss_meters(points=moved_points_by_true_of,
-                                                              pred_center=pred_center.squeeze(0))
-
-                # total_loss += self.cluster_center_points_center_loss_meters(points=moved_points_by_true_of,
-                #                                                             pred_center=pred_center.squeeze(0))
-
-                # total_loss += self.cluster_center_points_center_loss_meters_bbox_gt(
-                #     points_center=moved_points_by_true_of,
-                #     pred_center=pred_center.squeeze(0))
+                total_loss += criterion(points=shifted_points, pred_center=pred_center.squeeze(0))
 
             predicted_points = [p.detach().cpu().numpy() for p in pred_centers]
             true_points = [p.detach().cpu().mean(dim=0).numpy() for p in moved_points_by_true_of_list]
@@ -230,10 +182,12 @@ class SimpleModel(pl.LightningModule):
                 ade = compute_ade(np.stack(predicted_points), np.stack(true_points)).item()
                 fde = compute_fde(np.stack(predicted_points), np.stack(true_points)).item()
 
-                # fig = plot_trajectory_rnn_tb(predicted_points=np.stack(predicted_points),
-                #                              true_points=np.stack(true_points),
-                #                              actual_points=actual_points_list,
-                #                              imgs=None, gt=False)
+                if log_plot:
+                    fig = plot_trajectory_rnn_tb(predicted_points=np.stack(predicted_points),
+                                                 true_points=np.stack(true_points),
+                                                 actual_points=actual_points_list,
+                                                 imgs=None, gt=False)
+        # Fixme: fix dataset, remove hacks
         else:
             total_loss = torch.zeros(size=(5, 5), device=self.device, requires_grad=True).mean()
 
@@ -241,19 +195,6 @@ class SimpleModel(pl.LightningModule):
             total_loss = torch.zeros(size=(5, 5), device=self.device, requires_grad=True).mean()
 
         return total_loss / len(features1), ade, fde, fig
-
-    def _one_step_old(self, batch):
-        # features, cluster_centers, centers = self.preprocess_data(batch, self.mode)
-        features1, features2 = batch
-        features1, features2 = features1.squeeze().float(), features2.squeeze().float()
-        pred = self(features1[:, 2:])
-        current_center = self._calculate_mean(features1[:, :2])
-        pred_displacement = self._calculate_mean(pred)
-        pred_center = current_center + pred_displacement
-        # true_center = self._calculate_mean(features2[:, :2])
-        # loss = self.center_based_loss(pred_center=pred_center, target_center=true_center)
-        loss = self.cluster_center_loss(points=features2[:, :2], pred_center=pred_center)
-        return loss
 
     def _one_step(self, batch):
         features1, features2 = batch
@@ -277,7 +218,6 @@ class SimpleModel(pl.LightningModule):
         try:
             pred = self(features1[:, 4:])
         except IndexError:
-            print('Bad Data')
             return torch.zeros((5, 5), requires_grad=True).float().mean()
         # predicted optical flow moved points
         moved_points_pred_of = features1[:, :2] + pred
@@ -292,21 +232,13 @@ class SimpleModel(pl.LightningModule):
     def _one_step_center_only(self, batch):
         features1, features2, frame_, track_id_ = batch
         features1, features2 = features1.squeeze().float(), features2.squeeze().float()
-        # input prior velocity
-        # pred = self(center_past_uv)
         try:
             # find the center
             center_xy, center_true_uv, center_past_uv = self.find_center_point(features1)
             pred = self(center_past_uv)
         except IndexError:
-            print('Bad Data')
             return torch.zeros((5, 5), requires_grad=True).float().mean()
-        # pred = self(features1[:, 4:])
-        # try:
-        #     pred = self(features1[:, 4:])
-        # except IndexError:
-        #     print('Bad Data')
-        #     return torch.zeros((5, 5), requires_grad=True).float().mean()
+
         # predicted optical flow moved points
         # moved_points_pred_of = features1[:, :2] + pred
         # move points by actual optical flow
@@ -322,7 +254,7 @@ class SimpleModel(pl.LightningModule):
         xy = points[:, :2]
         mean = self._calculate_mean(xy)
         idx = None
-        dist = 100000
+        dist = np.inf
         for p, point in enumerate(xy):
             d = F.mse_loss(point, mean)
             if d < dist:
@@ -384,7 +316,8 @@ class SimpleModel(pl.LightningModule):
         return [opt], schedulers
 
     def preprocess_data(self, data_loader, mode: FeaturesMode, annotation_df, classic_clustering=False,
-                        test_mode=False, equal_time_distributed=True, normalized=True):
+                        test_mode=False, equal_time_distributed=True, normalized=True,
+                        one_step_feature_extraction=False):
         # original_shape=None, resize_shape=None):
         remaining_frames = None
         remaining_frames_idx = None
@@ -420,18 +353,19 @@ class SimpleModel(pl.LightningModule):
                                                          last_frame_from_last_used_batch)
             # plot_extracted_features_and_verify_flow(features_, frames)
             accumulated_features = {**accumulated_features, **features_}
-            features, cluster_centers = None, None
-            # if mode == FeaturesMode.UV:
-            #     # features, cluster_centers = self._process_features(features_, uv=True,
-            #     #                                                    classic_clustering=classic_clustering)
-            #     features = self._process_complex_features(features_, uv=True, test_mode=test_mode)
-            #     x, y = self._extract_trainable_features(features)
-            #     x_ += x
-            #     y_ += y
-            # if mode == FeaturesMode.XYUV:
-            #     return NotImplemented
-            # features, cluster_centers = self._process_features(features_, uv=False,
-            #                                                    classic_clustering=classic_clustering)
+            if one_step_feature_extraction:
+                if mode == FeaturesMode.UV:
+                    # features, cluster_centers = self._process_features(features_, uv=True,
+                    #                                                    classic_clustering=classic_clustering)
+                    features = self._process_complex_features(features_, uv=True, test_mode=test_mode)
+                    x, y = self._extract_trainable_features(features)
+                    x_ += x
+                    y_ += y
+                if mode == FeaturesMode.XYUV:
+                    return NotImplemented
+                features, cluster_centers = self._process_features(features_, uv=False,
+                                                                   classic_clustering=classic_clustering)
+                return features, cluster_centers
         return accumulated_features
 
     def _process_features(self, features_dict: dict, uv=True, classic_clustering=False):
@@ -499,16 +433,15 @@ class SimpleModel(pl.LightningModule):
                                                                     pair_0_normalize=i.normalize_params,
                                                                     pair_1_normalize=j.normalize_params))
                             else:
-                                per_frame_data.append(BasicTrainData(frame=frame_ +
-                                                                           self.num_frames_to_build_bg_sub_model *
-                                                                           (k - 1),
-                                                                     track_id=i.track_id,
-                                                                     pair_0_features=i.features,
-                                                                     pair_1_features=j.features,
-                                                                     frame_t0=i.frame_number,
-                                                                     frame_t1=j.frame_number,
-                                                                     bbox_center_t0=i.bbox_center,
-                                                                     bbox_center_t1=j.bbox_center))
+                                per_frame_data.append(
+                                    BasicTrainData(frame=frame_ + self.num_frames_to_build_bg_sub_model * (k - 1),
+                                                   track_id=i.track_id,
+                                                   pair_0_features=i.features,
+                                                   pair_1_features=j.features,
+                                                   frame_t0=i.frame_number,
+                                                   frame_t1=j.frame_number,
+                                                   bbox_center_t0=i.bbox_center,
+                                                   bbox_center_t1=j.bbox_center))
                                 # per_frame_data.append([i.features, j.features])
                 per_batch_data.append(per_frame_data)
                 per_frame_data = []
@@ -576,6 +509,7 @@ class SimpleModel(pl.LightningModule):
         return x_, y_
 
     def _extract_test_features(self, train_data):
+        # No use
         frame = []
         track_id = []
         x_ = []
@@ -593,7 +527,6 @@ class SimpleModel(pl.LightningModule):
         return x_, y_, x_normalize, y_normalize, track_id, frame
 
     def center_based_loss(self, pred_center, target_center):
-        # pred_center = current_center + pred
         return F.mse_loss(pred_center, target_center)
 
     def cluster_center_loss(self, points, pred_center):
@@ -609,7 +542,6 @@ class SimpleModel(pl.LightningModule):
             to_m = self.val_ratio
         loss = 0
         for point in points:
-            # loss += torch.norm((pred_center * point), p=2, dim=-1)
             loss += self.l2_norm(pred_center, point) * to_m
         return loss / len(points)
 
@@ -631,33 +563,20 @@ class SimpleModel(pl.LightningModule):
         return loss
 
     def l2_norm(self, point1, point2):
-        # return ((((point1[0] - point2[0]) * to_m).pow(2)) + (((point1[1] - point2[1]) * to_m).pow(2))).sqrt()
-        # return (((point1[0] - point2[0]).pow(2)) + ((point1[1] - point2[1]).pow(2))).sqrt()
-        return torch.norm(point1 - point2, p=2)  # l2 norm
+        return torch.norm(point1 - point2, p=2)
 
     def _calculate_mean(self, points):
         return points.mean(axis=0)
 
     def train_dataloader(self):
         # train_dataset = FeaturesDataset(train_x, train_y, mode=FeaturesMode.UV, preprocess=False)
-        train_dataset__ = FeaturesDatasetExtra(train_x, train_y, frames=train_frames, track_ids=train_track_ids,
-                                               mode=FeaturesMode.UV, preprocess=False, bbox_center_x=train_center_x,
-                                               bbox_center_y=train_center_y)
-        # train_subset = torch.utils.data.Subset(train_dataset, [0, 1])
-        return torch.utils.data.DataLoader(train_dataset__, 1)
+        # train_dataset__ = FeaturesDatasetExtra(train_x, train_y, frames=train_frames, track_ids=train_track_ids,
+        #                                        mode=FeaturesMode.UV, preprocess=False, bbox_center_x=train_center_x,
+        #                                        bbox_center_y=train_center_y)
+        return torch.utils.data.DataLoader(self.train_dataset, 1)
 
     def val_dataloader(self):
-        # val_subset = torch.utils.data.Subset(val_dataset, [0])
-        return torch.utils.data.DataLoader(val_dataset, 1)
-
-    def test_sample(self, batch):
-        x_, y_, x_norm_dict_, y_norm_dict_, track_id_, frame_num = batch
-        features1, features2 = x_.squeeze().float(), y_.squeeze().float()
-        pred = self(x_)
-        pred = self(features1[:, 2:])
-        current_center = self._calculate_mean(features1[:, :2])
-        pred_displacement = self._calculate_mean(pred)
-        pred_center = current_center + pred_displacement
+        return torch.utils.data.DataLoader(self.val_dataset, 1)
 
 
 if __name__ == '__main__':
@@ -753,8 +672,8 @@ if __name__ == '__main__':
         elif velocity_based:
             save_path = inference_dataset_path
             logger.info('Setting up DataLoaders')
-            # train_feats = torch.load(save_path
-            #                          + 'time_distributed_dict_with_gt_bbox_centers.pt')  # time_distributed_dict
+            train_feats = torch.load(save_path
+                                     + 'time_distributed_dict_with_gt_bbox_centers.pt')  # time_distributed_dict
             # # feats_data = net._process_complex_features(train_feats)
             # # data_x, data_y, data_frame_info, data_track_id_info = net._extract_trainable_features(feats_data,
             # #                                                                                       frame_info=True)
@@ -763,22 +682,19 @@ if __name__ == '__main__':
             # # if save_path:
             # #     Path(save_path).mkdir(parents=True, exist_ok=True)
             # # torch.save(features_save_dict, save_path + file_name)
-            #
-            # # Stage 1 - RNN
-            # feats_data = net._process_complex_features_rnn(train_feats)
-            # # data_x, data_y = net._extract_trainable_features(feats_data)
-            # # features_save_dict = {'x': data_x, 'y': data_y}
+
+            # Stage 1 - RNN
+            feats_data = net._process_complex_features_rnn(train_feats)
             # logger.info(f'Saving the features for video {vid_label.value}, video {video_number}')
             # if save_path:
             #     Path(save_path).mkdir(parents=True, exist_ok=True)
             # torch.save(feats_data, save_path + 'pre_train_rnn_data_with_gt_bbox_centers.pt')  # pre_train_rnn_data
 
             # Stage 2 - RNN
-            train_feats = torch.load(save_path
-                                     + 'pre_train_rnn_data_with_gt_bbox_centers.pt')  # pre_train_rnn_data
-            # feats_data = net._process_complex_features(train_feats)
+            # train_feats = torch.load(save_path
+            #                          + 'pre_train_rnn_data_with_gt_bbox_centers.pt')  # pre_train_rnn_data
             data_x, data_y, data_frame_info, data_track_id_info, data_bbox_center_x, data_bbox_center_y = \
-                net._extract_trainable_features_rnn(train_feats,
+                net._extract_trainable_features_rnn(feats_data,
                                                     return_frame_info=True)
             features_save_dict = {'x': data_x, 'y': data_y, 'frames': data_frame_info, 'track_ids': data_track_id_info,
                                   'bbox_center_x': data_bbox_center_x, 'bbox_center_y': data_bbox_center_y}
@@ -828,9 +744,8 @@ if __name__ == '__main__':
             train_loader = torch.utils.data.DataLoader(train_subset, 1)
 
             val_loader = torch.utils.data.DataLoader(val_dataset, 1)
-            # , shuffle = False,
-            # sampler = torch.utils.data.SequentialSampler(val_dataset))
 
+            # One-Step NN
             # m = SimpleModel.load_from_checkpoint(meta=meta, 'lightning_logs/version_11/checkpoints/epoch=9.ckpt',
             #                                      layers_mode='small',
             #                           meta_video=SDDVideoDatasets.QUAD, meta_train_video_number=train_vid_num,
@@ -851,6 +766,7 @@ if __name__ == '__main__':
             #                                                true_points=moved_points_by_true_of.detach().numpy(),
             #                                                actual_points=features1[:, :2].detach().numpy())
 
+            # One-Step NN - all points
             # m = SimpleModel.load_from_checkpoint('lightning_logs/version_12/checkpoints/epoch=20.ckpt',
             #                                      layers_mode='small', meta=meta,
             #                           meta_video=SDDVideoDatasets.QUAD, meta_train_video_number=train_vid_num,
@@ -866,6 +782,7 @@ if __name__ == '__main__':
             #                                    moved_points_by_true_of.detach().numpy(),
             #                                    features1[:, :2].detach().numpy())
 
+            # One-Step NN wih plot
             # m = SimpleModel.load_from_checkpoint('lightning_logs/version_13/checkpoints/epoch=99.ckpt', meta=meta,
             #                                      layers_mode='small',
             #                                      meta_video=SDDVideoDatasets.QUAD,
@@ -904,15 +821,18 @@ if __name__ == '__main__':
                 'layers_mode': 'rnn',
                 'meta_video': SDDVideoDatasets.QUAD,
                 'meta_train_video_number': train_vid_num,
-                'meta_val_video_number': inference_vid_num
+                'meta_val_video_number': inference_vid_num,
+                'train_dataset': train_dataset,
+                'val_dataset': val_dataset,
+                'time_steps': 5
             }
             of_model = SimpleModel(**kwargs_dict)
             of_model.load_state_dict(torch.load('lightning_logs/version_33/checkpoints/epoch=30.ckpt')['state_dict'])
             # of_model = torch.load('../Plots/overfit_scheduler_b1_of.pt')
             of_model.eval()
             time_steps = 5
-            for batch in tqdm(val_loader):
-                features1, features2, frame_, track_id, bbox_center1, bbox_center2 = batch
+            for batch_inference in tqdm(val_loader):
+                features1, features2, frame_, track_id, bbox_center1, bbox_center2 = batch_inference
                 frame_nums = [f.item() for f in frame_]
 
                 hx, cx = torch.zeros(size=(1, 32)), torch.zeros(size=(1, 32))
@@ -920,7 +840,7 @@ if __name__ == '__main__':
                 total_loss = torch.tensor(data=0, dtype=torch.float32)
                 img_frames = []
                 pred_centers = []
-                moved_points_by_true_of_list = []
+                gt_based_shifted_points_list = []
                 actual_points_list = []
                 last_input_velocity = None
                 last_pred_center = None
@@ -945,7 +865,7 @@ if __name__ == '__main__':
                         try:
                             center_xy, center_true_uv, center_past_uv = of_model.find_center_point(feat1)
                             # moved_points_by_true_of = feat2[:, :2]  # for gt based
-                            moved_points_by_true_of = bb_center2  # for bbox_center gt based
+                            gt_based_shifted_points = bb_center2  # for bbox_center gt based
                         except IndexError:
                             print('Bad Data')
                             break
@@ -967,7 +887,7 @@ if __name__ == '__main__':
 
                         # moved_points_by_true_of = feat1[:, :2] + feat1[:, 2:4]  # of based
                         # moved_points_by_true_of_center = moved_points_by_true_of.mean(0)  # for of based
-                        moved_points_by_true_of_list.append(moved_points_by_true_of)
+                        gt_based_shifted_points_list.append(gt_based_shifted_points)
                         # pred_center = center_xy + block_2
                         pred_center = last_pred_center + block_2
                         # pred_center = last_pred_center + (block_2 * 0.4)  # velocity * time - bad
@@ -1005,7 +925,7 @@ if __name__ == '__main__':
                         # logger.info(f'{i} -> Pred Center: {last_pred_center}')
 
                     predicted_points = [p.detach().numpy() for p in pred_centers]
-                    true_points = [p.detach().mean(dim=0).numpy() for p in moved_points_by_true_of_list]
+                    true_points = [p.detach().mean(dim=0).numpy() for p in gt_based_shifted_points_list]
                     logger.info(f'Pred Trajectory Length: '
                                 f'{np.linalg.norm(predicted_points[-1] - predicted_points[0], 2)}')
                     logger.info(f'True Trajectory Length: {np.linalg.norm(true_points[-1] - true_points[0], 2)}')
@@ -1032,9 +952,6 @@ if __name__ == '__main__':
                     #                                                imgs=None)
 
         elif train_velocity_based:
-            net = SimpleModel(meta=meta, num_frames_to_build_bg_sub_model=12, layers_mode='rnn',
-                              meta_video=SDDVideoDatasets.QUAD, meta_train_video_number=train_vid_num,
-                              meta_val_video_number=inference_vid_num, lr=1e-2)
             # file_name = 'time_distributed_velocity_features_with_frame_track_rnn.pt'
             file_name = 'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers.pt'
             logger.info('Setting up DataLoaders')
@@ -1042,6 +959,10 @@ if __name__ == '__main__':
             train_x, train_y, train_frames, train_track_ids, train_center_x, train_center_y = \
                 train_feats['x'], train_feats['y'], train_feats['frames'], train_feats['track_ids'], \
                 train_feats['bbox_center_x'], train_feats['bbox_center_y']
+
+            train_dataset = FeaturesDatasetExtra(train_x, train_y, frames=train_frames, track_ids=train_track_ids,
+                                                 mode=FeaturesMode.UV, preprocess=False, bbox_center_x=train_center_x,
+                                                 bbox_center_y=train_center_y)
 
             inference_feats = torch.load(inference_dataset_path + file_name)
             inference_x, inference_y, inference_frames, inference_track_ids, inference_center_x, inference_center_y = \
@@ -1060,6 +981,11 @@ if __name__ == '__main__':
             val_dataset, test_dataset = torch.utils.data.random_split(inference_dataset, [val_length, test_length],
                                                                       generator=torch.Generator().manual_seed(42))
 
+            net = SimpleModel(meta=meta, num_frames_to_build_bg_sub_model=12, layers_mode='rnn',
+                              meta_video=SDDVideoDatasets.QUAD, meta_train_video_number=train_vid_num,
+                              meta_val_video_number=inference_vid_num, lr=1e-2, train_dataset=train_dataset,
+                              val_dataset=val_dataset)
+            
             logger.info('Setting up network')
 
             # from pytorch_lightning import loggers as pl_loggers
@@ -1172,7 +1098,8 @@ if __name__ == '__main__':
 
             net = SimpleModel(meta=meta, num_frames_to_build_bg_sub_model=12, layers_mode='rnn',
                               meta_video=SDDVideoDatasets.QUAD, meta_train_video_number=train_vid_num,
-                              meta_val_video_number=inference_vid_num)
+                              meta_val_video_number=inference_vid_num, train_dataset=train_dataset,
+                              val_dataset=val_dataset)
 
             opt = torch.optim.Adam(net.parameters(), lr=1e-3)  # center based 1e-2, points 1e-3
             # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt)
@@ -1184,8 +1111,8 @@ if __name__ == '__main__':
                 total_loss = torch.tensor(data=0, dtype=torch.float32)
                 opt.zero_grad()
 
-                for batch in train_loader:
-                    features1, features2, frame_, track_id, bbox_center1, bbox_center2 = batch
+                for batch_inference in train_loader:
+                    features1, features2, frame_, track_id, bbox_center1, bbox_center2 = batch_inference
                     frame_nums = [f.item() for f in frame_]
 
                     hx, cx = torch.zeros(size=(1, 32)), torch.zeros(size=(1, 32))
@@ -1193,7 +1120,7 @@ if __name__ == '__main__':
                     total_loss = torch.tensor(data=0, dtype=torch.float32)
                     img_frames = []
                     pred_centers = []
-                    moved_points_by_true_of_list = []
+                    gt_based_shifted_points_list = []
                     actual_points_list = []
                     last_input_velocity = None
                     last_pred_center = None
@@ -1220,7 +1147,7 @@ if __name__ == '__main__':
                             try:
                                 center_xy, center_true_uv, center_past_uv = net.find_center_point(feat1)
                                 # moved_points_by_true_of = feat2[:, :2]  # for gt based
-                                moved_points_by_true_of = bb_center2  # for bbox_center gt based
+                                gt_based_shifted_points = bb_center2  # for bbox_center gt based
                             except IndexError:
                                 print('Bad Data')
                                 break
@@ -1243,15 +1170,16 @@ if __name__ == '__main__':
                             # block_2 = m.block_2(hx)
                             # logger.info(f'{i} -> Input Velocity: {last_input_velocity}')
                             # logger.info(f'{i} -> Current Center: {last_pred_center}')
-                            block_1 = net.block_1(last_input_velocity)
-                            hx, cx = net.rnn_cell(block_1, (hx, cx))
-                            block_2 = net.block_2(hx)
+                            with torch.no_grad():
+                                block_1 = net.block_1(last_input_velocity)
+                                hx, cx = net.rnn_cell(block_1, (hx, cx))
+                                block_2 = net.block_2(hx)
 
                             true_velocity = feat1[:, 2:4].mean(dim=0).unsqueeze(0)
 
                             # moved_points_by_true_of = feat1[:, :2] + feat1[:, 2:4]
-                            moved_points_by_true_of_center = moved_points_by_true_of.mean(0)
-                            moved_points_by_true_of_list.append(moved_points_by_true_of)
+                            moved_points_by_true_of_center = gt_based_shifted_points.mean(0)
+                            gt_based_shifted_points_list.append(gt_based_shifted_points)
                             # pred_center = center_xy + block_2
                             pred_center = last_pred_center + block_2
                             # pred_center = last_pred_center + (block_2 * 0.4)  # velocity * time - bad
@@ -1292,14 +1220,14 @@ if __name__ == '__main__':
                             # logger.info(f'*****Next Step*****')
                             # logger.info(f'{i} -> Pred Center: {last_pred_center}')
 
-                            total_loss += net.cluster_center_points_center_loss_meters(points=moved_points_by_true_of,
+                            total_loss += net.cluster_center_points_center_loss_meters(points=gt_based_shifted_points,
                                                                                        pred_center=pred_center.squeeze(
                                                                                            0))
                         # opt.zero_grad()
                         loss_list.append(total_loss.item())
                         total_loss.backward()
                         predicted_points = [p.detach().numpy() for p in pred_centers]
-                        true_points = [p.detach().mean(dim=0).numpy() for p in moved_points_by_true_of_list]
+                        true_points = [p.detach().mean(dim=0).numpy() for p in gt_based_shifted_points_list]
                         # logger.info(f'Pred Trajectory Length: '
                         #             f'{np.linalg.norm(predicted_points[-1] - predicted_points[0], 2)}')
                         # logger.info(f'True Trajectory Length: {np.linalg.norm(true_points[-1] - true_points[0], 2)}')
@@ -1371,7 +1299,10 @@ if __name__ == '__main__':
                 'layers_mode': 'rnn',
                 'meta_video': SDDVideoDatasets.QUAD,
                 'meta_train_video_number': train_vid_num,
-                'meta_val_video_number': inference_vid_num
+                'meta_val_video_number': inference_vid_num,
+                'train_dataset': train_dataset,
+                'val_dataset': val_dataset,
+                'time_steps': 5
             }
             of_model = SimpleModel(**kwargs_dict)
             # after debug - of based
@@ -1395,8 +1326,8 @@ if __name__ == '__main__':
             ade_dataset_gt_of_gt = []
             fde_dataset_gt_of_gt = []
 
-            for sav_i, batch in enumerate(tqdm(val_loader)):
-                features1, features2, frame_, track_id, bbox_center1, bbox_center2 = batch
+            for sav_i, batch_inference in enumerate(tqdm(val_loader)):
+                features1, features2, frame_, track_id, bbox_center1, bbox_center2 = batch_inference
                 frame_nums = [f.item() for f in frame_]
 
                 hx, cx = torch.zeros(size=(1, 32)), torch.zeros(size=(1, 32))
@@ -1406,8 +1337,8 @@ if __name__ == '__main__':
                 img_frames = []
                 pred_centers = []
                 pred_centers_gt = []
-                moved_points_by_true_of_list = []
-                moved_points_by_true_of_list_true = []
+                gt_based_shifted_points_list = []
+                of_based_shifted_points_list = []
                 actual_points_list = []
                 last_input_velocity = None
                 last_pred_center = None
@@ -1431,8 +1362,8 @@ if __name__ == '__main__':
                                                                bbox_center1[i].float(), bbox_center2[i].float()
                         try:
                             center_xy, center_true_uv, center_past_uv = of_model.find_center_point(feat1)
-                            # moved_points_by_true_of = feat2[:, :2]  # for gt based
-                            moved_points_by_true_of = bb_center2  # for bbox_center gt based
+                            # gt_based_shifted_points = feat2[:, :2]  # for gt based
+                            gt_based_shifted_points = bb_center2  # for bbox_center gt based
                         except IndexError:
                             print('Bad Data')
                             break
@@ -1455,29 +1386,29 @@ if __name__ == '__main__':
                             hx_gt, cx_gt = gt_model.rnn_cell(block_1_gt, (hx_gt, cx_gt))
                             block_2_gt = gt_model.block_2(hx_gt)
 
-                        # moved_points_by_true_of = feat1[:, :2] + feat1[:, 2:4]
-                        # moved_points_by_true_of_center = moved_points_by_true_of.mean(0)
-                        moved_points_by_true_of_list.append(moved_points_by_true_of)
+                        # gt_based_shifted_points = feat1[:, :2] + feat1[:, 2:4]
+                        # moved_points_by_true_of_center = gt_based_shifted_points.mean(0)
+                        gt_based_shifted_points_list.append(gt_based_shifted_points)
 
-                        moved_points_by_true_of_true = feat1[:, :2] + feat1[:, 2:4]
-                        moved_points_by_true_of_center_true = moved_points_by_true_of_true.mean(0)
-                        moved_points_by_true_of_list_true.append(moved_points_by_true_of_true)
+                        of_based_shifted_points = feat1[:, :2] + feat1[:, 2:4]
+                        moved_points_by_true_of_center_true = of_based_shifted_points.mean(0)
+                        of_based_shifted_points_list.append(of_based_shifted_points)
                         # pred_center = center_xy + block_2
                         pred_center = last_pred_center + block_2
                         pred_center_gt = last_pred_center_gt + block_2_gt
                         # pred_center = last_pred_center + (block_2 * 0.4)  # velocity * time - bad
 
                         # loss
-                        loss_gt_all_points = of_model.cluster_center_loss_meters(moved_points_by_true_of,
+                        loss_gt_all_points = of_model.cluster_center_loss_meters(gt_based_shifted_points,
                                                                                  pred_center_gt)
                         loss_gt_points_center = of_model. \
-                            cluster_center_points_center_loss_meters(moved_points_by_true_of,
+                            cluster_center_points_center_loss_meters(gt_based_shifted_points,
                                                                      pred_center_gt)
 
-                        loss_of_all_points = gt_model.cluster_center_loss_meters(moved_points_by_true_of_true,
+                        loss_of_all_points = gt_model.cluster_center_loss_meters(of_based_shifted_points,
                                                                                  pred_center)
                         loss_of_points_center = gt_model. \
-                            cluster_center_points_center_loss_meters(moved_points_by_true_of_true,
+                            cluster_center_points_center_loss_meters(of_based_shifted_points,
                                                                      pred_center)
 
                         # logger.info('')
@@ -1511,8 +1442,8 @@ if __name__ == '__main__':
                     predicted_points = [p.detach().numpy() for p in pred_centers]
                     predicted_points_gt = [p.detach().numpy() for p in pred_centers_gt]
 
-                    true_points = [p.detach().mean(dim=0).numpy() for p in moved_points_by_true_of_list]
-                    true_points_of = [p.detach().mean(dim=0).numpy() for p in moved_points_by_true_of_list_true]
+                    true_points = [p.detach().mean(dim=0).numpy() for p in gt_based_shifted_points_list]
+                    true_points_of = [p.detach().mean(dim=0).numpy() for p in of_based_shifted_points_list]
 
                     # logger.info(f'Optical Flow Trajectory Length: '
                     #             f'{trajectory_length(predicted_points)}')
@@ -1652,8 +1583,8 @@ if __name__ == '__main__':
             dist_list = []
             of_center = 0
 
-            for sav_i, batch in enumerate(tqdm(val_loader)):
-                features1, features2, frame_, track_id, bbox_center1, bbox_center2 = batch
+            for sav_i, batch_inference in enumerate(tqdm(val_loader)):
+                features1, features2, frame_, track_id, bbox_center1, bbox_center2 = batch_inference
 
                 moved_by_of = []
                 moved_by_gt = []
@@ -1676,13 +1607,13 @@ if __name__ == '__main__':
                         # moved_points_by_true_of = center_xy + feat1[:, 2:4].mean(0)
                         # moved_points_by_true_of = center_xy + center_true_uv
 
-                        moved_points_by_true_of = feat1[:, :2].mean(0) + feat1[:, 2:4].mean(0)
+                        gt_based_shifted_points = feat1[:, :2].mean(0) + feat1[:, 2:4].mean(0)
                         # center_xy_gt = feat2[:, :2].mean(0)
 
-                        moved_by_of.append(moved_points_by_true_of.numpy())
+                        moved_by_of.append(gt_based_shifted_points.numpy())
                         moved_by_gt.append(center_xy_gt.numpy())
 
-                        dist = torch.norm(moved_points_by_true_of - center_xy_gt, p=2)
+                        dist = torch.norm(gt_based_shifted_points - center_xy_gt, p=2)
                         dist_list.append(dist.item())
 
                     plot_trajectory_rnn(predicted_points=np.stack(moved_by_of),
@@ -1800,8 +1731,8 @@ if __name__ == '__main__':
                                                             meta_video=SDDVideoDatasets.QUAD,
                                                             meta_train_video_number=train_vid_num,
                                                             meta_val_video_number=inference_vid_num)
-                for batch, batch_ in tqdm(zip(loader, loader_)):
-                    features1, features2 = batch
+                for batch_inference, batch_ in tqdm(zip(loader, loader_)):
+                    features1, features2 = batch_inference
                     features1, features2 = features1.squeeze().float(), features2.squeeze().float()
                     # find the center
                     center_xy, center_true_uv, center_past_uv = of_model.find_center_point(features1)
@@ -1809,11 +1740,11 @@ if __name__ == '__main__':
                     pred = of_model(center_past_uv)
                     pred_center = center_xy + pred
                     # move points by actual optical flow
-                    moved_points_by_true_of = features1[:, :2] + features1[:, 2:4]
+                    gt_based_shifted_points = features1[:, :2] + features1[:, 2:4]
 
                     # plot
                     plot_points_predicted_and_true(predicted_points=pred_center.detach().numpy(),
-                                                   true_points=moved_points_by_true_of.detach().numpy(),
+                                                   true_points=gt_based_shifted_points.detach().numpy(),
                                                    actual_points=None)  # same frame
 
             else:
