@@ -21,7 +21,7 @@ from average_image.utils import BasicTrainData, BasicTestData, plot_extracted_fe
     plot_points_predicted_and_true, plot_and_compare_points_predicted_and_true, \
     plot_points_predicted_and_true_center_only, SDDMeta, plot_points_predicted_and_true_center_only_rnn, \
     plot_trajectory_rnn, compute_ade, compute_fde, trajectory_length, plot_trajectory_rnn_compare, \
-    plot_trajectory_rnn_compare_side_by_side, plot_trajectory_rnn_tb
+    plot_trajectory_rnn_compare_side_by_side, plot_trajectory_rnn_tb, is_inside_bbox, plot_bars_if_inside_bbox
 
 initialize_logging()
 logger = get_logger(__name__)
@@ -441,7 +441,9 @@ class SimpleModel(pl.LightningModule):
                                                    frame_t0=i.frame_number,
                                                    frame_t1=j.frame_number,
                                                    bbox_center_t0=i.bbox_center,
-                                                   bbox_center_t1=j.bbox_center))
+                                                   bbox_center_t1=j.bbox_center,
+                                                   bbox_t0=i.bbox,
+                                                   bbox_t1=j.bbox))
                                 # per_frame_data.append([i.features, j.features])
                 per_batch_data.append(per_frame_data)
                 per_frame_data = []
@@ -471,6 +473,8 @@ class SimpleModel(pl.LightningModule):
         y_ = []
         bbox_center_x = []
         bbox_center_y = []
+        bbox_x = []
+        bbox_y = []
         for key, value in train_data.items():
             num_frames = len(value)
             t_0 = value[0]
@@ -482,12 +486,17 @@ class SimpleModel(pl.LightningModule):
                 temp_track_info = []
                 temp_bbox_center_x = []
                 temp_bbox_center_y = []
+                temp_bbox_x = []
+                temp_bbox_y = []
+
                 temp_f_info.append(fr.frame)
                 temp_track_info.append(fr.track_id)
                 temp_x.append(fr.pair_0_features)
                 temp_y.append(fr.pair_1_features)
                 temp_bbox_center_x.append(fr.bbox_center_t0)
                 temp_bbox_center_y.append(fr.bbox_center_t1)
+                temp_bbox_x.append(fr.bbox_t0)
+                temp_bbox_y.append(fr.bbox_t1)
                 for t_i in t_rest:
                     for fr_other in t_i:
                         if fr == fr_other:
@@ -497,15 +506,19 @@ class SimpleModel(pl.LightningModule):
                             temp_y.append(fr_other.pair_1_features)
                             temp_bbox_center_x.append(fr_other.bbox_center_t0)
                             temp_bbox_center_y.append(fr_other.bbox_center_t1)
+                            temp_bbox_x.append(fr_other.bbox_t0)
+                            temp_bbox_y.append(fr_other.bbox_t1)
                 frame_info.append(temp_f_info)
                 track_id_info.append(temp_track_info)
                 x_.append(temp_x)
                 y_.append(temp_y)
                 bbox_center_x.append(temp_bbox_center_x)
                 bbox_center_y.append(temp_bbox_center_y)
+                bbox_x.append(temp_bbox_x)
+                bbox_y.append(temp_bbox_y)
 
         if return_frame_info:
-            return x_, y_, frame_info, track_id_info, bbox_center_x, bbox_center_y
+            return x_, y_, frame_info, track_id_info, bbox_center_x, bbox_center_y, bbox_x, bbox_y
         return x_, y_
 
     def _extract_test_features(self, train_data):
@@ -667,13 +680,14 @@ if __name__ == '__main__':
             logger.info(f'Saving the features for video {vid_label.value}, video {video_number}')
             if save_path:
                 Path(save_path).mkdir(parents=True, exist_ok=True)
-            file_name = 'time_distributed_dict_with_gt_bbox_centers.pt'
+            # file_name = 'time_distributed_dict_with_gt_bbox_centers.pt'
+            file_name = 'time_distributed_dict_with_gt_bbox_centers_and_bbox.pt'
             torch.save(final_featues_dict, save_path + file_name)
         elif velocity_based:
             save_path = inference_dataset_path
             logger.info('Setting up DataLoaders')
             train_feats = torch.load(save_path
-                                     + 'time_distributed_dict_with_gt_bbox_centers.pt')  # time_distributed_dict
+                                     + 'time_distributed_dict_with_gt_bbox_centers_and_bbox.pt')  # time_distributed_dict
             # # feats_data = net._process_complex_features(train_feats)
             # # data_x, data_y, data_frame_info, data_track_id_info = net._extract_trainable_features(feats_data,
             # #                                                                                       frame_info=True)
@@ -684,7 +698,7 @@ if __name__ == '__main__':
             # # torch.save(features_save_dict, save_path + file_name)
 
             # Stage 1 - RNN
-            feats_data = net._process_complex_features_rnn(train_feats)
+            feats_data = net._process_complex_features_rnn(train_feats, time_steps=10)
             # logger.info(f'Saving the features for video {vid_label.value}, video {video_number}')
             # if save_path:
             #     Path(save_path).mkdir(parents=True, exist_ok=True)
@@ -693,15 +707,17 @@ if __name__ == '__main__':
             # Stage 2 - RNN
             # train_feats = torch.load(save_path
             #                          + 'pre_train_rnn_data_with_gt_bbox_centers.pt')  # pre_train_rnn_data
-            data_x, data_y, data_frame_info, data_track_id_info, data_bbox_center_x, data_bbox_center_y = \
+            data_x, data_y, data_frame_info, data_track_id_info, data_bbox_center_x, data_bbox_center_y, data_bbox_x, \
+            data_bbox_y = \
                 net._extract_trainable_features_rnn(feats_data,
                                                     return_frame_info=True)
             features_save_dict = {'x': data_x, 'y': data_y, 'frames': data_frame_info, 'track_ids': data_track_id_info,
-                                  'bbox_center_x': data_bbox_center_x, 'bbox_center_y': data_bbox_center_y}
+                                  'bbox_center_x': data_bbox_center_x, 'bbox_center_y': data_bbox_center_y,
+                                  'bbox_x': data_bbox_x, 'bbox_y': data_bbox_y}
             logger.info(f'Saving the features for video {vid_label.value}, video {video_number}')
 
             # time_distributed_velocity_features_with_frame_track_rnn
-            file_name = 'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers.pt'
+            file_name = 'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_t10.pt'
             if save_path:
                 Path(save_path).mkdir(parents=True, exist_ok=True)
             torch.save(features_save_dict, save_path + file_name)
@@ -709,17 +725,20 @@ if __name__ == '__main__':
         elif inference_velocity_based:
             # file_name = 'time_distributed_velocity_features_with_frame_track.pt'
             # file_name = 'time_distributed_velocity_features_with_frame_track_rnn.pt'
-            file_name = 'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers.pt'
+            file_name = 'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox.pt'
             logger.info('Setting up DataLoaders')
             train_feats = torch.load(train_dataset_path + file_name)
-            train_x, train_y, train_frames, train_track_ids, train_center_x, train_center_y = \
-                train_feats['x'], train_feats['y'], train_feats['frames'], train_feats['track_ids'], \
-                train_feats['bbox_center_x'], train_feats['bbox_center_y']
+            train_x, train_y, train_frames, train_track_ids, train_center_x, train_center_y, train_bbox_x, \
+            train_bbox_y = train_feats['x'], train_feats['y'], train_feats['frames'], train_feats['track_ids'], \
+                           train_feats['bbox_center_x'], train_feats['bbox_center_y'], train_feats['bbox_x'], \
+                           train_feats['bbox_y']
 
             inference_feats = torch.load(inference_dataset_path + file_name)
-            inference_x, inference_y, inference_frames, inference_track_ids, inference_center_x, inference_center_y = \
+            inference_x, inference_y, inference_frames, inference_track_ids, inference_center_x, inference_center_y, \
+            inference_bbox_x, inference_bbox_y = \
                 inference_feats['x'], inference_feats['y'], inference_feats['frames'], inference_feats['track_ids'], \
-                inference_feats['bbox_center_x'], inference_feats['bbox_center_y']
+                inference_feats['bbox_center_x'], inference_feats['bbox_center_y'], inference_feats['bbox_x'], \
+                inference_feats['bbox_y']
 
             # Split Val and Test
             split_percent = 0.2
@@ -729,7 +748,9 @@ if __name__ == '__main__':
             inference_dataset = FeaturesDatasetExtra(inference_x, inference_y, frames=inference_frames,
                                                      track_ids=inference_track_ids, mode=FeaturesMode.UV,
                                                      preprocess=False, bbox_center_x=inference_center_x,
-                                                     bbox_center_y=inference_center_y)
+                                                     bbox_center_y=inference_center_y,
+                                                     bbox_x=inference_bbox_x,
+                                                     bbox_y=inference_bbox_y)
             val_dataset, test_dataset = torch.utils.data.random_split(inference_dataset, [val_length, test_length],
                                                                       generator=torch.Generator().manual_seed(42))
 
@@ -737,7 +758,9 @@ if __name__ == '__main__':
 
             train_dataset = FeaturesDatasetExtra(train_x, train_y, frames=train_frames, track_ids=train_track_ids,
                                                  mode=FeaturesMode.UV, preprocess=False, bbox_center_x=train_center_x,
-                                                 bbox_center_y=train_center_y)
+                                                 bbox_center_y=train_center_y,
+                                                 bbox_x=train_bbox_x,
+                                                 bbox_y=train_bbox_y)
             train_subset = torch.utils.data.Subset(train_dataset, [i for i in range(10)])
 
             # overfit - active
@@ -953,21 +976,26 @@ if __name__ == '__main__':
 
         elif train_velocity_based:
             # file_name = 'time_distributed_velocity_features_with_frame_track_rnn.pt'
-            file_name = 'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers.pt'
+            file_name = 'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox.pt'
             logger.info('Setting up DataLoaders')
             train_feats = torch.load(train_dataset_path + file_name)
-            train_x, train_y, train_frames, train_track_ids, train_center_x, train_center_y = \
-                train_feats['x'], train_feats['y'], train_feats['frames'], train_feats['track_ids'], \
-                train_feats['bbox_center_x'], train_feats['bbox_center_y']
+            train_x, train_y, train_frames, train_track_ids, train_center_x, train_center_y, train_bbox_x, \
+            train_bbox_y = train_feats['x'], train_feats['y'], train_feats['frames'], train_feats['track_ids'], \
+                           train_feats['bbox_center_x'], train_feats['bbox_center_y'], train_feats['bbox_x'], \
+                           train_feats['bbox_y']
 
             train_dataset = FeaturesDatasetExtra(train_x, train_y, frames=train_frames, track_ids=train_track_ids,
                                                  mode=FeaturesMode.UV, preprocess=False, bbox_center_x=train_center_x,
-                                                 bbox_center_y=train_center_y)
+                                                 bbox_center_y=train_center_y,
+                                                 bbox_x=train_bbox_x,
+                                                 bbox_y=train_bbox_y)
 
             inference_feats = torch.load(inference_dataset_path + file_name)
-            inference_x, inference_y, inference_frames, inference_track_ids, inference_center_x, inference_center_y = \
+            inference_x, inference_y, inference_frames, inference_track_ids, inference_center_x, inference_center_y, \
+            inference_bbox_x, inference_bbox_y = \
                 inference_feats['x'], inference_feats['y'], inference_feats['frames'], inference_feats['track_ids'], \
-                inference_feats['bbox_center_x'], inference_feats['bbox_center_y']
+                inference_feats['bbox_center_x'], inference_feats['bbox_center_y'], inference_feats['bbox_x'], \
+                inference_feats['bbox_y']
 
             # Split Val and Test
             split_percent = 0.2
@@ -977,7 +1005,10 @@ if __name__ == '__main__':
             inference_dataset = FeaturesDatasetExtra(inference_x, inference_y, frames=inference_frames,
                                                      track_ids=inference_track_ids, mode=FeaturesMode.UV,
                                                      preprocess=False, bbox_center_x=inference_center_x,
-                                                     bbox_center_y=inference_center_y)
+                                                     bbox_center_y=inference_center_y,
+                                                     bbox_x=inference_bbox_x,
+                                                     bbox_y=inference_bbox_y)
+
             val_dataset, test_dataset = torch.utils.data.random_split(inference_dataset, [val_length, test_length],
                                                                       generator=torch.Generator().manual_seed(42))
 
@@ -985,7 +1016,7 @@ if __name__ == '__main__':
                               meta_video=SDDVideoDatasets.QUAD, meta_train_video_number=train_vid_num,
                               meta_val_video_number=inference_vid_num, lr=1e-2, train_dataset=train_dataset,
                               val_dataset=val_dataset)
-            
+
             logger.info('Setting up network')
 
             # from pytorch_lightning import loggers as pl_loggers
@@ -1011,15 +1042,17 @@ if __name__ == '__main__':
             file_name = 'time_distributed_velocity_features_with_frame_track_rnn.pt'
             logger.info('Setting up DataLoaders')
             train_feats = torch.load(train_dataset_path + file_name)
-            train_x, train_y, train_frames, train_track_ids, train_center_x, train_center_y = \
-                train_feats['x'], train_feats['y'], train_feats['frames'], train_feats['track_ids'], \
-                train_feats['bbox_center_x'], train_feats['bbox_center_y']
+            train_x, train_y, train_frames, train_track_ids, train_center_x, train_center_y, train_bbox_x, \
+            train_bbox_y = train_feats['x'], train_feats['y'], train_feats['frames'], train_feats['track_ids'], \
+                           train_feats['bbox_center_x'], train_feats['bbox_center_y'], train_feats['bbox_x'], \
+                           train_feats['bbox_y']
 
             inference_feats = torch.load(inference_dataset_path + file_name)
-            inference_x, inference_y, inference_frames, inference_track_ids, inference_center_x, inference_center_y = \
+            inference_x, inference_y, inference_frames, inference_track_ids, inference_center_x, inference_center_y, \
+            inference_bbox_x, inference_bbox_y = \
                 inference_feats['x'], inference_feats['y'], inference_feats['frames'], inference_feats['track_ids'], \
-                inference_feats['bbox_center_x'], inference_feats['bbox_center_y']
-
+                inference_feats['bbox_center_x'], inference_feats['bbox_center_y'], inference_feats['bbox_x'], \
+                inference_feats['bbox_y']
             # Split Val and Test
             split_percent = 0.2
             val_length = int(split_percent * len(inference_x))
@@ -1028,7 +1061,10 @@ if __name__ == '__main__':
             inference_dataset = FeaturesDatasetExtra(inference_x, inference_y, frames=inference_frames,
                                                      track_ids=inference_track_ids, mode=FeaturesMode.UV,
                                                      preprocess=False, bbox_center_x=inference_center_x,
-                                                     bbox_center_y=inference_center_y)
+                                                     bbox_center_y=inference_center_y,
+                                                     bbox_x=inference_bbox_x,
+                                                     bbox_y=inference_bbox_y)
+
             val_dataset, test_dataset = torch.utils.data.random_split(inference_dataset, [val_length, test_length],
                                                                       generator=torch.Generator().manual_seed(42))
 
@@ -1036,7 +1072,9 @@ if __name__ == '__main__':
 
             train_dataset = FeaturesDatasetExtra(train_x, train_y, frames=train_frames, track_ids=train_track_ids,
                                                  mode=FeaturesMode.UV, preprocess=False, bbox_center_x=train_center_x,
-                                                 bbox_center_y=train_center_y)
+                                                 bbox_center_y=train_center_y,
+                                                 bbox_x=train_bbox_x,
+                                                 bbox_y=train_bbox_y)
             train_loader = torch.utils.data.DataLoader(train_dataset, 1)
 
             val_loader = torch.utils.data.DataLoader(val_dataset, 1)
@@ -1063,14 +1101,17 @@ if __name__ == '__main__':
             file_name = 'time_distributed_velocity_features_with_frame_track_rnn.pt'
             logger.info('Setting up DataLoaders')
             train_feats = torch.load(train_dataset_path + file_name)
-            train_x, train_y, train_frames, train_track_ids, train_center_x, train_center_y = \
-                train_feats['x'], train_feats['y'], train_feats['frames'], train_feats['track_ids'], \
-                train_feats['bbox_center_x'], train_feats['bbox_center_y']
+            train_x, train_y, train_frames, train_track_ids, train_center_x, train_center_y, train_bbox_x, \
+            train_bbox_y = train_feats['x'], train_feats['y'], train_feats['frames'], train_feats['track_ids'], \
+                           train_feats['bbox_center_x'], train_feats['bbox_center_y'], train_feats['bbox_x'], \
+                           train_feats['bbox_y']
 
             inference_feats = torch.load(inference_dataset_path + file_name)
-            inference_x, inference_y, inference_frames, inference_track_ids, inference_center_x, inference_center_y = \
+            inference_x, inference_y, inference_frames, inference_track_ids, inference_center_x, inference_center_y, \
+            inference_bbox_x, inference_bbox_y = \
                 inference_feats['x'], inference_feats['y'], inference_feats['frames'], inference_feats['track_ids'], \
-                inference_feats['bbox_center_x'], inference_feats['bbox_center_y']
+                inference_feats['bbox_center_x'], inference_feats['bbox_center_y'], inference_feats['bbox_x'], \
+                inference_feats['bbox_y']
 
             # Split Val and Test
             split_percent = 0.2
@@ -1080,7 +1121,10 @@ if __name__ == '__main__':
             inference_dataset = FeaturesDatasetExtra(inference_x, inference_y, frames=inference_frames,
                                                      track_ids=inference_track_ids, mode=FeaturesMode.UV,
                                                      preprocess=False, bbox_center_x=inference_center_x,
-                                                     bbox_center_y=inference_center_y)
+                                                     bbox_center_y=inference_center_y,
+                                                     bbox_x=inference_bbox_x,
+                                                     bbox_y=inference_bbox_y)
+
             val_dataset, test_dataset = torch.utils.data.random_split(inference_dataset, [val_length, test_length],
                                                                       generator=torch.Generator().manual_seed(42))
 
@@ -1088,7 +1132,10 @@ if __name__ == '__main__':
 
             train_dataset = FeaturesDatasetExtra(train_x, train_y, frames=train_frames, track_ids=train_track_ids,
                                                  mode=FeaturesMode.UV, preprocess=False, bbox_center_x=train_center_x,
-                                                 bbox_center_y=train_center_y)
+                                                 bbox_center_y=train_center_y,
+                                                 bbox_x=train_bbox_x,
+                                                 bbox_y=train_bbox_y)
+
             train_subset = torch.utils.data.Subset(train_dataset, [i for i in range(20)])
             # train_subset = torch.utils.data.Subset(train_dataset, [5, 13, 34])
 
@@ -1256,17 +1303,20 @@ if __name__ == '__main__':
         elif compare_models:
             base_save_path = '/home/rishabh/Thesis/imgs/'
             # file_name = 'time_distributed_velocity_features_with_frame_track_rnn.pt'
-            file_name = 'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers.pt'
+            file_name = 'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox.pt'
             logger.info('Setting up DataLoaders')
             train_feats = torch.load(train_dataset_path + file_name)
-            train_x, train_y, train_frames, train_track_ids, train_center_x, train_center_y = \
-                train_feats['x'], train_feats['y'], train_feats['frames'], train_feats['track_ids'], \
-                train_feats['bbox_center_x'], train_feats['bbox_center_y']
+            train_x, train_y, train_frames, train_track_ids, train_center_x, train_center_y, train_bbox_x, \
+            train_bbox_y = train_feats['x'], train_feats['y'], train_feats['frames'], train_feats['track_ids'], \
+                           train_feats['bbox_center_x'], train_feats['bbox_center_y'], train_feats['bbox_x'], \
+                           train_feats['bbox_y']
 
             inference_feats = torch.load(inference_dataset_path + file_name)
-            inference_x, inference_y, inference_frames, inference_track_ids, inference_center_x, inference_center_y = \
+            inference_x, inference_y, inference_frames, inference_track_ids, inference_center_x, inference_center_y, \
+            inference_bbox_x, inference_bbox_y = \
                 inference_feats['x'], inference_feats['y'], inference_feats['frames'], inference_feats['track_ids'], \
-                inference_feats['bbox_center_x'], inference_feats['bbox_center_y']
+                inference_feats['bbox_center_x'], inference_feats['bbox_center_y'], inference_feats['bbox_x'], \
+                inference_feats['bbox_y']
 
             # Split Val and Test
             split_percent = 0.3
@@ -1276,7 +1326,10 @@ if __name__ == '__main__':
             inference_dataset = FeaturesDatasetExtra(inference_x, inference_y, frames=inference_frames,
                                                      track_ids=inference_track_ids, mode=FeaturesMode.UV,
                                                      preprocess=False, bbox_center_x=inference_center_x,
-                                                     bbox_center_y=inference_center_y)
+                                                     bbox_center_y=inference_center_y,
+                                                     bbox_x=inference_bbox_x,
+                                                     bbox_y=inference_bbox_y)
+
             val_dataset, test_dataset = torch.utils.data.random_split(inference_dataset, [val_length, test_length],
                                                                       generator=torch.Generator().manual_seed(42))
 
@@ -1284,8 +1337,11 @@ if __name__ == '__main__':
 
             train_dataset = FeaturesDatasetExtra(train_x, train_y, frames=train_frames, track_ids=train_track_ids,
                                                  mode=FeaturesMode.UV, preprocess=False, bbox_center_x=train_center_x,
-                                                 bbox_center_y=train_center_y)
-            # train_subset = torch.utils.data.Subset(train_dataset, [i for i in range(10)])
+                                                 bbox_center_y=train_center_y,
+                                                 bbox_x=train_bbox_x,
+                                                 bbox_y=train_bbox_y)
+
+            train_subset = torch.utils.data.Subset(train_dataset, [i for i in range(10)])
 
             # overfit - active
             train_loader = torch.utils.data.DataLoader(train_dataset, 1)
@@ -1305,9 +1361,10 @@ if __name__ == '__main__':
                 'time_steps': 5
             }
             of_model = SimpleModel(**kwargs_dict)
-            # after debug - of based
+            # after debug - of based - all points
             # of_model.load_state_dict(torch.load('lightning_logs/version_24/checkpoints/epoch=128.ckpt')['state_dict'])
-            of_model.load_state_dict(torch.load('lightning_logs/version_39/checkpoints/epoch=49.ckpt')['state_dict'])
+            # center based
+            of_model.load_state_dict(torch.load('lightning_logs/version_38/checkpoints/epoch=199.ckpt')['state_dict'])
             of_model.eval()
 
             gt_model = SimpleModel(**kwargs_dict)
@@ -1315,7 +1372,7 @@ if __name__ == '__main__':
             # gt_model.load_state_dict(torch.load('lightning_logs/version_33/checkpoints/epoch=30.ckpt')['state_dict'])
             gt_model.load_state_dict(torch.load('lightning_logs/version_35/checkpoints/epoch=6.ckpt')['state_dict'])
             gt_model.eval()
-            time_steps = 5
+            time_steps = kwargs_dict['time_steps']
 
             ade_dataset_of = []
             fde_dataset_of = []
@@ -1326,8 +1383,18 @@ if __name__ == '__main__':
             ade_dataset_gt_of_gt = []
             fde_dataset_gt_of_gt = []
 
-            for sav_i, batch_inference in enumerate(tqdm(val_loader)):
-                features1, features2, frame_, track_id, bbox_center1, bbox_center2 = batch_inference
+            ade_dataset_linear = []
+            fde_dataset_linear = []
+
+            is_gt_based_shifted_points_inside_list = []
+            is_of_based_shifted_points_center_inside_list = []
+            is_pred_center_inside_list = []
+            is_pred_center_gt_inside_list = []
+
+            bad_data = False
+
+            for sav_i, batch_inference in enumerate(tqdm(train_loader)):
+                features1, features2, frame_, track_id, bbox_center1, bbox_center2, bbox1, bbox2 = batch_inference
                 frame_nums = [f.item() for f in frame_]
 
                 hx, cx = torch.zeros(size=(1, 32)), torch.zeros(size=(1, 32))
@@ -1335,6 +1402,7 @@ if __name__ == '__main__':
 
                 total_loss = torch.tensor(data=0, dtype=torch.float32)
                 img_frames = []
+                linear_pred_centers = []
                 pred_centers = []
                 pred_centers_gt = []
                 gt_based_shifted_points_list = []
@@ -1344,6 +1412,9 @@ if __name__ == '__main__':
                 last_pred_center = None
                 last_true_center = None
                 cap_count = 0
+
+                first_ts_velocity_linear = None
+
                 if len(features1) == time_steps:
                     cap = cv.VideoCapture(f'{base_path}videos/{vid_label.value}/video{inference_vid_num}/video.mov')
 
@@ -1357,15 +1428,16 @@ if __name__ == '__main__':
 
                     for i in range(time_steps):
 
-                        feat1, feat2, bb_center1, bb_center2 = features1[i].squeeze().float(), features2[
-                            i].squeeze().float(), \
-                                                               bbox_center1[i].float(), bbox_center2[i].float()
+                        feat1, feat2, bb_center1, bb_center2, bb1, bb2 = features1[i].squeeze().float(), features2[
+                            i].squeeze().float(), bbox_center1[i].float(), bbox_center2[i].float(), bbox1[i].float(), \
+                                                                         bbox2[i].float()
                         try:
                             center_xy, center_true_uv, center_past_uv = of_model.find_center_point(feat1)
                             # gt_based_shifted_points = feat2[:, :2]  # for gt based
                             gt_based_shifted_points = bb_center2  # for bbox_center gt based
                         except IndexError:
                             print('Bad Data')
+                            bad_data = True
                             break
 
                         if i == 0:
@@ -1374,6 +1446,8 @@ if __name__ == '__main__':
                             last_pred_center = center_xy
                             last_pred_center_gt = center_xy
                             last_true_center = center_xy
+                            linear_pred_center = center_xy
+                            first_ts_velocity_linear = center_past_uv
 
                         with torch.no_grad():
                             # logger.info(f'{i} -> Input Velocity: {last_input_velocity}')
@@ -1391,12 +1465,27 @@ if __name__ == '__main__':
                         gt_based_shifted_points_list.append(gt_based_shifted_points)
 
                         of_based_shifted_points = feat1[:, :2] + feat1[:, 2:4]
-                        moved_points_by_true_of_center_true = of_based_shifted_points.mean(0)
+                        of_based_shifted_points_center = of_based_shifted_points.mean(0)
                         of_based_shifted_points_list.append(of_based_shifted_points)
                         # pred_center = center_xy + block_2
                         pred_center = last_pred_center + block_2
                         pred_center_gt = last_pred_center_gt + block_2_gt
+                        linear_pred_center += first_ts_velocity_linear * 0.4  # d = v * t
                         # pred_center = last_pred_center + (block_2 * 0.4)  # velocity * time - bad
+
+                        is_gt_based_shifted_points_inside = is_inside_bbox(point=gt_based_shifted_points.squeeze(),
+                                                                           bbox=bb2.squeeze()).item()
+                        is_of_based_shifted_points_center_inside = is_inside_bbox(
+                            point=of_based_shifted_points_center.squeeze(),
+                            bbox=bb2.squeeze()).item()
+                        is_pred_center_inside = is_inside_bbox(point=pred_center.squeeze(), bbox=bb2.squeeze()).item()
+                        is_pred_center_gt_inside = is_inside_bbox(point=pred_center_gt.squeeze(),
+                                                                  bbox=bb2.squeeze()).item()
+
+                        is_gt_based_shifted_points_inside_list.append(is_gt_based_shifted_points_inside)
+                        is_of_based_shifted_points_center_inside_list.append(is_of_based_shifted_points_center_inside)
+                        is_pred_center_inside_list.append(is_pred_center_inside)
+                        is_pred_center_gt_inside_list.append(is_pred_center_gt_inside)
 
                         # loss
                         loss_gt_all_points = of_model.cluster_center_loss_meters(gt_based_shifted_points,
@@ -1431,6 +1520,7 @@ if __name__ == '__main__':
                         # last_true_center = moved_points_by_true_of_center
                         pred_centers.append(pred_center.squeeze(0))
                         pred_centers_gt.append(pred_center_gt.squeeze(0))
+                        linear_pred_centers.append(linear_pred_center)
 
                         # Remove mean for per time step plot
                         actual_points_list.append(feat1[:, :2].detach().mean(dim=0).numpy())
@@ -1439,8 +1529,13 @@ if __name__ == '__main__':
                         # logger.info(f'*****Next Step*****')
                         # logger.info(f'{i} -> Pred Center: {last_pred_center}')
 
+                    if bad_data:
+                        bad_data = False
+                        continue
+
                     predicted_points = [p.detach().numpy() for p in pred_centers]
                     predicted_points_gt = [p.detach().numpy() for p in pred_centers_gt]
+                    linear_predicted_points = [p.detach().numpy() for p in linear_pred_centers]
 
                     true_points = [p.detach().mean(dim=0).numpy() for p in gt_based_shifted_points_list]
                     true_points_of = [p.detach().mean(dim=0).numpy() for p in of_based_shifted_points_list]
@@ -1460,6 +1555,9 @@ if __name__ == '__main__':
                                     for idx, (i, j) in enumerate(zip(true_points, predicted_points_gt))}
                     # logger.info(f'GT L2 corresponding centers: {l2_points_gt}')
 
+                    l2_linear = {idx: np.linalg.norm(i - j, 2)
+                                 for idx, (i, j) in enumerate(zip(true_points_of, linear_predicted_points))}
+
                     # ade_of = compute_ade(np.stack(predicted_points), np.stack(true_points_of))
                     # fde_of = compute_fde(np.stack(predicted_points), np.stack(true_points_of))
                     ade_of = compute_ade(np.stack(predicted_points), np.stack(true_points))
@@ -1476,6 +1574,11 @@ if __name__ == '__main__':
                     fde_gt_of_gt = compute_fde(np.stack(true_points_of), np.stack(true_points))
                     ade_dataset_gt_of_gt.append(ade_gt_of_gt.item())
                     fde_dataset_gt_of_gt.append(fde_gt_of_gt.item())
+
+                    ade_linear = compute_ade(np.stack(linear_predicted_points), np.stack(true_points))
+                    fde_linear = compute_fde(np.stack(linear_predicted_points), np.stack(true_points))
+                    ade_dataset_linear.append(ade_linear.item())
+                    fde_dataset_linear.append(fde_linear.item())
 
                     # plot
                     # plot_trajectory_rnn_compare(predicted_points=np.stack(predicted_points),
@@ -1514,6 +1617,11 @@ if __name__ == '__main__':
                     #                                          save_path=
                     #                                          f'{base_save_path}compare_side_by_side_rgb_{sav_i}')
 
+            plot_bars_if_inside_bbox([is_gt_based_shifted_points_inside_list,
+                                      is_of_based_shifted_points_center_inside_list,
+                                      is_pred_center_inside_list,
+                                      is_pred_center_gt_inside_list])
+
             logger.info('Based on Optical Flow')
             logger.info(f'OF ADE: {np.array(ade_dataset_of).mean()}')
             logger.info(f'OF FDE: {np.array(fde_dataset_of).mean()}')
@@ -1531,18 +1639,27 @@ if __name__ == '__main__':
             logger.info(f'GT FDE: {np.array(fde_dataset_gt_of_gt).mean()}')
             logger.info(f'[m]GT ADE: {np.array(ade_dataset_gt_of_gt).mean() * gt_model.val_ratio}')
             logger.info(f'[m]GT FDE: {np.array(fde_dataset_gt_of_gt).mean() * gt_model.val_ratio}')
+
+            logger.info('Linear Flow')
+            logger.info(f'Linear ADE: {np.array(ade_dataset_linear).mean()}')
+            logger.info(f'Linear FDE: {np.array(fde_dataset_linear).mean()}')
+            logger.info(f'[m]Linear ADE: {np.array(ade_dataset_linear).mean() * of_model.val_ratio}')
+            logger.info(f'[m]Linear FDE: {np.array(fde_dataset_linear).mean() * of_model.val_ratio}')
         elif compare_of_gt:
             file_name = 'time_distributed_velocity_features_with_frame_track_rnn.pt'
             logger.info('Setting up DataLoaders')
             train_feats = torch.load(train_dataset_path + file_name)
-            train_x, train_y, train_frames, train_track_ids, train_center_x, train_center_y = \
-                train_feats['x'], train_feats['y'], train_feats['frames'], train_feats['track_ids'], \
-                train_feats['bbox_center_x'], train_feats['bbox_center_y']
+            train_x, train_y, train_frames, train_track_ids, train_center_x, train_center_y, train_bbox_x, \
+            train_bbox_y = train_feats['x'], train_feats['y'], train_feats['frames'], train_feats['track_ids'], \
+                           train_feats['bbox_center_x'], train_feats['bbox_center_y'], train_feats['bbox_x'], \
+                           train_feats['bbox_y']
 
             inference_feats = torch.load(inference_dataset_path + file_name)
-            inference_x, inference_y, inference_frames, inference_track_ids, inference_center_x, inference_center_y = \
+            inference_x, inference_y, inference_frames, inference_track_ids, inference_center_x, inference_center_y, \
+            inference_bbox_x, inference_bbox_y = \
                 inference_feats['x'], inference_feats['y'], inference_feats['frames'], inference_feats['track_ids'], \
-                inference_feats['bbox_center_x'], inference_feats['bbox_center_y']
+                inference_feats['bbox_center_x'], inference_feats['bbox_center_y'], inference_feats['bbox_x'], \
+                inference_feats['bbox_y']
 
             # Split Val and Test
             split_percent = 0.3
@@ -1552,14 +1669,20 @@ if __name__ == '__main__':
             inference_dataset = FeaturesDatasetExtra(inference_x, inference_y, frames=inference_frames,
                                                      track_ids=inference_track_ids, mode=FeaturesMode.UV,
                                                      preprocess=False, bbox_center_x=inference_center_x,
-                                                     bbox_center_y=inference_center_y)
+                                                     bbox_center_y=inference_center_y,
+                                                     bbox_x=inference_bbox_x,
+                                                     bbox_y=inference_bbox_y)
+
             val_dataset, test_dataset = torch.utils.data.random_split(inference_dataset, [val_length, test_length])
 
             logger.info('Setting up network')
 
             train_dataset = FeaturesDatasetExtra(train_x, train_y, frames=train_frames, track_ids=train_track_ids,
                                                  mode=FeaturesMode.UV, preprocess=False, bbox_center_x=train_center_x,
-                                                 bbox_center_y=train_center_y)
+                                                 bbox_center_y=train_center_y,
+                                                 bbox_x=train_bbox_x,
+                                                 bbox_y=train_bbox_y)
+
             train_subset = torch.utils.data.Subset(train_dataset, [i for i in range(10)])
 
             # overfit - active

@@ -693,13 +693,15 @@ class FeatureExtractor(object):
                                                                 cluster_centers=cluster_algo.cluster_centers,
                                                                 cluster_labels=cluster_algo.labels,
                                                                 optical_flow_frame_num=optical_flow_frame_num,
-                                                                bbox_center=bbox_centers[id_]))
+                                                                bbox_center=bbox_centers[id_],
+                                                                bbox=annotations[id_][:4]))
                     else:
                         all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id_][-1].item(),
                                                                 frame_number=data_frame_num,
                                                                 normalize_params=options,
                                                                 optical_flow_frame_num=optical_flow_frame_num,
-                                                                bbox_center=bbox_centers[id_]))
+                                                                bbox_center=bbox_centers[id_],
+                                                                bbox=annotations[id_][:4]))
                 else:
                     if use_intensities:
                         data = np.stack((object_idx[1], object_idx[0], flow_idx[..., 1], flow_idx[..., 0],
@@ -718,7 +720,8 @@ class FeatureExtractor(object):
                                                                 frame_number=data_frame_num,
                                                                 normalize_params=None,
                                                                 optical_flow_frame_num=optical_flow_frame_num,
-                                                                bbox_center=bbox_centers[id_]))
+                                                                bbox_center=bbox_centers[id_],
+                                                                bbox=annotations[id_][:4]))
 
         return all_agent_features
 
@@ -1342,8 +1345,8 @@ class BackgroundSubtraction(FeatureExtractor):
             for past_flow in past_12_frames_optical_flow:
                 of_flow_till_current_frame += past_flow
 
-            # displacement/time = velocity
-            of_flow_till_current_frame = of_flow_till_current_frame / 0.4
+            # displacement/time = velocity - wrong it already is velocity
+            # of_flow_till_current_frame = of_flow_till_current_frame
 
             # flow between consecutive frames
             frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))

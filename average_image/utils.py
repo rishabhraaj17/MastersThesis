@@ -302,6 +302,33 @@ def cal_centers(b_box):
     return np.vstack((x_mid, y_mid)).T
 
 
+def is_inside_bbox(point, bbox):
+    x, y = point
+    x_min, y_min, x_max, y_max = bbox
+    return x_min < x < x_max and y_min < y < y_max
+
+
+def plot_bars_if_inside_bbox(data):
+    n = len(data)
+    ind = np.arange(n)
+    width = 0.25
+
+    true_count = []
+    false_count = []
+
+    for d in data:
+        true_count.append(d.count(True))
+        false_count.append(d.count(False))
+
+    plt.bar(ind, true_count, width, color='r')
+    plt.bar(ind + width, false_count, width, color='b')
+    plt.ylabel('Centers Count')
+    plt.title('Times center falls inside bounding box')
+    plt.xticks(ind, ('GT Bbox Center', 'OF (OpenCV)', 'Pred OF', 'Pred GT'))
+    plt.legend(labels=['Inside', 'Outside'])
+    plt.show()
+
+
 def renormalize_optical_flow(features, options):
     of_0 = denormalize(features[..., 0], options['f_max_0'], options['f_min_0'])
     of_1 = denormalize(features[..., 1], options['f_max_1'], options['f_min_1'])
@@ -1060,7 +1087,7 @@ class SDDMeta(object):
 
 
 class AgentFeatures(object):
-    def __init__(self, features, track_id, frame_number, normalize_params, optical_flow_frame_num, bbox_center,
+    def __init__(self, features, track_id, frame_number, normalize_params, optical_flow_frame_num, bbox_center, bbox,
                  cluster_centers=None, cluster_labels=None):
         super(AgentFeatures, self).__init__()
         self.frame_number = frame_number
@@ -1071,6 +1098,7 @@ class AgentFeatures(object):
         self.cluster_labels = cluster_labels
         self.optical_flow_frame_num = optical_flow_frame_num
         self.bbox_center = bbox_center
+        self.bbox = bbox
 
     def __repr__(self):
         pass  # auto-printing??
@@ -1082,7 +1110,7 @@ class AgentFeatures(object):
 
 class BasicTrainData(object):
     def __init__(self, frame, track_id, pair_0_features, pair_1_features, bbox_center_t0, bbox_center_t1,
-                 frame_t0, frame_t1):
+                 frame_t0, frame_t1, bbox_t0, bbox_t1):
         super(BasicTrainData, self).__init__()
         self.frame = frame
         self.track_id = track_id
@@ -1092,6 +1120,8 @@ class BasicTrainData(object):
         self.bbox_center_t1 = bbox_center_t1
         self.frame_t0 = frame_t0
         self.frame_t1 = frame_t1
+        self.bbox_t0 = bbox_t0
+        self.bbox_t1 = bbox_t1
 
     def __eq__(self, other):
         return self.track_id == other.track_id
