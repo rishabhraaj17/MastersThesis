@@ -68,17 +68,31 @@ class SimpleModel(pl.LightningModule):
                                         nn.Linear(16, 8),
                                         nn.ReLU(inplace=True),
                                         nn.Linear(8, in_features))
+        # elif layers_mode == 'rnn':
+        #     self.block_1 = nn.Sequential(nn.Linear(in_features, 8),
+        #                                  nn.ReLU(inplace=True),
+        #                                  nn.Linear(8, 16),
+        #                                  nn.ReLU(inplace=True))
+        #     self.rnn_cell = nn.LSTMCell(input_size=16, hidden_size=32)
+        #     self.block_2 = nn.Sequential(nn.Linear(32, 16),
+        #                                  nn.ReLU(inplace=True),
+        #                                  nn.Linear(16, 8),
+        #                                  nn.ReLU(inplace=True),
+        #                                  nn.Linear(8, in_features))
         elif layers_mode == 'rnn':
-            self.block_1 = nn.Sequential(nn.Linear(in_features, 8),
+            self.block_1 = nn.Sequential(nn.Linear(in_features, 4),
                                          nn.ReLU(inplace=True),
-                                         nn.Linear(8, 16),
+                                         nn.Linear(4, 8),
                                          nn.ReLU(inplace=True))
-            self.rnn_cell = nn.LSTMCell(input_size=16, hidden_size=32)
+            self.rnn_cell = nn.LSTMCell(input_size=8, hidden_size=16)
+            self.rnn_cell_1 = nn.LSTMCell(input_size=16, hidden_size=32)
             self.block_2 = nn.Sequential(nn.Linear(32, 16),
                                          nn.ReLU(inplace=True),
                                          nn.Linear(16, 8),
                                          nn.ReLU(inplace=True),
-                                         nn.Linear(8, in_features))
+                                         nn.Linear(8, 4),
+                                         nn.ReLU(inplace=True),
+                                         nn.Linear(4, in_features))
         else:
             self.layers = nn.Sequential(nn.Linear(in_features, 8),
                                         nn.ReLU(inplace=True),
@@ -107,20 +121,28 @@ class SimpleModel(pl.LightningModule):
 
         self.save_hyperparameters('lr', 'time_steps')
 
-    def forward(self, x, cx=None, hx=None):
+    def forward(self, x, cx=None, hx=None, cx_1=None, hx_1=None):
         if self.rnn_mode:
             block_1 = self.block_1(x)
             hx, cx = self.rnn_cell(block_1, (hx, cx))
-            out = self.block_2(hx)
+            hx_1, cx_1 = self.rnn_cell_1(hx, (hx_1, cx_1))
+            out = self.block_2(hx_1)
+            return out, cx, hx, cx_1, hx_1
         else:
             out = self.layers(x)
-        return out
+            return out
 
     def _one_step_rnn(self, batch, log_plot=False, of_based=True, gt_all_points_based=False,
-                      gt_bbox_center_based=False, center_based_loss=False):
-        features1, features2, frame_, track_id, bbox_center1, bbox_center2 = batch
+                      gt_bbox_center_based=False, center_based_loss=True):
+        features1, features2, frame_, track_id, bbox_center1, bbox_center2, bbox1, bbox2 = batch
 
-        hx, cx = torch.zeros(size=(1, 32), device=self.device), torch.zeros(size=(1, 32), device=self.device)
+        hx, cx = torch.zeros(size=(1, 16), device=self.device), torch.zeros(size=(1, 16), device=self.device)
+        hx_1, cx_1 = torch.zeros(size=(1, 32), device=self.device), torch.zeros(size=(1, 32), device=self.device)
+
+        torch.nn.init.xavier_normal_(hx)
+        torch.nn.init.xavier_normal_(cx)
+        torch.nn.init.xavier_normal_(hx_1)
+        torch.nn.init.xavier_normal_(cx_1)
 
         total_loss = torch.tensor(data=0, dtype=torch.float32, device=self.device)
         last_input_velocity = None
@@ -158,10 +180,10 @@ class SimpleModel(pl.LightningModule):
                     break
 
                 if idx_i == 0:
-                    last_input_velocity = center_past_uv.unsqueeze(0)
+                    last_input_velocity = center_past_uv.unsqueeze(0)  # * 0.4  # bug workaround
                     last_pred_center = center_xy
 
-                block_2 = self(cx=cx, hx=hx, last_input_velocity=last_input_velocity)
+                block_2, cx, hx, cx_1, hx_1 = self(last_input_velocity, cx, hx, cx_1, hx_1)
 
                 if of_based:
                     shifted_points = feat1[:, :2] + feat1[:, 2:4]
@@ -317,18 +339,22 @@ class SimpleModel(pl.LightningModule):
 
     def preprocess_data(self, data_loader, mode: FeaturesMode, annotation_df, classic_clustering=False,
                         test_mode=False, equal_time_distributed=True, normalized=True,
-                        one_step_feature_extraction=False):
+                        one_step_feature_extraction=False, save_per_part_path=None, resume_idx=None):
         # original_shape=None, resize_shape=None):
+        save_per_part_path += 'parts/'
         remaining_frames = None
         remaining_frames_idx = None
         past_12_frames_optical_flow = []
         last_frame_from_last_used_batch = None
         accumulated_features = {}
         x_, y_ = [], []
-        for data in tqdm(data_loader):
+        for part_idx, data in enumerate(tqdm(data_loader)):
             # frames, bbox, centers = data  # read frames from loader and frame number and get annotations + centers
             # here
             # frames, bbox, centers = frames.squeeze(), bbox.squeeze(), centers.squeeze()
+            if resume_idx is not None:
+                if part_idx < resume_idx:
+                    continue
             frames, frame_numbers = data
             frames = frames.squeeze()
             feature_extractor = MOG2.for_frames()
@@ -353,6 +379,11 @@ class SimpleModel(pl.LightningModule):
                                                          last_frame_from_last_used_batch)
             # plot_extracted_features_and_verify_flow(features_, frames)
             accumulated_features = {**accumulated_features, **features_}
+            if save_per_part_path is not None:
+                Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
+                f_n = f'time_distributed_dict_with_gt_bbox_centers_and_bbox_part{part_idx}.pt'
+                torch.save(accumulated_features, save_per_part_path + f_n)
+
             if one_step_feature_extraction:
                 if mode == FeaturesMode.UV:
                     # features, cluster_centers = self._process_features(features_, uv=True,
@@ -594,7 +625,7 @@ class SimpleModel(pl.LightningModule):
 
 if __name__ == '__main__':
     # 1st stage
-    compute_features = False
+    compute_features = True
     # 2nd stage
     velocity_based = False  # feature extraction
     train_velocity_based = False
@@ -602,7 +633,7 @@ if __name__ == '__main__':
     graph_debug = False
     overfit = False
     normalized_ = False
-    compare_models = True
+    compare_models = False
     compare_of_gt = False
 
     time_distributed = True
@@ -619,8 +650,8 @@ if __name__ == '__main__':
 
         base_path = "../Datasets/SDD/"
         save_base_path = "../Datasets/SDD_Features/"
-        vid_label = SDDVideoClasses.QUAD
-        video_number = 1
+        vid_label = SDDVideoClasses.LITTLE
+        video_number = 3
 
         save_path = f'{save_base_path}{vid_label.value}/video{video_number}/'
 
@@ -674,7 +705,8 @@ if __name__ == '__main__':
                                                          annotation_df=sdd_simple.annotations_df,
                                                          classic_clustering=False, test_mode=test,
                                                          equal_time_distributed=time_distributed,
-                                                         normalized=normalized_)
+                                                         normalized=normalized_, save_per_part_path=save_path,
+                                                         resume_idx=None)
                 # features_save_dict = {'x': x, 'y': y}
 
             logger.info(f'Saving the features for video {vid_label.value}, video {video_number}')
@@ -976,7 +1008,7 @@ if __name__ == '__main__':
 
         elif train_velocity_based:
             # file_name = 'time_distributed_velocity_features_with_frame_track_rnn.pt'
-            file_name = 'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox.pt'
+            file_name = 'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_t10.pt'
             logger.info('Setting up DataLoaders')
             train_feats = torch.load(train_dataset_path + file_name)
             train_x, train_y, train_frames, train_track_ids, train_center_x, train_center_y, train_bbox_x, \
@@ -1015,7 +1047,7 @@ if __name__ == '__main__':
             net = SimpleModel(meta=meta, num_frames_to_build_bg_sub_model=12, layers_mode='rnn',
                               meta_video=SDDVideoDatasets.QUAD, meta_train_video_number=train_vid_num,
                               meta_val_video_number=inference_vid_num, lr=1e-2, train_dataset=train_dataset,
-                              val_dataset=val_dataset)
+                              val_dataset=val_dataset, time_steps=10)
 
             logger.info('Setting up network')
 
@@ -1364,7 +1396,8 @@ if __name__ == '__main__':
             # after debug - of based - all points
             # of_model.load_state_dict(torch.load('lightning_logs/version_24/checkpoints/epoch=128.ckpt')['state_dict'])
             # center based
-            of_model.load_state_dict(torch.load('lightning_logs/version_38/checkpoints/epoch=199.ckpt')['state_dict'])
+            # of_model.load_state_dict(torch.load('lightning_logs/version_38/checkpoints/epoch=199.ckpt')['state_dict'])
+            of_model.load_state_dict(torch.load('lightning_logs/version_40/checkpoints/epoch=9.ckpt')['state_dict'])
             of_model.eval()
 
             gt_model = SimpleModel(**kwargs_dict)
@@ -1393,7 +1426,7 @@ if __name__ == '__main__':
 
             bad_data = False
 
-            for sav_i, batch_inference in enumerate(tqdm(train_loader)):
+            for sav_i, batch_inference in enumerate(tqdm(val_loader)):
                 features1, features2, frame_, track_id, bbox_center1, bbox_center2, bbox1, bbox2 = batch_inference
                 frame_nums = [f.item() for f in frame_]
 
@@ -1441,7 +1474,7 @@ if __name__ == '__main__':
                             break
 
                         if i == 0:
-                            last_input_velocity = center_past_uv.unsqueeze(0)
+                            last_input_velocity = center_past_uv.unsqueeze(0)  # * 0.4  # bug workaround
                             last_input_velocity_gt = center_past_uv.unsqueeze(0)
                             last_pred_center = center_xy
                             last_pred_center_gt = center_xy
