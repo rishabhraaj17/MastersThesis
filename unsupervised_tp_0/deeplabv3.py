@@ -85,12 +85,12 @@ def main(args, video_label, train_video_num, val_video_num, inference_mode=False
     logger.info(f"DataLoaders built successfully")
 
     if inference_mode:
-        model = DeepLab.load_from_checkpoint('../lightning_logs/version_254348/checkpoints/epoch=5.ckpt',
+        model = DeepLab.load_from_checkpoint('../lightning_logs/version_254348/checkpoints/epoch=20.ckpt',
                                              )
         logger.info(f"Inference Network: {model.__class__.__name__}")
         logger.info(f"Starting Inference")
         model.eval()
-        frames, _ = next(iter(train_loader))
+        frames, _ = next(iter(val_loader))
         frames = frames.squeeze(1)
         pred = model(frames)
         plot = make_grid(torch.cat((frames, pred['out'])), nrow=2)
