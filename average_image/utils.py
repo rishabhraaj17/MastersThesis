@@ -8,6 +8,8 @@ import pandas as pd
 import PIL.Image as Image
 import torch
 from matplotlib import patches, cm
+import matplotlib.pylab as pl
+import matplotlib.gridspec as gridspec
 import matplotlib.patches as mpatches
 from sklearn.decomposition import PCA
 from torchvision.datasets.folder import make_dataset
@@ -329,6 +331,73 @@ def plot_bars_if_inside_bbox(data):
     plt.show()
 
 
+def plot_track_analysis(track_id, ade, fde, inside_bbox, per_spot_de, save_path, idx):
+    width = 0.25
+    gs = gridspec.GridSpec(2, 2)
+
+    fig = plt.figure()
+    ax1 = fig.add_subplot(gs[0, 0])  # row 0, col 0
+    ax1.bar(2, [ade], width, color='r', label='ADE')
+    ax1.bar(2 + width, [fde], width, color='b', label='FDE')
+    ax1.tick_params(
+        axis='x',  # changes apply to the x-axis
+        which='both',  # both major and minor ticks are affected
+        bottom=False,  # ticks along the bottom edge are off
+        top=False,  # ticks along the top edge are off
+        labelbottom=False)  # labels along the bottom edge are off
+    ax1.set_title('ADE/FDE')
+    ax1.legend()
+
+    true_count = []
+    false_count = []
+    true_count.append(inside_bbox.count(True))
+    false_count.append(inside_bbox.count(False))
+
+    ax2 = fig.add_subplot(gs[0, 1])  # row 0, col 1
+    ax2.bar(2, true_count, width, color='r', label='Inside')
+    ax2.bar(2 + width, false_count, width, color='b', label='Outside')
+    ax2.tick_params(
+        axis='x',  # changes apply to the x-axis
+        which='both',  # both major and minor ticks are affected
+        bottom=False,  # ticks along the bottom edge are off
+        top=False,  # ticks along the top edge are off
+        labelbottom=False)  # labels along the bottom edge are off
+    ax2.set_title('Is OF Center inside Bbox')
+    ax2.legend()
+
+    n = len(per_spot_de)
+    ind = np.arange(n)
+
+    ax3 = fig.add_subplot(gs[1, :])  # row 1, span all columns
+    ax3.bar(ind, per_spot_de, width, color='r', label='Error per time-step')
+    ax3.legend()
+
+    fig.suptitle(f'Track Id : {track_id}')
+    if save_path is not None:
+        fig.savefig(f"{save_path}{idx}_track_id_{track_id}.png")
+    else:
+        plt.show()
+
+
+def plot_violin_plot(ade_list, fde_list, save_path):
+    fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(9, 4))
+    data = [ade_list, fde_list]
+    axes.violinplot(data,
+                    showmeans=False,
+                    showmedians=True)
+    axes.set_title('ADE/FDE')
+
+    axes.yaxis.grid(True)
+    axes.set_xticks([y + 1 for y in range(len(data))])
+    axes.set_xlabel('ADE/FDE')
+    axes.set_ylabel('Observed values')
+
+    plt.setp(axes, xticks=[y + 1 for y in range(len(data))],
+             xticklabels=['ADE', 'FDE'])
+    fig.savefig(f"{save_path}ade_fde_violin.png")
+    plt.show()
+
+
 def renormalize_optical_flow(features, options):
     of_0 = denormalize(features[..., 0], options['f_max_0'], options['f_min_0'])
     of_1 = denormalize(features[..., 1], options['f_max_1'], options['f_min_1'])
@@ -405,11 +474,15 @@ def renormalize_any_cluster(cluster_centers, options):
     return out
 
 
-def plot_extracted_features(frame_object_list, img=None):
+def plot_extracted_features(frame_object_list, img=None, normalize=False):
     object_points = []
     for obj in frame_object_list:
-        renormalized_ = renormalize_any_cluster(obj.features[:, :2], obj.normalize_params).astype(np.int)
-        object_points.append([renormalized_[:, 0], renormalized_[:, 1]])
+        if normalize:
+            renormalized_ = renormalize_any_cluster(obj.features[:, :2], obj.normalize_params).astype(np.int)
+            object_points.append([renormalized_[:, 0], renormalized_[:, 1]])
+        else:
+            feats = obj.features[:, :2]
+            object_points.append([feats[..., 0], feats[..., 1]])
 
     if img is not None:
         plt.imshow(img)
@@ -685,6 +758,7 @@ def plot_trajectory_rnn_tb(predicted_points, true_points, actual_points=None, im
 
     return fig
 
+
 def plot_trajectory_rnn_compare(predicted_points, predicted_points_gt, true_points, true_points_of, of_l2, gt_l2,
                                 actual_points=None, imgs=None, gt=False, m_ratio=None, save_path=None, show=False):
     fig, axs = plt.subplots(1, 1, sharex='none', sharey='none',
@@ -849,14 +923,25 @@ def plot_trajectory_rnn_compare_side_by_side(predicted_points, predicted_points_
         plt.show()
 
 
-def compute_ade(predicted_trajs, gt_traj):
+def compute_ade(predicted_trajs, gt_traj, batched=True):
     error = np.linalg.norm(predicted_trajs - gt_traj, axis=-1)
-    ade = np.mean(error, axis=-1)
+    if batched:
+        ade = np.mean(error)
+    else:
+        ade = np.mean(error, axis=-1)
     return ade.flatten()
 
 
-def compute_fde(predicted_trajs, gt_traj):
-    final_error = np.linalg.norm(predicted_trajs[-1] - gt_traj[-1], axis=-1)
+def compute_per_stop_de(predicted_trajs, gt_traj):
+    error = np.linalg.norm(predicted_trajs - gt_traj, axis=-1)
+    return error
+
+
+def compute_fde(predicted_trajs, gt_traj, batched=True):
+    if batched:
+        final_error = np.linalg.norm(predicted_trajs[-1, ...] - gt_traj[-1, ...], axis=-1).mean()
+    else:
+        final_error = np.linalg.norm(predicted_trajs[-1] - gt_traj[-1], axis=-1)
     # final_error = np.linalg.norm(predicted_trajs[:, :, -1] - gt_traj[-1], axis=-1)
     return final_error.flatten()
 
