@@ -97,6 +97,9 @@ def core_layers_maker(batch_norm, in_features, layers, v):
 
 
 class BaselineSequential(LightningModule):
+    """
+    Watch 8 time steps, predict next 12
+    """
     def __init__(self, meta=None, original_frame_shape=None, num_frames_between_two_time_steps=12, lr=1e-5,
                  mode=FeaturesMode.UV, layers_mode=None, meta_video=None, meta_train_video_number=None,
                  meta_val_video_number=None, time_steps=5, train_dataset=None, val_dataset=None, batch_size=1,
@@ -126,8 +129,8 @@ class BaselineSequential(LightningModule):
         self.gt_based = gt_based
         self.center_based = center_based
 
-        self.save_hyperparameters('lr', 'time_steps')  # , 'meta_video', 'batch_size', 'meta_train_video_number',
-        # 'meta_val_video_number')
+        self.save_hyperparameters('lr', 'time_steps', 'meta_video', 'batch_size', 'meta_train_video_number',
+                                  'meta_val_video_number')
 
     def forward(self, x, cx=None, hx=None, cx_1=None, hx_1=None, stacked=True):
         if stacked:
@@ -152,6 +155,7 @@ class BaselineSequential(LightningModule):
         last_input_velocity, last_pred_center, bad_data = None, None, False
         pred_centers, moved_points_by_true_of_list, actual_points_list = [], [], []
         ade, fde, shifted_points = None, None, None
+        steps_to_watch = 8
 
         criterion = self.setup_loss()
 
@@ -159,19 +163,14 @@ class BaselineSequential(LightningModule):
             for idx_i, i in enumerate(range(self.ts)):
                 feat, bb_center1, bb_center2 = features[i].squeeze().float(), bbox_center1[i].float(), \
                                                bbox_center2[i].float()
-                try:
-                    center_xy, center_true_uv, center_past_uv, shifted_point, gt_past_velocity = \
-                        feat[:, 0, :], feat[:, 1, :], feat[:, 2, :], feat[:, 3, :], feat[:, 4, :]
-                    if self.gt_based:
-                        shifted_points = bb_center2
-                    if not self.center_based:
-                        return NotImplemented
-                except IndexError:
-                    bad_data = True
-                    print('Bad Data')
-                    break
+                center_xy, center_true_uv, center_past_uv, shifted_point, gt_past_velocity = \
+                    feat[:, 0, :], feat[:, 1, :], feat[:, 2, :], feat[:, 3, :], feat[:, 4, :]
+                if self.gt_based:
+                    shifted_points = bb_center2
+                if not self.center_based:
+                    return NotImplemented
 
-                if idx_i == 0:
+                if idx_i < steps_to_watch:
                     if self.gt_based:
                         last_input_velocity = gt_past_velocity
                         last_pred_center = bb_center1
@@ -179,15 +178,27 @@ class BaselineSequential(LightningModule):
                         last_input_velocity = center_past_uv
                         last_pred_center = center_xy
 
-                block_2, cx, hx, cx_1, hx_1 = self(last_input_velocity, cx, hx, cx_1, hx_1, True)
+                    block_2, cx, hx, cx_1, hx_1 = self(last_input_velocity, cx, hx, cx_1, hx_1, True)
 
-                if not self.gt_based:
-                    shifted_points = shifted_point
+                    if not self.gt_based:
+                        shifted_points = shifted_point
 
-                moved_points_by_true_of_list.append(shifted_points)
-                pred_center = last_pred_center + (block_2 * 0.4)
-                last_input_velocity = block_2
-                last_pred_center = pred_center
+                    moved_points_by_true_of_list.append(shifted_points)
+                    pred_center = last_pred_center + (block_2 * 0.4)
+                    if idx_i == steps_to_watch - 1:
+                        last_input_velocity = block_2
+                        last_pred_center = pred_center
+                else:
+                    block_2, cx, hx, cx_1, hx_1 = self(last_input_velocity, cx, hx, cx_1, hx_1, True)
+
+                    if not self.gt_based:
+                        shifted_points = shifted_point
+
+                    moved_points_by_true_of_list.append(shifted_points)
+                    pred_center = last_pred_center + (block_2 * 0.4)
+                    last_input_velocity = block_2
+                    last_pred_center = pred_center
+
                 pred_centers.append(pred_center)
                 actual_points_list.append(bb_center2)
 
@@ -196,16 +207,8 @@ class BaselineSequential(LightningModule):
             predicted_points = [p.detach().cpu().numpy() for p in pred_centers]
             true_points = [p.detach().cpu().numpy() for p in actual_points_list]
 
-            if len(predicted_points) != 0 or len(true_points) != 0:
-                ade = compute_ade(np.stack(predicted_points), np.stack(true_points)).item()
-                fde = compute_fde(np.stack(predicted_points), np.stack(true_points)).item()
-
-        # Fixme: fix dataset, remove hacks
-        else:
-            total_loss = torch.zeros(size=(5, 5), device=self.device, requires_grad=True).mean()
-
-        if bad_data:
-            total_loss = torch.zeros(size=(5, 5), device=self.device, requires_grad=True).mean()
+            ade = compute_ade(np.stack(predicted_points), np.stack(true_points)).item()
+            fde = compute_fde(np.stack(predicted_points), np.stack(true_points)).item()
 
         return total_loss / len(features), ade, fde
 
@@ -386,4 +389,3 @@ if __name__ == '__main__':
         }
 
         train(**kwargs_dict)
-
