@@ -1173,7 +1173,7 @@ class SDDMeta(object):
 
 class AgentFeatures(object):
     def __init__(self, features, track_id, frame_number, normalize_params, optical_flow_frame_num, bbox_center, bbox,
-                 cluster_centers=None, cluster_labels=None):
+                 track_gt_velocity, cluster_centers=None, cluster_labels=None):
         super(AgentFeatures, self).__init__()
         self.frame_number = frame_number
         self.features = features
@@ -1184,6 +1184,7 @@ class AgentFeatures(object):
         self.optical_flow_frame_num = optical_flow_frame_num
         self.bbox_center = bbox_center
         self.bbox = bbox
+        self.track_gt_velocity = track_gt_velocity
 
     def __repr__(self):
         pass  # auto-printing??
@@ -1195,7 +1196,7 @@ class AgentFeatures(object):
 
 class BasicTrainData(object):
     def __init__(self, frame, track_id, pair_0_features, pair_1_features, bbox_center_t0, bbox_center_t1,
-                 frame_t0, frame_t1, bbox_t0, bbox_t1):
+                 frame_t0, frame_t1, bbox_t0, bbox_t1, track_gt_velocity_t0, track_gt_velocity_t1):
         super(BasicTrainData, self).__init__()
         self.frame = frame
         self.track_id = track_id
@@ -1207,6 +1208,8 @@ class BasicTrainData(object):
         self.frame_t1 = frame_t1
         self.bbox_t0 = bbox_t0
         self.bbox_t1 = bbox_t1
+        self.track_gt_velocity_t0 = track_gt_velocity_t0
+        self.track_gt_velocity_t1 = track_gt_velocity_t1
 
     def __eq__(self, other):
         return self.track_id == other.track_id

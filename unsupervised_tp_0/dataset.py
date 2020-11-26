@@ -11,7 +11,8 @@ from torchvision.datasets.folder import make_dataset
 from torchvision.datasets.video_utils import VideoClips
 
 from average_image.constants import SDDVideoClasses, FeaturesMode
-from average_image.bbox_utils import get_frame_annotations, scale_annotations, get_frame_by_track_annotations
+from average_image.bbox_utils import get_frame_annotations, scale_annotations, get_frame_by_track_annotations, \
+    get_frame_annotations_and_skip_lost
 from average_image.utils import SDDMeta, plot_with_centers, object_of_interest_mask
 
 import warnings
@@ -38,6 +39,22 @@ def resize_frames(frame, frame_annotation, size: Optional[Union[Tuple, int]] = N
     #                                                     new_scale=new_shape, return_track_id=False,
     #                                                     tracks_with_annotations=True)
     return frame, original_shape, new_shape  # frame_annotation, frame_centers
+
+
+def resize_frames_with_annotation(frame, frame_annotation, size: Optional[Union[Tuple, int]] = None,
+                                  scale: Optional[float] = None):
+    frame = frame.float() / 255.0
+    original_shape = frame.shape[2], frame.shape[3]
+    if size is not None:
+        frame = F.interpolate(frame, size=size, mode='bilinear', align_corners=False)
+    if scale is not None:
+        frame = F.interpolate(frame, scale_factor=scale, mode='bilinear', align_corners=False)
+    new_shape = frame.shape[2], frame.shape[3]
+    track_id = None
+    frame_annotation, frame_centers = scale_annotations(frame_annotation, original_scale=original_shape,
+                                                        new_scale=new_shape, return_track_id=False,
+                                                        tracks_with_annotations=True)
+    return frame, original_shape, new_shape, frame_annotation, frame_centers
 
 
 class SDDDatasetBuilder(VisionDataset):
@@ -254,6 +271,47 @@ class SDDSimpleDataset(Dataset):
                 self.new_scale = new_scale
 
         return video, item
+
+
+class SDDSimpleDatasetWithAnnotation(SDDSimpleDataset):
+    def __init__(self, root: str, video_label: SDDVideoClasses, frames_per_clip: int, num_videos=None, step_factor=None,
+                 step_between_clips: int = 1, frame_rate: Optional[float] = None, fold: int = 1, train: bool = True,
+                 transform: Any = None, _precomputed_metadata: bool = None, num_workers: int = 1, _video_width: int = 0,
+                 _video_height: int = 0, _video_min_dimension: int = 0, _audio_samples: int = 0, scale: float = 1.0,
+                 single_track_mode: bool = False, track_id: int = 0, video_number_to_use: int = 0,
+                 multiple_videos: bool = False):
+        super(SDDSimpleDatasetWithAnnotation, self).__init__(root, video_label, frames_per_clip, num_videos,
+                                                             step_factor, step_between_clips, frame_rate, fold, train,
+                                                             transform, _precomputed_metadata, num_workers,
+                                                             _video_width, _video_height, _video_min_dimension,
+                                                             _audio_samples, scale, single_track_mode, track_id,
+                                                             video_number_to_use, multiple_videos)
+
+    def __getitem__(self, item):
+        video, audio, info, video_idx = self.video_clips.get_clip(item)
+        # Dont read annotation here as stacking is not possible when number of objects differ
+        # if self.single_track_mode:
+        #     label = get_frame_by_track_annotations(self.annotations_df, item, track_id=self.track_id)
+        # else:
+        #     label = get_frame_annotations(self.annotations_df, item)
+        video = video.permute(0, 3, 1, 2)
+
+        # centers = None
+        # label = get_frame_annotations(self.annotations_df, item)
+        label = get_frame_annotations_and_skip_lost(self.annotations_df, item)
+        new_scale = None
+        original_shape = None
+        # track_ids = None
+        frame_annotation, frame_centers = None, None
+        if self.transform is not None:
+            # video, label, centers = self.transform(video, label, scale=self.scale)
+            video, original_shape, new_scale, frame_annotation, frame_centers = \
+                self.transform(video, label, scale=self.scale)
+            if self.original_shape is None or self.new_scale is None:
+                self.original_shape = original_shape
+                self.new_scale = new_scale
+
+        return video, item, frame_annotation, frame_centers
 
 
 class FeaturesDataset(Dataset):

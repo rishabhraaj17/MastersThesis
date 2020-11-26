@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name="UTP_SegNet_20ep"
+#SBATCH --job-name="UTP_UNet_50ep"
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1,VRAM:16G
@@ -10,4 +10,4 @@
 #SBATCH --error=/usr/stud/rajr/storage/slurm/rajr/logs/vanilla_vgg_vae_1_epoch/slurm-%j.out
 
 source /usr/stud/rajr/anaconda3/bin/activate py38
-srun python unsupervised_tp_0/deeplabv3.py --pin_memory --batch_norm --pretrained --num_workers 8 --batch_size 2 --epochs 80 --dataset_root /usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/ --save_path /usr/stud/rajr/storage/slurm/rajr/logs/vanilla_vgg_vae_1_epoch/checkpoint/
+srun python unsupervised_tp_0/unet.py --pin_memory --batch_norm --pretrained --num_workers 8 --batch_size 2 --epochs 80 --dataset_root /usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/ --save_path /usr/stud/rajr/storage/slurm/rajr/logs/vanilla_vgg_vae_1_epoch/checkpoint/

@@ -311,8 +311,8 @@ class SimpleModel(pl.LightningModule):
                 feat, bb_center1, bb_center2 = features[i].squeeze().float(), bbox_center1[i].float(), \
                                                bbox_center2[i].float()
                 try:
-                    center_xy, center_true_uv, center_past_uv, shifted_point = feat[:, 0, :], feat[:, 1, :], \
-                                                                               feat[:, 2, :], feat[:, 3, :]
+                    center_xy, center_true_uv, center_past_uv, shifted_point, gt_past_velocity = \
+                        feat[:, 0, :], feat[:, 1, :], feat[:, 2, :], feat[:, 3, :], feat[:, 4, :]
                     if gt_all_points_based:
                         return NotImplemented
                     if gt_bbox_center_based:
@@ -322,8 +322,12 @@ class SimpleModel(pl.LightningModule):
                     break
 
                 if idx_i == 0:
-                    last_input_velocity = center_past_uv  # * 0.4  # bug workaround
-                    last_pred_center = center_xy
+                    if gt_bbox_center_based:
+                        last_input_velocity = gt_past_velocity  # * 0.4  # bug workaround
+                        last_pred_center = bb_center1
+                    else:
+                        last_input_velocity = center_past_uv  # * 0.4  # bug workaround
+                        last_pred_center = center_xy
 
                 block_2, cx, hx, cx_1, hx_1 = self(last_input_velocity, cx, hx, cx_1, hx_1, False)
 
@@ -331,7 +335,7 @@ class SimpleModel(pl.LightningModule):
                     shifted_points = shifted_point
 
                 moved_points_by_true_of_list.append(shifted_points)
-                pred_center = last_pred_center + block_2
+                pred_center = last_pred_center + (block_2 * 0.4)
                 last_input_velocity = block_2
                 last_pred_center = pred_center
                 pred_centers.append(pred_center)
@@ -500,6 +504,7 @@ class SimpleModel(pl.LightningModule):
         remaining_frames_idx = None
         past_12_frames_optical_flow = []
         last_frame_from_last_used_batch = None
+        gt_velocity_dict = {}
         accumulated_features = {}
         x_, y_ = [], []
         for part_idx, data in enumerate(tqdm(data_loader)):
@@ -513,7 +518,7 @@ class SimpleModel(pl.LightningModule):
             frames = frames.squeeze()
             feature_extractor = MOG2.for_frames()
             features_, remaining_frames, remaining_frames_idx, last_frame_from_last_used_batch, \
-            past_12_frames_optical_flow = feature_extractor. \
+            past_12_frames_optical_flow, gt_velocity_dict = feature_extractor. \
                 keyframe_based_clustering_from_frames_nn(frames=frames, n=30, use_last_n_to_build_model=False,
                                                          frames_to_build_model=self.num_frames_to_build_bg_sub_model,
                                                          original_shape=data_loader.dataset.original_shape,
@@ -530,12 +535,13 @@ class SimpleModel(pl.LightningModule):
                                                          remaining_frames_idx=remaining_frames_idx,
                                                          past_12_frames_optical_flow=past_12_frames_optical_flow,
                                                          last_frame_from_last_used_batch=
-                                                         last_frame_from_last_used_batch)
-            plot_extracted_features_and_verify_flow(features_, frames)
+                                                         last_frame_from_last_used_batch,
+                                                         gt_velocity_dict=gt_velocity_dict)
+            # plot_extracted_features_and_verify_flow(features_, frames)
             accumulated_features = {**accumulated_features, **features_}
             if save_per_part_path is not None:
                 Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
-                f_n = f'time_distributed_dict_with_gt_bbox_centers_and_bbox_part{part_idx}.pt'
+                f_n = f'time_distributed_dict_with_gt_bbox_centers_and_bbox_part_gt_velocity{part_idx}.pt'
                 torch.save(accumulated_features, save_per_part_path + f_n)
 
             if one_step_feature_extraction:
@@ -628,7 +634,9 @@ class SimpleModel(pl.LightningModule):
                                                    bbox_center_t0=i.bbox_center,
                                                    bbox_center_t1=j.bbox_center,
                                                    bbox_t0=i.bbox,
-                                                   bbox_t1=j.bbox))
+                                                   bbox_t1=j.bbox,
+                                                   track_gt_velocity_t0=i.track_gt_velocity,
+                                                   track_gt_velocity_t1=j.track_gt_velocity))
                                 # per_frame_data.append([i.features, j.features])
                 per_batch_data.append(per_frame_data)
                 per_frame_data = []
@@ -667,7 +675,9 @@ class SimpleModel(pl.LightningModule):
                                                    bbox_center_t0=i.bbox_center,
                                                    bbox_center_t1=j.bbox_center,
                                                    bbox_t0=i.bbox,
-                                                   bbox_t1=j.bbox))
+                                                   bbox_t1=j.bbox,
+                                                   track_gt_velocity_t0=i.track_gt_velocity,
+                                                   track_gt_velocity_t1=j.track_gt_velocity))
                                 # per_frame_data.append([i.features, j.features])
                 per_batch_data.append(per_frame_data)
                 per_frame_data = []
@@ -753,6 +763,8 @@ class SimpleModel(pl.LightningModule):
         bbox_center_y = []
         bbox_x = []
         bbox_y = []
+        gt_velocity_x = []
+        gt_velocity_y = []
         for key, value in tqdm(train_data.items()):
             num_frames = len(value)
             t_0 = value[0]
@@ -766,6 +778,8 @@ class SimpleModel(pl.LightningModule):
                 temp_bbox_center_y = []
                 temp_bbox_x = []
                 temp_bbox_y = []
+                temp_gt_velocity_x = []
+                temp_gt_velocity_y = []
 
                 temp_f_info.append(fr.frame)
                 temp_track_info.append(fr.track_id)
@@ -775,6 +789,8 @@ class SimpleModel(pl.LightningModule):
                 temp_bbox_center_y.append(fr.bbox_center_t1)
                 temp_bbox_x.append(fr.bbox_t0)
                 temp_bbox_y.append(fr.bbox_t1)
+                temp_gt_velocity_x.append(fr.track_gt_velocity_t0)
+                temp_gt_velocity_y.append(fr.track_gt_velocity_t1)
                 for t_i in t_rest:
                     for fr_other in t_i:
                         if fr == fr_other:
@@ -786,6 +802,8 @@ class SimpleModel(pl.LightningModule):
                             temp_bbox_center_y.append(fr_other.bbox_center_t1)
                             temp_bbox_x.append(fr_other.bbox_t0)
                             temp_bbox_y.append(fr_other.bbox_t1)
+                            temp_gt_velocity_x.append(fr_other.track_gt_velocity_t0)
+                            temp_gt_velocity_y.append(fr_other.track_gt_velocity_t1)
                 frame_info.append(temp_f_info)
                 track_id_info.append(temp_track_info)
                 x_.append(temp_x)
@@ -794,9 +812,12 @@ class SimpleModel(pl.LightningModule):
                 bbox_center_y.append(temp_bbox_center_y)
                 bbox_x.append(temp_bbox_x)
                 bbox_y.append(temp_bbox_y)
+                gt_velocity_x.append(temp_gt_velocity_x)
+                gt_velocity_y.append(temp_gt_velocity_y)
 
         if return_frame_info:
-            return x_, y_, frame_info, track_id_info, bbox_center_x, bbox_center_y, bbox_x, bbox_y
+            return x_, y_, frame_info, track_id_info, bbox_center_x, bbox_center_y, bbox_x, bbox_y, gt_velocity_x, \
+                   gt_velocity_y
         return x_, y_
 
     def _extract_test_features(self, train_data):
@@ -933,20 +954,21 @@ def find_center_point(points):
 
 
 def center_based_dataset(features):
-    features_x, features_y, frames, track_ids, center_x, center_y, bbox_x, bbox_y = features['x'], features['y'], \
-                                                                                    features['frames'], \
-                                                                                    features['track_ids'], features[
-                                                                                        'bbox_center_x'], \
-                                                                                    features['bbox_center_y'], features[
-                                                                                        'bbox_x'], \
-                                                                                    features['bbox_y']
+    features_x, features_y, frames, track_ids, center_x, center_y, bbox_x, bbox_y, gt_velocity_x, gt_velocity_y \
+        = features['x'], features['y'], features['frames'], features['track_ids'], features['bbox_center_x'], \
+          features['bbox_center_y'], features['bbox_x'], features['bbox_y'], features['gt_velocity_x'], \
+          features['gt_velocity_y']
+    skipped_counter = 0
     features_center = []
-    for feat1 in tqdm(features_x):
+    for feat1, velocity_x in tqdm(zip(features_x, gt_velocity_x)):
         f1_list = []
-        for f1 in feat1:
+        for f1, vx in zip(feat1, velocity_x):
             center_xy, center_true_uv, center_past_uv = find_center_point(f1)
             shifted_points = (f1[:, :2] + f1[:, 2:4]).mean(axis=0)
-            f1_list.append(np.vstack((center_xy, center_true_uv, center_past_uv, shifted_points)))
+            try:
+                f1_list.append(np.vstack((center_xy, center_true_uv, center_past_uv, shifted_points, vx)))
+            except ValueError:
+                skipped_counter += 1
         features_center.append(f1_list)
     save_dict = {'center_based': features_center,
                  'x': features_x,
@@ -956,7 +978,10 @@ def center_based_dataset(features):
                  'bbox_center_x': center_x,
                  'bbox_center_y': center_y,
                  'bbox_x': bbox_x,
-                 'bbox_y': bbox_y}
+                 'bbox_y': bbox_y,
+                 'gt_velocity_x': gt_velocity_x,
+                 'gt_velocity_y': gt_velocity_y}
+    print('skipped: ', skipped_counter)
     return save_dict
 
 
@@ -964,7 +989,7 @@ def center_dataset_collate(batch):
     center_features_list, frames_batched_list, track_ids_batched_list, bbox_center_x_batched_list, \
     bbox_center_y_batched_list, bbox_x_batched_list, bbox_y_batched_list = [], [], [], [], [], [], []
     for data in batch:
-        center_features = np.zeros(shape=(0, 4, 2))
+        center_features = np.zeros(shape=(0, 5, 2))
         frames_batched, track_ids_batched = np.zeros(shape=(0, 1)), np.zeros(shape=(0, 1))
         bbox_center_x_batched, bbox_center_y_batched = np.zeros(shape=(0, 2)), np.zeros(shape=(0, 2))
         bbox_x_batched, bbox_y_batched = np.zeros(shape=(0, 4)), np.zeros(shape=(0, 4))
@@ -1094,7 +1119,7 @@ if __name__ == '__main__':
             if save_path:
                 Path(save_path).mkdir(parents=True, exist_ok=True)
             # file_name = 'time_distributed_dict_with_gt_bbox_centers.pt'
-            file_name = 'time_distributed_dict_with_gt_bbox_centers_and_bbox.pt'
+            file_name = 'time_distributed_dict_with_gt_bbox_centers_and_bbox_gt_velocity.pt'
             torch.save(final_featues_dict, save_path + file_name)
         elif analysis_mode:
             save_path = '../Datasets/SDD_Features/quad/video1/analysis/'
@@ -1475,12 +1500,17 @@ if __name__ == '__main__':
         elif train_larger_dataset:
             t_steps = COLLATE_TS
             extract_features = False
-            inference = True
+            inference = False
             if extract_features:
                 # process for dataset
-                file_name = '../Datasets/SDD_Features/little/video3/time_distributed_dict_with_gt_bbox_centers_and_bbox.pt'
+                # file_name = '/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD_Features/little/video3/' \
+                #             'time_distributed_dict_with_gt_bbox_centers_and_bbox_gt_velocity.pt'
+                file_name = '../Datasets/SDD_Features/little/video3/' \
+                            'time_distributed_dict_with_gt_bbox_centers_and_bbox_gt_velocity.pt'
                 train_feats = torch.load(file_name)
-                feats_data = net._process_complex_features_rnn(train_feats, time_steps=10)
+                logger.info(f'Processing the features for video {vid_label.value}, video {video_number}')
+                feats_data = net._process_complex_features_rnn(train_feats, time_steps=t_steps)
+                logger.info(f'Extracting the features for video {vid_label.value}, video {video_number}')
                 # logger.info(f'Saving the features for video {vid_label.value}, video {video_number}')
                 # # if save_path:
                 # #     Path(save_path).mkdir(parents=True, exist_ok=True)
@@ -1490,13 +1520,14 @@ if __name__ == '__main__':
                 # # train_feats = torch.load(save_path
                 # #                          + 'pre_train_rnn_data_with_gt_bbox_centers.pt')  # pre_train_rnn_data
                 data_x, data_y, data_frame_info, data_track_id_info, data_bbox_center_x, data_bbox_center_y, data_bbox_x, \
-                data_bbox_y = \
+                data_bbox_y, data_gt_velocity_x, data_gt_velocity_y = \
                     net._extract_trainable_features_rnn(feats_data,
                                                         return_frame_info=True)
                 features_save_dict = {'x': data_x, 'y': data_y, 'frames': data_frame_info,
                                       'track_ids': data_track_id_info,
                                       'bbox_center_x': data_bbox_center_x, 'bbox_center_y': data_bbox_center_y,
-                                      'bbox_x': data_bbox_x, 'bbox_y': data_bbox_y}
+                                      'bbox_x': data_bbox_x, 'bbox_y': data_bbox_y, 'gt_velocity_x': data_gt_velocity_x,
+                                      'gt_velocity_y': data_gt_velocity_y}
                 # logger.info(f'Saving the features for video {vid_label.value}, video {video_number}')
                 #
                 # Center based preprocessing
@@ -1511,15 +1542,17 @@ if __name__ == '__main__':
                 # logger.info('Setting up DataLoaders')
                 # train_feats = torch.load(save_path + file_name)
                 # train_feats = center_based_dataset(train_feats)
+                logger.info(f'Preparing the features for video {vid_label.value}, video {video_number}')
                 train_feats = center_based_dataset(features_save_dict)
-                file_name = 'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
-                            'center_based_t10.pt'
-                # if save_path:
-                #     Path(save_path).mkdir(parents=True, exist_ok=True)
-                # torch.save(train_feats, save_path + file_name)
+                file_name = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
+                            f'center_based_gt_velocity_t{t_steps}.pt'
+                if save_path:
+                    Path(save_path).mkdir(parents=True, exist_ok=True)
+                torch.save(train_feats, save_path + file_name)
+                logger.info(f'Completed the feature extraction for video {vid_label.value}, video {video_number}')
 
             file_name = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
-                        f'center_based_t{t_steps}.pt'
+                        f'center_based_gt_velocity_t{t_steps}.pt'
 
             logger.info('Setting up DataLoaders')
             train_feats = torch.load(save_path + file_name)
@@ -1717,9 +1750,8 @@ if __name__ == '__main__':
                                 # center_xy, center_true_uv, center_past_uv, shifted_point = feat[:, 0, :], \
                                 #                                                            feat[:, 1, :], \
                                 #                                                            feat[:, 2, :], feat[:, 3, :]
-                                center_xy, center_true_uv, center_past_uv, shifted_point = feat[0, :], \
-                                                                                           feat[1, :], \
-                                                                                           feat[2, :], feat[3, :]
+                                center_xy, center_true_uv, center_past_uv, shifted_point, gt_past_velocity = \
+                                    feat[0, :], feat[1, :], feat[2, :], feat[3, :], feat[4, :]
                                 # gt_based_shifted_points = feat2[:, :2]  # for gt based
                                 gt_based_shifted_points = bb_center2  # for bbox_center gt based
                             except IndexError:
@@ -1731,12 +1763,17 @@ if __name__ == '__main__':
                                 # last_input_velocity = center_past_uv.unsqueeze(0)  # * 0.4  # bug workaround
                                 # last_input_velocity_gt = center_past_uv.unsqueeze(0)
                                 last_input_velocity = center_past_uv.unsqueeze(0)
-                                last_input_velocity_gt = center_past_uv.unsqueeze(0)
+                                # last_input_velocity_gt = center_past_uv.unsqueeze(0)
+                                last_input_velocity_gt = gt_past_velocity.unsqueeze(0)
                                 last_pred_center = center_xy
-                                last_pred_center_gt = center_xy
-                                last_true_center = center_xy
-                                linear_pred_center = center_xy
-                                first_ts_velocity_linear = center_past_uv
+                                # last_pred_center_gt = center_xy
+                                last_pred_center_gt = bb_center1
+                                # last_true_center = center_xy
+                                last_true_center = bb_center1
+                                # linear_pred_center = center_xy
+                                linear_pred_center = bb_center1
+                                # first_ts_velocity_linear = center_past_uv
+                                first_ts_velocity_linear = gt_past_velocity
 
                             with torch.no_grad():
                                 # logger.info(f'{i} -> Input Velocity: {last_input_velocity}')
@@ -1763,7 +1800,7 @@ if __name__ == '__main__':
                             # pred_center = center_xy + block_2
                             pred_center = last_pred_center + block_2
                             pred_center_gt = last_pred_center_gt + block_2_gt
-                            linear_pred_center += first_ts_velocity_linear  # * 0.4  # d = v * t
+                            linear_pred_center += first_ts_velocity_linear * 0.4  # * 0.4  # d = v * t
                             # pred_center = last_pred_center + (block_2 * 0.4)  # velocity * time - bad
 
                             is_gt_based_shifted_points_inside = is_inside_bbox(point=gt_based_shifted_points.squeeze(),

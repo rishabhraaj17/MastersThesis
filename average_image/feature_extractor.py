@@ -634,6 +634,28 @@ class FeatureExtractor(object):
         data_ = np.abs(data_)
         all_agent_features = []
         data_frame_num = data_frame_num.item()
+
+        # get last 12 frames and extract gt velocity
+        gt_bboxs_dict = {}
+        gt_velocity_dict = {}
+        for gt_idx in range(data_frame_num - 12, data_frame_num):
+            fr_annotation = get_frame_annotations_and_skip_lost(df, gt_idx)
+            fr_annotations, fr_bbox_centers, fr_track_ids = scale_annotations(fr_annotation,
+                                                                              original_scale=original_shape,
+                                                                              new_scale=new_shape, return_track_id=True,
+                                                                              tracks_with_annotations=True)
+            for t_id, bb_center in zip(fr_track_ids, fr_bbox_centers):
+                if t_id in gt_bboxs_dict.keys():
+                    gt_bboxs_dict[t_id].append(bb_center)
+                    continue
+                gt_bboxs_dict.update({t_id: [bb_center]})
+
+        for gt_key, gt_value in gt_bboxs_dict.items():
+            dist = 0
+            for p in range(len(gt_value) - 1):
+                dist += np.linalg.norm((np.expand_dims(gt_value[p], 0) - np.expand_dims(gt_value[p+1], 0)), 2, axis=0)
+            gt_velocity_dict.update({gt_key: dist / 0.4})
+
         frame_annotation = get_frame_annotations_and_skip_lost(df, data_frame_num)
         annotations, bbox_centers = scale_annotations(frame_annotation, original_scale=original_shape,
                                                       new_scale=new_shape, return_track_id=False,
@@ -716,12 +738,18 @@ class FeatureExtractor(object):
                     if do_clustering:
                         return NotImplemented
                     else:
+                        try:
+                            track_gt_velocity = gt_velocity_dict[annotations[id_][-1].item()]
+                        except KeyError:
+                            temp_key = list(gt_velocity_dict.keys())[-1]
+                            track_gt_velocity = np.zeros_like(gt_velocity_dict[temp_key])
                         all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id_][-1].item(),
                                                                 frame_number=data_frame_num,
                                                                 normalize_params=None,
                                                                 optical_flow_frame_num=optical_flow_frame_num,
                                                                 bbox_center=bbox_centers[id_],
-                                                                bbox=annotations[id_][:4]))
+                                                                bbox=annotations[id_][:4],
+                                                                track_gt_velocity=track_gt_velocity))
 
         return all_agent_features
 
@@ -1229,7 +1257,8 @@ class BackgroundSubtraction(FeatureExtractor):
                                                  frame_numbers=None, df=None, return_normalized=False,
                                                  remaining_frames=None, remaining_frames_idx=None,
                                                  past_12_frames_optical_flow=None,
-                                                 last_frame_from_last_used_batch=None):
+                                                 last_frame_from_last_used_batch=None,
+                                                 gt_velocity_dict=None):
         self.original_shape = original_shape
         interest_fr = None
         actual_interest_fr = None
@@ -1261,6 +1290,8 @@ class BackgroundSubtraction(FeatureExtractor):
             elif equal_time_distributed:
                 selected_past = [(fr - i * time_gap_within_frames) % total_frames for i in range(1, step + 1)]
                 selected_future = [(fr + i * time_gap_within_frames) % total_frames for i in range(1, step + 1)]
+                # selected_future = [(fr + i * time_gap_within_frames + 1) % total_frames for i in range(1, step + 1)]
+                # selected_future.remove(fr)
                 selected_frames = selected_past + selected_future
                 frames_building_model = [frames[s] for s in selected_frames]
             else:
@@ -1320,6 +1351,18 @@ class BackgroundSubtraction(FeatureExtractor):
                                                                                               all_results_out=True)
                     # last_frame_from_last_used_batch = frames[interest_fr]
                     past_12_frames_optical_flow.append(past_flow_per_frame)
+
+                    # fr_annotation = get_frame_annotations_and_skip_lost(df, actual_interest_fr.item())
+                    # fr_annotations, fr_bbox_centers, fr_track_ids = scale_annotations(fr_annotation,
+                    #                                                                   original_scale=original_shape,
+                    #                                                                   new_scale=resized_shape,
+                    #                                                                   return_track_id=True,
+                    #                                                                   tracks_with_annotations=True)
+                    # for t_id, bb_center in zip(fr_track_ids, fr_bbox_centers):
+                    #     if t_id in gt_velocity_dict.keys():
+                    #         gt_velocity_dict[t_id].append(bb_center)
+                    #         continue
+                    #     gt_velocity_dict.update({t_id: [bb_center]})
                 else:
                     previous = cv.cvtColor(frames[interest_fr - 1], cv.COLOR_BGR2GRAY)
                     next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
@@ -1329,6 +1372,18 @@ class BackgroundSubtraction(FeatureExtractor):
                                                                                               all_results_out=True)
                     last_frame_from_last_used_batch = frames[interest_fr]
                     past_12_frames_optical_flow.append(past_flow_per_frame)
+
+                    # fr_annotation = get_frame_annotations_and_skip_lost(df, actual_interest_fr.item())
+                    # fr_annotations, fr_bbox_centers, fr_track_ids = scale_annotations(fr_annotation,
+                    #                                                                   original_scale=original_shape,
+                    #                                                                   new_scale=resized_shape,
+                    #                                                                   return_track_id=True,
+                    #                                                                   tracks_with_annotations=True)
+                    # for t_id, bb_center in zip(fr_track_ids, fr_bbox_centers):
+                    #     if t_id in gt_velocity_dict.keys():
+                    #         gt_velocity_dict[t_id].append(bb_center)
+                    #         continue
+                    #     gt_velocity_dict.update({t_id: [bb_center]})
 
             # if actual_interest_fr != 0:
             #     previous = cv.cvtColor(frames[actual_interest_fr - 1], cv.COLOR_BGR2GRAY)
@@ -1405,12 +1460,16 @@ class BackgroundSubtraction(FeatureExtractor):
                                                 evaluation_mode=True,
                                                 return_options=True)
             past_12_frames_optical_flow = past_12_frames_optical_flow[1:]
+            # for gt_key, gt_value in gt_velocity_dict.items():
+            #     if len(gt_value) > 12:
+            #         gt_velocity_dict[gt_key] = gt_velocity_dict[gt_key][1:]
+
         # return data_all_frames, frames[actual_interest_fr:, ...], frame_numbers[actual_interest_fr:], \
         #        last_frame_from_last_used_batch
         # past_12_frames_optical_flow = past_12_frames_optical_flow[1:]
         return data_all_frames, frames[interest_fr:, ...], \
                torch.arange(interest_fr + frame_numbers[0], frame_numbers[-1] + 1), \
-               last_frame_from_last_used_batch, past_12_frames_optical_flow
+               last_frame_from_last_used_batch, past_12_frames_optical_flow, gt_velocity_dict
 
     def _core_processing(self, frame, kernel):
         mask = self.algo.apply(frame)
