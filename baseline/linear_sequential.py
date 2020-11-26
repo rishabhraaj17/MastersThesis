@@ -1,4 +1,5 @@
 from datetime import datetime
+from enum import Enum
 import warnings
 from pathlib import Path
 
@@ -26,6 +27,14 @@ TIME_STEPS = 20
 NUM_WORKERS = 10
 BATCH_SIZE = 256
 LR = 1e-3
+USE_BATCH_NORM = False
+GT_BASED = True
+CENTER_BASED = True
+OF_VERSION = 1
+GT_VERSION = 0
+OF_EPOCH = None
+GT_EPOCH = 88
+
 MANUAL_SEED = 42
 torch.manual_seed(MANUAL_SEED)
 GENERATOR_SEED = torch.Generator().manual_seed(MANUAL_SEED)
@@ -34,6 +43,12 @@ LINEAR_CFG = {
     'encoder': [4, 8, 16],
     'decoder': [32, 16, 8, 4, 2]
 }
+
+
+class NetworkMode(Enum):
+    TRAIN = 'train'
+    VALIDATION = 'val'
+    TEST = 'test'
 
 
 def center_dataset_collate(batch):
@@ -345,7 +360,9 @@ def train(meta, num_frames_between_two_time_steps, meta_video, meta_train_video_
 
 def inference(meta, num_frames_between_two_time_steps, meta_video, meta_train_video_number, meta_val_video_number, lr,
               train_dataset, val_dataset, test_dataset, time_steps, batch_size, num_workers, of_model_version,
-              of_model_epoch, gt_model_version, gt_model_epoch, use_batch_norm, center_based, device, dataset_video):
+              of_model_epoch, gt_model_version, gt_model_epoch, use_batch_norm, center_based, device, dataset_video,
+              loader_to_use_for_inference):
+
     train_loader = DataLoader(train_dataset, batch_size, collate_fn=center_dataset_collate, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size, collate_fn=center_dataset_collate, num_workers=num_workers)
     test_loader = DataLoader(test_dataset, batch_size, collate_fn=center_dataset_collate, num_workers=num_workers)
@@ -368,12 +385,27 @@ def inference(meta, num_frames_between_two_time_steps, meta_video, meta_train_vi
     if img_save_path:
         Path(img_save_path).mkdir(parents=True, exist_ok=True)
 
-    inference_core(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade_dataset_of, batches_processed,
-                   dataset_video, device, fde_dataset_gt, fde_dataset_gt_of_gt, fde_dataset_linear, fde_dataset_of,
-                   gt_model, img_save_path, is_gt_based_shifted_points_inside_list,
-                   is_of_based_shifted_points_center_inside_list, is_pred_center_gt_inside_list,
-                   is_pred_center_inside_list, meta_val_video_number, of_model, plot_results, steps_to_watch,
-                   time_steps, train_loader)
+    if loader_to_use_for_inference == NetworkMode.TRAIN:
+        inference_core(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade_dataset_of, batches_processed,
+                       dataset_video, device, fde_dataset_gt, fde_dataset_gt_of_gt, fde_dataset_linear, fde_dataset_of,
+                       gt_model, img_save_path, is_gt_based_shifted_points_inside_list,
+                       is_of_based_shifted_points_center_inside_list, is_pred_center_gt_inside_list,
+                       is_pred_center_inside_list, meta_val_video_number, of_model, plot_results, steps_to_watch,
+                       time_steps, train_loader)
+    if loader_to_use_for_inference == NetworkMode.VALIDATION:
+        inference_core(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade_dataset_of, batches_processed,
+                       dataset_video, device, fde_dataset_gt, fde_dataset_gt_of_gt, fde_dataset_linear, fde_dataset_of,
+                       gt_model, img_save_path, is_gt_based_shifted_points_inside_list,
+                       is_of_based_shifted_points_center_inside_list, is_pred_center_gt_inside_list,
+                       is_pred_center_inside_list, meta_val_video_number, of_model, plot_results, steps_to_watch,
+                       time_steps, val_loader)
+    if loader_to_use_for_inference == NetworkMode.TEST:
+        inference_core(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade_dataset_of, batches_processed,
+                       dataset_video, device, fde_dataset_gt, fde_dataset_gt_of_gt, fde_dataset_linear, fde_dataset_of,
+                       gt_model, img_save_path, is_gt_based_shifted_points_inside_list,
+                       is_of_based_shifted_points_center_inside_list, is_pred_center_gt_inside_list,
+                       is_pred_center_inside_list, meta_val_video_number, of_model, plot_results, steps_to_watch,
+                       time_steps, test_loader)
 
 
 def inference_core(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade_dataset_of, batches_processed,
@@ -658,6 +690,59 @@ def inference_model_setup(batch_size, center_based, gt_model_epoch, gt_model_ver
     return gt_model, of_model
 
 
+def main(do_train, features_load_path, meta, meta_video, meta_train_video_number, meta_val_video_number, time_steps, lr,
+         batch_size, num_workers, of_model_version, of_model_epoch, gt_model_version, gt_model_epoch, use_batch_norm,
+         center_based, gt_based, dataset_video, loader_to_use_for_inference):
+    logger.info('Setting up DataLoaders')
+    feats = torch.load(features_load_path)
+
+    train_set, val_set, test_set = prepare_datasets(features=feats)
+
+    if do_train:
+        kwargs_dict = {
+            'meta': meta,
+            'num_frames_between_two_time_steps': 12,
+            'meta_video': meta_video,
+            'meta_train_video_number': meta_train_video_number,
+            'meta_val_video_number': meta_val_video_number,
+            'lr': lr,
+            'train_dataset': train_set,
+            'val_dataset': val_set,
+            'time_steps': time_steps,
+            'batch_size': batch_size,
+            'num_workers': num_workers,
+            'use_batch_norm': use_batch_norm,
+            'gt_based': gt_based,
+            'center_based': center_based
+        }
+        train(**kwargs_dict)
+    else:
+        kwargs_dict = {
+            'meta': meta,
+            'num_frames_between_two_time_steps': 12,
+            'meta_video': meta_video,
+            'meta_train_video_number': meta_train_video_number,
+            'meta_val_video_number': meta_val_video_number,
+            'lr': lr,
+            'train_dataset': train_set,
+            'val_dataset': val_set,
+            'test_dataset': test_set,
+            'time_steps': time_steps,
+            'batch_size': 1,
+            'num_workers': 0,
+            'use_batch_norm': use_batch_norm,
+            'center_based': center_based,
+            'device': 'cpu',
+            'of_model_version': of_model_version,
+            'of_model_epoch': of_model_epoch,
+            'gt_model_version': gt_model_version,
+            'gt_model_epoch': gt_model_epoch,
+            'dataset_video': dataset_video,
+            'loader_to_use_for_inference': loader_to_use_for_inference
+        }
+        inference(**kwargs_dict)
+
+
 if __name__ == '__main__':
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -683,48 +768,9 @@ if __name__ == '__main__':
         file_name = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
                     f'center_based_gt_velocity_t{TIME_STEPS}.pt'
 
-        logger.info('Setting up DataLoaders')
-        feats = torch.load(save_path + file_name)
-
-        train_set, val_set, test_set = prepare_datasets(features=feats)
-
-        if train_mode:
-            kwargs_dict = {
-                'meta': dataset_meta,
-                'num_frames_between_two_time_steps': 12,
-                'meta_video': dataset_meta_video,
-                'meta_train_video_number': video_number,
-                'meta_val_video_number': video_number,
-                'lr': LR,
-                'train_dataset': train_set,
-                'val_dataset': val_set,
-                'time_steps': TIME_STEPS,
-                'batch_size': BATCH_SIZE,
-                'num_workers': NUM_WORKERS,
-                'use_batch_norm': False,
-                'gt_based': False,
-                'center_based': True
-            }
-            train(**kwargs_dict)
-        else:
-            kwargs_dict = {
-                'meta': dataset_meta,
-                'num_frames_between_two_time_steps': 12,
-                'meta_video': dataset_meta_video,
-                'meta_train_video_number': video_number,
-                'meta_val_video_number': video_number,
-                'lr': LR,
-                'train_dataset': train_set,
-                'val_dataset': val_set,
-                'time_steps': TIME_STEPS,
-                'batch_size': 1,
-                'num_workers': 0,
-                'use_batch_norm': False,
-                'center_based': True,
-                'device': 'cpu',
-                'of_model_version': None,
-                'of_model_epoch': None,
-                'gt_model_version': None,
-                'gt_model_epoch': None,
-                'dataset_video': video_label
-            }
+        main(do_train=train_mode, features_load_path=save_path + file_name, meta=dataset_meta,
+             meta_video=dataset_meta_video, meta_train_video_number=video_number, meta_val_video_number=video_number,
+             time_steps=TIME_STEPS, lr=LR, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, of_model_version=OF_VERSION,
+             of_model_epoch=OF_EPOCH, gt_model_version=GT_VERSION, gt_model_epoch=GT_EPOCH,
+             use_batch_norm=USE_BATCH_NORM, center_based=CENTER_BASED, gt_based=GT_BASED, dataset_video=video_label,
+             loader_to_use_for_inference=NetworkMode.VALIDATION)
