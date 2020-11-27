@@ -30,6 +30,7 @@ ALPHA = 1
 TOP_K = 1
 WEIGHT_POINTS_INSIDE_BBOX_MORE = True
 
+# -1 for both steps
 EXECUTE_STEP = 2
 
 

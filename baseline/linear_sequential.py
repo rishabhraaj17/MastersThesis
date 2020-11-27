@@ -52,8 +52,8 @@ class NetworkMode(Enum):
 
 
 def center_dataset_collate(batch):
-    center_features_list, frames_batched_list, track_ids_batched_list, bbox_center_x_batched_list, \
-    bbox_center_y_batched_list, bbox_x_batched_list, bbox_y_batched_list = [], [], [], [], [], [], []
+    center_features_list, frames_batched_list, track_ids_batched_list, bbox_center_x_batched_list = [], [], [], []
+    bbox_center_y_batched_list, bbox_x_batched_list, bbox_y_batched_list = [], [], []
     for data in batch:
         center_features = np.zeros(shape=(0, 5, 2))
         frames_batched, track_ids_batched = np.zeros(shape=(0, 1)), np.zeros(shape=(0, 1))
@@ -314,6 +314,87 @@ class BaselineSequential(LightningModule):
         return [opt], schedulers
 
 
+class BaselineSequentialV0(BaselineSequential):
+    """
+    Watch 1 time step, predict next N
+    """
+
+    def __init__(self, meta=None, original_frame_shape=None, num_frames_between_two_time_steps=12, lr=1e-5,
+                 mode=FeaturesMode.UV, layers_mode=None, meta_video=None, meta_train_video_number=None,
+                 meta_val_video_number=None, time_steps=5, train_dataset=None, val_dataset=None, batch_size=1,
+                 num_workers=0, use_batch_norm=False, gt_based=True, center_based=True):
+        super(BaselineSequentialV0, self).__init__(meta=meta, original_frame_shape=original_frame_shape,
+                                                   num_frames_between_two_time_steps=num_frames_between_two_time_steps,
+                                                   lr=lr, mode=mode, layers_mode=layers_mode, meta_video=meta_video,
+                                                   meta_train_video_number=meta_train_video_number,
+                                                   meta_val_video_number=meta_val_video_number, time_steps=time_steps,
+                                                   train_dataset=train_dataset, val_dataset=val_dataset,
+                                                   batch_size=batch_size, num_workers=num_workers,
+                                                   use_batch_norm=use_batch_norm, gt_based=gt_based,
+                                                   center_based=center_based)
+
+    def one_step(self, batch):
+        features, frame_, track_id, bbox_center1, bbox_center2, bbox1, bbox2 = batch
+        b_size = features.shape[1]
+
+        cx, cx_1, hx, hx_1 = self.init_hidden_states(b_size)
+        total_loss = torch.tensor(data=0, dtype=torch.float32, device=self.device)
+        last_input_velocity, last_pred_center, bad_data = None, None, False
+        pred_centers, moved_points_by_true_of_list, actual_points_list = [], [], []
+        ade, fde, shifted_points = None, None, None
+        steps_to_watch = 8
+
+        criterion = self.setup_loss()
+
+        if len(features) == self.ts:
+            for idx_i, i in enumerate(range(self.ts)):
+                feat, bb_center1, bb_center2 = features[i].squeeze().float(), bbox_center1[i].float(), \
+                                               bbox_center2[i].float()
+                center_xy, center_true_uv, center_past_uv, shifted_point, gt_past_velocity = \
+                    feat[:, 0, :], feat[:, 1, :], feat[:, 2, :], feat[:, 3, :], feat[:, 4, :]
+                if self.gt_based:
+                    shifted_points = bb_center2
+                if not self.center_based:
+                    return NotImplemented
+
+                if idx_i == 0:
+                    if self.gt_based:
+                        last_input_velocity = gt_past_velocity
+                        last_pred_center = bb_center1
+                    else:
+                        last_input_velocity = center_past_uv
+                        last_pred_center = center_xy
+
+                block_2, cx, hx, cx_1, hx_1 = self(last_input_velocity, cx, hx, cx_1, hx_1, True)
+
+                if not self.gt_based:
+                    shifted_points = shifted_point
+
+                moved_points_by_true_of_list.append(shifted_points)
+                pred_center = last_pred_center + (block_2 * 0.4)
+                last_input_velocity = block_2
+                last_pred_center = pred_center
+                pred_centers.append(pred_center)
+                actual_points_list.append(bb_center2)
+
+                total_loss += criterion(shifted_points, pred_center=pred_center)
+
+            predicted_points = [p.detach().cpu().numpy() for p in pred_centers]
+            true_points = [p.detach().cpu().numpy() for p in actual_points_list]
+
+            ade = compute_ade(np.stack(predicted_points), np.stack(true_points)).item()
+            fde = compute_fde(np.stack(predicted_points), np.stack(true_points)).item()
+
+        return total_loss / len(features), ade, fde
+
+
+USE_NETWORK_V0 = False
+if USE_NETWORK_V0:
+    NETWORK = BaselineSequentialV0
+else:
+    NETWORK = BaselineSequential
+
+
 def split_dataset(features, split_percent=0.2):
     inference_length = int(split_percent * len(features))
     train_length = len(features) - inference_length
@@ -346,12 +427,12 @@ def prepare_datasets(features, split_percent=0.2):
 
 def train(meta, num_frames_between_two_time_steps, meta_video, meta_train_video_number, meta_val_video_number, lr,
           train_dataset, val_dataset, time_steps, batch_size, num_workers, use_batch_norm, gt_based, center_based):
-    model = BaselineSequential(meta=meta, num_frames_between_two_time_steps=num_frames_between_two_time_steps,
-                               lr=lr, meta_video=meta_video, meta_train_video_number=meta_train_video_number,
-                               meta_val_video_number=meta_val_video_number, train_dataset=train_dataset,
-                               val_dataset=val_dataset, time_steps=time_steps, batch_size=batch_size,
-                               num_workers=num_workers, use_batch_norm=use_batch_norm, gt_based=gt_based,
-                               center_based=center_based)
+    model = NETWORK(meta=meta, num_frames_between_two_time_steps=num_frames_between_two_time_steps,
+                    lr=lr, meta_video=meta_video, meta_train_video_number=meta_train_video_number,
+                    meta_val_video_number=meta_val_video_number, train_dataset=train_dataset,
+                    val_dataset=val_dataset, time_steps=time_steps, batch_size=batch_size,
+                    num_workers=num_workers, use_batch_norm=use_batch_norm, gt_based=gt_based,
+                    center_based=center_based)
     logger.info('Setting up network')
     trainer = pl.Trainer(gpus=1, max_epochs=400)
     logger.info('Initiating Training')
@@ -362,7 +443,6 @@ def inference(meta, num_frames_between_two_time_steps, meta_video, meta_train_vi
               train_dataset, val_dataset, test_dataset, time_steps, batch_size, num_workers, of_model_version,
               of_model_epoch, gt_model_version, gt_model_epoch, use_batch_norm, center_based, device, dataset_video,
               loader_to_use_for_inference):
-
     train_loader = DataLoader(train_dataset, batch_size, collate_fn=center_dataset_collate, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size, collate_fn=center_dataset_collate, num_workers=num_workers)
     test_loader = DataLoader(test_dataset, batch_size, collate_fn=center_dataset_collate, num_workers=num_workers)
@@ -385,27 +465,38 @@ def inference(meta, num_frames_between_two_time_steps, meta_video, meta_train_vi
     if img_save_path:
         Path(img_save_path).mkdir(parents=True, exist_ok=True)
 
+    if USE_NETWORK_V0:
+        inference_core_method = inference_core_v0
+    else:
+        inference_core_method = inference_core
+
     if loader_to_use_for_inference == NetworkMode.TRAIN:
-        inference_core(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade_dataset_of, batches_processed,
-                       dataset_video, device, fde_dataset_gt, fde_dataset_gt_of_gt, fde_dataset_linear, fde_dataset_of,
-                       gt_model, img_save_path, is_gt_based_shifted_points_inside_list,
-                       is_of_based_shifted_points_center_inside_list, is_pred_center_gt_inside_list,
-                       is_pred_center_inside_list, meta_val_video_number, of_model, plot_results, steps_to_watch,
-                       time_steps, train_loader)
+        inference_core_method(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade_dataset_of,
+                              batches_processed,
+                              dataset_video, device, fde_dataset_gt, fde_dataset_gt_of_gt, fde_dataset_linear,
+                              fde_dataset_of,
+                              gt_model, img_save_path, is_gt_based_shifted_points_inside_list,
+                              is_of_based_shifted_points_center_inside_list, is_pred_center_gt_inside_list,
+                              is_pred_center_inside_list, meta_val_video_number, of_model, plot_results, steps_to_watch,
+                              time_steps, train_loader)
     if loader_to_use_for_inference == NetworkMode.VALIDATION:
-        inference_core(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade_dataset_of, batches_processed,
-                       dataset_video, device, fde_dataset_gt, fde_dataset_gt_of_gt, fde_dataset_linear, fde_dataset_of,
-                       gt_model, img_save_path, is_gt_based_shifted_points_inside_list,
-                       is_of_based_shifted_points_center_inside_list, is_pred_center_gt_inside_list,
-                       is_pred_center_inside_list, meta_val_video_number, of_model, plot_results, steps_to_watch,
-                       time_steps, val_loader)
+        inference_core_method(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade_dataset_of,
+                              batches_processed,
+                              dataset_video, device, fde_dataset_gt, fde_dataset_gt_of_gt, fde_dataset_linear,
+                              fde_dataset_of,
+                              gt_model, img_save_path, is_gt_based_shifted_points_inside_list,
+                              is_of_based_shifted_points_center_inside_list, is_pred_center_gt_inside_list,
+                              is_pred_center_inside_list, meta_val_video_number, of_model, plot_results, steps_to_watch,
+                              time_steps, val_loader)
     if loader_to_use_for_inference == NetworkMode.TEST:
-        inference_core(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade_dataset_of, batches_processed,
-                       dataset_video, device, fde_dataset_gt, fde_dataset_gt_of_gt, fde_dataset_linear, fde_dataset_of,
-                       gt_model, img_save_path, is_gt_based_shifted_points_inside_list,
-                       is_of_based_shifted_points_center_inside_list, is_pred_center_gt_inside_list,
-                       is_pred_center_inside_list, meta_val_video_number, of_model, plot_results, steps_to_watch,
-                       time_steps, test_loader)
+        inference_core_method(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade_dataset_of,
+                              batches_processed,
+                              dataset_video, device, fde_dataset_gt, fde_dataset_gt_of_gt, fde_dataset_linear,
+                              fde_dataset_of,
+                              gt_model, img_save_path, is_gt_based_shifted_points_inside_list,
+                              is_of_based_shifted_points_center_inside_list, is_pred_center_gt_inside_list,
+                              is_pred_center_inside_list, meta_val_video_number, of_model, plot_results, steps_to_watch,
+                              time_steps, test_loader)
 
 
 def inference_core(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade_dataset_of, batches_processed,
@@ -528,57 +619,180 @@ def inference_core(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade
                 is_pred_center_inside_list.append(is_pred_center_inside)
                 is_pred_center_gt_inside_list.append(is_pred_center_gt_inside)
 
-            predicted_points = [p.detach().numpy() for p in pred_centers]
-            predicted_points_gt = [p.detach().numpy() for p in pred_centers_gt]
-            linear_predicted_points = [p.detach().numpy() for p in linear_pred_centers]
-
-            # true_points = [p.detach().mean(dim=0).numpy() for p in gt_based_shifted_points_list]
-            # true_points_of = [p.detach().mean(dim=0).numpy() for p in of_based_shifted_points_list]
-
-            true_points = [p.detach().numpy() for p in gt_based_shifted_points_list]
-            true_points_of = [p.detach().numpy() for p in of_based_shifted_points_list]
-
-            l2_points = {idx: np.linalg.norm(i - j, 2)
-                         for idx, (i, j) in enumerate(zip(true_points_of, predicted_points))}
-
-            l2_points_gt = {idx: np.linalg.norm(i - j, 2)
-                            for idx, (i, j) in enumerate(zip(true_points, predicted_points_gt))}
-
-            l2_linear = {idx: np.linalg.norm(i - j, 2)
-                         for idx, (i, j) in enumerate(zip(true_points_of, linear_predicted_points))}
-
-            # ade_of = compute_ade(np.stack(predicted_points), np.stack(true_points_of))
-            # fde_of = compute_fde(np.stack(predicted_points), np.stack(true_points_of))
-            ade_of = compute_ade(np.stack(predicted_points), np.stack(true_points).squeeze())
-            fde_of = compute_fde(np.stack(predicted_points), np.stack(true_points).squeeze())
-            ade_dataset_of.append(ade_of.item())
-            fde_dataset_of.append(fde_of.item())
-
-            ade_gt = compute_ade(np.stack(predicted_points_gt), np.stack(true_points).squeeze())
-            fde_gt = compute_fde(np.stack(predicted_points_gt), np.stack(true_points).squeeze())
-            ade_dataset_gt.append(ade_gt.item())
-            fde_dataset_gt.append(fde_gt.item())
-
-            ade_gt_of_gt = compute_ade(np.stack(true_points_of), np.stack(true_points).squeeze())
-            fde_gt_of_gt = compute_fde(np.stack(true_points_of), np.stack(true_points).squeeze())
-            ade_dataset_gt_of_gt.append(ade_gt_of_gt.item())
-            fde_dataset_gt_of_gt.append(fde_gt_of_gt.item())
-
-            ade_linear = compute_ade(np.stack(linear_predicted_points), np.stack(true_points).squeeze())
-            fde_linear = compute_fde(np.stack(linear_predicted_points), np.stack(true_points).squeeze())
-            ade_dataset_linear.append(ade_linear.item())
-            fde_dataset_linear.append(fde_linear.item())
-
-            # plot
-            if plot_results:
-                inference_plot_images(actual_points_list, gt_model, img_frames, img_save_path, l2_points, l2_points_gt,
-                                      predicted_points, predicted_points_gt, sav_i, true_points, true_points_of)
+            inference_results_post_processing(actual_points_list, ade_dataset_gt, ade_dataset_gt_of_gt,
+                                              ade_dataset_linear, ade_dataset_of, fde_dataset_gt, fde_dataset_gt_of_gt,
+                                              fde_dataset_linear, fde_dataset_of, gt_based_shifted_points_list,
+                                              gt_model, img_frames, img_save_path, linear_pred_centers,
+                                              of_based_shifted_points_list, plot_results, pred_centers, pred_centers_gt,
+                                              sav_i)
     plot_bars_if_inside_bbox([is_gt_based_shifted_points_inside_list,
                               is_of_based_shifted_points_center_inside_list,
                               is_pred_center_inside_list,
                               is_pred_center_gt_inside_list])
     inference_log_stdout(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade_dataset_of, batches_processed,
                          fde_dataset_gt, fde_dataset_gt_of_gt, fde_dataset_linear, fde_dataset_of, gt_model, of_model)
+
+
+def inference_core_v0(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade_dataset_of, batches_processed,
+                      dataset_video, device, fde_dataset_gt, fde_dataset_gt_of_gt, fde_dataset_linear, fde_dataset_of,
+                      gt_model, img_save_path, is_gt_based_shifted_points_inside_list,
+                      is_of_based_shifted_points_center_inside_list, is_pred_center_gt_inside_list,
+                      is_pred_center_inside_list, meta_val_video_number, of_model, plot_results, steps_to_watch,
+                      time_steps, loader):
+    for sav_i, batch_inference in enumerate(tqdm(loader)):
+        try:
+            features, frame_, track_id, bbox_center1, bbox_center2, bbox1, bbox2 = batch_inference
+            batches_processed += 1
+        except TypeError:
+            continue
+        b_size = features.shape[1]
+
+        cx_of, cx_1_of, cx_1_gt, cx_gt, hx_of, hx_1_of, hx_1_gt, hx_gt = inference_init_weights(b_size, device)
+
+        frame_nums = [f.item() for f in frame_]
+        img_frames, linear_pred_centers, pred_centers, pred_centers_gt = [], [], [], []
+        gt_based_shifted_points_list, of_based_shifted_points_list, actual_points_list = [], [], []
+        last_input_velocity_of, last_input_velocity_gt, last_pred_center_of, last_pred_center_gt, last_true_center = \
+            None, None, None, None, None
+        cap_count = 0
+
+        first_ts_velocity_linear, linear_pred_center = None, None
+
+        if len(features) == time_steps:
+            if plot_results:
+                cap = cv.VideoCapture(f'{base_path}videos/{dataset_video.value}/video{meta_val_video_number}/video.mov')
+
+                while 1:
+                    ret, video_frame = cap.read()
+                    if cap_count in frame_nums:
+                        img_frames.append(video_frame)
+                        break
+                    cap_count += 1
+
+            for i in range(time_steps):
+                feat, bb_center1, bb_center2, bb1, bb2 = features[i].squeeze().float(), bbox_center1[i].float(), \
+                                                         bbox_center2[i].float(), bbox1[i].float(), bbox2[i].float()
+                center_xy, center_true_uv, center_past_uv, shifted_point, gt_past_velocity = \
+                    feat[0, :], feat[1, :], feat[2, :], feat[3, :], feat[4, :]
+                # gt_based_shifted_points = feat2[:, :2]  # for gt based (all points)
+                gt_based_shifted_points = bb_center2  # for bbox_center gt based
+
+                if i == 0:
+                    last_input_velocity_of = center_past_uv.unsqueeze(0)
+                    last_pred_center_of = center_xy
+                    last_input_velocity_gt = gt_past_velocity.unsqueeze(0)
+                    last_pred_center_gt = bb_center1
+                    linear_pred_center = bb_center1
+                    first_ts_velocity_linear = gt_past_velocity
+                    last_true_center = bb_center1
+
+                with torch.no_grad():
+                    block_2_of, cx_of, hx_of, cx_1_of, hx_1_of = of_model(last_input_velocity_of, cx_of, hx_of,
+                                                                          cx_1_of, hx_1_of, True)
+                    block_2_gt, cx_gt, hx_gt, cx_1_gt, hx_1_gt = gt_model(last_input_velocity_gt, cx_gt,
+                                                                          hx_gt, cx_1_gt, hx_1_gt, True)
+
+                gt_based_shifted_points_list.append(gt_based_shifted_points)
+                of_based_shifted_points = shifted_point
+                of_based_shifted_points_list.append(of_based_shifted_points)
+
+                pred_center_of = last_pred_center_of + (block_2_of * 0.4)
+                pred_center_gt = last_pred_center_gt + (block_2_gt * 0.4)
+
+
+                last_input_velocity_of = block_2_of
+                last_input_velocity_gt = block_2_gt
+                last_pred_center_of = pred_center_of
+                last_pred_center_gt = pred_center_gt
+
+                linear_pred_center += first_ts_velocity_linear * 0.4  # * 0.4  # d = v * t
+
+                # last_true_center = moved_points_by_true_of_center
+                pred_centers.append(pred_center_of.squeeze(0))
+                pred_centers_gt.append(pred_center_gt.squeeze(0))
+                linear_pred_centers.append(linear_pred_center)
+
+                # Remove mean for per time step plot
+                actual_points_list.append(bb_center1.squeeze().detach().numpy())
+
+                is_gt_based_shifted_points_inside = is_inside_bbox(point=gt_based_shifted_points.squeeze(),
+                                                                   bbox=bb2.squeeze()).item()
+                is_of_based_shifted_points_center_inside = is_inside_bbox(
+                    # point=of_based_shifted_points_center.squeeze(),
+                    point=of_based_shifted_points.squeeze(),
+                    bbox=bb2.squeeze()).item()
+                is_pred_center_inside = is_inside_bbox(point=pred_center_of.squeeze(),
+                                                       bbox=bb2.squeeze()).item()
+                is_pred_center_gt_inside = is_inside_bbox(point=pred_center_gt.squeeze(),
+                                                          bbox=bb2.squeeze()).item()
+
+                is_gt_based_shifted_points_inside_list.append(is_gt_based_shifted_points_inside)
+                is_of_based_shifted_points_center_inside_list.append(
+                    is_of_based_shifted_points_center_inside)
+                is_pred_center_inside_list.append(is_pred_center_inside)
+                is_pred_center_gt_inside_list.append(is_pred_center_gt_inside)
+
+            inference_results_post_processing(actual_points_list, ade_dataset_gt, ade_dataset_gt_of_gt,
+                                              ade_dataset_linear, ade_dataset_of, fde_dataset_gt, fde_dataset_gt_of_gt,
+                                              fde_dataset_linear, fde_dataset_of, gt_based_shifted_points_list,
+                                              gt_model, img_frames, img_save_path, linear_pred_centers,
+                                              of_based_shifted_points_list, plot_results, pred_centers, pred_centers_gt,
+                                              sav_i)
+    plot_bars_if_inside_bbox([is_gt_based_shifted_points_inside_list,
+                              is_of_based_shifted_points_center_inside_list,
+                              is_pred_center_inside_list,
+                              is_pred_center_gt_inside_list])
+    inference_log_stdout(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade_dataset_of, batches_processed,
+                         fde_dataset_gt, fde_dataset_gt_of_gt, fde_dataset_linear, fde_dataset_of, gt_model, of_model)
+
+
+def inference_results_post_processing(actual_points_list, ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear,
+                                      ade_dataset_of, fde_dataset_gt, fde_dataset_gt_of_gt, fde_dataset_linear,
+                                      fde_dataset_of, gt_based_shifted_points_list, gt_model, img_frames, img_save_path,
+                                      linear_pred_centers, of_based_shifted_points_list, plot_results, pred_centers,
+                                      pred_centers_gt, sav_i):
+    predicted_points = [p.detach().numpy() for p in pred_centers]
+    predicted_points_gt = [p.detach().numpy() for p in pred_centers_gt]
+    linear_predicted_points = [p.detach().numpy() for p in linear_pred_centers]
+
+    # true_points = [p.detach().mean(dim=0).numpy() for p in gt_based_shifted_points_list]
+    # true_points_of = [p.detach().mean(dim=0).numpy() for p in of_based_shifted_points_list]
+    true_points = [p.detach().numpy() for p in gt_based_shifted_points_list]
+    true_points_of = [p.detach().numpy() for p in of_based_shifted_points_list]
+
+    l2_points = {idx: np.linalg.norm(i - j, 2)
+                 for idx, (i, j) in enumerate(zip(true_points_of, predicted_points))}
+    l2_points_gt = {idx: np.linalg.norm(i - j, 2)
+                    for idx, (i, j) in enumerate(zip(true_points, predicted_points_gt))}
+    l2_linear = {idx: np.linalg.norm(i - j, 2)
+                 for idx, (i, j) in enumerate(zip(true_points_of, linear_predicted_points))}
+
+    # ade_of = compute_ade(np.stack(predicted_points), np.stack(true_points_of))
+    # fde_of = compute_fde(np.stack(predicted_points), np.stack(true_points_of))
+    ade_of = compute_ade(np.stack(predicted_points), np.stack(true_points).squeeze())
+    fde_of = compute_fde(np.stack(predicted_points), np.stack(true_points).squeeze())
+    ade_dataset_of.append(ade_of.item())
+    fde_dataset_of.append(fde_of.item())
+
+    ade_gt = compute_ade(np.stack(predicted_points_gt), np.stack(true_points).squeeze())
+    fde_gt = compute_fde(np.stack(predicted_points_gt), np.stack(true_points).squeeze())
+    ade_dataset_gt.append(ade_gt.item())
+    fde_dataset_gt.append(fde_gt.item())
+
+    ade_gt_of_gt = compute_ade(np.stack(true_points_of), np.stack(true_points).squeeze())
+    fde_gt_of_gt = compute_fde(np.stack(true_points_of), np.stack(true_points).squeeze())
+    ade_dataset_gt_of_gt.append(ade_gt_of_gt.item())
+    fde_dataset_gt_of_gt.append(fde_gt_of_gt.item())
+
+    ade_linear = compute_ade(np.stack(linear_predicted_points), np.stack(true_points).squeeze())
+    fde_linear = compute_fde(np.stack(linear_predicted_points), np.stack(true_points).squeeze())
+    ade_dataset_linear.append(ade_linear.item())
+    fde_dataset_linear.append(fde_linear.item())
+
+    # plot
+    if plot_results:
+        inference_plot_images(actual_points_list, gt_model, img_frames, img_save_path, l2_points, l2_points_gt,
+                              predicted_points, predicted_points_gt, sav_i, true_points, true_points_of)
 
 
 def inference_plot_images(actual_points_list, gt_model, img_frames, img_save_path, l2_points, l2_points_gt,
@@ -669,18 +883,18 @@ def inference_init_weights(b_size, device):
 def inference_model_setup(batch_size, center_based, gt_model_epoch, gt_model_version, lr, meta, meta_train_video_number,
                           meta_val_video_number, meta_video, num_frames_between_two_time_steps, num_workers,
                           of_model_epoch, of_model_version, time_steps, train_dataset, use_batch_norm, val_dataset):
-    of_model = BaselineSequential(meta=meta, num_frames_between_two_time_steps=num_frames_between_two_time_steps,
-                                  lr=lr, meta_video=meta_video, meta_train_video_number=meta_train_video_number,
-                                  meta_val_video_number=meta_val_video_number, train_dataset=train_dataset,
-                                  val_dataset=val_dataset, time_steps=time_steps, batch_size=batch_size,
-                                  num_workers=num_workers, use_batch_norm=use_batch_norm, gt_based=False,
-                                  center_based=center_based)
-    gt_model = BaselineSequential(meta=meta, num_frames_between_two_time_steps=num_frames_between_two_time_steps,
-                                  lr=lr, meta_video=meta_video, meta_train_video_number=meta_train_video_number,
-                                  meta_val_video_number=meta_val_video_number, train_dataset=train_dataset,
-                                  val_dataset=val_dataset, time_steps=time_steps, batch_size=batch_size,
-                                  num_workers=num_workers, use_batch_norm=use_batch_norm, gt_based=True,
-                                  center_based=center_based)
+    of_model = NETWORK(meta=meta, num_frames_between_two_time_steps=num_frames_between_two_time_steps,
+                       lr=lr, meta_video=meta_video, meta_train_video_number=meta_train_video_number,
+                       meta_val_video_number=meta_val_video_number, train_dataset=train_dataset,
+                       val_dataset=val_dataset, time_steps=time_steps, batch_size=batch_size,
+                       num_workers=num_workers, use_batch_norm=use_batch_norm, gt_based=False,
+                       center_based=center_based)
+    gt_model = NETWORK(meta=meta, num_frames_between_two_time_steps=num_frames_between_two_time_steps,
+                       lr=lr, meta_video=meta_video, meta_train_video_number=meta_train_video_number,
+                       meta_val_video_number=meta_val_video_number, train_dataset=train_dataset,
+                       val_dataset=val_dataset, time_steps=time_steps, batch_size=batch_size,
+                       num_workers=num_workers, use_batch_norm=use_batch_norm, gt_based=True,
+                       center_based=center_based)
     of_model.load_state_dict(torch.load(f'lightning_logs/version_{of_model_version}/checkpoints/'
                                         f'epoch={of_model_epoch}.ckpt')['state_dict'])
     gt_model.load_state_dict(torch.load(f'lightning_logs/version_{gt_model_version}/checkpoints/'
@@ -768,6 +982,7 @@ if __name__ == '__main__':
         file_name = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
                     f'center_based_gt_velocity_t{TIME_STEPS}.pt'
 
+        USE_NETWORK_V0 = False
         main(do_train=train_mode, features_load_path=save_path + file_name, meta=dataset_meta,
              meta_video=dataset_meta_video, meta_train_video_number=video_number, meta_val_video_number=video_number,
              time_steps=TIME_STEPS, lr=LR, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, of_model_version=OF_VERSION,
