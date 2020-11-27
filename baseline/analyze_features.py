@@ -6,10 +6,11 @@ import torch
 from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
-from average_image.utils import BasicTestData, BasicTrainData, is_inside_bbox, compute_ade, compute_fde, \
+from average_image.utils import is_inside_bbox, compute_ade, compute_fde, \
     compute_per_stop_de, SDDMeta, plot_track_analysis, plot_violin_plot
 from baseline.extract_features import extract_trainable_features_rnn, process_complex_features_rnn
 from log import initialize_logging, get_logger
+from unsupervised_tp_0.extracted_of_optimization import cost_function
 from unsupervised_tp_0.nn_clustering_0 import get_track_info
 
 initialize_logging()
@@ -33,26 +34,33 @@ DF_FILE_NAME = f'analysis_t{TIME_STEPS}.csv'
 
 
 def analyze_extracted_features(features_dict: dict, test_mode=False, time_steps=TIME_STEPS, track_info=None, ratio=1.0,
-                               num_frames_to_build_bg_sub_model=12):
+                               num_frames_to_build_bg_sub_model=12, optimized_of=False, top_k=1, alpha=1,
+                               weight_points_inside_bbox_more=True):
     train_data = process_complex_features_rnn(features_dict=features_dict, test_mode=test_mode, time_steps=time_steps,
                                               num_frames_to_build_bg_sub_model=num_frames_to_build_bg_sub_model)
 
-    x_, y_, frame_info, track_id_info, bbox_center_x, bbox_center_y, bbox_x, bbox_y = \
+    x_, y_, frame_info, track_id_info, bbox_center_x, bbox_center_y, bbox_x, bbox_y, gt_velocity_x, gt_velocity_y = \
         extract_trainable_features_rnn(train_data)
     of_track_analysis = {}
     of_track_analysis_df = None
-    for features_u, features_v, features_f_info, features_t_info, features_b_c_x, features_b_c_y, features_b_x, \
+    for features_x, features_y, features_f_info, features_t_info, features_b_c_x, features_b_c_y, features_b_x, \
         features_b_y in tqdm(zip(x_, y_, frame_info, track_id_info, bbox_center_x,
                                  bbox_center_y, bbox_x, bbox_y)):
         unique_tracks = np.unique(features_t_info)
         current_track = unique_tracks[0]
         of_inside_bbox_list, of_track_list, gt_track_list, of_ade_list, of_fde_list, of_per_stop_de = \
             [], [], [], [], [], []
-        for u, v, f_info, t_info, b_c_x, b_c_y, b_x, b_y in zip(features_u, features_v, features_f_info,
-                                                                features_t_info, features_b_c_x, features_b_c_y,
-                                                                features_b_x, features_b_y):
-            of_flow = u[:, :2] + u[:, 2:4]
-            of_flow_center = of_flow.mean(0)
+        for feature_x, feature_y, f_info, t_info, b_c_x, b_c_y, b_x, b_y in zip(features_x, features_y, features_f_info,
+                                                                                features_t_info, features_b_c_x,
+                                                                                features_b_c_y,
+                                                                                features_b_x, features_b_y):
+            of_flow = feature_x[:, :2] + feature_x[:, 2:4]
+            if optimized_of:
+                of_flow_center = of_flow.mean(0)
+            else:
+                _, of_flow_top_k = cost_function(of_flow, bbox_center_y, top_k=top_k, alpha=alpha, bbox=bbox_y,
+                                                 weight_points_inside_bbox_more=weight_points_inside_bbox_more)
+                of_flow_center = of_flow_top_k[0]
             of_inside_bbox = is_inside_bbox(of_flow_center, b_y)
             of_inside_bbox_list.append(of_inside_bbox)
 
@@ -127,12 +135,14 @@ def parse_df_analysis(in_df, save_path=None):
     return t_id_list, ade_list, fde_list, inside_bbox_list, per_stop_de_list
 
 
-def analyze(save=False):
+def analyze(save=False, optimized_of=True, top_k=1, alpha=1, weight_points_inside_bbox_more=True):
     features = torch.load(LOAD_FILE)
     annotation = get_track_info(ANNOTATIONS_PATH + ANNOTATIONS_FILE)
     pixel_to_meter_ratio = float(META.get_meta(META_VIDEO_LABEL, VIDEO_NUMBER)[0]['Ratio'].to_numpy()[0])
     analysis_data = analyze_extracted_features(features, time_steps=TIME_STEPS, track_info=annotation,
-                                               ratio=pixel_to_meter_ratio)
+                                               ratio=pixel_to_meter_ratio, optimized_of=optimized_of, top_k=top_k,
+                                               alpha=alpha, weight_points_inside_bbox_more=
+                                               weight_points_inside_bbox_more)
     if DF_SAVE_PATH and save:
         Path(DF_SAVE_PATH).mkdir(parents=True, exist_ok=True)
         analysis_data.to_csv(DF_SAVE_PATH + DF_FILE_NAME)
@@ -146,11 +156,12 @@ def parse_analysis(df):
     return parsed_data
 
 
-def main(save=True):
-    df = analyze(save=save)
+def main(save=True, optimized_of=True, top_k=1, alpha=1, weight_points_inside_bbox_more=True):
+    df = analyze(save=save, optimized_of=optimized_of, top_k=top_k, alpha=alpha,
+                 weight_points_inside_bbox_more=weight_points_inside_bbox_more)
     parsed_data = parse_analysis(df)
     logger.info("Analysis Completed!")
 
 
 if __name__ == '__main__':
-    main()
+    main(optimized_of=False, top_k=1, alpha=1, weight_points_inside_bbox_more=True)
