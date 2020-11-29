@@ -1500,7 +1500,7 @@ if __name__ == '__main__':
         elif train_larger_dataset:
             t_steps = COLLATE_TS
             extract_features = False
-            inference = False
+            inference = True
             if extract_features:
                 # process for dataset
                 # file_name = '/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD_Features/little/video3/' \
@@ -1630,11 +1630,11 @@ if __name__ == '__main__':
                 # gt_model_epoch = 13
 
                 # # T=5 w/o batchnorm
-                of_model_version = 65
-                of_model_epoch = 18
+                of_model_version = 77
+                of_model_epoch = 55
 
-                gt_model_version = 64
-                gt_model_epoch = 52
+                gt_model_version = 74
+                gt_model_epoch = 4
 
                 # # T=10 - batchnorm
                 # of_model_version = 61
@@ -1644,11 +1644,11 @@ if __name__ == '__main__':
                 # gt_model_epoch = 275
 
                 # # T=10 - w/o batchnorm
-                # of_model_version = 66
-                # of_model_epoch = 201
+                # of_model_version = 78
+                # of_model_epoch = 145
                 #
-                # gt_model_version = 67
-                # gt_model_epoch = 6
+                # gt_model_version = 79
+                # gt_model_epoch = 12
 
                 of_model = SimpleModel(**kwargs_dict)
                 of_model.load_state_dict(torch.load(f'lightning_logs/version_{str(of_model_version)}/checkpoints/'
@@ -1685,7 +1685,7 @@ if __name__ == '__main__':
                 base_save_path = f'/home/rishabh/Thesis/imgs/t={t_steps}_batchnorm_stacked_of_vs_gt/'
                 inference_vid_num = 3
 
-                for sav_i, batch_inference in enumerate(tqdm(train_loader)):
+                for sav_i, batch_inference in enumerate(tqdm(test_loader)):
                     try:
                         features, frame_, track_id, bbox_center1, bbox_center2, bbox1, bbox2 = batch_inference
                         batches_processed += 1
@@ -1798,8 +1798,8 @@ if __name__ == '__main__':
                             # of_based_shifted_points_center = of_based_shifted_points.mean(0)  # remove
                             of_based_shifted_points_list.append(of_based_shifted_points)
                             # pred_center = center_xy + block_2
-                            pred_center = last_pred_center + block_2
-                            pred_center_gt = last_pred_center_gt + block_2_gt
+                            pred_center = last_pred_center + (block_2 * 0.4)
+                            pred_center_gt = last_pred_center_gt + (block_2_gt * 0.4)
                             linear_pred_center += first_ts_velocity_linear * 0.4  # * 0.4  # d = v * t
                             # pred_center = last_pred_center + (block_2 * 0.4)  # velocity * time - bad
 

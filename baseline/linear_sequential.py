@@ -23,19 +23,19 @@ from unsupervised_tp_0.dataset import FeaturesDatasetCenterBased
 initialize_logging()
 logger = get_logger(__name__)
 
-TIME_STEPS = 10
+TIME_STEPS = 20
 NUM_WORKERS = 10
 BATCH_SIZE = 256
 LR = 1e-3
 USE_BATCH_NORM = False
-GT_BASED = True
+GT_BASED = False
 CENTER_BASED = True
 OF_VERSION = 1
 GT_VERSION = 0
 OF_EPOCH = 363
 GT_EPOCH = 88
 
-USE_NETWORK_V0 = True
+USE_NETWORK_V0 = False
 
 MANUAL_SEED = 42
 torch.manual_seed(MANUAL_SEED)
@@ -704,7 +704,6 @@ def inference_core_v0(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, 
                 pred_center_of = last_pred_center_of + (block_2_of * 0.4)
                 pred_center_gt = last_pred_center_gt + (block_2_gt * 0.4)
 
-
                 last_input_velocity_of = block_2_of
                 last_input_velocity_gt = block_2_gt
                 last_pred_center_of = pred_center_of
@@ -962,6 +961,128 @@ def main(do_train, features_load_path, meta, meta_video, meta_train_video_number
         inference(**kwargs_dict)
 
 
+def inference_main(meta, meta_video, meta_train_video_number, meta_val_video_number, time_steps, lr, of_model_version,
+                   of_model_epoch, gt_model_version, gt_model_epoch, use_batch_norm, center_based, dataset_video,
+                   loader_to_use_for_inference, train_set, val_set, test_set):
+    kwargs_dict = {
+        'meta': meta,
+        'num_frames_between_two_time_steps': 12,
+        'meta_video': meta_video,
+        'meta_train_video_number': meta_train_video_number,
+        'meta_val_video_number': meta_val_video_number,
+        'lr': lr,
+        'train_dataset': train_set,
+        'val_dataset': val_set,
+        'test_dataset': test_set,
+        'time_steps': time_steps,
+        'batch_size': 1,
+        'num_workers': 0,
+        'use_batch_norm': use_batch_norm,
+        'center_based': center_based,
+        'device': 'cpu',
+        'of_model_version': of_model_version,
+        'of_model_epoch': of_model_epoch,
+        'gt_model_version': gt_model_version,
+        'gt_model_epoch': gt_model_epoch,
+        'dataset_video': dataset_video,
+        'loader_to_use_for_inference': loader_to_use_for_inference
+    }
+    inference(**kwargs_dict)
+
+
+def eval_models(dataset_load_path, meta, meta_video, meta_train_video_number, meta_val_video_number, lr, use_batch_norm,
+                center_based, dataset_video):
+    logger.info('Optical Flow Optimized!')
+
+    if USE_NETWORK_V0 and TIME_STEPS == 5:
+        time_steps = TIME_STEPS
+        features_load_path = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
+                             f'center_based_gt_velocity_of_optimized_t{time_steps}.pt'
+        features_load_path = dataset_load_path + features_load_path
+        logger.info('Setting up DataLoaders')
+        feats = torch.load(features_load_path)
+        train_set, val_set, test_set = prepare_datasets(features=feats)
+        logger.info('Watch 1 predict else!')
+        # T=5
+        logger.info('T=5')
+        logger.info('Validation')
+        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
+                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
+                       time_steps=time_steps, lr=lr, of_model_version=3, of_model_epoch=95, gt_model_version=2,
+                       gt_model_epoch=392, use_batch_norm=use_batch_norm, center_based=center_based,
+                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.VALIDATION)
+        logger.info('Test')
+        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
+                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
+                       time_steps=time_steps, lr=lr, of_model_version=3, of_model_epoch=95, gt_model_version=2,
+                       gt_model_epoch=392, use_batch_norm=use_batch_norm, center_based=center_based,
+                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.TEST)
+        logger.info('Train')
+        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
+                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
+                       time_steps=time_steps, lr=lr, of_model_version=3, of_model_epoch=95, gt_model_version=2,
+                       gt_model_epoch=392, use_batch_norm=use_batch_norm, center_based=center_based,
+                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.TRAIN)
+    elif USE_NETWORK_V0 and TIME_STEPS == 10:
+        time_steps = TIME_STEPS
+        features_load_path = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
+                             f'center_based_gt_velocity_of_optimized_t{time_steps}.pt'
+        features_load_path = dataset_load_path + features_load_path
+        logger.info('Setting up DataLoaders')
+        feats = torch.load(features_load_path)
+        train_set, val_set, test_set = prepare_datasets(features=feats)
+        # T=10
+        logger.info('T=10')
+        logger.info('Validation')
+        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
+                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
+                       time_steps=time_steps, lr=lr, of_model_version=4, of_model_epoch=395, gt_model_version=5,
+                       gt_model_epoch=341, use_batch_norm=use_batch_norm, center_based=center_based,
+                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.VALIDATION)
+        logger.info('Test')
+        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
+                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
+                       time_steps=time_steps, lr=lr, of_model_version=4, of_model_epoch=395, gt_model_version=5,
+                       gt_model_epoch=341, use_batch_norm=use_batch_norm, center_based=center_based,
+                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.TEST)
+        logger.info('Train')
+        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
+                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
+                       time_steps=time_steps, lr=lr, of_model_version=4, of_model_epoch=395, gt_model_version=5,
+                       gt_model_epoch=341, use_batch_norm=use_batch_norm, center_based=center_based,
+                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.TRAIN)
+    elif not USE_NETWORK_V0 and TIME_STEPS == 20:
+        time_steps = TIME_STEPS
+        features_load_path = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
+                             f'center_based_gt_velocity_of_optimized_t{time_steps}.pt'
+        features_load_path = dataset_load_path + features_load_path
+        logger.info('Setting up DataLoaders')
+        feats = torch.load(features_load_path)
+        train_set, val_set, test_set = prepare_datasets(features=feats)
+        # T=20
+        logger.info('T=20')
+        logger.info('Validation')
+        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
+                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
+                       time_steps=time_steps, lr=lr, of_model_version=7, of_model_epoch=201, gt_model_version=6,
+                       gt_model_epoch=88, use_batch_norm=use_batch_norm, center_based=center_based,
+                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.VALIDATION)
+        logger.info('Test')
+        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
+                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
+                       time_steps=time_steps, lr=lr, of_model_version=7, of_model_epoch=201, gt_model_version=6,
+                       gt_model_epoch=88, use_batch_norm=use_batch_norm, center_based=center_based,
+                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.TEST)
+        logger.info('Train')
+        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
+                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
+                       time_steps=time_steps, lr=lr, of_model_version=7, of_model_epoch=201, gt_model_version=6,
+                       gt_model_epoch=88, use_batch_norm=use_batch_norm, center_based=center_based,
+                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.TRAIN)
+    else:
+        return NotImplemented
+
+
 if __name__ == '__main__':
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -987,9 +1108,13 @@ if __name__ == '__main__':
         file_name = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
                     f'center_based_gt_velocity_of_optimized_t{TIME_STEPS}.pt'
 
-        main(do_train=train_mode, features_load_path=save_path + file_name, meta=dataset_meta,
-             meta_video=dataset_meta_video, meta_train_video_number=video_number, meta_val_video_number=video_number,
-             time_steps=TIME_STEPS, lr=LR, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, of_model_version=OF_VERSION,
-             of_model_epoch=OF_EPOCH, gt_model_version=GT_VERSION, gt_model_epoch=GT_EPOCH,
-             use_batch_norm=USE_BATCH_NORM, center_based=CENTER_BASED, gt_based=GT_BASED, dataset_video=video_label,
-             loader_to_use_for_inference=NetworkMode.VALIDATION)
+        # main(do_train=train_mode, features_load_path=save_path + file_name, meta=dataset_meta,
+        #      meta_video=dataset_meta_video, meta_train_video_number=video_number, meta_val_video_number=video_number,
+        #      time_steps=TIME_STEPS, lr=LR, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS,
+        #      of_model_version=OF_VERSION, of_model_epoch=OF_EPOCH, gt_model_version=GT_VERSION,
+        #      gt_model_epoch=GT_EPOCH, use_batch_norm=USE_BATCH_NORM, center_based=CENTER_BASED, gt_based=GT_BASED,
+        #      dataset_video=video_label, loader_to_use_for_inference=NetworkMode.VALIDATION)
+
+        eval_models(dataset_load_path=save_path, meta=dataset_meta, meta_video=dataset_meta_video,
+                    meta_train_video_number=video_number, meta_val_video_number=video_number, lr=LR,
+                    use_batch_norm=USE_BATCH_NORM, center_based=CENTER_BASED, dataset_video=video_label)
