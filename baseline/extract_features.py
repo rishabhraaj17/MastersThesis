@@ -17,13 +17,15 @@ initialize_logging()
 logger = get_logger(__name__)
 
 SAVE_BASE_PATH = "../Datasets/SDD_Features/"
+# SAVE_BASE_PATH = "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD_Features/"
 BASE_PATH = "../Datasets/SDD/"
+# BASE_PATH = "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/"
 VIDEO_LABEL = SDDVideoClasses.LITTLE
 VIDEO_NUMBER = 3
 SAVE_PATH = f'{SAVE_BASE_PATH}{VIDEO_LABEL.value}/video{VIDEO_NUMBER}/'
 FILE_NAME_STEP_1 = 'time_distributed_dict_with_gt_bbox_centers_and_bbox_gt_velocity.pt'
 LOAD_FILE_STEP_1 = SAVE_PATH + FILE_NAME_STEP_1
-TIME_STEPS = 8
+TIME_STEPS = 10
 
 ENABLE_OF_OPTIMIZATION = True
 ALPHA = 1
@@ -230,11 +232,11 @@ def step_two():
     features = torch.load(LOAD_FILE_STEP_1)
 
     # Step 2.1
-    logger.info(f'Processing the features for video {VIDEO_LABEL.value}, video {VIDEO_NUMBER}')
+    logger.info(f'Processing the features for video {VIDEO_LABEL.value}, video {VIDEO_NUMBER}, {TIME_STEPS} time-steps')
     feats_data = process_complex_features_rnn(features, time_steps=TIME_STEPS)
 
     # Step 2.2
-    logger.info(f'Extracting the features for video {VIDEO_LABEL.value}, video {VIDEO_NUMBER}')
+    logger.info(f'Extracting the features for video {VIDEO_LABEL.value}, video {VIDEO_NUMBER}, {TIME_STEPS} time-steps')
 
     x, y, frame_info, track_id_info, bbox_center_x, bbox_center_y, bbox_x, bbox_y, gt_velocity_x, gt_velocity_y = \
         extract_trainable_features_rnn(feats_data, return_frame_info=True)
@@ -245,10 +247,10 @@ def step_two():
                           'gt_velocity_y': gt_velocity_y}
 
     # Step 2.3
-    logger.info(f'Preparing the features for video {VIDEO_LABEL.value}, video {VIDEO_NUMBER}')
+    logger.info(f'Preparing the features for video {VIDEO_LABEL.value}, video {VIDEO_NUMBER}, {TIME_STEPS} time-steps')
     features = center_based_dataset(features_save_dict)
     file_name = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
-                f'center_based_gt_velocity_t{TIME_STEPS}.pt'
+                f'center_based_gt_velocity_of_optimized_t{TIME_STEPS}.pt'
     if SAVE_PATH:
         Path(SAVE_PATH).mkdir(parents=True, exist_ok=True)
     torch.save(features, SAVE_PATH + file_name)

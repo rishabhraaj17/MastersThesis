@@ -23,7 +23,7 @@ from unsupervised_tp_0.dataset import FeaturesDatasetCenterBased
 initialize_logging()
 logger = get_logger(__name__)
 
-TIME_STEPS = 20
+TIME_STEPS = 10
 NUM_WORKERS = 10
 BATCH_SIZE = 256
 LR = 1e-3
@@ -32,8 +32,10 @@ GT_BASED = True
 CENTER_BASED = True
 OF_VERSION = 1
 GT_VERSION = 0
-OF_EPOCH = None
+OF_EPOCH = 363
 GT_EPOCH = 88
+
+USE_NETWORK_V0 = True
 
 MANUAL_SEED = 42
 torch.manual_seed(MANUAL_SEED)
@@ -149,9 +151,13 @@ class BaselineSequential(LightningModule):
         # self.rnn_mode = True if layers_mode == 'rnn' else False
         self.gt_based = gt_based
         self.center_based = center_based
+        model = self.__class__.__name__
+        same_init = False
 
         self.save_hyperparameters('lr', 'time_steps', 'meta_video', 'batch_size', 'meta_train_video_number',
                                   'meta_val_video_number', 'use_batch_norm', 'gt_based', 'center_based')
+        self.hparams.update({'network': model,
+                             'same_init_vel_and_center': same_init})
 
     def forward(self, x, cx=None, hx=None, cx_1=None, hx_1=None, stacked=True):
         if stacked:
@@ -388,7 +394,6 @@ class BaselineSequentialV0(BaselineSequential):
         return total_loss / len(features), ade, fde
 
 
-USE_NETWORK_V0 = False
 if USE_NETWORK_V0:
     NETWORK = BaselineSequentialV0
 else:
@@ -980,9 +985,8 @@ if __name__ == '__main__':
         dataset_meta_video = SDDVideoDatasets.LITTLE
 
         file_name = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
-                    f'center_based_gt_velocity_t{TIME_STEPS}.pt'
+                    f'center_based_gt_velocity_of_optimized_t{TIME_STEPS}.pt'
 
-        USE_NETWORK_V0 = False
         main(do_train=train_mode, features_load_path=save_path + file_name, meta=dataset_meta,
              meta_video=dataset_meta_video, meta_train_video_number=video_number, meta_val_video_number=video_number,
              time_steps=TIME_STEPS, lr=LR, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, of_model_version=OF_VERSION,

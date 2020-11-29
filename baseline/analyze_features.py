@@ -26,11 +26,12 @@ FILE_NAME = 'time_distributed_dict_with_gt_bbox_centers_and_bbox_gt_velocity.pt'
 LOAD_FILE = SAVE_PATH + FILE_NAME
 ANNOTATIONS_FILE = 'annotation_augmented.csv'
 ANNOTATIONS_PATH = f'{BASE_PATH}annotations/{VIDEO_LABEL.value}/video{VIDEO_NUMBER}/'
-TIME_STEPS = 8
+TIME_STEPS = 100
+OPTIMIZED_OF = True
 META_PATH = '../Datasets/SDD/H_SDD.txt'
 META = SDDMeta(META_PATH)
-DF_SAVE_PATH = f'{SAVE_PATH}analysis/'
-DF_FILE_NAME = f'analysis_t{TIME_STEPS}.csv'
+DF_SAVE_PATH = f'{SAVE_PATH}analysis2/'
+DF_FILE_NAME = f'optimized_of_analysis_t{TIME_STEPS}.csv' if OPTIMIZED_OF else f'analysis_t{TIME_STEPS}.csv'
 
 
 def analyze_extracted_features(features_dict: dict, test_mode=False, time_steps=TIME_STEPS, track_info=None, ratio=1.0,
@@ -45,7 +46,7 @@ def analyze_extracted_features(features_dict: dict, test_mode=False, time_steps=
     of_track_analysis_df = None
     for features_x, features_y, features_f_info, features_t_info, features_b_c_x, features_b_c_y, features_b_x, \
         features_b_y in tqdm(zip(x_, y_, frame_info, track_id_info, bbox_center_x,
-                                 bbox_center_y, bbox_x, bbox_y)):
+                                 bbox_center_y, bbox_x, bbox_y), total=len(x_)):
         unique_tracks = np.unique(features_t_info)
         current_track = unique_tracks[0]
         of_inside_bbox_list, of_track_list, gt_track_list, of_ade_list, of_fde_list, of_per_stop_de = \
@@ -56,11 +57,11 @@ def analyze_extracted_features(features_dict: dict, test_mode=False, time_steps=
                                                                                 features_b_x, features_b_y):
             of_flow = feature_x[:, :2] + feature_x[:, 2:4]
             if optimized_of:
-                of_flow_center = of_flow.mean(0)
-            else:
-                _, of_flow_top_k = cost_function(of_flow, bbox_center_y, top_k=top_k, alpha=alpha, bbox=bbox_y,
+                _, of_flow_top_k = cost_function(of_flow, b_c_y, top_k=top_k, alpha=alpha, bbox=b_y,
                                                  weight_points_inside_bbox_more=weight_points_inside_bbox_more)
                 of_flow_center = of_flow_top_k[0]
+            else:
+                of_flow_center = of_flow.mean(0)
             of_inside_bbox = is_inside_bbox(of_flow_center, b_y)
             of_inside_bbox_list.append(of_inside_bbox)
 
@@ -102,7 +103,9 @@ def parse_df_analysis(in_df, save_path=None):
     inside_bbox_list, per_stop_de_list, inside_bbox, per_stop_de = [], [], [], []
     inside_bbox_count, outside_bbox_count = [], []
     t_id, ade, fde = None, None, None
-    for idx, (index, row) in enumerate(tqdm(in_df.iterrows())):
+    plot_folder = 'of_optimized_plots/' if OPTIMIZED_OF else 'plots/'
+    # plot_folder = 'non_bbox_of_optimized_plots/' if OPTIMIZED_OF else 'plots/'
+    for idx, (index, row) in enumerate(tqdm(in_df.iterrows(), total=len(in_df))):
         if idx == 0:
             t_id = row['track_id']
             ade = row['ade']
@@ -116,8 +119,8 @@ def parse_df_analysis(in_df, save_path=None):
                 per_stop_de_list.append(per_stop_de)
                 inside_bbox_count.append(inside_bbox.count(True))
                 outside_bbox_count.append(inside_bbox.count(False))
-                if idx % 99 == 0:
-                    plot_track_analysis(t_id, ade, fde, inside_bbox, per_stop_de, save_path + 'plots/', idx)
+                if idx % 999 == 0:
+                    plot_track_analysis(t_id, ade, fde, inside_bbox, per_stop_de, save_path + plot_folder, idx)
                 # plot_track_analysis(t_id, ade, fde, inside_bbox, per_stop_de, save_path+'plots/', idx)
                 inside_bbox, per_stop_de = [], []
             t_id = row['track_id']
@@ -128,6 +131,9 @@ def parse_df_analysis(in_df, save_path=None):
         else:
             inside_bbox.append(row['of_inside_bbox_list'])
             per_stop_de.append(row['per_stop_de'])
+    if OPTIMIZED_OF:
+        save_path = save_path + 'of_optimized'
+        # save_path = save_path + 'non_bbox_of_optimized'
     plot_violin_plot(ade_list, fde_list, save_path)
     in_count = sum(inside_bbox_count)
     out_count = sum(outside_bbox_count)
@@ -150,18 +156,28 @@ def analyze(save=False, optimized_of=True, top_k=1, alpha=1, weight_points_insid
 
 
 def parse_analysis(df):
-    if isinstance(df, str):
-        df = pd.read_csv(DF_SAVE_PATH + DF_FILE_NAME)
     parsed_data = parse_df_analysis(df, DF_SAVE_PATH)
     return parsed_data
 
 
-def main(save=True, optimized_of=True, top_k=1, alpha=1, weight_points_inside_bbox_more=True):
-    df = analyze(save=save, optimized_of=optimized_of, top_k=top_k, alpha=alpha,
-                 weight_points_inside_bbox_more=weight_points_inside_bbox_more)
-    parsed_data = parse_analysis(df)
-    logger.info("Analysis Completed!")
+def main(save=True, optimized_of=True, top_k=1, alpha=1, weight_points_inside_bbox_more=True, from_file=True,
+         process_both=False):
+    if from_file:
+        logger.info(f'Loading saved data - {DF_FILE_NAME} - for parsing!')
+        df = pd.read_csv(DF_SAVE_PATH + DF_FILE_NAME)
+        logger.info('Parsing ...')
+        parsed_data = parse_analysis(df)
+        logger.info("Analysis Completed!")
+    else:
+        logger.info('Computing ...')
+        df = analyze(save=save, optimized_of=optimized_of, top_k=top_k, alpha=alpha,
+                     weight_points_inside_bbox_more=weight_points_inside_bbox_more)
+        if process_both:
+            logger.info('Parsing ...')
+            parsed_data = parse_analysis(df)
+        logger.info("Computation Completed! Load file for parsing")
 
 
 if __name__ == '__main__':
-    main(optimized_of=False, top_k=1, alpha=1, weight_points_inside_bbox_more=True)
+    main(optimized_of=OPTIMIZED_OF, top_k=1, alpha=1, weight_points_inside_bbox_more=True, save=True,
+         from_file=True, process_both=False)
