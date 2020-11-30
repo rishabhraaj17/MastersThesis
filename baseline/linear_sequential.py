@@ -23,20 +23,20 @@ from unsupervised_tp_0.dataset import FeaturesDatasetCenterBased
 initialize_logging()
 logger = get_logger(__name__)
 
-TIME_STEPS = 20
+TIME_STEPS = 10
 NUM_WORKERS = 10
 BATCH_SIZE = 256
 LR = 1e-3
 USE_BATCH_NORM = False
 GT_BASED = False
 CENTER_BASED = True
-SAME_INIT = False
+SAME_INIT = True
 OF_VERSION = 1
 GT_VERSION = 0
 OF_EPOCH = 363
 GT_EPOCH = 88
 
-USE_NETWORK_V0 = False
+USE_NETWORK_V0 = True
 
 MANUAL_SEED = 42
 torch.manual_seed(MANUAL_SEED)
@@ -1139,14 +1139,14 @@ if __name__ == '__main__':
         file_name = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
                     f'center_based_gt_velocity_of_optimized_t{TIME_STEPS}.pt'
 
-        # main(do_train=train_mode, features_load_path=save_path + file_name, meta=dataset_meta,
-        #      meta_video=dataset_meta_video, meta_train_video_number=video_number, meta_val_video_number=video_number,
-        #      time_steps=TIME_STEPS, lr=LR, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS,
-        #      of_model_version=OF_VERSION, of_model_epoch=OF_EPOCH, gt_model_version=GT_VERSION,
-        #      gt_model_epoch=GT_EPOCH, use_batch_norm=USE_BATCH_NORM, center_based=CENTER_BASED, gt_based=GT_BASED,
-        #      dataset_video=video_label, loader_to_use_for_inference=NetworkMode.VALIDATION, same_init=SAME_INIT)
+        main(do_train=train_mode, features_load_path=save_path + file_name, meta=dataset_meta,
+             meta_video=dataset_meta_video, meta_train_video_number=video_number, meta_val_video_number=video_number,
+             time_steps=TIME_STEPS, lr=LR, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS,
+             of_model_version=OF_VERSION, of_model_epoch=OF_EPOCH, gt_model_version=GT_VERSION,
+             gt_model_epoch=GT_EPOCH, use_batch_norm=USE_BATCH_NORM, center_based=CENTER_BASED, gt_based=GT_BASED,
+             dataset_video=video_label, loader_to_use_for_inference=NetworkMode.VALIDATION, same_init=SAME_INIT)
 
-        eval_models(dataset_load_path=save_path, meta=dataset_meta, meta_video=dataset_meta_video,
-                    meta_train_video_number=video_number, meta_val_video_number=video_number, lr=LR,
-                    use_batch_norm=USE_BATCH_NORM, center_based=CENTER_BASED, dataset_video=video_label,
-                    same_init=SAME_INIT)
+        # eval_models(dataset_load_path=save_path, meta=dataset_meta, meta_video=dataset_meta_video,
+        #             meta_train_video_number=video_number, meta_val_video_number=video_number, lr=LR,
+        #             use_batch_norm=USE_BATCH_NORM, center_based=CENTER_BASED, dataset_video=video_label,
+        #             same_init=SAME_INIT)

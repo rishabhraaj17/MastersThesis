@@ -1,8 +1,11 @@
+from pathlib import Path
+
 import torch
 
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
 from average_image.utils import is_inside_bbox
@@ -56,17 +59,20 @@ def cost_function(of_points, center, top_k, alpha, bbox, weight_points_inside_bb
     weighted_of_points = (1 / z) * weighted_of_points  # normalize 0-1?
     if weight_points_inside_bbox_more and len(points_inside_bbox_idx) > 0:
         weighted_of_points[points_inside_bbox_idx] = weighted_of_points[points_inside_bbox_idx] * 100
-    top_k_indices = largest_indices(weighted_of_points, top_k)[0]
+    try:
+        top_k_indices = largest_indices(weighted_of_points, top_k)[0]
+    except ValueError:
+        top_k_indices = largest_indices(weighted_of_points, len(weighted_of_points))[0]
     return weighted_of_points, of_points[top_k_indices]
 
 
 def of_optimization(data_features_x, data_features_y, bounding_box_x, bounding_box_y, bounding_box_centers_x,
-                    bounding_box_centers_y, alpha):
-    for features_x, bboxs_x, bbox_centers_x, features_y, bboxs_y, bbox_centers_y in \
-            zip(data_features_x, bounding_box_x, bounding_box_centers_x, data_features_y, bounding_box_y,
-                bounding_box_centers_y):
-        for feature_x, bbox_x, bbox_center_x, feature_y, bbox_y, bbox_center_y in \
-                zip(features_x, bboxs_x, bbox_centers_x, features_y, bboxs_y, bbox_centers_y):
+                    bounding_box_centers_y, data_frames, data_track_ids, alpha, save_plots=True, plot_save_path=None):
+    for idx, (features_x, bboxs_x, bbox_centers_x, features_y, bboxs_y, bbox_centers_y, frames, track_ids) in \
+            enumerate(tqdm(zip(data_features_x, bounding_box_x, bounding_box_centers_x, data_features_y, bounding_box_y,
+                               bounding_box_centers_y, data_frames, data_track_ids), total=len(data_features_x))):
+        for feature_x, bbox_x, bbox_center_x, feature_y, bbox_y, bbox_center_y, frame, track_id in \
+                zip(features_x, bboxs_x, bbox_centers_x, features_y, bboxs_y, bbox_centers_y, frames, track_ids):
             t0_points_xy, t0_points_uv, t0_points_past_uv = feature_x[:, :2], feature_x[:, 2:4], feature_x[:, 4:]
             t1_points_xy, t1_points_uv, t1_points_past_uv = feature_y[:, :2], feature_y[:, 2:4], feature_y[:, 4:]
             t0_x_min, t0_y_min, t0_x_max, t0_y_max = bbox_x
@@ -79,13 +85,15 @@ def of_optimization(data_features_x, data_features_y, bounding_box_x, bounding_b
             weighted_shifted_points, weighted_shifted_points_top_k = cost_function(shifted_points, bbox_center_y,
                                                                                    top_k=10, alpha=alpha, bbox=bbox_y,
                                                                                    weight_points_inside_bbox_more=True)
+            if idx % 5000 == 0:
+                plot_basic_analysis(bbox_center_y, shifted_points, t1_h, t1_points_xy, t1_w, t1_x, t1_y,
+                                    save=save_plots, weighted_shifted_points_top_k=weighted_shifted_points_top_k,
+                                    plot_save_path=plot_save_path,
+                                    plt_file_name=f'frame-{frame}-track_id-{track_id}.png')
 
-            plot_basic_analysis(bbox_center_y, shifted_points, t1_h, t1_points_xy, t1_w, t1_x, t1_y,
-                                weighted_shifted_points_top_k)
 
-
-def plot_basic_analysis(bbox_center_y, shifted_points, t1_h, t1_points_xy, t1_w, t1_x, t1_y,
-                        weighted_shifted_points_top_k=None):
+def plot_basic_analysis(bbox_center_y, shifted_points, t1_h, t1_points_xy, t1_w, t1_x, t1_y, save,
+                        weighted_shifted_points_top_k=None, plot_save_path=None, plt_file_name=None):
     plt.plot(shifted_points[:, 0], shifted_points[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k',
              markersize=8, label='OF Shifted')
     plt.plot(t1_points_xy[:, 0], t1_points_xy[:, 1], '*', markerfacecolor='green', markeredgecolor='k',
@@ -97,11 +105,16 @@ def plot_basic_analysis(bbox_center_y, shifted_points, t1_h, t1_points_xy, t1_w,
                  markeredgecolor='k', markersize=8, label='Weighted TopK')
     plt.gca().add_patch(Rectangle((t1_x, t1_y), t1_w, t1_h, linewidth=1, edgecolor='r', facecolor='none'))
     plt.legend()
-    plt.show()
+    if save and plot_save_path is not None:
+        Path(plot_save_path).mkdir(parents=True, exist_ok=True)
+        plt.savefig(plot_save_path + plt_file_name)
+        plt.close()
+    else:
+        plt.show()
 
 
 if __name__ == '__main__':
-    time_steps = 5
+    time_steps = 20
     base_path = "../Datasets/SDD/"
     save_base_path = "../Datasets/SDD_Features/"
     vid_label = SDDVideoClasses.LITTLE
@@ -121,6 +134,9 @@ if __name__ == '__main__':
                                           dataset_feats['bbox_center_y'], dataset_feats['bbox_x'], \
                                           dataset_feats['bbox_y'], dataset_feats['center_based']
 
+    plt_save_path = f'../Plots/optimized_of/T={time_steps}/'
+
     of_optimization(data_features_x=dataset_x, data_features_y=dataset_y, bounding_box_x=dataset_bbox_x,
                     bounding_box_y=dataset_bbox_y, bounding_box_centers_x=dataset_center_x,
-                    bounding_box_centers_y=dataset_center_y, alpha=1)
+                    bounding_box_centers_y=dataset_center_y, alpha=1, save_plots=True, plot_save_path=plt_save_path,
+                    data_frames=dataset_frames, data_track_ids=dataset_track_ids)

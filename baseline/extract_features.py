@@ -7,10 +7,10 @@ from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
 from average_image.feature_extractor import MOG2
-from average_image.utils import plot_extracted_features_and_verify_flow, BasicTestData, BasicTrainData
+from average_image.utils import BasicTestData, BasicTrainData
 from log import initialize_logging, get_logger
 from unsupervised_tp_0.dataset import SDDSimpleDataset, resize_frames
-from unsupervised_tp_0.extracted_of_optimization import cost_function
+from baseline.extracted_of_optimization import cost_function
 from unsupervised_tp_0.nn_clustering_0 import find_center_point
 
 initialize_logging()

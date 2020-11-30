@@ -10,7 +10,7 @@ from average_image.utils import is_inside_bbox, compute_ade, compute_fde, \
     compute_per_stop_de, SDDMeta, plot_track_analysis, plot_violin_plot
 from baseline.extract_features import extract_trainable_features_rnn, process_complex_features_rnn
 from log import initialize_logging, get_logger
-from unsupervised_tp_0.extracted_of_optimization import cost_function
+from baseline.extracted_of_optimization import cost_function
 from unsupervised_tp_0.nn_clustering_0 import get_track_info
 
 initialize_logging()
