@@ -23,20 +23,32 @@ from unsupervised_tp_0.dataset import FeaturesDatasetCenterBased
 initialize_logging()
 logger = get_logger(__name__)
 
-TIME_STEPS = 10
+TIME_STEPS = 20
 NUM_WORKERS = 10
 BATCH_SIZE = 256
 LR = 1e-3
 USE_BATCH_NORM = False
-GT_BASED = False
+GT_BASED = True
 CENTER_BASED = True
-SAME_INIT = True
+SAME_INIT = False
 OF_VERSION = 1
 GT_VERSION = 0
 OF_EPOCH = 363
 GT_EPOCH = 88
 
-USE_NETWORK_V0 = True
+
+class NetworkType(Enum):
+    """
+    V0 - Watch 1 time step, predict next N
+    V1 - Watch 8 time steps, predict next 12 (network learns for later 12 steps as well)
+    V2 - Watch 8 time steps, predict next 12 (network does not learns for later 12 steps)
+    """
+    V0 = 'V0'
+    V1 = 'V1'
+    V2 = 'V2'
+
+
+NETWORK_TO_USE = NetworkType.V2
 
 MANUAL_SEED = 42
 torch.manual_seed(MANUAL_SEED)
@@ -121,7 +133,7 @@ def core_layers_maker(batch_norm, in_features, layers, v):
 
 class BaselineSequential(LightningModule):
     """
-    Watch 8 time steps, predict next 12
+    Watch 8 time steps, predict next 12 (learn 8 - supervised, 12 - unsupervised)
     """
 
     def __init__(self, meta=None, original_frame_shape=None, num_frames_between_two_time_steps=12, lr=1e-5,
@@ -401,10 +413,95 @@ class BaselineSequentialV0(BaselineSequential):
         return total_loss / len(features), ade, fde
 
 
-if USE_NETWORK_V0:
+class BaselineSequentialV1(BaselineSequential):
+    """
+    Watch and learn 8 time step, predict next 12 time steps
+    """
+
+    def __init__(self, meta=None, original_frame_shape=None, num_frames_between_two_time_steps=12, lr=1e-5,
+                 mode=FeaturesMode.UV, layers_mode=None, meta_video=None, meta_train_video_number=None,
+                 meta_val_video_number=None, time_steps=5, train_dataset=None, val_dataset=None, batch_size=1,
+                 num_workers=0, use_batch_norm=False, gt_based=True, center_based=True, same_init=False):
+        super(BaselineSequentialV1, self).__init__(meta=meta, original_frame_shape=original_frame_shape,
+                                                   num_frames_between_two_time_steps=num_frames_between_two_time_steps,
+                                                   lr=lr, mode=mode, layers_mode=layers_mode, meta_video=meta_video,
+                                                   meta_train_video_number=meta_train_video_number,
+                                                   meta_val_video_number=meta_val_video_number, time_steps=time_steps,
+                                                   train_dataset=train_dataset, val_dataset=val_dataset,
+                                                   batch_size=batch_size, num_workers=num_workers,
+                                                   use_batch_norm=use_batch_norm, gt_based=gt_based,
+                                                   center_based=center_based, same_init=same_init)
+
+    def one_step(self, batch):
+        features, frame_, track_id, bbox_center1, bbox_center2, bbox1, bbox2 = batch
+        b_size = features.shape[1]
+
+        cx, cx_1, hx, hx_1 = self.init_hidden_states(b_size)
+        total_loss = torch.tensor(data=0, dtype=torch.float32, device=self.device)
+        last_input_velocity, last_pred_center, bad_data = None, None, False
+        pred_centers, moved_points_by_true_of_list, actual_points_list = [], [], []
+        ade, fde, shifted_points = None, None, None
+        steps_to_watch = 8
+
+        criterion = self.setup_loss()
+
+        if len(features) == self.ts:
+            for idx_i, i in enumerate(range(self.ts)):
+                feat, bb_center1, bb_center2 = features[i].squeeze().float(), bbox_center1[i].float(), \
+                                               bbox_center2[i].float()
+                center_xy, center_true_uv, center_past_uv, shifted_point, gt_past_velocity = \
+                    feat[:, 0, :], feat[:, 1, :], feat[:, 2, :], feat[:, 3, :], feat[:, 4, :]
+                if self.gt_based:
+                    shifted_points = bb_center2
+                if not self.center_based:
+                    return NotImplemented
+
+                if idx_i < steps_to_watch:
+                    if idx_i == 0:
+                        if not self.same_init:
+                            if self.gt_based:
+                                last_input_velocity = gt_past_velocity
+                                last_pred_center = bb_center1
+                            else:
+                                last_input_velocity = center_past_uv
+                                last_pred_center = center_xy
+                        else:
+                            last_input_velocity = gt_past_velocity
+                            last_pred_center = bb_center1
+
+                    block_2, cx, hx, cx_1, hx_1 = self(last_input_velocity, cx, hx, cx_1, hx_1, True)
+
+                    if not self.gt_based:
+                        shifted_points = shifted_point
+
+                    moved_points_by_true_of_list.append(shifted_points)
+                    pred_center = last_pred_center + (block_2 * 0.4)
+                    last_input_velocity = block_2
+                    last_pred_center = pred_center
+                    pred_centers.append(pred_center)
+                    actual_points_list.append(bb_center2)
+
+                    total_loss += criterion(shifted_points, pred_center=pred_center)
+                else:
+                    break
+
+            predicted_points = [p.detach().cpu().numpy() for p in pred_centers]
+            true_points = [p.detach().cpu().numpy() for p in actual_points_list]
+
+            ade = compute_ade(np.stack(predicted_points), np.stack(true_points)).item()
+            fde = compute_fde(np.stack(predicted_points), np.stack(true_points)).item()
+
+        return total_loss / len(features), ade, fde
+
+
+if NETWORK_TO_USE == NetworkType.V0:
     NETWORK = BaselineSequentialV0
-else:
+elif NETWORK_TO_USE == NetworkType.V1:
     NETWORK = BaselineSequential
+elif NETWORK_TO_USE == NetworkType.V2:
+    NETWORK = BaselineSequentialV1
+else:
+    raise NotImplemented
 
 
 def split_dataset(features, split_percent=0.2):
@@ -479,7 +576,7 @@ def inference(meta, num_frames_between_two_time_steps, meta_video, meta_train_vi
     if img_save_path:
         Path(img_save_path).mkdir(parents=True, exist_ok=True)
 
-    if USE_NETWORK_V0:
+    if NETWORK_TO_USE == NetworkType.V0 or NETWORK_TO_USE == NetworkType.V2:
         inference_core_method = inference_core_v0
     else:
         inference_core_method = inference_core
@@ -1022,7 +1119,7 @@ def eval_models(dataset_load_path, meta, meta_video, meta_train_video_number, me
                 center_based, dataset_video, same_init):
     logger.info('Optical Flow Optimized!')
 
-    if USE_NETWORK_V0 and TIME_STEPS == 5:
+    if NETWORK_TO_USE and TIME_STEPS == 5:
         time_steps = TIME_STEPS
         features_load_path = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
                              f'center_based_gt_velocity_of_optimized_t{time_steps}.pt'
@@ -1031,28 +1128,16 @@ def eval_models(dataset_load_path, meta, meta_video, meta_train_video_number, me
         feats = torch.load(features_load_path)
         train_set, val_set, test_set = prepare_datasets(features=feats)
         logger.info('Watch 1 predict else!')
+
+        of_model_version, of_model_epoch = 10, 142
+        gt_model_version, gt_model_epoch = 13, 392
+
         # T=5
         logger.info('T=5')
-        logger.info('Validation')
-        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
-                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
-                       time_steps=time_steps, lr=lr, of_model_version=3, of_model_epoch=95, gt_model_version=2,
-                       gt_model_epoch=392, use_batch_norm=use_batch_norm, center_based=center_based,
-                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.VALIDATION,
-                       same_init=same_init)
-        logger.info('Test')
-        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
-                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
-                       time_steps=time_steps, lr=lr, of_model_version=3, of_model_epoch=95, gt_model_version=2,
-                       gt_model_epoch=392, use_batch_norm=use_batch_norm, center_based=center_based,
-                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.TEST, same_init=same_init)
-        logger.info('Train')
-        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
-                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
-                       time_steps=time_steps, lr=lr, of_model_version=3, of_model_epoch=95, gt_model_version=2,
-                       gt_model_epoch=392, use_batch_norm=use_batch_norm, center_based=center_based,
-                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.TRAIN, same_init=same_init)
-    elif USE_NETWORK_V0 and TIME_STEPS == 10:
+        eval_models_core(center_based, dataset_video, gt_model_epoch, gt_model_version, lr, meta,
+                         meta_train_video_number, meta_val_video_number, meta_video, of_model_epoch, of_model_version,
+                         same_init, test_set, time_steps, train_set, use_batch_norm, val_set)
+    elif NETWORK_TO_USE and TIME_STEPS == 10:
         time_steps = TIME_STEPS
         features_load_path = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
                              f'center_based_gt_velocity_of_optimized_t{time_steps}.pt'
@@ -1060,28 +1145,16 @@ def eval_models(dataset_load_path, meta, meta_video, meta_train_video_number, me
         logger.info('Setting up DataLoaders')
         feats = torch.load(features_load_path)
         train_set, val_set, test_set = prepare_datasets(features=feats)
+
+        of_model_version, of_model_epoch = 11, 175
+        gt_model_version, gt_model_epoch = 12, 341
+
         # T=10
         logger.info('T=10')
-        logger.info('Validation')
-        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
-                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
-                       time_steps=time_steps, lr=lr, of_model_version=4, of_model_epoch=395, gt_model_version=5,
-                       gt_model_epoch=341, use_batch_norm=use_batch_norm, center_based=center_based,
-                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.VALIDATION,
-                       same_init=same_init)
-        logger.info('Test')
-        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
-                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
-                       time_steps=time_steps, lr=lr, of_model_version=4, of_model_epoch=395, gt_model_version=5,
-                       gt_model_epoch=341, use_batch_norm=use_batch_norm, center_based=center_based,
-                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.TEST, same_init=same_init)
-        logger.info('Train')
-        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
-                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
-                       time_steps=time_steps, lr=lr, of_model_version=4, of_model_epoch=395, gt_model_version=5,
-                       gt_model_epoch=341, use_batch_norm=use_batch_norm, center_based=center_based,
-                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.TRAIN, same_init=same_init)
-    elif not USE_NETWORK_V0 and TIME_STEPS == 20:
+        eval_models_core(center_based, dataset_video, gt_model_epoch, gt_model_version, lr, meta,
+                         meta_train_video_number, meta_val_video_number, meta_video, of_model_epoch, of_model_version,
+                         same_init, test_set, time_steps, train_set, use_batch_norm, val_set)
+    elif not NETWORK_TO_USE and TIME_STEPS == 20:
         time_steps = TIME_STEPS
         features_load_path = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
                              f'center_based_gt_velocity_of_optimized_t{time_steps}.pt'
@@ -1089,29 +1162,43 @@ def eval_models(dataset_load_path, meta, meta_video, meta_train_video_number, me
         logger.info('Setting up DataLoaders')
         feats = torch.load(features_load_path)
         train_set, val_set, test_set = prepare_datasets(features=feats)
+
+        of_model_version, of_model_epoch = 8, 299
+        gt_model_version, gt_model_epoch = 9, 88
+
         # T=20
         logger.info('T=20')
-        logger.info('Validation')
-        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
-                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
-                       time_steps=time_steps, lr=lr, of_model_version=7, of_model_epoch=201, gt_model_version=6,
-                       gt_model_epoch=88, use_batch_norm=use_batch_norm, center_based=center_based,
-                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.VALIDATION,
-                       same_init=same_init)
-        logger.info('Test')
-        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
-                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
-                       time_steps=time_steps, lr=lr, of_model_version=7, of_model_epoch=201, gt_model_version=6,
-                       gt_model_epoch=88, use_batch_norm=use_batch_norm, center_based=center_based,
-                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.TEST, same_init=same_init)
-        logger.info('Train')
-        inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
-                       meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
-                       time_steps=time_steps, lr=lr, of_model_version=7, of_model_epoch=201, gt_model_version=6,
-                       gt_model_epoch=88, use_batch_norm=use_batch_norm, center_based=center_based,
-                       dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.TRAIN, same_init=same_init)
+        eval_models_core(center_based, dataset_video, gt_model_epoch, gt_model_version, lr, meta,
+                         meta_train_video_number, meta_val_video_number, meta_video, of_model_epoch, of_model_version,
+                         same_init, test_set, time_steps, train_set, use_batch_norm, val_set)
     else:
         return NotImplemented
+
+
+def eval_models_core(center_based, dataset_video, gt_model_epoch, gt_model_version, lr, meta, meta_train_video_number,
+                     meta_val_video_number, meta_video, of_model_epoch, of_model_version, same_init, test_set,
+                     time_steps, train_set, use_batch_norm, val_set):
+    logger.info('Validation')
+    inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
+                   meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
+                   time_steps=time_steps, lr=lr, of_model_version=of_model_version, of_model_epoch=of_model_epoch,
+                   gt_model_version=gt_model_version, gt_model_epoch=gt_model_epoch, use_batch_norm=use_batch_norm,
+                   dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.VALIDATION,
+                   center_based=center_based, same_init=same_init)
+    logger.info('Test')
+    inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
+                   meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
+                   time_steps=time_steps, lr=lr, of_model_version=of_model_version, of_model_epoch=of_model_epoch,
+                   gt_model_version=gt_model_version, gt_model_epoch=gt_model_epoch, use_batch_norm=use_batch_norm,
+                   dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.TEST,
+                   center_based=center_based, same_init=same_init)
+    logger.info('Train')
+    inference_main(meta=meta, meta_video=meta_video, train_set=train_set, val_set=val_set, test_set=test_set,
+                   meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
+                   time_steps=time_steps, lr=lr, of_model_version=of_model_version, of_model_epoch=of_model_epoch,
+                   gt_model_version=gt_model_version, gt_model_epoch=gt_model_epoch, use_batch_norm=use_batch_norm,
+                   dataset_video=dataset_video, loader_to_use_for_inference=NetworkMode.TRAIN,
+                   center_based=center_based, same_init=same_init)
 
 
 if __name__ == '__main__':
