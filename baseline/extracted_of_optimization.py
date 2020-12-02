@@ -113,6 +113,23 @@ def plot_basic_analysis(bbox_center_y, shifted_points, t1_h, t1_points_xy, t1_w,
         plt.show()
 
 
+def distance_weighted_optimization(features_path, plot_save_path, alpha=1, save_plots=True):
+    logger.info('Loading Dataset')
+    dataset_feats = torch.load(features_path)
+    logger.info('Dataset Loaded')
+
+    dataset_x, dataset_y, dataset_frames, dataset_track_ids, dataset_center_x, dataset_center_y, dataset_bbox_x, \
+    dataset_bbox_y, dataset_center_data = dataset_feats['x'], dataset_feats['y'], dataset_feats['frames'], \
+                                          dataset_feats['track_ids'], dataset_feats['bbox_center_x'], \
+                                          dataset_feats['bbox_center_y'], dataset_feats['bbox_x'], \
+                                          dataset_feats['bbox_y'], dataset_feats['center_based']
+
+    of_optimization(data_features_x=dataset_x, data_features_y=dataset_y, bounding_box_x=dataset_bbox_x,
+                    bounding_box_y=dataset_bbox_y, bounding_box_centers_x=dataset_center_x,
+                    bounding_box_centers_y=dataset_center_y, alpha=alpha, save_plots=save_plots,
+                    plot_save_path=plot_save_path, data_frames=dataset_frames, data_track_ids=dataset_track_ids)
+
+
 if __name__ == '__main__':
     time_steps = 20
     base_path = "../Datasets/SDD/"
@@ -123,20 +140,7 @@ if __name__ == '__main__':
     save_path = f'{save_base_path}{vid_label.value}/video{video_number}/'
     file_name = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
                 f'center_based_gt_velocity_t{time_steps}.pt'
-
-    logger.info('Loading Dataset')
-    dataset_feats = torch.load(save_path + file_name)
-    logger.info('Dataset Loaded')
-
-    dataset_x, dataset_y, dataset_frames, dataset_track_ids, dataset_center_x, dataset_center_y, dataset_bbox_x, \
-    dataset_bbox_y, dataset_center_data = dataset_feats['x'], dataset_feats['y'], dataset_feats['frames'], \
-                                          dataset_feats['track_ids'], dataset_feats['bbox_center_x'], \
-                                          dataset_feats['bbox_center_y'], dataset_feats['bbox_x'], \
-                                          dataset_feats['bbox_y'], dataset_feats['center_based']
-
     plt_save_path = f'../Plots/optimized_of/T={time_steps}/'
 
-    of_optimization(data_features_x=dataset_x, data_features_y=dataset_y, bounding_box_x=dataset_bbox_x,
-                    bounding_box_y=dataset_bbox_y, bounding_box_centers_x=dataset_center_x,
-                    bounding_box_centers_y=dataset_center_y, alpha=1, save_plots=True, plot_save_path=plt_save_path,
-                    data_frames=dataset_frames, data_track_ids=dataset_track_ids)
+    distance_weighted_optimization(features_path=save_path + file_name, plot_save_path=plt_save_path, alpha=1,
+                                   save_plots=True)
