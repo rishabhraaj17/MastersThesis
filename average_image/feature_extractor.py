@@ -1471,6 +1471,20 @@ class BackgroundSubtraction(FeatureExtractor):
                torch.arange(interest_fr + frame_numbers[0], frame_numbers[-1] + 1), \
                last_frame_from_last_used_batch, past_12_frames_optical_flow, gt_velocity_dict
 
+    def bg_sub_for_frame_equal_time_distributed(self, frames, fr, time_gap_within_frames, total_frames, step, n, kernel,
+                                                var_threshold, interest_fr):
+        selected_past = [(fr - i * time_gap_within_frames) % total_frames for i in range(1, step + 1)]
+        selected_future = [(fr + i * time_gap_within_frames) % total_frames for i in range(1, step + 1)]
+        selected_frames = selected_past + selected_future
+        frames_building_model = [frames[s] for s in selected_frames]
+
+        algo = cv.createBackgroundSubtractorMOG2(history=n, varThreshold=var_threshold)
+        _ = self._process_preloaded_n_frames(n, frames_building_model, kernel, algo)
+
+        mask = algo.apply(frames[interest_fr], learningRate=0)
+        mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
+        return mask
+
     def keyframe_based_feature_extraction_optimized_optical_flow_from_frames_nn(self, frames, n, frames_to_build_model,
                                                                                 original_shape, resized_shape,
                                                                                 equal_time_distributed=False,
@@ -1637,6 +1651,21 @@ class BackgroundSubtraction(FeatureExtractor):
             #                                                                               next_frame=next_frame,
             #                                                                               all_results_out=True)
             #     past_12_frames_optical_flow.append(past_flow_per_frame)
+
+            if len(past_12_frames_optical_flow) > 12:
+                temp_past_12_frames_optical_flow = {}
+                for i in list(past_12_frames_optical_flow)[-12:]:
+                    temp_past_12_frames_optical_flow.update({i: past_12_frames_optical_flow[i]})
+                past_12_frames_optical_flow = temp_past_12_frames_optical_flow
+                temp_past_12_frames_optical_flow = None
+
+            if len(last12_bg_sub_mask) > 13:  # we need one more for of?
+                temp_last12_bg_sub_mask = {}
+                for i in list(last12_bg_sub_mask)[-13:]:
+                    temp_last12_bg_sub_mask.update({i: last12_bg_sub_mask[i]})
+                last12_bg_sub_mask = temp_last12_bg_sub_mask
+                temp_last12_bg_sub_mask = None
+
             if actual_interest_fr < 12:
                 continue
 
@@ -1649,14 +1678,27 @@ class BackgroundSubtraction(FeatureExtractor):
 
             # flow between consecutive frames
             frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))
+            future12_bg_sub_mask = {}
+            future_12_frames_optical_flow = {}
             flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))
             for of_i in range(interest_fr, of_interest_fr):
+                future_mask = self.bg_sub_for_frame_equal_time_distributed(frames=frames, fr=of_i,
+                                                                           time_gap_within_frames=
+                                                                           time_gap_within_frames,
+                                                                           total_frames=total_frames, step=step, n=n,
+                                                                           kernel=kernel, var_threshold=var_threshold,
+                                                                           interest_fr=of_i)
+                future12_bg_sub_mask.update({of_i: future_mask})
+
                 previous = cv.cvtColor(frames[of_i], cv.COLOR_BGR2GRAY)
                 next_frame = cv.cvtColor(frames[of_i + 1], cv.COLOR_BGR2GRAY)
 
                 flow_per_frame, rgb, mag, ang = self.get_optical_flow(previous_frame=previous, next_frame=next_frame,
                                                                       all_results_out=True)
-                flow += flow_per_frame
+                # flow += flow_per_frame
+                # for 1st flow map the frame to add flow is actual_interest_fr - 1 | actual_interest_fr = 12 =
+                # interest_fr = 8, thus we need interest_fr=7 which is actual_interest_fr=11
+                future_12_frames_optical_flow.update({f'{of_i - 1}-{of_i}': flow_per_frame})
 
             if use_color:
                 data, data_, max_0, max_1, min_0, min_1, threshold_img = \
