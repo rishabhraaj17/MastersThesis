@@ -33,7 +33,7 @@ TOP_K = 1
 WEIGHT_POINTS_INSIDE_BBOX_MORE = True
 
 # -1 for both steps
-EXECUTE_STEP = 2
+EXECUTE_STEP = 1
 
 
 def preprocess_data(classic_clustering=False, equal_time_distributed=True, save_per_part_path=SAVE_PATH,
@@ -71,6 +71,57 @@ def preprocess_data(classic_clustering=False, equal_time_distributed=True, save_
                                                      last_frame_from_last_used_batch=
                                                      last_frame_from_last_used_batch,
                                                      gt_velocity_dict=gt_velocity_dict)
+        # plot_extracted_features_and_verify_flow(features_, frames)
+        accumulated_features = {**accumulated_features, **features_}
+        if save_per_part_path is not None:
+            Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
+            f_n = f'time_distributed_dict_with_gt_bbox_centers_and_bbox_part_gt_velocity{part_idx}.pt'
+            torch.save(accumulated_features, save_per_part_path + f_n)
+
+    return accumulated_features
+
+
+def preprocess_optical_flow_optimized_data(classic_clustering=False, equal_time_distributed=True,
+                                           save_per_part_path=SAVE_PATH,
+                                           num_frames_to_build_bg_sub_model=12):
+    sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
+                                  num_videos=1, video_number_to_use=VIDEO_NUMBER,
+                                  step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
+                                  single_track_mode=False, track_id=5, multiple_videos=False)
+    data_loader = DataLoader(sdd_simple, 16)
+    save_per_part_path += 'parts/'
+    remaining_frames, remaining_frames_idx, last_frame_from_last_used_batch = None, None, None
+    last_optical_flow_map, last12_bg_sub_mask = None, {}
+    past_12_frames_optical_flow = {}
+    gt_velocity_dict, accumulated_features = {}, {}
+    for part_idx, data in enumerate(tqdm(data_loader)):
+        frames, frame_numbers = data
+        frames = frames.squeeze()
+        feature_extractor = MOG2.for_frames()
+        features_, remaining_frames, remaining_frames_idx, last_frame_from_last_used_batch, \
+        past_12_frames_optical_flow, gt_velocity_dict, last_optical_flow_map, last12_bg_sub_mask = feature_extractor. \
+            keyframe_based_feature_extraction_optimized_optical_flow_from_frames_nn(
+            frames=frames, n=30,
+            use_last_n_to_build_model=False,
+            frames_to_build_model=num_frames_to_build_bg_sub_model,
+            original_shape=sdd_simple.original_shape,
+            resized_shape=sdd_simple.new_scale,
+            classic_clustering=classic_clustering,
+            object_of_interest_only=False,
+            var_threshold=None, track_ids=None,
+            all_object_of_interest_only=True,
+            equal_time_distributed=equal_time_distributed,
+            frame_numbers=frame_numbers,
+            df=sdd_simple.annotations_df,
+            return_normalized=False,
+            remaining_frames=remaining_frames,
+            remaining_frames_idx=remaining_frames_idx,
+            past_12_frames_optical_flow=past_12_frames_optical_flow,
+            last_frame_from_last_used_batch=
+            last_frame_from_last_used_batch,
+            gt_velocity_dict=gt_velocity_dict,
+            last_optical_flow_map=last_optical_flow_map,
+            last12_bg_sub_mask=last12_bg_sub_mask)
         # plot_extracted_features_and_verify_flow(features_, frames)
         accumulated_features = {**accumulated_features, **features_}
         if save_per_part_path is not None:
@@ -220,8 +271,11 @@ def center_based_dataset(features):
     return save_dict
 
 
-def step_one():
-    accumulated_features = preprocess_data()
+def step_one(with_optimized_of=True):
+    if with_optimized_of:
+        accumulated_features = preprocess_optical_flow_optimized_data()
+    else:
+        accumulated_features = preprocess_data()
     logger.info(f'Saving the features for video {VIDEO_LABEL.value}, video {VIDEO_NUMBER}')
     if SAVE_PATH:
         Path(SAVE_PATH).mkdir(parents=True, exist_ok=True)
@@ -261,11 +315,11 @@ if __name__ == '__main__':
     if EXECUTE_STEP == 1:
         # STEP 1
         # Extract features from video
-        step_one()
+        step_one(with_optimized_of=True)
     if EXECUTE_STEP == 2:
         # STEP 2
         # Trainable Format
         step_two()
     if EXECUTE_STEP == -1:
-        step_one()
+        step_one(with_optimized_of=True)
         step_two()

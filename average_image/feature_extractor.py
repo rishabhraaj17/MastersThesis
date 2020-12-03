@@ -1471,6 +1471,253 @@ class BackgroundSubtraction(FeatureExtractor):
                torch.arange(interest_fr + frame_numbers[0], frame_numbers[-1] + 1), \
                last_frame_from_last_used_batch, past_12_frames_optical_flow, gt_velocity_dict
 
+    def keyframe_based_feature_extraction_optimized_optical_flow_from_frames_nn(self, frames, n, frames_to_build_model,
+                                                                                original_shape, resized_shape,
+                                                                                equal_time_distributed=False,
+                                                                                var_threshold=100, use_color=False,
+                                                                                use_last_n_to_build_model=False,
+                                                                                object_of_interest_only=False,
+                                                                                classic_clustering=False,
+                                                                                track_ids=None,
+                                                                                all_object_of_interest_only=False,
+                                                                                time_gap_within_frames=3,
+                                                                                frame_numbers=None, df=None,
+                                                                                return_normalized=False,
+                                                                                remaining_frames=None,
+                                                                                remaining_frames_idx=None,
+                                                                                past_12_frames_optical_flow=None,
+                                                                                last_frame_from_last_used_batch=None,
+                                                                                gt_velocity_dict=None,
+                                                                                last_optical_flow_map=None,
+                                                                                last12_bg_sub_mask=None):
+        self.original_shape = original_shape
+        interest_fr = None
+        actual_interest_fr = None
+        frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
+
+        # cat old frames
+        if remaining_frames is not None:
+            frames = np.concatenate((remaining_frames, frames), axis=0)
+            # remaining_frames_idx.tolist() + frame_numbers.tolist()
+            frame_numbers = torch.cat((remaining_frames_idx, frame_numbers))
+
+        kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
+        if n is not None:
+            if equal_time_distributed:
+                step = n // 2
+            else:
+                step = len(frames) / (n + 1)
+        else:
+            n = frames_to_build_model
+        total_frames = frames.shape[0]
+        data_all_frames = {}
+        # np.zeros(shape=(frames.shape[1], frames.shape[2], 2))
+
+        for fr, actual_fr in tqdm(zip(range(frames.shape[0]), frame_numbers), total=frames.shape[0]):
+            if use_last_n_to_build_model:
+                # selected_frames = [(fr - i - 1) % total_frames for i in range(frames_to_build_model)]
+                selected_frames = [(fr + i) % total_frames for i in range(frames_to_build_model)]
+                frames_building_model = [frames[s] for s in selected_frames]
+            elif equal_time_distributed:
+                selected_past = [(fr - i * time_gap_within_frames) % total_frames for i in range(1, step + 1)]
+                selected_future = [(fr + i * time_gap_within_frames) % total_frames for i in range(1, step + 1)]
+                # selected_future = [(fr + i * time_gap_within_frames + 1) % total_frames for i in range(1, step + 1)]
+                # selected_future.remove(fr)
+                selected_frames = selected_past + selected_future
+                frames_building_model = [frames[s] for s in selected_frames]
+            else:
+                selected_frames = [int((step * i) + fr) % len(frames) for i in range(1, n + 1)]
+                frames_building_model = [frames[int((step * i) + fr) % len(frames)] for i in range(1, n + 1)]
+
+            algo = cv.createBackgroundSubtractorMOG2(history=n, varThreshold=var_threshold)
+            _ = self._process_preloaded_n_frames(n, frames_building_model, kernel, algo)
+
+            interest_fr = fr % total_frames
+            # actual_interest_fr = ((actual_fr % total_frames) + frame_numbers[0])
+            actual_interest_fr = actual_fr  # % total_frames
+
+            of_interest_fr = (fr + frames_to_build_model) % total_frames
+            # actual_of_interest_fr = (((actual_fr + frames_to_build_model) % total_frames) + frame_numbers[0])
+            actual_of_interest_fr = (actual_fr + frames_to_build_model)  # % total_frames
+
+            mask = algo.apply(frames[interest_fr], learningRate=0)
+            mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
+
+            # flow between n and n+k
+            # previous = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+            # next_frame = cv.cvtColor(frames[of_interest_fr], cv.COLOR_BGR2GRAY)
+            #
+            # flow, rgb, mag, ang = self.get_optical_flow(previous_frame=previous, next_frame=next_frame,
+            #                                             all_results_out=True)
+
+            # do not go in circle for flow estimation
+            if of_interest_fr < interest_fr:
+                break
+
+            # past flows till this frame (never more than 0.4 secs)
+            # past_of_idx = list(range(0, fr + 1))
+            # past_of_idx = past_of_idx[-frames_to_build_model:]
+            #
+            # for past_of_i in past_of_idx:
+            #     if len(past_of_idx) <= 1:
+            #         break
+            #     if past_of_i == interest_fr:
+            #         continue
+            #     previous = cv.cvtColor(frames[past_of_i], cv.COLOR_BGR2GRAY)
+            #     next_frame = cv.cvtColor(frames[past_of_i + 1], cv.COLOR_BGR2GRAY)
+            #
+            #     past_flow_per_frame, past_rgb, past_mag, past_ang = self.get_optical_flow(previous_frame=previous,
+            #                                                                               next_frame=next_frame,
+            #                                                                               all_results_out=True)
+            #     of_flow_till_current_frame += past_flow_per_frame
+
+            last12_bg_sub_mask.update({actual_interest_fr.item(): mask})
+
+            # start at 12th frame and then only consider last 12 frames for velocity estimation
+            if actual_interest_fr != 0:
+                if interest_fr == 0:
+                    previous = cv.cvtColor(last_frame_from_last_used_batch, cv.COLOR_BGR2GRAY)
+                    next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+
+                    past_flow_per_frame, past_rgb, past_mag, past_ang = self.get_optical_flow(previous_frame=previous,
+                                                                                              next_frame=next_frame,
+                                                                                              all_results_out=True)
+                    # last_frame_from_last_used_batch = frames[interest_fr]
+                    # last_optical_flow_map = past_flow_per_frame
+                    # fixme: append optimized of_map
+                    # past_12_frames_optical_flow.append(past_flow_per_frame)
+                    # last12_bg_sub_mask.update({actual_interest_fr.item(): mask})
+                    past_12_frames_optical_flow.update({f'{actual_interest_fr.item() - 1}-{actual_interest_fr.item()}':
+                                                            past_flow_per_frame})
+
+                    # fr_annotation = get_frame_annotations_and_skip_lost(df, actual_interest_fr.item())
+                    # fr_annotations, fr_bbox_centers, fr_track_ids = scale_annotations(fr_annotation,
+                    #                                                                   original_scale=original_shape,
+                    #                                                                   new_scale=resized_shape,
+                    #                                                                   return_track_id=True,
+                    #                                                                   tracks_with_annotations=True)
+                    # for t_id, bb_center in zip(fr_track_ids, fr_bbox_centers):
+                    #     if t_id in gt_velocity_dict.keys():
+                    #         gt_velocity_dict[t_id].append(bb_center)
+                    #         continue
+                    #     gt_velocity_dict.update({t_id: [bb_center]})
+                else:
+                    previous = cv.cvtColor(frames[interest_fr - 1], cv.COLOR_BGR2GRAY)
+                    next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+
+                    past_flow_per_frame, past_rgb, past_mag, past_ang = self.get_optical_flow(previous_frame=previous,
+                                                                                              next_frame=next_frame,
+                                                                                              all_results_out=True)
+                    last_frame_from_last_used_batch = frames[interest_fr]
+                    # last_optical_flow_map = past_flow_per_frame
+                    # fixme: append optimized of_map
+                    # past_12_frames_optical_flow.append(past_flow_per_frame)
+                    # last12_bg_sub_mask.update({actual_interest_fr.item(): mask})
+                    # past_12_frames_optical_flow.update({actual_interest_fr.item(): past_flow_per_frame})
+                    past_12_frames_optical_flow.update({f'{actual_interest_fr.item() - 1}-{actual_interest_fr.item()}':
+                                                            past_flow_per_frame})
+
+                    # fr_annotation = get_frame_annotations_and_skip_lost(df, actual_interest_fr.item())
+                    # fr_annotations, fr_bbox_centers, fr_track_ids = scale_annotations(fr_annotation,
+                    #                                                                   original_scale=original_shape,
+                    #                                                                   new_scale=resized_shape,
+                    #                                                                   return_track_id=True,
+                    #                                                                   tracks_with_annotations=True)
+                    # for t_id, bb_center in zip(fr_track_ids, fr_bbox_centers):
+                    #     if t_id in gt_velocity_dict.keys():
+                    #         gt_velocity_dict[t_id].append(bb_center)
+                    #         continue
+                    #     gt_velocity_dict.update({t_id: [bb_center]})
+
+            # if actual_interest_fr != 0:
+            #     previous = cv.cvtColor(frames[actual_interest_fr - 1], cv.COLOR_BGR2GRAY)
+            #     next_frame = cv.cvtColor(frames[actual_interest_fr], cv.COLOR_BGR2GRAY)
+            #
+            #     past_flow_per_frame, past_rgb, past_mag, past_ang = self.get_optical_flow(previous_frame=previous,
+            #                                                                               next_frame=next_frame,
+            #                                                                               all_results_out=True)
+            #     past_12_frames_optical_flow.append(past_flow_per_frame)
+            if actual_interest_fr < 12:
+                continue
+
+            # of_flow_till_current_frame = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))
+            # for past_flow in past_12_frames_optical_flow:
+            #     of_flow_till_current_frame += past_flow
+
+            # displacement/time = velocity - wrong it already is velocity
+            # of_flow_till_current_frame = of_flow_till_current_frame
+
+            # flow between consecutive frames
+            frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))
+            flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))
+            for of_i in range(interest_fr, of_interest_fr):
+                previous = cv.cvtColor(frames[of_i], cv.COLOR_BGR2GRAY)
+                next_frame = cv.cvtColor(frames[of_i + 1], cv.COLOR_BGR2GRAY)
+
+                flow_per_frame, rgb, mag, ang = self.get_optical_flow(previous_frame=previous, next_frame=next_frame,
+                                                                      all_results_out=True)
+                flow += flow_per_frame
+
+            if use_color:
+                data, data_, max_0, max_1, min_0, min_1, threshold_img = \
+                    self._prepare_data_xyuv_color(frames[interest_fr],
+                                                  flow, interest_fr,
+                                                  mask,
+                                                  evaluation_mode
+                                                  =True,
+                                                  lab_space=True)
+            else:
+                if object_of_interest_only:
+                    # Add classic clustering in them
+                    data, data_, max_0, max_1, min_0, min_1, options = \
+                        self._prepare_data_xyuv_for_object_of_interest(flow, interest_fr,
+                                                                       mask, data_frame_num=actual_interest_fr,
+                                                                       evaluation_mode=True,
+                                                                       return_options=True,
+                                                                       original_shape=original_shape,
+                                                                       new_shape=resized_shape,
+                                                                       df=df)
+                elif all_object_of_interest_only:
+                    pass
+                    # all_agent_features = \
+                    #     self._prepare_data_xyuv_for_all_object_of_interest(flow, interest_fr,
+                    #                                                        mask, data_frame_num=actual_interest_fr,
+                    #                                                        evaluation_mode=True,
+                    #                                                        return_options=True,
+                    #                                                        track_ids=track_ids,
+                    #                                                        original_shape=original_shape,
+                    #                                                        new_shape=resized_shape,
+                    #                                                        df=df, do_clustering=classic_clustering,
+                    #                                                        optical_flow_frame_num=
+                    #                                                        frames_used_in_of_estimation,
+                    #                                                        optical_flow_till_current_frame=
+                    #                                                        past_12_frames_optical_flow,
+                    #                                                        return_normalized=return_normalized)
+                    # of_flow_till_current_frame = flow
+                    # # data_all_frames.update({interest_fr: all_agent_features})
+                    # data_all_frames.update({actual_interest_fr.item(): all_agent_features})
+                    # # plot_extracted_features(all_agent_features, frames[actual_interest_fr])
+                else:
+                    # Add classic clustering in them
+                    data, data_, max_0, max_1, min_0, min_1, threshold_img, options = \
+                        self._prepare_data_xyuv(flow, interest_fr,
+                                                mask,
+                                                evaluation_mode=True,
+                                                return_options=True)
+            # past_12_frames_optical_flow = past_12_frames_optical_flow[1:]  # fixme!
+
+            # for gt_key, gt_value in gt_velocity_dict.items():
+            #     if len(gt_value) > 12:
+            #         gt_velocity_dict[gt_key] = gt_velocity_dict[gt_key][1:]
+
+        # return data_all_frames, frames[actual_interest_fr:, ...], frame_numbers[actual_interest_fr:], \
+        #        last_frame_from_last_used_batch
+        # past_12_frames_optical_flow = past_12_frames_optical_flow[1:]
+        return data_all_frames, frames[interest_fr:, ...], \
+               torch.arange(interest_fr + frame_numbers[0], frame_numbers[-1] + 1), \
+               last_frame_from_last_used_batch, past_12_frames_optical_flow, gt_velocity_dict, last_optical_flow_map, \
+               last12_bg_sub_mask
+
     def _core_processing(self, frame, kernel):
         mask = self.algo.apply(frame)
         mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
