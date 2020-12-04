@@ -24,6 +24,7 @@ from average_image.feature_clustering import MeanShiftClustering, HierarchicalCl
 from average_image.layers import min_pool2d
 from average_image.utils import precision_recall, evaluate_clustering_per_frame, normalize, SDDMeta, \
     evaluate_clustering_non_cc, AgentFeatures, plot_extracted_features, plot_points_only
+from baseline.extracted_of_optimization import optimize_optical_flow_object_level_for_frames
 
 
 class FeatureExtractor(object):
@@ -653,7 +654,145 @@ class FeatureExtractor(object):
         for gt_key, gt_value in gt_bboxs_dict.items():
             dist = 0
             for p in range(len(gt_value) - 1):
-                dist += np.linalg.norm((np.expand_dims(gt_value[p], 0) - np.expand_dims(gt_value[p+1], 0)), 2, axis=0)
+                dist += np.linalg.norm((np.expand_dims(gt_value[p], 0) - np.expand_dims(gt_value[p + 1], 0)), 2, axis=0)
+            gt_velocity_dict.update({gt_key: dist / 0.4})
+
+        frame_annotation = get_frame_annotations_and_skip_lost(df, data_frame_num)
+        annotations, bbox_centers = scale_annotations(frame_annotation, original_scale=original_shape,
+                                                      new_scale=new_shape, return_track_id=False,
+                                                      tracks_with_annotations=True)
+        for id_ in range(annotations.shape[0]):
+            mask = np.zeros_like(data_)
+            mask[annotations[id_][1]:annotations[id_][3], annotations[id_][0]:annotations[id_][2]] = \
+                data_[annotations[id_][1]:annotations[id_][3], annotations[id_][0]:annotations[id_][2]]
+            object_idx = (mask > 0).nonzero()
+            # plot_points_only(object_idx[0], object_idx[1])
+            if object_idx[0].size != 0:
+                intensities = mask[object_idx[0], object_idx[1]]
+                flow_idx = flow[object_idx[0], object_idx[1]]
+                past_flow_idx = optical_flow_till_current_frame[object_idx[0], object_idx[1]]
+
+                if return_normalized:
+                    flow_idx_normalized_0, f_max_0, f_min_0 = normalize(flow_idx[..., 0])
+                    flow_idx_normalized_1, f_max_1, f_min_1 = normalize(flow_idx[..., 1])
+                    past_flow_idx_normalized_0, past_f_max_0, past_f_min_0 = normalize(past_flow_idx[..., 0])
+                    past_flow_idx_normalized_1, past_f_max_1, past_f_min_1 = normalize(past_flow_idx[..., 1])
+                    object_idx_normalized_0, max_0, min_0 = normalize(object_idx[0])
+                    object_idx_normalized_1, max_1, min_1 = normalize(object_idx[1])
+                    if use_intensities:
+                        data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                                         flow_idx_normalized_0, past_flow_idx_normalized_1, past_flow_idx_normalized_0,
+                                         intensities)).transpose()
+                    else:
+                        data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                                         flow_idx_normalized_0, past_flow_idx_normalized_1, past_flow_idx_normalized_0,
+                                         )).transpose()
+                    if np.isnan(data).any():
+                        continue
+                    options = {
+                        'max_0': max_0,
+                        'min_0': min_0,
+                        'max_1': max_1,
+                        'min_1': min_1,
+                        'f_max_0': f_max_0,
+                        'f_min_0': f_min_0,
+                        'f_max_1': f_max_1,
+                        'f_min_1': f_min_1,
+                        'past_f_max_0': past_f_max_0,
+                        'past_f_min_0': past_f_min_0,
+                        'past_f_max_1': past_f_max_1,
+                        'past_f_min_1': past_f_min_1
+                    }
+                    if do_clustering:
+                        cluster_algo, n_clusters_ = FeatureExtractor._perform_clustering(data, max_0, max_1, min_0,
+                                                                                         min_1,
+                                                                                         bandwidth=0.1,
+                                                                                         renormalize=True,
+                                                                                         min_bin_freq=3,
+                                                                                         max_iter=300)
+                        all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id_][-1].item(),
+                                                                frame_number=data_frame_num,
+                                                                normalize_params=options,
+                                                                cluster_centers=cluster_algo.cluster_centers,
+                                                                cluster_labels=cluster_algo.labels,
+                                                                optical_flow_frame_num=optical_flow_frame_num,
+                                                                bbox_center=bbox_centers[id_],
+                                                                bbox=annotations[id_][:4]))
+                    else:
+                        all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id_][-1].item(),
+                                                                frame_number=data_frame_num,
+                                                                normalize_params=options,
+                                                                optical_flow_frame_num=optical_flow_frame_num,
+                                                                bbox_center=bbox_centers[id_],
+                                                                bbox=annotations[id_][:4]))
+                else:
+                    if use_intensities:
+                        data = np.stack((object_idx[1], object_idx[0], flow_idx[..., 1], flow_idx[..., 0],
+                                         past_flow_idx[..., 1], past_flow_idx[..., 0],
+                                         intensities)).transpose()
+                    else:
+                        data = np.stack((object_idx[1], object_idx[0], flow_idx[..., 1], flow_idx[..., 0],
+                                         past_flow_idx[..., 1], past_flow_idx[..., 0])).transpose()
+                    if np.isnan(data).any():
+                        continue
+
+                    if do_clustering:
+                        return NotImplemented
+                    else:
+                        try:
+                            track_gt_velocity = gt_velocity_dict[annotations[id_][-1].item()]
+                        except KeyError:
+                            temp_key = list(gt_velocity_dict.keys())[-1]
+                            track_gt_velocity = np.zeros_like(gt_velocity_dict[temp_key])
+                        all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id_][-1].item(),
+                                                                frame_number=data_frame_num,
+                                                                normalize_params=None,
+                                                                optical_flow_frame_num=optical_flow_frame_num,
+                                                                bbox_center=bbox_centers[id_],
+                                                                bbox=annotations[id_][:4],
+                                                                track_gt_velocity=track_gt_velocity))
+
+        return all_agent_features
+
+    @staticmethod
+    def _prepare_data_xyuv_for_all_object_of_interest_optimized_optical_flow(flow, interest_fr, processed_data,
+                                                                             data_frame_num,
+                                                                             use_intensities=False,
+                                                                             evaluation_mode: bool = False,
+                                                                             return_options: bool = False,
+                                                                             track_ids=None, original_shape=None,
+                                                                             new_shape=None, df=None,
+                                                                             do_clustering=False,
+                                                                             optical_flow_frame_num=None,
+                                                                             optical_flow_till_current_frame=None,
+                                                                             return_normalized=False):
+        if evaluation_mode:
+            data_ = processed_data
+        else:
+            data_ = processed_data[interest_fr]
+        data_ = np.abs(data_)
+        all_agent_features = []
+        data_frame_num = data_frame_num.item()
+
+        # get last 12 frames and extract gt velocity
+        gt_bboxs_dict = {}
+        gt_velocity_dict = {}
+        for gt_idx in range(data_frame_num - 12, data_frame_num):
+            fr_annotation = get_frame_annotations_and_skip_lost(df, gt_idx)
+            fr_annotations, fr_bbox_centers, fr_track_ids = scale_annotations(fr_annotation,
+                                                                              original_scale=original_shape,
+                                                                              new_scale=new_shape, return_track_id=True,
+                                                                              tracks_with_annotations=True)
+            for t_id, bb_center in zip(fr_track_ids, fr_bbox_centers):
+                if t_id in gt_bboxs_dict.keys():
+                    gt_bboxs_dict[t_id].append(bb_center)
+                    continue
+                gt_bboxs_dict.update({t_id: [bb_center]})
+
+        for gt_key, gt_value in gt_bboxs_dict.items():
+            dist = 0
+            for p in range(len(gt_value) - 1):
+                dist += np.linalg.norm((np.expand_dims(gt_value[p], 0) - np.expand_dims(gt_value[p + 1], 0)), 2, axis=0)
             gt_velocity_dict.update({gt_key: dist / 0.4})
 
         frame_annotation = get_frame_annotations_and_skip_lost(df, data_frame_num)
@@ -1485,25 +1624,27 @@ class BackgroundSubtraction(FeatureExtractor):
         mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
         return mask
 
-    def keyframe_based_feature_extraction_optimized_optical_flow_from_frames_nn(self, frames, n, frames_to_build_model,
-                                                                                original_shape, resized_shape,
-                                                                                equal_time_distributed=False,
-                                                                                var_threshold=100, use_color=False,
-                                                                                use_last_n_to_build_model=False,
-                                                                                object_of_interest_only=False,
-                                                                                classic_clustering=False,
-                                                                                track_ids=None,
-                                                                                all_object_of_interest_only=False,
-                                                                                time_gap_within_frames=3,
-                                                                                frame_numbers=None, df=None,
-                                                                                return_normalized=False,
-                                                                                remaining_frames=None,
-                                                                                remaining_frames_idx=None,
-                                                                                past_12_frames_optical_flow=None,
-                                                                                last_frame_from_last_used_batch=None,
-                                                                                gt_velocity_dict=None,
-                                                                                last_optical_flow_map=None,
-                                                                                last12_bg_sub_mask=None):
+    def keyframe_based_feature_extraction_optimized_optical_flow_from_frames_nn(
+            self, frames, n, frames_to_build_model,
+            original_shape, resized_shape,
+            equal_time_distributed=False,
+            var_threshold=100, use_color=False,
+            use_last_n_to_build_model=False,
+            object_of_interest_only=False,
+            classic_clustering=False,
+            track_ids=None,
+            all_object_of_interest_only=False,
+            time_gap_within_frames=3,
+            frame_numbers=None, df=None,
+            return_normalized=False,
+            remaining_frames=None,
+            remaining_frames_idx=None,
+            past_12_frames_optical_flow=None,
+            last_frame_from_last_used_batch=None,
+            gt_velocity_dict=None,
+            last_optical_flow_map=None,
+            last12_bg_sub_mask=None,
+            all_object_of_interest_only_with_optimized_of=True):
         self.original_shape = original_shape
         interest_fr = None
         actual_interest_fr = None
@@ -1598,7 +1739,6 @@ class BackgroundSubtraction(FeatureExtractor):
                                                                                               all_results_out=True)
                     # last_frame_from_last_used_batch = frames[interest_fr]
                     # last_optical_flow_map = past_flow_per_frame
-                    # fixme: append optimized of_map
                     # past_12_frames_optical_flow.append(past_flow_per_frame)
                     # last12_bg_sub_mask.update({actual_interest_fr.item(): mask})
                     past_12_frames_optical_flow.update({f'{actual_interest_fr.item() - 1}-{actual_interest_fr.item()}':
@@ -1624,7 +1764,6 @@ class BackgroundSubtraction(FeatureExtractor):
                                                                                               all_results_out=True)
                     last_frame_from_last_used_batch = frames[interest_fr]
                     # last_optical_flow_map = past_flow_per_frame
-                    # fixme: append optimized of_map
                     # past_12_frames_optical_flow.append(past_flow_per_frame)
                     # last12_bg_sub_mask.update({actual_interest_fr.item(): mask})
                     # past_12_frames_optical_flow.update({actual_interest_fr.item(): past_flow_per_frame})
@@ -1675,20 +1814,28 @@ class BackgroundSubtraction(FeatureExtractor):
 
             # displacement/time = velocity - wrong it already is velocity
             # of_flow_till_current_frame = of_flow_till_current_frame
+            # fixme: put sum of past optimized OF here
+            past_12_frames_optical_flow_summed = optimize_optical_flow_object_level_for_frames(
+                df=df,
+                foreground_masks=last12_bg_sub_mask,
+                optical_flow_between_frames=past_12_frames_optical_flow,
+                original_shape=original_shape,
+                new_shape=resized_shape)
 
             # flow between consecutive frames
             frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))
             future12_bg_sub_mask = {}
             future_12_frames_optical_flow = {}
-            flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))
-            for of_i in range(interest_fr, of_interest_fr):
+            flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))  # fixme: put sum of optimized of here
+            for of_i, actual_of_i in zip(range(interest_fr, of_interest_fr),
+                                         range(actual_interest_fr, actual_of_interest_fr)):
                 future_mask = self.bg_sub_for_frame_equal_time_distributed(frames=frames, fr=of_i,
                                                                            time_gap_within_frames=
                                                                            time_gap_within_frames,
                                                                            total_frames=total_frames, step=step, n=n,
                                                                            kernel=kernel, var_threshold=var_threshold,
                                                                            interest_fr=of_i)
-                future12_bg_sub_mask.update({of_i: future_mask})
+                future12_bg_sub_mask.update({actual_of_i: future_mask})
 
                 previous = cv.cvtColor(frames[of_i], cv.COLOR_BGR2GRAY)
                 next_frame = cv.cvtColor(frames[of_i + 1], cv.COLOR_BGR2GRAY)
@@ -1698,7 +1845,7 @@ class BackgroundSubtraction(FeatureExtractor):
                 # flow += flow_per_frame
                 # for 1st flow map the frame to add flow is actual_interest_fr - 1 | actual_interest_fr = 12 =
                 # interest_fr = 8, thus we need interest_fr=7 which is actual_interest_fr=11
-                future_12_frames_optical_flow.update({f'{of_i - 1}-{of_i}': flow_per_frame})
+                future_12_frames_optical_flow.update({f'{actual_of_i - 1}-{actual_of_i}': flow_per_frame})
 
             if use_color:
                 data, data_, max_0, max_1, min_0, min_1, threshold_img = \
@@ -1720,25 +1867,46 @@ class BackgroundSubtraction(FeatureExtractor):
                                                                        new_shape=resized_shape,
                                                                        df=df)
                 elif all_object_of_interest_only:
-                    pass
-                    # all_agent_features = \
-                    #     self._prepare_data_xyuv_for_all_object_of_interest(flow, interest_fr,
-                    #                                                        mask, data_frame_num=actual_interest_fr,
-                    #                                                        evaluation_mode=True,
-                    #                                                        return_options=True,
-                    #                                                        track_ids=track_ids,
-                    #                                                        original_shape=original_shape,
-                    #                                                        new_shape=resized_shape,
-                    #                                                        df=df, do_clustering=classic_clustering,
-                    #                                                        optical_flow_frame_num=
-                    #                                                        frames_used_in_of_estimation,
-                    #                                                        optical_flow_till_current_frame=
-                    #                                                        past_12_frames_optical_flow,
-                    #                                                        return_normalized=return_normalized)
-                    # of_flow_till_current_frame = flow
-                    # # data_all_frames.update({interest_fr: all_agent_features})
-                    # data_all_frames.update({actual_interest_fr.item(): all_agent_features})
-                    # # plot_extracted_features(all_agent_features, frames[actual_interest_fr])
+                    all_agent_features = \
+                        self._prepare_data_xyuv_for_all_object_of_interest(flow, interest_fr,
+                                                                           mask, data_frame_num=actual_interest_fr,
+                                                                           evaluation_mode=True,
+                                                                           return_options=True,
+                                                                           track_ids=track_ids,
+                                                                           original_shape=original_shape,
+                                                                           new_shape=resized_shape,
+                                                                           df=df, do_clustering=classic_clustering,
+                                                                           optical_flow_frame_num=
+                                                                           frames_used_in_of_estimation,
+                                                                           optical_flow_till_current_frame=
+                                                                           past_12_frames_optical_flow,
+                                                                           return_normalized=return_normalized)
+                    of_flow_till_current_frame = flow
+                    # data_all_frames.update({interest_fr: all_agent_features})
+                    data_all_frames.update({actual_interest_fr.item(): all_agent_features})
+                    # plot_extracted_features(all_agent_features, frames[actual_interest_fr])
+                elif all_object_of_interest_only_with_optimized_of:
+                    all_agent_features = \
+                        self._prepare_data_xyuv_for_all_object_of_interest_optimized_optical_flow(
+                            flow, interest_fr,
+                            mask,
+                            data_frame_num=actual_interest_fr,
+                            evaluation_mode=True,
+                            return_options=True,
+                            track_ids=track_ids,
+                            original_shape=original_shape,
+                            new_shape=resized_shape,
+                            df=df,
+                            do_clustering=classic_clustering,
+                            optical_flow_frame_num=
+                            frames_used_in_of_estimation,
+                            optical_flow_till_current_frame=
+                            past_12_frames_optical_flow,
+                            return_normalized=return_normalized)
+                    of_flow_till_current_frame = flow
+                    # data_all_frames.update({interest_fr: all_agent_features})
+                    data_all_frames.update({actual_interest_fr.item(): all_agent_features})
+                    # plot_extracted_features(all_agent_features, frames[actual_interest_fr])
                 else:
                     # Add classic clustering in them
                     data, data_, max_0, max_1, min_0, min_1, threshold_img, options = \

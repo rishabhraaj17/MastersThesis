@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -109,7 +110,8 @@ def preprocess_optical_flow_optimized_data(classic_clustering=False, equal_time_
             classic_clustering=classic_clustering,
             object_of_interest_only=False,
             var_threshold=None, track_ids=None,
-            all_object_of_interest_only=True,
+            all_object_of_interest_only=False,
+            all_object_of_interest_only_with_optimized_of=True,
             equal_time_distributed=equal_time_distributed,
             frame_numbers=frame_numbers,
             df=sdd_simple.annotations_df,
@@ -312,14 +314,17 @@ def step_two():
 
 
 if __name__ == '__main__':
-    if EXECUTE_STEP == 1:
-        # STEP 1
-        # Extract features from video
-        step_one(with_optimized_of=True)
-    if EXECUTE_STEP == 2:
-        # STEP 2
-        # Trainable Format
-        step_two()
-    if EXECUTE_STEP == -1:
-        step_one(with_optimized_of=True)
-        step_two()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+
+        if EXECUTE_STEP == 1:
+            # STEP 1
+            # Extract features from video
+            step_one(with_optimized_of=True)
+        if EXECUTE_STEP == 2:
+            # STEP 2
+            # Trainable Format
+            step_two()
+        if EXECUTE_STEP == -1:
+            step_one(with_optimized_of=True)
+            step_two()
