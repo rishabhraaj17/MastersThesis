@@ -239,8 +239,8 @@ def plot_clouds_in_and_out_with_circle_around_center_and_bbox(cloud1, cloud2, bo
              markersize=8)
     ax1.plot(center[0], center[1], '*', markerfacecolor='red', markeredgecolor='k',
              markersize=8)
-    ax1.plot(points_in_pair_cloud1[0], points_in_pair_cloud1[1], 'o', markerfacecolor='orange', markeredgecolor='k',
-             markersize=8)
+    ax1.plot(points_in_pair_cloud1[..., 0], points_in_pair_cloud1[..., 1], 'o', markerfacecolor='orange',
+             markeredgecolor='k', markersize=8)
     rect1 = patches.Rectangle(xy=(box[0], box[1]), width=box[2] - box[0], height=box[3] - box[1], fill=False,
                               linewidth=line_width, edgecolor='r')
     # cloud2
@@ -252,8 +252,8 @@ def plot_clouds_in_and_out_with_circle_around_center_and_bbox(cloud1, cloud2, bo
              markersize=8)
     ax2.plot(center[0], center[1], '*', markerfacecolor='red', markeredgecolor='k',
              markersize=8)
-    ax2.plot(points_in_pair_cloud2[0], points_in_pair_cloud2[1], 'o', markerfacecolor='orange', markeredgecolor='k',
-             markersize=8)
+    ax2.plot(points_in_pair_cloud2[..., 0], points_in_pair_cloud2[..., 1], 'o', markerfacecolor='orange',
+             markeredgecolor='k', markersize=8)
     rect2 = patches.Rectangle(xy=(box[0], box[1]), width=box[2] - box[0], height=box[3] - box[1], fill=False,
                               linewidth=line_width, edgecolor='r')
     ax1.add_patch(rect1)
@@ -292,8 +292,8 @@ def plot_clouds_in_and_out_with_circle_around_center_and_bbox_same_plot(cloud1, 
              markersize=8)
     ax1.plot(center[0], center[1], '*', markerfacecolor='red', markeredgecolor='k',
              markersize=8)
-    ax1.plot(points_in_pair_cloud1[0], points_in_pair_cloud1[1], 'o', markerfacecolor='orange', markeredgecolor='k',
-             markersize=8)
+    ax1.plot(points_in_pair_cloud1[..., 0], points_in_pair_cloud1[..., 1], 'o', markerfacecolor='orange',
+             markeredgecolor='k', markersize=8)
     rect1 = patches.Rectangle(xy=(box[0], box[1]), width=box[2] - box[0], height=box[3] - box[1], fill=False,
                               linewidth=line_width, edgecolor='r')
     # cloud2
@@ -303,8 +303,8 @@ def plot_clouds_in_and_out_with_circle_around_center_and_bbox_same_plot(cloud1, 
              markersize=8)
     ax1.plot(points_matched_cloud2[:, 0], points_matched_cloud2[:, 1], 'o', markerfacecolor='aqua', markeredgecolor='k',
              markersize=8)
-    ax1.plot(points_in_pair_cloud2[0], points_in_pair_cloud2[1], 'o', markerfacecolor='orange', markeredgecolor='k',
-             markersize=8)
+    ax1.plot(points_in_pair_cloud2[..., 0], points_in_pair_cloud2[..., 1], 'o', markerfacecolor='orange',
+             markeredgecolor='k', markersize=8)
 
     ax1.add_patch(rect1)
     ax1.add_artist(circle)
@@ -352,6 +352,11 @@ def clouds_distance_matrix(cloud1, cloud2, p=2):
     for point in cloud1:
         distance_matrix.append(np.linalg.norm(cloud2 - point, p, axis=1))
     return np.stack(distance_matrix)
+
+
+def smallest_n_indices(a, n):
+    idx = a.ravel().argsort()[:n]
+    return np.stack(np.unravel_index(idx, a.shape)).T
 
 
 def distance_weighted_optimization(features_path, plot_save_path, alpha=1, save_plots=True):
@@ -495,6 +500,9 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
 
                 distance_matrix = clouds_distance_matrix(object_idx_stacked.T, past_flow_shifted_points.T)
                 closest_point_pair_idx = np.unravel_index(distance_matrix.argmin(), distance_matrix.shape)
+                closest_n_point_pair_idx = smallest_n_indices(distance_matrix, 10)
+                closest_n_true_point_pair = object_idx_stacked.T[closest_n_point_pair_idx[..., 0]]
+                closest_n_shifted_point_pair = past_flow_shifted_points.T[closest_n_point_pair_idx[..., 1]]
                 true_point_in_pair = object_idx_stacked.T[closest_point_pair_idx[0]]
                 shifted_point_in_pair = past_flow_shifted_points.T[closest_point_pair_idx[1]]
 
@@ -533,8 +541,8 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                     points_inside_cloud2=shifted_points_inside_circle,
                     points_matched_cloud1=true_points_matches,
                     points_matched_cloud2=shifted_points_matches,
-                    points_in_pair_cloud1=true_point_in_pair,
-                    points_in_pair_cloud2=shifted_point_in_pair)
+                    points_in_pair_cloud1=closest_n_true_point_pair,
+                    points_in_pair_cloud2=closest_n_shifted_point_pair)
 
                 plot_clouds_in_and_out_with_circle_around_center_and_bbox_same_plot(
                     cloud1=object_idx_stacked.T,
@@ -545,8 +553,8 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                     points_inside_cloud2=shifted_points_inside_circle,
                     points_matched_cloud1=true_points_matches,
                     points_matched_cloud2=shifted_points_matches,
-                    points_in_pair_cloud1=true_point_in_pair,
-                    points_in_pair_cloud2=shifted_point_in_pair
+                    points_in_pair_cloud1=closest_n_true_point_pair,
+                    points_in_pair_cloud2=closest_n_shifted_point_pair
                 )
 
                 # plot_point_with_bbox(object_idx_stacked.T, box=bbox)
