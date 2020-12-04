@@ -20,6 +20,7 @@ logger = get_logger(__name__)
 
 SHIFT_X = 15
 SHIFT_Y = 12
+CLOSEST_N_POINTS = 10
 
 
 def largest_indices(array: np.ndarray, n: int) -> tuple:
@@ -500,11 +501,13 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
 
                 distance_matrix = clouds_distance_matrix(object_idx_stacked.T, past_flow_shifted_points.T)
                 closest_point_pair_idx = np.unravel_index(distance_matrix.argmin(), distance_matrix.shape)
-                closest_n_point_pair_idx = smallest_n_indices(distance_matrix, 10)
+                closest_n_point_pair_idx = smallest_n_indices(distance_matrix, CLOSEST_N_POINTS)
                 closest_n_true_point_pair = object_idx_stacked.T[closest_n_point_pair_idx[..., 0]]
                 closest_n_shifted_point_pair = past_flow_shifted_points.T[closest_n_point_pair_idx[..., 1]]
                 true_point_in_pair = object_idx_stacked.T[closest_point_pair_idx[0]]
                 shifted_point_in_pair = past_flow_shifted_points.T[closest_point_pair_idx[1]]
+
+                # flow for closest N points
 
                 closest_shifted_point_to_object_idx_stacked_center = closest_point_in_cloud_to_a_point(
                     cloud=past_flow_shifted_points.T, point=object_idx_stacked_center
