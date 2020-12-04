@@ -6,6 +6,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import patches
 from matplotlib.patches import Rectangle
+import matplotlib.patches as mpatches
+
 from tqdm import tqdm
 
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost, scale_annotations
@@ -15,6 +17,9 @@ from log import get_logger, initialize_logging
 
 initialize_logging()
 logger = get_logger(__name__)
+
+SHIFT_X = 15
+SHIFT_Y = 12
 
 
 def largest_indices(array: np.ndarray, n: int) -> tuple:
@@ -218,6 +223,8 @@ def plot_point_in_and_out_with_circle_around_center_and_bbox(points, box, center
 
 def plot_clouds_in_and_out_with_circle_around_center_and_bbox(cloud1, cloud2, box, center, circle_radius,
                                                               points_inside_cloud1, points_inside_cloud2,
+                                                              points_matched_cloud1, points_matched_cloud2,
+                                                              points_in_pair_cloud1, points_in_pair_cloud2,
                                                               line_width=None):
     circle1 = plt.Circle((center[0], center[1]), circle_radius, color='green', fill=False)
     circle2 = plt.Circle((center[0], center[1]), circle_radius, color='green', fill=False)
@@ -225,26 +232,93 @@ def plot_clouds_in_and_out_with_circle_around_center_and_bbox(cloud1, cloud2, bo
     fig, (ax1, ax2) = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(12, 6))
     # cloud1
     ax1.plot(cloud1[:, 0], cloud1[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k',
-             markersize=8, label='Points')
+             markersize=8)
     ax1.plot(points_inside_cloud1[:, 0], points_inside_cloud1[:, 1], 'o', markerfacecolor='yellow', markeredgecolor='k',
-             markersize=8, label='Points')
+             markersize=8)
+    ax1.plot(points_matched_cloud1[:, 0], points_matched_cloud1[:, 1], 'o', markerfacecolor='aqua', markeredgecolor='k',
+             markersize=8)
     ax1.plot(center[0], center[1], '*', markerfacecolor='red', markeredgecolor='k',
-             markersize=8, label='Center')
+             markersize=8)
+    ax1.plot(points_in_pair_cloud1[0], points_in_pair_cloud1[1], 'o', markerfacecolor='orange', markeredgecolor='k',
+             markersize=8)
     rect1 = patches.Rectangle(xy=(box[0], box[1]), width=box[2] - box[0], height=box[3] - box[1], fill=False,
                               linewidth=line_width, edgecolor='r')
-    # cloud1
-    ax2.plot(cloud2[:, 0], cloud2[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k',
-             markersize=8, label='Points')
+    # cloud2
+    ax2.plot(cloud2[:, 0], cloud2[:, 1], 'o', markerfacecolor='magenta', markeredgecolor='k',
+             markersize=8)
     ax2.plot(points_inside_cloud2[:, 0], points_inside_cloud2[:, 1], 'o', markerfacecolor='yellow', markeredgecolor='k',
-             markersize=8, label='Points')
+             markersize=8)
+    ax2.plot(points_matched_cloud2[:, 0], points_matched_cloud2[:, 1], 'o', markerfacecolor='aqua', markeredgecolor='k',
+             markersize=8)
     ax2.plot(center[0], center[1], '*', markerfacecolor='red', markeredgecolor='k',
-             markersize=8, label='Center')
+             markersize=8)
+    ax2.plot(points_in_pair_cloud2[0], points_in_pair_cloud2[1], 'o', markerfacecolor='orange', markeredgecolor='k',
+             markersize=8)
     rect2 = patches.Rectangle(xy=(box[0], box[1]), width=box[2] - box[0], height=box[3] - box[1], fill=False,
                               linewidth=line_width, edgecolor='r')
     ax1.add_patch(rect1)
     ax1.add_artist(circle1)
     ax2.add_patch(rect2)
     ax2.add_artist(circle2)
+
+    legends_dict = {'blue': 'Points at T',
+                    'magenta': '(T-1) Shifted points at T',
+                    'yellow': 'Points inside circle',
+                    'red': 'Shifted point closest to Points at T Center + Bounding Box',
+                    'green': 'Circle',
+                    'aqua': 'Common points in two clusters',
+                    'orange': 'Closest point pair'}
+
+    legend_patches = [mpatches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
+    plt.show()
+
+
+def plot_clouds_in_and_out_with_circle_around_center_and_bbox_same_plot(cloud1, cloud2, box, center, circle_radius,
+                                                                        points_inside_cloud1, points_inside_cloud2,
+                                                                        points_matched_cloud1, points_matched_cloud2,
+                                                                        points_in_pair_cloud1, points_in_pair_cloud2,
+                                                                        line_width=None):
+    circle = plt.Circle((center[0], center[1]), circle_radius, color='green', fill=False)
+
+    fig, ax1 = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(6, 6))
+    # cloud1
+    ax1.plot(cloud1[:, 0], cloud1[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k',
+             markersize=8)
+    ax1.plot(points_inside_cloud1[:, 0], points_inside_cloud1[:, 1], 'o', markerfacecolor='yellow', markeredgecolor='k',
+             markersize=8)
+    ax1.plot(points_matched_cloud1[:, 0], points_matched_cloud1[:, 1], 'o', markerfacecolor='aqua', markeredgecolor='k',
+             markersize=8)
+    ax1.plot(center[0], center[1], '*', markerfacecolor='red', markeredgecolor='k',
+             markersize=8)
+    ax1.plot(points_in_pair_cloud1[0], points_in_pair_cloud1[1], 'o', markerfacecolor='orange', markeredgecolor='k',
+             markersize=8)
+    rect1 = patches.Rectangle(xy=(box[0], box[1]), width=box[2] - box[0], height=box[3] - box[1], fill=False,
+                              linewidth=line_width, edgecolor='r')
+    # cloud2
+    ax1.plot(cloud2[:, 0], cloud2[:, 1], 'o', markerfacecolor='magenta', markeredgecolor='k',
+             markersize=8)
+    ax1.plot(points_inside_cloud2[:, 0], points_inside_cloud2[:, 1], 'o', markerfacecolor='yellow', markeredgecolor='k',
+             markersize=8)
+    ax1.plot(points_matched_cloud2[:, 0], points_matched_cloud2[:, 1], 'o', markerfacecolor='aqua', markeredgecolor='k',
+             markersize=8)
+    ax1.plot(points_in_pair_cloud2[0], points_in_pair_cloud2[1], 'o', markerfacecolor='orange', markeredgecolor='k',
+             markersize=8)
+
+    ax1.add_patch(rect1)
+    ax1.add_artist(circle)
+
+    legends_dict = {'blue': 'Points at T',
+                    'magenta': '(T-1) Shifted points at T',
+                    'yellow': 'Points inside circle',
+                    'red': 'Shifted point closest to Points at T Center + Bounding Box',
+                    'green': 'Circle',
+                    'aqua': 'Common points in two clusters',
+                    'orange': 'Closest point pair'}
+
+    legend_patches = [mpatches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
 
     plt.show()
 
@@ -271,6 +345,13 @@ def find_cloud_center(cloud, p=2):
 def closest_point_in_cloud_to_a_point(cloud, point, p=2):
     distance_with_point = np.linalg.norm(cloud - point, p, axis=1)
     return cloud[np.argmin(distance_with_point)]
+
+
+def clouds_distance_matrix(cloud1, cloud2, p=2):
+    distance_matrix = []
+    for point in cloud1:
+        distance_matrix.append(np.linalg.norm(cloud2 - point, p, axis=1))
+    return np.stack(distance_matrix)
 
 
 def distance_weighted_optimization(features_path, plot_save_path, alpha=1, save_plots=True):
@@ -371,8 +452,8 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                 past_object_idx_stacked = np.stack(past_object_idx)
                 past_flow_idx = past_flow_idx.T
                 past_flow_shifted_points = np.zeros_like(past_object_idx_stacked, dtype=np.float)
-                past_flow_shifted_points[0] = past_object_idx[0] + past_flow_idx[0]  # x -> u
-                past_flow_shifted_points[1] = past_object_idx[1] + past_flow_idx[1]  # y -> v
+                past_flow_shifted_points[0] = past_object_idx[0] + past_flow_idx[0] + SHIFT_X  # x -> u
+                past_flow_shifted_points[1] = past_object_idx[1] + past_flow_idx[1] + SHIFT_Y  # y -> v
                 past_flow_shifted_points = np.round(past_flow_shifted_points).astype(np.int)
                 # plot_point_with_bbox(past_flow_shifted_points.T, box=past_bbox)
 
@@ -412,9 +493,15 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                 #                                                          object_idx_stacked.T[
                 #                                                              points_object_idx_inside_circle])
 
+                distance_matrix = clouds_distance_matrix(object_idx_stacked.T, past_flow_shifted_points.T)
+                closest_point_pair_idx = np.unravel_index(distance_matrix.argmin(), distance_matrix.shape)
+                true_point_in_pair = object_idx_stacked.T[closest_point_pair_idx[0]]
+                shifted_point_in_pair = past_flow_shifted_points.T[closest_point_pair_idx[1]]
+
                 closest_shifted_point_to_object_idx_stacked_center = closest_point_in_cloud_to_a_point(
                     cloud=past_flow_shifted_points.T, point=object_idx_stacked_center
                 )
+                # closest_shifted_point_to_object_idx_stacked_center = shifted_point_in_pair  # todo: use this as center
                 shifted_points_inside_circle_idx = find_points_inside_circle(
                     cloud=past_flow_shifted_points.T,
                     circle_center=
@@ -428,9 +515,14 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
 
                 shifted_points_inside_circle = past_flow_shifted_points.T[shifted_points_inside_circle_idx]
                 true_points_inside_circle = object_idx_stacked.T[true_points_inside_circle_idx]
-                common_points_inside_circle_bool = (shifted_points_inside_circle == true_points_inside_circle).all(1)
-                common_points_inside_circle_idx = np.where(common_points_inside_circle_bool == True)[0]
-                common_points_inside_circle = true_points_inside_circle[common_points_inside_circle_idx]
+                # common_points_inside_circle_bool = (shifted_points_inside_circle == true_points_inside_circle).all(1)
+                # common_points_inside_circle_idx = np.where(common_points_inside_circle_bool == True)[0]
+                # common_points_inside_circle = true_points_inside_circle[common_points_inside_circle_idx]
+                intersect = np.intersect1d(true_points_inside_circle[:, 0], shifted_points_inside_circle[:, 0])
+                true_points_matches = true_points_inside_circle[np.any(true_points_inside_circle[:, 0]
+                                                                       == intersect[:, None], axis=0)]
+                shifted_points_matches = shifted_points_inside_circle[np.any(shifted_points_inside_circle[:, 0]
+                                                                             == intersect[:, None], axis=0)]
 
                 plot_clouds_in_and_out_with_circle_around_center_and_bbox(
                     cloud1=object_idx_stacked.T,
@@ -438,7 +530,24 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                     center=closest_shifted_point_to_object_idx_stacked_center,
                     circle_radius=circle_radius,
                     points_inside_cloud1=true_points_inside_circle,
-                    points_inside_cloud2=shifted_points_inside_circle)
+                    points_inside_cloud2=shifted_points_inside_circle,
+                    points_matched_cloud1=true_points_matches,
+                    points_matched_cloud2=shifted_points_matches,
+                    points_in_pair_cloud1=true_point_in_pair,
+                    points_in_pair_cloud2=shifted_point_in_pair)
+
+                plot_clouds_in_and_out_with_circle_around_center_and_bbox_same_plot(
+                    cloud1=object_idx_stacked.T,
+                    cloud2=past_flow_shifted_points.T, box=bbox,
+                    center=closest_shifted_point_to_object_idx_stacked_center,
+                    circle_radius=circle_radius,
+                    points_inside_cloud1=true_points_inside_circle,
+                    points_inside_cloud2=shifted_points_inside_circle,
+                    points_matched_cloud1=true_points_matches,
+                    points_matched_cloud2=shifted_points_matches,
+                    points_in_pair_cloud1=true_point_in_pair,
+                    points_in_pair_cloud2=shifted_point_in_pair
+                )
 
                 # plot_point_with_bbox(object_idx_stacked.T, box=bbox)
 
@@ -457,7 +566,8 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
 
                 flow_dict_for_frame.update({past_track_id: {'features_xy': past_object_idx,
                                                             'flow_uv': past_flow_idx,
-                                                            'shifted_xy': past_flow_shifted_points}})
+                                                            'shifted_xy': past_flow_shifted_points,
+                                                            'shifted_points_inside_circle': shifted_points_matches}})
         updated_flow_map = np.zeros_like(of_between_frames_value)
         for k, v in flow_dict_for_frame.items():
             features_x, features_y = v['features_xy'][0], v['features_xy'][1]
