@@ -18,9 +18,10 @@ from log import get_logger, initialize_logging
 initialize_logging()
 logger = get_logger(__name__)
 
-SHIFT_X = 15
-SHIFT_Y = 12
-CLOSEST_N_POINTS = 10
+SHIFT_X = 0
+SHIFT_Y = 0
+CLOSEST_N_POINTS = 20
+SHIFT_CORRECTION_ALPHA = 1
 
 
 def largest_indices(array: np.ndarray, n: int) -> tuple:
@@ -508,6 +509,19 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                 shifted_point_in_pair = past_flow_shifted_points.T[closest_point_pair_idx[1]]
 
                 # flow for closest N points
+                xy_distance_closest_n_points = np.linalg.norm(np.expand_dims(closest_n_true_point_pair, 0) -
+                                                              np.expand_dims(closest_n_shifted_point_pair, 0), 2,
+                                                              axis=0)
+                # xy_distance_closest_n_points_mean = xy_distance_closest_n_points.mean(axis=0)
+                xy_distance_closest_n_points_mean = np.max(xy_distance_closest_n_points, axis=0)
+                # experiment
+                if past_flow_shifted_points.T.mean() < object_idx_stacked.T.mean():
+                    shift_correction = np.power(xy_distance_closest_n_points_mean, SHIFT_CORRECTION_ALPHA)
+                    # past_flow_shifted_points = (past_flow_shifted_points.T + xy_distance_closest_n_points_mean).T
+                else:
+                    shift_correction = - np.power(xy_distance_closest_n_points_mean, SHIFT_CORRECTION_ALPHA)
+                    # past_flow_shifted_points = (past_flow_shifted_points.T - xy_distance_closest_n_points_mean).T
+                past_flow_shifted_points = (past_flow_shifted_points.T + shift_correction).T
 
                 closest_shifted_point_to_object_idx_stacked_center = closest_point_in_cloud_to_a_point(
                     cloud=past_flow_shifted_points.T, point=object_idx_stacked_center
@@ -578,7 +592,8 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                 flow_dict_for_frame.update({past_track_id: {'features_xy': past_object_idx,
                                                             'flow_uv': past_flow_idx,
                                                             'shifted_xy': past_flow_shifted_points,
-                                                            'shifted_points_inside_circle': shifted_points_matches}})
+                                                            'shifted_points_inside_circle': shifted_points_matches,
+                                                            'shift_correction': shift_correction}})
         updated_flow_map = np.zeros_like(of_between_frames_value)
         for k, v in flow_dict_for_frame.items():
             features_x, features_y = v['features_xy'][0], v['features_xy'][1]
