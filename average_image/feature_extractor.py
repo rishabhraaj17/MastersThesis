@@ -1820,7 +1820,8 @@ class BackgroundSubtraction(FeatureExtractor):
                 foreground_masks=last12_bg_sub_mask,
                 optical_flow_between_frames=past_12_frames_optical_flow,
                 original_shape=original_shape,
-                new_shape=resized_shape)
+                new_shape=resized_shape,
+                circle_radius=8)  # todo: add to parameter
 
             # flow between consecutive frames
             frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))
@@ -1846,6 +1847,15 @@ class BackgroundSubtraction(FeatureExtractor):
                 # for 1st flow map the frame to add flow is actual_interest_fr - 1 | actual_interest_fr = 12 =
                 # interest_fr = 8, thus we need interest_fr=7 which is actual_interest_fr=11
                 future_12_frames_optical_flow.update({f'{actual_of_i - 1}-{actual_of_i}': flow_per_frame})
+
+            # todo: put one past frame in future12_bg_sub_mask
+            future_12_frames_optical_flow_summed = optimize_optical_flow_object_level_for_frames(
+                df=df,
+                foreground_masks=future12_bg_sub_mask,
+                optical_flow_between_frames=future_12_frames_optical_flow,
+                original_shape=original_shape,
+                new_shape=resized_shape,
+                circle_radius=8)  # todo: add to parameter
 
             if use_color:
                 data, data_, max_0, max_1, min_0, min_1, threshold_img = \
