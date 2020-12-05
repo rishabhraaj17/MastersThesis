@@ -582,7 +582,6 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                 past_flow_shifted_points[0] = past_object_idx[0] + past_flow_idx[0] + SHIFT_X  # x -> u
                 past_flow_shifted_points[1] = past_object_idx[1] + past_flow_idx[1] + SHIFT_Y  # y -> v
                 past_flow_shifted_points = np.round(past_flow_shifted_points).astype(np.int)
-                # plot_point_with_bbox(past_flow_shifted_points.T, box=past_bbox)
 
                 try:
                     track_idx_next_frame = track_ids.tolist().index(past_track_id)
@@ -613,12 +612,6 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                                                                             circle_center=
                                                                             object_idx_stacked_center,
                                                                             circle_radius=circle_radius)
-                # plot_point_in_and_out_with_circle_around_center_and_bbox(object_idx_stacked.T, box=bbox,
-                #                                                          center=object_idx_stacked_center,
-                #                                                          circle_radius=circle_radius,
-                #                                                          points_inside=
-                #                                                          object_idx_stacked.T[
-                #                                                              points_object_idx_inside_circle])
 
                 distance_matrix = clouds_distance_matrix(object_idx_stacked.T, past_flow_shifted_points.T)
                 closest_point_pair_idx = np.unravel_index(distance_matrix.argmin(), distance_matrix.shape)
@@ -633,14 +626,14 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                                                               np.expand_dims(closest_n_shifted_point_pair, 0), 2,
                                                               axis=0)
                 # xy_distance_closest_n_points_mean = xy_distance_closest_n_points.mean(axis=0)
+                # using max instead
                 xy_distance_closest_n_points_mean = np.max(xy_distance_closest_n_points, axis=0)
-                # experiment
+
                 if past_flow_shifted_points.T.mean() < object_idx_stacked.T.mean():
                     shift_correction = np.power(xy_distance_closest_n_points_mean, SHIFT_CORRECTION_ALPHA)
-                    # past_flow_shifted_points = (past_flow_shifted_points.T + xy_distance_closest_n_points_mean).T
                 else:
                     shift_correction = - np.power(xy_distance_closest_n_points_mean, SHIFT_CORRECTION_ALPHA)
-                    # past_flow_shifted_points = (past_flow_shifted_points.T - xy_distance_closest_n_points_mean).T
+
                 past_flow_shifted_points_before_adjustment = past_flow_shifted_points.copy()
                 past_flow_shifted_points = (past_flow_shifted_points.T + shift_correction).T
 
@@ -661,40 +654,11 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
 
                 shifted_points_inside_circle = past_flow_shifted_points.T[shifted_points_inside_circle_idx]
                 true_points_inside_circle = object_idx_stacked.T[true_points_inside_circle_idx]
-                # common_points_inside_circle_bool = (shifted_points_inside_circle == true_points_inside_circle).all(1)
-                # common_points_inside_circle_idx = np.where(common_points_inside_circle_bool == True)[0]
-                # common_points_inside_circle = true_points_inside_circle[common_points_inside_circle_idx]
                 intersect = np.intersect1d(true_points_inside_circle[:, 0], shifted_points_inside_circle[:, 0])
                 true_points_matches = true_points_inside_circle[np.any(true_points_inside_circle[:, 0]
                                                                        == intersect[:, None], axis=0)]
                 shifted_points_matches = shifted_points_inside_circle[np.any(shifted_points_inside_circle[:, 0]
                                                                              == intersect[:, None], axis=0)]
-
-                # plot_clouds_in_and_out_with_circle_around_center_and_bbox(
-                #     cloud1=object_idx_stacked.T,
-                #     cloud2=past_flow_shifted_points.T, box=bbox,
-                #     center=closest_shifted_point_to_object_idx_stacked_center,
-                #     circle_radius=circle_radius,
-                #     points_inside_cloud1=true_points_inside_circle,
-                #     points_inside_cloud2=shifted_points_inside_circle,
-                #     points_matched_cloud1=true_points_matches,
-                #     points_matched_cloud2=shifted_points_matches,
-                #     points_in_pair_cloud1=closest_n_true_point_pair,
-                #     points_in_pair_cloud2=closest_n_shifted_point_pair,
-                #     shift_correction=shift_correction)
-
-                # plot_clouds_in_and_out_with_circle_around_center_and_bbox_same_plot(
-                #     cloud1=object_idx_stacked.T,
-                #     cloud2=past_flow_shifted_points.T, box=bbox,
-                #     center=closest_shifted_point_to_object_idx_stacked_center,
-                #     circle_radius=circle_radius,
-                #     points_inside_cloud1=true_points_inside_circle,
-                #     points_inside_cloud2=shifted_points_inside_circle,
-                #     points_matched_cloud1=true_points_matches,
-                #     points_matched_cloud2=shifted_points_matches,
-                #     points_in_pair_cloud1=closest_n_true_point_pair,
-                #     points_in_pair_cloud2=closest_n_shifted_point_pair,
-                #     shift_correction=shift_correction)
 
                 plot_true_and_shifted(
                     true_cloud=object_idx_stacked.T,
@@ -714,17 +678,6 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                     track_id=track_id,
                     line_width=None
                 )
-
-                # plot_point_with_bbox(object_idx_stacked.T, box=bbox)
-
-                # plot_basic_analysis(bbox_center_y=bbox_center, shifted_points=past_flow_shifted_points.T,
-                #                     t1_points_xy=object_idx_stacked.T, t1_h=h, t1_w=w, t1_x=x, t1_y=y, save=False)
-
-                # plot_images_with_bbox(img1=bg_sub_mask_value, img2=next_bg_sub_frame, box1=past_bbox, box2=bbox)
-                # plot_images_with_bbox(img1=past_mask, img2=mask, box1=past_bbox, box2=bbox)
-
-                # plot_points_with_bbox(points1=past_flow_shifted_points.T, points2=object_idx_stacked.T,
-                #                       box1=past_bbox, box2=bbox)
 
                 processed_tracks += 1
 
