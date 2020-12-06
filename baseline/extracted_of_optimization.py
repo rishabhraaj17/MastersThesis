@@ -344,7 +344,7 @@ def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_s
     # cloud2
     ax1.plot(original_shifted_cloud[:, 0], original_shifted_cloud[:, 1], 'o', markerfacecolor='magenta',
              markeredgecolor='k', markersize=8)
-    ax1.plot(original_shifted_cloud_key_point[0], original_shifted_cloud_key_point[1], '*', markerfacecolor='cyan',
+    ax1.plot(original_shifted_cloud_key_point[0], original_shifted_cloud_key_point[1], '*', markerfacecolor='orange',
              markeredgecolor='k', markersize=9)
     rect2 = patches.Rectangle(xy=(shifted_box[0], shifted_box[1]), width=shifted_box[2] - shifted_box[0],
                               height=shifted_box[3] - shifted_box[1], fill=False,
@@ -380,7 +380,7 @@ def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_s
                     'r': 'True Bounding Box',
                     'g': 'Shifted Bounding Box',
                     'aqua': f'Shifted {key_point_criteria}',
-                    'cyan': f'Default Shifted {key_point_criteria}',
+                    'orange': f'Default Shifted {key_point_criteria}',
                     'yellow': f'True {key_point_criteria}'}
 
     legend_patches = [mpatches.Patch(color=key, label=val) for key, val in legends_dict.items()]
@@ -964,7 +964,7 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
         original_12_frames_flow += value
 
     verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skipped, original_12_frames_flow,
-                           df, original_shape, new_shape, img_level=True, object_level=True)
+                           df, original_shape, new_shape, img_level=False, object_level=True)
 
     logger.info(f'Frames processed: {processed_frames} | Tracks Processed: {processed_tracks} | '
                 f'Tracks Skipped: {tracks_skipped}')
@@ -973,7 +973,8 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
 
 
 def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skipped, original_12_frames_flow,
-                           df, original_shape, new_shape, img_level=False, object_level=True):
+                           df, original_shape, new_shape, img_level=False, object_level=True, input_frame_num=0,
+                           target_frame_num=12):
     if img_level:
         activations = (foreground_masks[0] > 0).nonzero()
         frame_flow_idx = final_12_frames_flow[activations[0], activations[1]]
@@ -991,16 +992,16 @@ def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skippe
         plot_images(optical_flow_shifted_frame, bg_sub_mask_value_next)
     if object_level:
         # can also verify object-level
-        frame_input = foreground_masks[0]
-        frame_target = foreground_masks[12]
+        frame_input = foreground_masks[input_frame_num]
+        frame_target = foreground_masks[target_frame_num]
 
-        input_frame_annotation = get_frame_annotations_and_skip_lost(df, 0)
+        input_frame_annotation = get_frame_annotations_and_skip_lost(df, input_frame_num)
         input_annotations, input_bbox_centers, input_track_ids = scale_annotations(input_frame_annotation,
                                                                                    original_scale=original_shape,
                                                                                    new_scale=new_shape,
                                                                                    return_track_id=True,
                                                                                    tracks_with_annotations=True)
-        target_frame_annotation = get_frame_annotations_and_skip_lost(df, 12)
+        target_frame_annotation = get_frame_annotations_and_skip_lost(df, target_frame_num)
         target_annotations, target_bbox_centers, target_track_ids = scale_annotations(target_frame_annotation,
                                                                                       original_scale=original_shape,
                                                                                       new_scale=new_shape,
