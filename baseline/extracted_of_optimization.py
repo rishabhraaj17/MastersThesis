@@ -945,8 +945,9 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
         updated_flow_map = np.zeros_like(of_between_frames_value)
         original_flow_map = np.zeros_like(of_between_frames_value)
         for k, v in flow_dict_for_frame.items():
-            features_x, features_y = v['features_xy'][0], v['features_xy'][1]
-            updated_flow_map[features_x, features_y] = v['flow_uv'].T + v['shift_correction']
+            features_x, features_y = v['features_xy'][1], v['features_xy'][0]
+            flow_correction = v['shift_correction']
+            updated_flow_map[features_x, features_y] = v['flow_uv'].T + flow_correction
             original_flow_map[features_x, features_y] = v['flow_uv'].T
             logger.info(f"Shift Correction: {v['shift_correction']}")
         updated_optical_flow_between_frames.update({of_between_frames_key: updated_flow_map})
@@ -1028,14 +1029,14 @@ def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skippe
                 flow_shifted_points = np.zeros_like(input_frame_object_idx_stacked, dtype=np.float)
                 flow_shifted_points[0] = input_frame_object_idx[0] + flow_idx[0]
                 flow_shifted_points[1] = input_frame_object_idx[1] + flow_idx[1]
-                flow_shifted_points = np.round(flow_shifted_points).astype(np.int)
+                # flow_shifted_points = np.round(flow_shifted_points).astype(np.int)
 
                 original_flow_idx = original_12_frames_flow[input_frame_object_idx[0], input_frame_object_idx[1]]
                 original_flow_idx = original_flow_idx.T
                 original_flow_shifted_points = np.zeros_like(input_frame_object_idx_stacked, dtype=np.float)
                 original_flow_shifted_points[0] = input_frame_object_idx[0] + original_flow_idx[0]
                 original_flow_shifted_points[1] = input_frame_object_idx[1] + original_flow_idx[1]
-                original_flow_shifted_points = np.round(original_flow_shifted_points).astype(np.int)
+                # original_flow_shifted_points = np.round(original_flow_shifted_points).astype(np.int)
 
                 try:
                     track_idx_next_frame = target_track_ids.tolist().index(input_frame_track_id)
