@@ -487,6 +487,95 @@ def plot_true_and_shifted(true_cloud, shifted_cloud, true_box, shifted_box, cent
     plt.show()
 
 
+def plot_true_and_shifted_all_steps_simple(true_cloud, shifted_cloud, true_box, shifted_box,
+                                           shift_correction, shifted_cloud_before_shift,
+                                           true_cloud_key_point, shifted_cloud_key_point,
+                                           shift_corrected_cloud_key_point, key_point_criteria,
+                                           frame_number, track_id, line_width=None):
+
+    fig, ax = plt.subplots(2, 2, sharex='none', sharey='none', figsize=(14, 12))
+    ax1, ax2, ax3, ax4 = ax[0, 0], ax[0, 1], ax[1, 0], ax[1, 1]
+
+    # cloud1
+    ax1.plot(true_cloud[:, 0], true_cloud[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k',
+             markersize=8)
+    ax1.plot(true_cloud_key_point[0], true_cloud_key_point[1], '*', markerfacecolor='silver', markeredgecolor='k',
+             markersize=9)
+    rect1 = patches.Rectangle(xy=(true_box[0], true_box[1]), width=true_box[2] - true_box[0],
+                              height=true_box[3] - true_box[1], fill=False,
+                              linewidth=line_width, edgecolor='r')
+    # cloud2
+    ax2.plot(shifted_cloud_before_shift[:, 0], shifted_cloud_before_shift[:, 1], 'o', markerfacecolor='magenta',
+             markeredgecolor='k', markersize=8)
+    ax2.plot(shifted_cloud_key_point[0], shifted_cloud_key_point[1], '*', markerfacecolor='yellow',
+             markeredgecolor='k', markersize=9)
+    rect2 = patches.Rectangle(xy=(shifted_box[0], shifted_box[1]), width=shifted_box[2] - shifted_box[0],
+                              height=shifted_box[3] - shifted_box[1], fill=False,
+                              linewidth=line_width, edgecolor='teal')
+
+    # cloud1 + cloud2
+    # cloud1
+    ax3.plot(true_cloud[:, 0], true_cloud[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k',
+             markersize=8)
+    rect3 = patches.Rectangle(xy=(true_box[0], true_box[1]), width=true_box[2] - true_box[0],
+                              height=true_box[3] - true_box[1], fill=False,
+                              linewidth=line_width, edgecolor='r')
+    # cloud2
+    ax3.plot(shifted_cloud_before_shift[:, 0], shifted_cloud_before_shift[:, 1], 'o', markerfacecolor='magenta',
+             markeredgecolor='k', markersize=8)
+    rect3_shifted = patches.Rectangle(xy=(shifted_box[0], shifted_box[1]), width=shifted_box[2] - shifted_box[0],
+                                      height=shifted_box[3] - shifted_box[1], fill=False,
+                                      linewidth=line_width, edgecolor='teal')
+    ax3.plot(true_cloud_key_point[0], true_cloud_key_point[1], '*', markerfacecolor='silver', markeredgecolor='k',
+             markersize=9)
+    ax3.plot(shifted_cloud_key_point[0], shifted_cloud_key_point[1], '*', markerfacecolor='yellow',
+             markeredgecolor='k', markersize=9)
+
+    # cloud1 + cloud2 - after shift correction
+    # cloud1
+    ax4.plot(true_cloud[:, 0], true_cloud[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k',
+             markersize=8)
+    rect4 = patches.Rectangle(xy=(true_box[0], true_box[1]), width=true_box[2] - true_box[0],
+                              height=true_box[3] - true_box[1], fill=False,
+                              linewidth=line_width, edgecolor='r')
+    # cloud2
+    ax4.plot(shifted_cloud[:, 0], shifted_cloud[:, 1], 'o', markerfacecolor='magenta', markeredgecolor='k',
+             markersize=8)
+    rect4_shifted = patches.Rectangle(xy=(shifted_box[0], shifted_box[1]), width=shifted_box[2] - shifted_box[0],
+                                      height=shifted_box[3] - shifted_box[1], fill=False,
+                                      linewidth=line_width, edgecolor='teal')
+    ax4.plot(true_cloud_key_point[0], true_cloud_key_point[1], '*', markerfacecolor='silver', markeredgecolor='k',
+             markersize=9)
+    ax4.plot(shift_corrected_cloud_key_point[0], shift_corrected_cloud_key_point[1], '*', markerfacecolor='plum',
+             markeredgecolor='k', markersize=9)
+
+    ax1.add_patch(rect1)
+    ax2.add_patch(rect2)
+    ax3.add_patch(rect3)
+    ax4.add_patch(rect4)
+    ax3.add_patch(rect3_shifted)
+    ax4.add_patch(rect4_shifted)
+
+    ax1.set_title('True Cloud')
+    ax2.set_title('Shifted Cloud')
+    ax3.set_title('Clouds Overlaid')
+    ax4.set_title('Flow Corrected Overlaid')
+
+    legends_dict = {'blue': 'Points at T',
+                    'magenta': '(T-1) Shifted points at T',
+                    'r': 'True Bounding Box',
+                    'silver': f'Shifted {key_point_criteria}',
+                    'plum': f'Shift Corrected {key_point_criteria}',
+                    'yellow': f'True {key_point_criteria}',
+                    'teal': 'Shifted Bounding Box'}
+
+    legend_patches = [mpatches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+    fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}\nShift Correction: {shift_correction}')
+
+    plt.show()
+
+
 def is_point_inside_circle(circle_x, circle_y, rad, x, y):
     if (x - circle_x) * (x - circle_x) + (y - circle_y) * (y - circle_y) <= rad * rad:
         return True
@@ -712,18 +801,19 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                 # Approach 2 - Working on mean/median of points - could go wrong for different features
 
                 # STEP: 1
-
-                # take the distance between center
-                # true_cloud_mean = object_idx_stacked.T.mean(0)
-                # shifted_cloud_mean = past_flow_shifted_points.T.mean(0)
+                key_point_criterion = np.median
+                # take the mean distance between center
+                # true_cloud_key_point = object_idx_stacked.T.mean(0)
+                # shifted_cloud_key_point = past_flow_shifted_points.T.mean(0)
 
                 # median
-                true_cloud_mean = np.median(object_idx_stacked.T, axis=0)
-                shifted_cloud_mean = np.median(past_flow_shifted_points.T, axis=0)
+                true_cloud_key_point = key_point_criterion(object_idx_stacked.T, axis=0)
+                shifted_cloud_key_point = key_point_criterion(past_flow_shifted_points.T, axis=0)
 
                 #  STEP: 2
-                xy_distance_closest_n_points_mean = np.linalg.norm(np.expand_dims(true_cloud_mean, 0) -
-                                                                   np.expand_dims(shifted_cloud_mean, 0), 2, axis=0)
+                xy_distance_closest_n_points_mean = np.linalg.norm(np.expand_dims(true_cloud_key_point, 0) -
+                                                                   np.expand_dims(shifted_cloud_key_point, 0), 2,
+                                                                   axis=0)
                 xy_distance_closest_n_points_mean_x, xy_distance_closest_n_points_mean_y = \
                     xy_distance_closest_n_points_mean
 
@@ -775,25 +865,41 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
 
                 past_flow_shifted_points = (past_flow_shifted_points.T + shift_correction).T
 
-                plot_true_and_shifted(
+                plot_true_and_shifted_all_steps_simple(
                     true_cloud=object_idx_stacked.T,
                     shifted_cloud=past_flow_shifted_points.T,
                     true_box=bbox,
                     shifted_box=past_bbox,
-                    center=closest_shifted_point_to_object_idx_stacked_center,
-                    circle_radius=circle_radius,
-                    points_inside_true_cloud=true_points_inside_circle,
-                    points_inside_shifted_cloud=shifted_points_inside_circle,
-                    points_matched_true_cloud=true_points_matches,
-                    points_matched_shifted_cloud=shifted_points_matches,
-                    points_in_pair_true_cloud=closest_n_true_point_pair,
-                    points_in_pair_shifted_cloud=closest_n_shifted_point_pair,
                     shift_correction=shift_correction,
+                    shift_corrected_cloud_key_point=key_point_criterion(past_flow_shifted_points.T, axis=0),
                     shifted_cloud_before_shift=past_flow_shifted_points_before_adjustment.T,
                     frame_number=bg_sub_mask_key + 1,
                     track_id=track_id,
+                    true_cloud_key_point=true_cloud_key_point,
+                    shifted_cloud_key_point=shifted_cloud_key_point,
+                    key_point_criteria='Median',
                     line_width=None
                 )
+
+                # plot_true_and_shifted(
+                #     true_cloud=object_idx_stacked.T,
+                #     shifted_cloud=past_flow_shifted_points.T,
+                #     true_box=bbox,
+                #     shifted_box=past_bbox,
+                #     center=closest_shifted_point_to_object_idx_stacked_center,
+                #     circle_radius=circle_radius,
+                #     points_inside_true_cloud=true_points_inside_circle,
+                #     points_inside_shifted_cloud=shifted_points_inside_circle,
+                #     points_matched_true_cloud=true_points_matches,
+                #     points_matched_shifted_cloud=shifted_points_matches,
+                #     points_in_pair_true_cloud=closest_n_true_point_pair,
+                #     points_in_pair_shifted_cloud=closest_n_shifted_point_pair,
+                #     shift_correction=shift_correction,
+                #     shifted_cloud_before_shift=past_flow_shifted_points_before_adjustment.T,
+                #     frame_number=bg_sub_mask_key + 1,
+                #     track_id=track_id,
+                #     line_width=None
+                # )
 
                 processed_tracks += 1
 
@@ -891,9 +997,11 @@ def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skippe
                     continue
 
                 target_frame_mask = np.zeros_like(frame_target)
-                target_frame_mask[target_annotations[track_idx_next_frame][1]:target_annotations[track_idx_next_frame][3],
+                target_frame_mask[
+                target_annotations[track_idx_next_frame][1]:target_annotations[track_idx_next_frame][3],
                 target_annotations[track_idx_next_frame][0]:target_annotations[track_idx_next_frame][2]] = \
-                    frame_target[target_annotations[track_idx_next_frame][1]:target_annotations[track_idx_next_frame][3],
+                    frame_target[
+                    target_annotations[track_idx_next_frame][1]:target_annotations[track_idx_next_frame][3],
                     target_annotations[track_idx_next_frame][0]:target_annotations[track_idx_next_frame][2]]
 
                 target_frame_track_id = target_annotations[track_idx_next_frame][-1].item()
