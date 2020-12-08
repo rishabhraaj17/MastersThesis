@@ -2,6 +2,7 @@ from pathlib import Path
 
 import torch
 
+import cv2 as cv
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import patches
@@ -342,7 +343,7 @@ def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_s
                               height=true_box[3] - true_box[1], fill=False,
                               linewidth=line_width, edgecolor='r')
     # cloud2
-    ax1.plot(original_shifted_cloud[:, 0], original_shifted_cloud[:, 1], 'o', markerfacecolor='magenta',
+    ax1.plot(original_shifted_cloud[:, 0], original_shifted_cloud[:, 1], 'o', markerfacecolor='gray',
              markeredgecolor='k', markersize=8)
     ax1.plot(original_shifted_cloud_key_point[0], original_shifted_cloud_key_point[1], '*', markerfacecolor='orange',
              markeredgecolor='k', markersize=9)
@@ -377,6 +378,7 @@ def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_s
 
     legends_dict = {'blue': 'Points at T',
                     'magenta': '(T-1) Shifted points at T',
+                    'gray': '(T-1) Default Shifted points at T',
                     'r': 'True Bounding Box',
                     'g': 'Shifted Bounding Box',
                     'aqua': f'Shifted {key_point_criteria}',
@@ -647,6 +649,16 @@ def smallest_n_indices(a, n):
 def largest_n_indices(a, n):
     idx = a.ravel().argsort()[-n:]
     return np.stack(np.unravel_index(idx, a.shape)).T
+
+
+def visualize_flow(flow, frame_dim):
+    hsv = np.zeros((frame_dim[0], frame_dim[1], 3), dtype=np.uint8)
+    hsv[..., 1] = 255
+    mag, ang = cv.cartToPolar(flow[..., 0], flow[..., 1])
+    hsv[..., 0] = ang * 180 / np.pi / 2
+    hsv[..., 2] = cv.normalize(mag, None, 0, 255, cv.NORM_MINMAX)  # 0-1 normalize
+    rgb = cv.cvtColor(hsv, cv.COLOR_HSV2BGR)
+    return rgb
 
 
 def distance_weighted_optimization(features_path, plot_save_path, alpha=1, save_plots=True):
@@ -942,14 +954,24 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                                                             'shift_corrected_xy': past_flow_shifted_points,
                                                             'shifted_points_inside_circle': shifted_points_matches,
                                                             'shift_correction': shift_correction}})
-        updated_flow_map = np.zeros_like(of_between_frames_value)
+        # updated_flow_map = np.zeros_like(of_between_frames_value)
+        updated_flow_map = of_between_frames_value.copy()
         original_flow_map = np.zeros_like(of_between_frames_value)
         for k, v in flow_dict_for_frame.items():
             features_x, features_y = v['features_xy'][1], v['features_xy'][0]
             flow_correction = v['shift_correction']
-            updated_flow_map[features_x, features_y] = v['flow_uv'].T + flow_correction
+            logger.info(f"Shift Correction: {flow_correction}")
+            # updated_flow_map[features_x, features_y] = v['flow_uv'].T + flow_correction
+            updated_flow_map[features_x, features_y] += flow_correction
+            # logger.info(updated_flow_map[features_x, features_y])
+            # logger.info(of_between_frames_value[features_x, features_y])
             original_flow_map[features_x, features_y] = v['flow_uv'].T
-            logger.info(f"Shift Correction: {v['shift_correction']}")
+        # verify_flow_correction(updated_flow_map, foreground_masks, tracks_skipped, of_between_frames_value, df,
+        #                        original_shape, new_shape, False, True, input_frame_num=bg_sub_mask_key,
+        #                        target_frame_num=bg_sub_mask_key+1)
+        # default_flow = visualize_flow(of_between_frames_value, bg_sub_mask_value.shape)
+        # optimized_flow = visualize_flow(updated_flow_map, bg_sub_mask_value.shape)
+        # plot_images(default_flow, optimized_flow)
         updated_optical_flow_between_frames.update({of_between_frames_key: updated_flow_map})
         original_optical_flow_between_frames.update({of_between_frames_key: original_flow_map})
         processed_frames += 1
@@ -962,6 +984,10 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
     #     original_12_frames_flow += value
     for key, value in optical_flow_between_frames.items():
         original_12_frames_flow += value
+
+    # final_default_flow = visualize_flow(original_12_frames_flow, foreground_masks[0].shape)
+    # final_optimized_flow = visualize_flow(final_12_frames_flow, foreground_masks[0].shape)
+    # plot_images(final_default_flow, final_optimized_flow)
 
     verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skipped, original_12_frames_flow,
                            df, original_shape, new_shape, img_level=False, object_level=True)
@@ -1024,7 +1050,8 @@ def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skippe
             input_frame_object_idx[0], input_frame_object_idx[1] = input_frame_object_idx[1], input_frame_object_idx[0]
 
             if input_frame_object_idx[0].size != 0:
-                flow_idx = final_12_frames_flow[input_frame_object_idx[0], input_frame_object_idx[1]]
+                # flow_idx = final_12_frames_flow[input_frame_object_idx[0], input_frame_object_idx[1]]
+                flow_idx = final_12_frames_flow[input_frame_object_idx[1], input_frame_object_idx[0]]
                 input_frame_object_idx_stacked = np.stack(input_frame_object_idx)
                 flow_idx = flow_idx.T
                 flow_shifted_points = np.zeros_like(input_frame_object_idx_stacked, dtype=np.float)
@@ -1032,12 +1059,16 @@ def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skippe
                 flow_shifted_points[1] = input_frame_object_idx[1] + flow_idx[1]
                 # flow_shifted_points = np.round(flow_shifted_points).astype(np.int)
 
-                original_flow_idx = original_12_frames_flow[input_frame_object_idx[0], input_frame_object_idx[1]]
+                # original_flow_idx = original_12_frames_flow[input_frame_object_idx[0], input_frame_object_idx[1]]
+                original_flow_idx = original_12_frames_flow[input_frame_object_idx[1], input_frame_object_idx[0]]
                 original_flow_idx = original_flow_idx.T
                 original_flow_shifted_points = np.zeros_like(input_frame_object_idx_stacked, dtype=np.float)
                 original_flow_shifted_points[0] = input_frame_object_idx[0] + original_flow_idx[0]
                 original_flow_shifted_points[1] = input_frame_object_idx[1] + original_flow_idx[1]
                 # original_flow_shifted_points = np.round(original_flow_shifted_points).astype(np.int)
+
+                # logger.info(flow_idx.T)
+                # logger.info(original_flow_idx.T)
 
                 try:
                     track_idx_next_frame = target_track_ids.tolist().index(input_frame_track_id)
@@ -1101,3 +1132,7 @@ if __name__ == '__main__':
                                                   optical_flow_between_frames=of_flows,
                                                   original_shape=o_shape, new_shape=n_shape,
                                                   circle_radius=6)
+    # TODO:
+    #  1. Circular area. Take points from clouds. For true_cloud take actual displacement.
+    #  2. Find out why clubbing together is not working out.
+    #  3. Data distribution and characteristics of the gt flow and of flow.
