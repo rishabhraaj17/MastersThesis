@@ -23,6 +23,8 @@ SHIFT_X = 0
 SHIFT_Y = 0
 CLOSEST_N_POINTS = 20
 SHIFT_CORRECTION_ALPHA = 1
+OVERLAP_THRESHOLD = 90
+OVERLAP_THRESHOLD = OVERLAP_THRESHOLD/100.0
 
 
 def largest_indices(array: np.ndarray, n: int) -> tuple:
@@ -330,7 +332,8 @@ def plot_clouds_in_and_out_with_circle_around_center_and_bbox_same_plot(cloud1, 
 
 def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_shifted_cloud, true_box, shifted_box,
                                            true_cloud_key_point, shifted_cloud_key_point, key_point_criteria,
-                                           original_shifted_cloud_key_point, line_width=None):
+                                           original_shifted_cloud_key_point, frame_input, frame_target, track_id,
+                                           plot_save_path=None, line_width=None):
     fig, (ax1, ax2) = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(12, 6))
 
     # Default
@@ -389,7 +392,12 @@ def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_s
     fig.legend(handles=legend_patches, loc=2)
     fig.suptitle(f'1st Frame vs 12th Frame')
 
-    plt.show()
+    if plot_save_path is None:
+        plt.show()
+    else:
+        Path(plot_save_path).mkdir(parents=True, exist_ok=True)
+        plt.savefig(plot_save_path + f'fig_tracks_{track_id}_input_{frame_input}_target_{frame_target}.png')
+        plt.close()
 
 
 def plot_true_and_shifted(true_cloud, shifted_cloud, true_box, shifted_box, center, circle_radius,
@@ -526,7 +534,7 @@ def plot_true_and_shifted_all_steps_simple(true_cloud, shifted_cloud, true_box, 
                                            shift_correction, shifted_cloud_before_shift,
                                            true_cloud_key_point, shifted_cloud_key_point,
                                            shift_corrected_cloud_key_point, key_point_criteria,
-                                           frame_number, track_id, line_width=None):
+                                           frame_number, track_id, line_width=None, plot_save_path=None):
     fig, ax = plt.subplots(2, 2, sharex='none', sharey='none', figsize=(14, 12))
     ax1, ax2, ax3, ax4 = ax[0, 0], ax[0, 1], ax[1, 0], ax[1, 1]
 
@@ -607,7 +615,12 @@ def plot_true_and_shifted_all_steps_simple(true_cloud, shifted_cloud, true_box, 
     fig.legend(handles=legend_patches, loc=2)
     fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}\nShift Correction: {shift_correction}')
 
-    plt.show()
+    if plot_save_path is None:
+        plt.show()
+    else:
+        Path(plot_save_path).mkdir(parents=True, exist_ok=True)
+        plt.savefig(plot_save_path + f'fig_frame_{frame_number}_track_{track_id}.png')
+        plt.close()
 
 
 def is_point_inside_circle(circle_x, circle_y, rad, x, y):
@@ -822,9 +835,17 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
 
                 #  STEP: 4
                 # flow for closest N points
-                # xy_distance_closest_n_points = np.linalg.norm(np.expand_dims(closest_n_true_point_pair, 0) -
-                #                                               np.expand_dims(closest_n_shifted_point_pair, 0), 2,
-                #                                               axis=0)
+                xy_distance_closest_n_points = np.linalg.norm(np.expand_dims(closest_n_true_point_pair, 0) -
+                                                              np.expand_dims(closest_n_shifted_point_pair, 0), 2,
+                                                              axis=0)
+                xy_distance_closest_n_points_mean = xy_distance_closest_n_points.mean()
+                xy_per_dimension_overlap = np.equal(closest_n_true_point_pair, closest_n_shifted_point_pair)\
+                    .astype(np.float).mean(0)
+                xy_overall_dimension_overlap = np.equal(closest_n_true_point_pair, closest_n_shifted_point_pair)\
+                    .astype(np.float).mean()
+                logger.info(f'xy_distance_closest_n_points_mean: {xy_distance_closest_n_points_mean}\n'
+                            f'xy_per_dimension_overlap: {xy_per_dimension_overlap}'
+                            f'xy_overall_dimension_overlap: {xy_overall_dimension_overlap}')
 
                 #  STEP: 4.1
                 # using mean
@@ -880,6 +901,9 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
 
                 shift_correction = np.power(pre_shift_correction, SHIFT_CORRECTION_ALPHA)
 
+                if xy_overall_dimension_overlap > OVERLAP_THRESHOLD:
+                    shift_correction = np.zeros_like(pre_shift_correction)
+
                 past_flow_shifted_points_before_adjustment = past_flow_shifted_points.copy()
 
                 # circle stuff is irrelevant right now
@@ -910,21 +934,24 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
 
                 past_flow_shifted_points = (past_flow_shifted_points.T + shift_correction).T
 
-                # plot_true_and_shifted_all_steps_simple(
-                #     true_cloud=object_idx_stacked.T,
-                #     shifted_cloud=past_flow_shifted_points.T,
-                #     true_box=bbox,
-                #     shifted_box=past_bbox,
-                #     shift_correction=shift_correction,
-                #     shift_corrected_cloud_key_point=key_point_criterion(past_flow_shifted_points.T, axis=0),
-                #     shifted_cloud_before_shift=past_flow_shifted_points_before_adjustment.T,
-                #     frame_number=bg_sub_mask_key + 1,
-                #     track_id=track_id,
-                #     true_cloud_key_point=true_cloud_key_point,
-                #     shifted_cloud_key_point=shifted_cloud_key_point,
-                #     key_point_criteria='Median',
-                #     line_width=None
-                # )
+                plot_save_path = f'../Plots/Optimization_plot/wit{int(OVERLAP_THRESHOLD * 100)}_threshold/'
+
+                plot_true_and_shifted_all_steps_simple(
+                    true_cloud=object_idx_stacked.T,
+                    shifted_cloud=past_flow_shifted_points.T,
+                    true_box=bbox,
+                    shifted_box=past_bbox,
+                    shift_correction=shift_correction,
+                    shift_corrected_cloud_key_point=key_point_criterion(past_flow_shifted_points.T, axis=0),
+                    shifted_cloud_before_shift=past_flow_shifted_points_before_adjustment.T,
+                    frame_number=bg_sub_mask_key + 1,
+                    track_id=track_id,
+                    true_cloud_key_point=true_cloud_key_point,
+                    shifted_cloud_key_point=shifted_cloud_key_point,
+                    key_point_criteria='Median',
+                    line_width=None,
+                    plot_save_path=plot_save_path
+                )
 
                 # plot_true_and_shifted(
                 #     true_cloud=object_idx_stacked.T,
@@ -969,6 +996,7 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
         # verify_flow_correction(updated_flow_map, foreground_masks, tracks_skipped, of_between_frames_value, df,
         #                        original_shape, new_shape, False, True, input_frame_num=bg_sub_mask_key,
         #                        target_frame_num=bg_sub_mask_key+1)
+
         # default_flow = visualize_flow(of_between_frames_value, bg_sub_mask_value.shape)
         # optimized_flow = visualize_flow(updated_flow_map, bg_sub_mask_value.shape)
         # plot_images(default_flow, optimized_flow)
@@ -990,7 +1018,8 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
     # plot_images(final_default_flow, final_optimized_flow)
 
     verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skipped, original_12_frames_flow,
-                           df, original_shape, new_shape, img_level=False, object_level=True)
+                           df, original_shape, new_shape, img_level=False, object_level=True,
+                           plot_save_path=plot_save_path)
 
     logger.info(f'Frames processed: {processed_frames} | Tracks Processed: {processed_tracks} | '
                 f'Tracks Skipped: {tracks_skipped}')
@@ -1000,7 +1029,7 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
 
 def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skipped, original_12_frames_flow,
                            df, original_shape, new_shape, img_level=False, object_level=True, input_frame_num=0,
-                           target_frame_num=12):
+                           target_frame_num=12, plot_save_path=None):
     if img_level:
         activations = (foreground_masks[0] > 0).nonzero()
         frame_flow_idx = final_12_frames_flow[activations[0], activations[1]]
@@ -1107,7 +1136,11 @@ def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skippe
                                                        original_shifted_cloud_key_point=
                                                        np.median(original_flow_shifted_points.T, axis=0),
                                                        key_point_criteria='Median',
-                                                       shifted_box=input_frame_bbox)
+                                                       shifted_box=input_frame_bbox,
+                                                       frame_input=input_frame_num,
+                                                       frame_target=target_frame_num,
+                                                       track_id=input_frame_track_id,
+                                                       plot_save_path=plot_save_path)
 
 
 if __name__ == '__main__':
@@ -1134,5 +1167,6 @@ if __name__ == '__main__':
                                                   circle_radius=6)
     # TODO:
     #  1. Circular area. Take points from clouds. For true_cloud take actual displacement.
-    #  2. Find out why clubbing together is not working out.
+    #  2. Find out why clubbing together is not working out. - looks better with index swap and copy current flow map
+    #  then shift - improvement - if overlap is good enough dont shift!!
     #  3. Data distribution and characteristics of the gt flow and of flow.
