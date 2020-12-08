@@ -333,7 +333,7 @@ def plot_clouds_in_and_out_with_circle_around_center_and_bbox_same_plot(cloud1, 
 def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_shifted_cloud, true_box, shifted_box,
                                            true_cloud_key_point, shifted_cloud_key_point, key_point_criteria,
                                            original_shifted_cloud_key_point, frame_input, frame_target, track_id,
-                                           plot_save_path=None, line_width=None):
+                                           overlap_threshold, plot_save_path=None, line_width=None):
     fig, (ax1, ax2) = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(12, 6))
 
     # Default
@@ -390,7 +390,8 @@ def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_s
 
     legend_patches = [mpatches.Patch(color=key, label=val) for key, val in legends_dict.items()]
     fig.legend(handles=legend_patches, loc=2)
-    fig.suptitle(f'1st Frame vs 12th Frame')
+    fig.suptitle(f'1st Frame vs 12th Frame\n'
+                 f'Overlap Threshold: {overlap_threshold}')
 
     if plot_save_path is None:
         plt.show()
@@ -532,7 +533,7 @@ def plot_true_and_shifted(true_cloud, shifted_cloud, true_box, shifted_box, cent
 
 def plot_true_and_shifted_all_steps_simple(true_cloud, shifted_cloud, true_box, shifted_box,
                                            shift_correction, shifted_cloud_before_shift,
-                                           true_cloud_key_point, shifted_cloud_key_point,
+                                           true_cloud_key_point, shifted_cloud_key_point, overlap_threshold,
                                            shift_corrected_cloud_key_point, key_point_criteria,
                                            frame_number, track_id, line_width=None, plot_save_path=None):
     fig, ax = plt.subplots(2, 2, sharex='none', sharey='none', figsize=(14, 12))
@@ -613,7 +614,8 @@ def plot_true_and_shifted_all_steps_simple(true_cloud, shifted_cloud, true_box, 
 
     legend_patches = [mpatches.Patch(color=key, label=val) for key, val in legends_dict.items()]
     fig.legend(handles=legend_patches, loc=2)
-    fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}\nShift Correction: {shift_correction}')
+    fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}\nShift Correction: {shift_correction}\n'
+                 f'Overlap Threshold: {overlap_threshold}')
 
     if plot_save_path is None:
         plt.show()
@@ -949,6 +951,7 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                     true_cloud_key_point=true_cloud_key_point,
                     shifted_cloud_key_point=shifted_cloud_key_point,
                     key_point_criteria='Median',
+                    overlap_threshold=OVERLAP_THRESHOLD,
                     line_width=None,
                     plot_save_path=plot_save_path
                 )
@@ -1140,6 +1143,7 @@ def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skippe
                                                        frame_input=input_frame_num,
                                                        frame_target=target_frame_num,
                                                        track_id=input_frame_track_id,
+                                                       overlap_threshold=OVERLAP_THRESHOLD,
                                                        plot_save_path=plot_save_path)
 
 
