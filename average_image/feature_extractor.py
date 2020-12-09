@@ -1821,7 +1821,8 @@ class BackgroundSubtraction(FeatureExtractor):
                 optical_flow_between_frames=past_12_frames_optical_flow,
                 original_shape=original_shape,
                 new_shape=resized_shape,
-                circle_radius=8)  # todo: add to parameter
+                circle_radius=8,
+                plot=True)  # todo: add to parameter
 
             # flow between consecutive frames
             frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))
@@ -1859,7 +1860,8 @@ class BackgroundSubtraction(FeatureExtractor):
                 original_shape=original_shape,
                 new_shape=resized_shape,
                 circle_radius=8,
-                future_frames_mode=True)  # todo: add to parameter
+                future_frames_mode=True,
+                plot=True)  # todo: add to parameter
 
             if use_color:
                 data, data_, max_0, max_1, min_0, min_1, threshold_img = \

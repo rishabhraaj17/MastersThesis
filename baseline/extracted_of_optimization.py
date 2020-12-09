@@ -23,7 +23,7 @@ SHIFT_X = 0
 SHIFT_Y = 0
 CLOSEST_N_POINTS = 20
 SHIFT_CORRECTION_ALPHA = 1
-OVERLAP_THRESHOLD = 90
+OVERLAP_THRESHOLD = 80
 OVERLAP_THRESHOLD = OVERLAP_THRESHOLD/100.0
 
 
@@ -647,6 +647,7 @@ def find_points_inside_circle(cloud, circle_center, circle_radius):
 def find_cloud_center(cloud, p=2):
     cloud_mean = cloud.mean(axis=0)
     distance_with_mean = np.linalg.norm(cloud - cloud_mean, p, axis=1)
+    # fixme: ValueError: attempt to get argmin of an empty sequence
     return cloud[np.argmin(distance_with_mean)]
 
 
@@ -740,7 +741,7 @@ def optimize_optical_flow_object_level_for_frames_older(df, foreground_masks, op
 
 
 def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_flow_between_frames, original_shape,
-                                                  new_shape, circle_radius, future_frames_mode=False):
+                                                  new_shape, circle_radius, future_frames_mode=False, plot=True):
     processed_frames = 0
     processed_tracks = 0
     tracks_skipped = 0
@@ -809,6 +810,9 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                 object_idx = list(object_idx)
                 object_idx[0], object_idx[1] = object_idx[1], object_idx[0]
                 object_idx_stacked = np.stack(object_idx)
+
+                if object_idx_stacked.size == 0 or past_flow_shifted_points.size == 0:
+                    continue
 
                 object_idx_stacked_center = find_cloud_center(object_idx_stacked.T)
                 # points_object_idx_inside_circle = find_points_inside_circle(cloud=object_idx_stacked.T,
@@ -947,43 +951,24 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                 else:
                     plot_save_path = f'../Plots/Optimization_plot/wit{int(OVERLAP_THRESHOLD * 100)}_threshold/'
 
-                plot_true_and_shifted_all_steps_simple(
-                    true_cloud=object_idx_stacked.T,
-                    shifted_cloud=past_flow_shifted_points.T,
-                    true_box=bbox,
-                    shifted_box=past_bbox,
-                    shift_correction=shift_correction,
-                    shift_corrected_cloud_key_point=key_point_criterion(past_flow_shifted_points.T, axis=0),
-                    shifted_cloud_before_shift=past_flow_shifted_points_before_adjustment.T,
-                    frame_number=bg_sub_mask_key + 1,
-                    track_id=track_id,
-                    true_cloud_key_point=true_cloud_key_point,
-                    shifted_cloud_key_point=shifted_cloud_key_point,
-                    key_point_criteria='Median',
-                    overlap_threshold=OVERLAP_THRESHOLD,
-                    line_width=None,
-                    plot_save_path=plot_save_path
-                )
-
-                # plot_true_and_shifted(
-                #     true_cloud=object_idx_stacked.T,
-                #     shifted_cloud=past_flow_shifted_points.T,
-                #     true_box=bbox,
-                #     shifted_box=past_bbox,
-                #     center=closest_shifted_point_to_object_idx_stacked_center,
-                #     circle_radius=circle_radius,
-                #     points_inside_true_cloud=true_points_inside_circle,
-                #     points_inside_shifted_cloud=shifted_points_inside_circle,
-                #     points_matched_true_cloud=true_points_matches,
-                #     points_matched_shifted_cloud=shifted_points_matches,
-                #     points_in_pair_true_cloud=closest_n_true_point_pair,
-                #     points_in_pair_shifted_cloud=closest_n_shifted_point_pair,
-                #     shift_correction=shift_correction,
-                #     shifted_cloud_before_shift=past_flow_shifted_points_before_adjustment.T,
-                #     frame_number=bg_sub_mask_key + 1,
-                #     track_id=track_id,
-                #     line_width=None
-                # )
+                if plot:
+                    plot_true_and_shifted_all_steps_simple(
+                        true_cloud=object_idx_stacked.T,
+                        shifted_cloud=past_flow_shifted_points.T,
+                        true_box=bbox,
+                        shifted_box=past_bbox,
+                        shift_correction=shift_correction,
+                        shift_corrected_cloud_key_point=key_point_criterion(past_flow_shifted_points.T, axis=0),
+                        shifted_cloud_before_shift=past_flow_shifted_points_before_adjustment.T,
+                        frame_number=bg_sub_mask_key + 1,
+                        track_id=track_id,
+                        true_cloud_key_point=true_cloud_key_point,
+                        shifted_cloud_key_point=shifted_cloud_key_point,
+                        key_point_criteria='Median',
+                        overlap_threshold=OVERLAP_THRESHOLD,
+                        line_width=None,
+                        plot_save_path=plot_save_path
+                    )
 
                 processed_tracks += 1
 
@@ -1030,9 +1015,10 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
     # plot_images(final_default_flow, final_optimized_flow)
     first_key = list(foreground_masks.keys())[0]
     last_key = list(foreground_masks.keys())[-1]
-    verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skipped, original_12_frames_flow,
-                           df, original_shape, new_shape, img_level=False, object_level=True,
-                           plot_save_path=plot_save_path, input_frame_num=first_key, target_frame_num=last_key)
+    if plot:
+        verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skipped, original_12_frames_flow,
+                               df, original_shape, new_shape, img_level=False, object_level=True,
+                               plot_save_path=plot_save_path, input_frame_num=first_key, target_frame_num=last_key)
 
     logger.info(f'Frames processed: {processed_frames} | Tracks Processed: {processed_tracks} | '
                 f'Tracks Skipped: {tracks_skipped}')
