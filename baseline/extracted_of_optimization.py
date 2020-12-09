@@ -1176,5 +1176,7 @@ if __name__ == '__main__':
     # TODO:
     #  1. Circular area. Take points from clouds. For true_cloud take actual displacement.
     #  2. Find out why clubbing together is not working out. - looks better with index swap and copy current flow map
-    #  then shift - improvement - if overlap is good enough dont shift!!
+    #  then shift - improvement - if overlap is good enough dont shift!! - Done
     #  3. Data distribution and characteristics of the gt flow and of flow.
+    #  4. Check the index swap thing during final flow in
+    #  _prepare_data_xyuv_for_all_object_of_interest_optimized_optical_flow if the indexes are correct!
