@@ -1828,6 +1828,9 @@ class BackgroundSubtraction(FeatureExtractor):
             future12_bg_sub_mask = {}
             future_12_frames_optical_flow = {}
             flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))  # fixme: put sum of optimized of here
+            last_frame_to_add_in_future_dict = list(last12_bg_sub_mask.keys())[-2]
+            future12_bg_sub_mask.update({
+                last_frame_to_add_in_future_dict: last12_bg_sub_mask[last_frame_to_add_in_future_dict]})
             for of_i, actual_of_i in zip(range(interest_fr, of_interest_fr),
                                          range(actual_interest_fr, actual_of_interest_fr)):
                 future_mask = self.bg_sub_for_frame_equal_time_distributed(frames=frames, fr=of_i,
@@ -1855,7 +1858,8 @@ class BackgroundSubtraction(FeatureExtractor):
                 optical_flow_between_frames=future_12_frames_optical_flow,
                 original_shape=original_shape,
                 new_shape=resized_shape,
-                circle_radius=8)  # todo: add to parameter
+                circle_radius=8,
+                future_frames_mode=True)  # todo: add to parameter
 
             if use_color:
                 data, data_, max_0, max_1, min_0, min_1, threshold_img = \
@@ -1898,7 +1902,7 @@ class BackgroundSubtraction(FeatureExtractor):
                 elif all_object_of_interest_only_with_optimized_of:
                     all_agent_features = \
                         self._prepare_data_xyuv_for_all_object_of_interest_optimized_optical_flow(
-                            flow, interest_fr,
+                            future_12_frames_optical_flow_summed, interest_fr,
                             mask,
                             data_frame_num=actual_interest_fr,
                             evaluation_mode=True,
@@ -1911,7 +1915,7 @@ class BackgroundSubtraction(FeatureExtractor):
                             optical_flow_frame_num=
                             frames_used_in_of_estimation,
                             optical_flow_till_current_frame=
-                            past_12_frames_optical_flow,
+                            past_12_frames_optical_flow_summed,
                             return_normalized=return_normalized)
                     of_flow_till_current_frame = flow
                     # data_all_frames.update({interest_fr: all_agent_features})

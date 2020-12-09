@@ -734,7 +734,7 @@ def optimize_optical_flow_object_level_for_frames_older(df, foreground_masks, op
 
 
 def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_flow_between_frames, original_shape,
-                                                  new_shape, circle_radius):
+                                                  new_shape, circle_radius, future_frames_mode=False):
     processed_frames = 0
     processed_tracks = 0
     tracks_skipped = 0
@@ -936,7 +936,10 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
 
                 past_flow_shifted_points = (past_flow_shifted_points.T + shift_correction).T
 
-                plot_save_path = f'../Plots/Optimization_plot/wit{int(OVERLAP_THRESHOLD * 100)}_threshold/'
+                if future_frames_mode:
+                    plot_save_path = f'../Plots/Optimization_plot/wit{int(OVERLAP_THRESHOLD * 100)}_threshold_future/'
+                else:
+                    plot_save_path = f'../Plots/Optimization_plot/wit{int(OVERLAP_THRESHOLD * 100)}_threshold/'
 
                 plot_true_and_shifted_all_steps_simple(
                     true_cloud=object_idx_stacked.T,
@@ -1019,10 +1022,11 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
     # final_default_flow = visualize_flow(original_12_frames_flow, foreground_masks[0].shape)
     # final_optimized_flow = visualize_flow(final_12_frames_flow, foreground_masks[0].shape)
     # plot_images(final_default_flow, final_optimized_flow)
-
+    first_key = list(foreground_masks.keys())[0]
+    last_key = list(foreground_masks.keys())[-1]
     verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skipped, original_12_frames_flow,
                            df, original_shape, new_shape, img_level=False, object_level=True,
-                           plot_save_path=plot_save_path)
+                           plot_save_path=plot_save_path, input_frame_num=first_key, target_frame_num=last_key)
 
     logger.info(f'Frames processed: {processed_frames} | Tracks Processed: {processed_tracks} | '
                 f'Tracks Skipped: {tracks_skipped}')
