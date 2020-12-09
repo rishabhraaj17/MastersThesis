@@ -376,8 +376,11 @@ def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_s
     ax2.add_patch(rect3)
     ax2.add_patch(rect4)
 
-    ax1.set_title('Default')
-    ax2.set_title('Optimized')
+    original_error = np.linalg.norm(true_cloud_key_point - original_shifted_cloud_key_point, 2)
+    optimized_error = np.linalg.norm(true_cloud_key_point - shifted_cloud_key_point, 2)
+
+    ax1.set_title(f'Default | Error: {original_error:.2f}')
+    ax2.set_title(f'Optimized | Error: {optimized_error:.2f}')
 
     legends_dict = {'blue': 'Points at T',
                     'magenta': '(T-1) Shifted points at T',
@@ -599,10 +602,13 @@ def plot_true_and_shifted_all_steps_simple(true_cloud, shifted_cloud, true_box, 
     ax3.add_patch(rect3_shifted)
     ax4.add_patch(rect4_shifted)
 
+    original_error = np.linalg.norm(true_cloud_key_point - shifted_cloud_key_point, 2)
+    optimized_error = np.linalg.norm(true_cloud_key_point - shift_corrected_cloud_key_point, 2)
+
     ax1.set_title('True Cloud')
     ax2.set_title('Shifted Cloud')
-    ax3.set_title('Clouds Overlaid')
-    ax4.set_title('Flow Corrected Overlaid')
+    ax3.set_title(f'Clouds Overlaid | Error: {original_error:.2f}')
+    ax4.set_title(f'Flow Corrected Overlaid | Error: {optimized_error:.2f}')
 
     legends_dict = {'blue': 'Points at T',
                     'magenta': '(T-1) Shifted points at T',
