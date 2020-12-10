@@ -972,6 +972,8 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                 else:
                     plot_save_path = f'../Plots/Optimization_plot/wit{int(OVERLAP_THRESHOLD * 100)}_threshold/'
 
+                # plot_save_path = None
+
                 if plot:
                     plot_true_and_shifted_all_steps_simple(
                         true_cloud=object_idx_stacked.T,
@@ -1036,20 +1038,24 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
     # plot_images(final_default_flow, final_optimized_flow)
     first_key = list(foreground_masks.keys())[0]
     last_key = list(foreground_masks.keys())[-1]
+    after_2nd_flow_correction = None
     if plot:
-        verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skipped, original_12_frames_flow,
-                               df, original_shape, new_shape, img_level=False, object_level=True,
-                               plot_save_path=plot_save_path, input_frame_num=first_key, target_frame_num=last_key)
+        after_2nd_flow_correction = verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skipped,
+                                                           original_12_frames_flow,
+                                                           df, original_shape, new_shape, img_level=False,
+                                                           object_level=True,
+                                                           plot_save_path=plot_save_path, input_frame_num=first_key,
+                                                           target_frame_num=last_key)
 
     logger.info(f'Frames processed: {processed_frames} | Tracks Processed: {processed_tracks} | '
                 f'Tracks Skipped: {tracks_skipped}')
 
-    return final_12_frames_flow
+    return after_2nd_flow_correction  # or final_12_frames_flow
 
 
-def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skipped, original_12_frames_flow,
-                           df, original_shape, new_shape, img_level=False, object_level=True, input_frame_num=0,
-                           target_frame_num=12, plot_save_path=None):
+def verify_flow_correction_old(final_12_frames_flow, foreground_masks, tracks_skipped, original_12_frames_flow,
+                               df, original_shape, new_shape, img_level=False, object_level=True, input_frame_num=0,
+                               target_frame_num=12, plot_save_path=None):
     if img_level:
         activations = (foreground_masks[0] > 0).nonzero()
         frame_flow_idx = final_12_frames_flow[activations[0], activations[1]]
@@ -1164,6 +1170,170 @@ def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skippe
                                                        frame_target_bbox_center=target_frame_bbox_center,
                                                        overlap_threshold=OVERLAP_THRESHOLD,
                                                        plot_save_path=plot_save_path)
+
+
+def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skipped, original_12_frames_flow,
+                           df, original_shape, new_shape, img_level=False, object_level=True, input_frame_num=0,
+                           target_frame_num=12, plot_save_path=None, pull_towards_bbox_center=True):
+    if img_level:
+        activations = (foreground_masks[0] > 0).nonzero()
+        frame_flow_idx = final_12_frames_flow[activations[0], activations[1]]
+        activations_stacked = np.stack(activations)
+        frame_flow_idx = frame_flow_idx.T
+        optical_flow_shifted_past_frame_activations = np.zeros_like(activations_stacked, dtype=np.float)
+        optical_flow_shifted_past_frame_activations[0] = activations[0] + frame_flow_idx[0]
+        optical_flow_shifted_past_frame_activations[1] = activations[1] + frame_flow_idx[1]
+        optical_flow_shifted_past_frame_activations = np.round(optical_flow_shifted_past_frame_activations) \
+            .astype(np.int)
+        optical_flow_shifted_frame = np.zeros_like(foreground_masks[0])
+        optical_flow_shifted_frame[optical_flow_shifted_past_frame_activations[0],
+                                   optical_flow_shifted_past_frame_activations[1]] = 255
+        bg_sub_mask_value_next = foreground_masks[12]
+        plot_images(optical_flow_shifted_frame, bg_sub_mask_value_next)
+    if object_level:
+        final_flow_vector_map = final_12_frames_flow.copy()
+        # can also verify object-level
+        frame_input = foreground_masks[input_frame_num]
+        frame_target = foreground_masks[target_frame_num]
+
+        input_frame_annotation = get_frame_annotations_and_skip_lost(df, input_frame_num)
+        input_annotations, input_bbox_centers, input_track_ids = scale_annotations(input_frame_annotation,
+                                                                                   original_scale=original_shape,
+                                                                                   new_scale=new_shape,
+                                                                                   return_track_id=True,
+                                                                                   tracks_with_annotations=True)
+        target_frame_annotation = get_frame_annotations_and_skip_lost(df, target_frame_num)
+        target_annotations, target_bbox_centers, target_track_ids = scale_annotations(target_frame_annotation,
+                                                                                      original_scale=original_shape,
+                                                                                      new_scale=new_shape,
+                                                                                      return_track_id=True,
+                                                                                      tracks_with_annotations=True)
+
+        for id_ in range(input_annotations.shape[0]):
+            input_frame_mask = np.zeros_like(frame_input)
+            input_frame_mask[input_annotations[id_][1]:input_annotations[id_][3],
+            input_annotations[id_][0]:input_annotations[id_][2]] = \
+                frame_input[input_annotations[id_][1]:input_annotations[id_][3],
+                input_annotations[id_][0]:input_annotations[id_][2]]
+
+            input_frame_track_id = input_annotations[id_][-1].item()
+            input_frame_bbox_center = input_bbox_centers[id_]
+            input_frame_bbox = input_annotations[id_][:4]
+
+            input_frame_object_idx = (input_frame_mask > 0).nonzero()
+            input_frame_object_idx = list(input_frame_object_idx)
+            input_frame_object_idx[0], input_frame_object_idx[1] = input_frame_object_idx[1], input_frame_object_idx[0]
+
+            if input_frame_object_idx[0].size != 0:
+                try:
+                    track_idx_next_frame = target_track_ids.tolist().index(input_frame_track_id)
+                except ValueError:
+                    logger.info(f'SKIPPING: Track id {input_frame_track_id} absent in next frame!')
+                    tracks_skipped += 1
+                    continue
+
+                target_frame_mask = np.zeros_like(frame_target)
+                target_frame_mask[
+                target_annotations[track_idx_next_frame][1]:target_annotations[track_idx_next_frame][3],
+                target_annotations[track_idx_next_frame][0]:target_annotations[track_idx_next_frame][2]] = \
+                    frame_target[
+                    target_annotations[track_idx_next_frame][1]:target_annotations[track_idx_next_frame][3],
+                    target_annotations[track_idx_next_frame][0]:target_annotations[track_idx_next_frame][2]]
+
+                target_frame_track_id = target_annotations[track_idx_next_frame][-1].item()
+                target_frame_bbox_center = target_bbox_centers[track_idx_next_frame]
+                target_frame_bbox = target_annotations[track_idx_next_frame][:4]
+                x_min, y_min, x_max, y_max = target_frame_bbox
+                x, y, w, h = x_min, y_min, (x_max - x_min), (y_max - y_min)
+
+                target_frame_object_idx = (target_frame_mask > 0).nonzero()
+                target_frame_object_idx = list(target_frame_object_idx)
+                target_frame_object_idx[0], target_frame_object_idx[1] = \
+                    target_frame_object_idx[1], target_frame_object_idx[0]
+                target_frame_object_idx_stacked = np.stack(target_frame_object_idx)
+
+                input_frame_object_idx_stacked = np.stack(input_frame_object_idx)
+
+                # original_flow_idx = original_12_frames_flow[input_frame_object_idx[0], input_frame_object_idx[1]]
+                original_flow_idx = original_12_frames_flow[input_frame_object_idx[1], input_frame_object_idx[0]]
+                original_flow_idx = original_flow_idx.T
+                original_flow_shifted_points = np.zeros_like(input_frame_object_idx_stacked, dtype=np.float)
+                original_flow_shifted_points[0] = input_frame_object_idx[0] + original_flow_idx[0]
+                original_flow_shifted_points[1] = input_frame_object_idx[1] + original_flow_idx[1]
+                # original_flow_shifted_points = np.round(original_flow_shifted_points).astype(np.int)
+
+                # flow_idx = final_flow_vector_map[input_frame_object_idx[0], input_frame_object_idx[1]]
+                flow_idx = final_flow_vector_map[input_frame_object_idx[1], input_frame_object_idx[0]]
+                flow_idx = flow_idx.T
+                flow_shifted_points = np.zeros_like(input_frame_object_idx_stacked, dtype=np.float)
+                flow_shifted_points[0] = input_frame_object_idx[0] + flow_idx[0]
+                flow_shifted_points[1] = input_frame_object_idx[1] + flow_idx[1]
+                # flow_shifted_points = np.round(flow_shifted_points).astype(np.int)
+
+                # 2nd wave of improvement
+                # 1. If error increases after shift, dont shift
+                original_error_bbox_center = np.linalg.norm(target_frame_bbox_center -
+                                                            np.median(original_flow_shifted_points.T, axis=0), 2)
+                optimized_error_bbox_center = np.linalg.norm(target_frame_bbox_center -
+                                                             np.median(flow_shifted_points.T, axis=0), 2)
+
+                if original_error_bbox_center < optimized_error_bbox_center:
+                    final_flow_vector_map[input_frame_object_idx[1], input_frame_object_idx[0]] = \
+                        original_12_frames_flow[input_frame_object_idx[1], input_frame_object_idx[0]]
+                    flow_idx = final_flow_vector_map[input_frame_object_idx[1], input_frame_object_idx[0]]
+                    flow_idx = flow_idx.T
+                    flow_shifted_points = np.zeros_like(input_frame_object_idx_stacked, dtype=np.float)
+                    flow_shifted_points[0] = input_frame_object_idx[0] + flow_idx[0]
+                    flow_shifted_points[1] = input_frame_object_idx[1] + flow_idx[1]
+                # 2. Pull points close once more
+                key_point_criterion = np.median
+                shifted_cloud_key_point = key_point_criterion(flow_shifted_points.T, axis=0)
+                xy_distance_closest_n_points_by_criteria = np.linalg.norm(np.expand_dims(target_frame_bbox_center, 0) -
+                                                                          np.expand_dims(shifted_cloud_key_point, 0), 2,
+                                                                          axis=0)
+
+                xy_distance_closest_n_points_mean_x, xy_distance_closest_n_points_mean_y = \
+                    xy_distance_closest_n_points_by_criteria
+
+                shift_condition_base = flow_shifted_points.T.mean(0) < target_frame_bbox_center
+                shift_condition_base_x, shift_condition_base_y = shift_condition_base
+
+                if shift_condition_base_x and shift_condition_base_y:
+                    pre_shift_correction = np.array([xy_distance_closest_n_points_mean_x,
+                                                     xy_distance_closest_n_points_mean_y])
+                elif not shift_condition_base_x and shift_condition_base_y:
+                    pre_shift_correction = np.array([-xy_distance_closest_n_points_mean_x,
+                                                     xy_distance_closest_n_points_mean_y])
+                elif shift_condition_base_x and not shift_condition_base_y:
+                    pre_shift_correction = np.array([xy_distance_closest_n_points_mean_x,
+                                                     -xy_distance_closest_n_points_mean_y])
+                else:
+                    pre_shift_correction = np.array([-xy_distance_closest_n_points_mean_x,
+                                                     -xy_distance_closest_n_points_mean_y])
+
+                shift_correction = np.power(pre_shift_correction, SHIFT_CORRECTION_ALPHA)
+                flow_shifted_points = (flow_shifted_points.T + shift_correction).T
+                # 3. Throw points - circle idea can work here - todo: if required
+
+                plot_true_and_shifted_same_plot_simple(true_cloud=target_frame_object_idx_stacked.T,
+                                                       shifted_cloud=flow_shifted_points.T,
+                                                       original_shifted_cloud=original_flow_shifted_points.T,
+                                                       true_box=target_frame_bbox,
+                                                       true_cloud_key_point=
+                                                       np.median(target_frame_object_idx_stacked.T, axis=0),
+                                                       shifted_cloud_key_point=np.median(flow_shifted_points.T, axis=0),
+                                                       original_shifted_cloud_key_point=
+                                                       np.median(original_flow_shifted_points.T, axis=0),
+                                                       key_point_criteria='Median',
+                                                       shifted_box=input_frame_bbox,
+                                                       frame_input=input_frame_num,
+                                                       frame_target=target_frame_num,
+                                                       track_id=input_frame_track_id,
+                                                       frame_input_bbox_center=input_frame_bbox_center,
+                                                       frame_target_bbox_center=target_frame_bbox_center,
+                                                       overlap_threshold=OVERLAP_THRESHOLD,
+                                                       plot_save_path=plot_save_path)
+        return final_flow_vector_map
 
 
 def verify_flow_correction_during_extraction(frame_t, frame_t_minus_one, frame_t_plus_one,
