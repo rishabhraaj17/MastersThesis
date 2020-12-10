@@ -24,7 +24,7 @@ SHIFT_Y = 0
 CLOSEST_N_POINTS = 20
 SHIFT_CORRECTION_ALPHA = 1
 OVERLAP_THRESHOLD = 80
-OVERLAP_THRESHOLD = OVERLAP_THRESHOLD/100.0
+OVERLAP_THRESHOLD = OVERLAP_THRESHOLD / 100.0
 
 
 def largest_indices(array: np.ndarray, n: int) -> tuple:
@@ -333,6 +333,7 @@ def plot_clouds_in_and_out_with_circle_around_center_and_bbox_same_plot(cloud1, 
 def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_shifted_cloud, true_box, shifted_box,
                                            true_cloud_key_point, shifted_cloud_key_point, key_point_criteria,
                                            original_shifted_cloud_key_point, frame_input, frame_target, track_id,
+                                           frame_input_bbox_center, frame_target_bbox_center,
                                            overlap_threshold, plot_save_path=None, line_width=None):
     fig, (ax1, ax2) = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(12, 6))
 
@@ -345,6 +346,8 @@ def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_s
     rect1 = patches.Rectangle(xy=(true_box[0], true_box[1]), width=true_box[2] - true_box[0],
                               height=true_box[3] - true_box[1], fill=False,
                               linewidth=line_width, edgecolor='r')
+    ax1.plot(frame_input_bbox_center[0], frame_input_bbox_center[1], 'D', markerfacecolor='violet', markeredgecolor='k',
+             markersize=9)
     # cloud2
     ax1.plot(original_shifted_cloud[:, 0], original_shifted_cloud[:, 1], 'o', markerfacecolor='gray',
              markeredgecolor='k', markersize=8)
@@ -353,6 +356,8 @@ def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_s
     rect2 = patches.Rectangle(xy=(shifted_box[0], shifted_box[1]), width=shifted_box[2] - shifted_box[0],
                               height=shifted_box[3] - shifted_box[1], fill=False,
                               linewidth=line_width, edgecolor='g')
+    ax1.plot(frame_target_bbox_center[0], frame_target_bbox_center[1], 'D', markerfacecolor='wheat',
+             markeredgecolor='k', markersize=9)
     # Optimized
     # cloud1
     ax2.plot(true_cloud[:, 0], true_cloud[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k',
@@ -362,6 +367,8 @@ def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_s
     rect3 = patches.Rectangle(xy=(true_box[0], true_box[1]), width=true_box[2] - true_box[0],
                               height=true_box[3] - true_box[1], fill=False,
                               linewidth=line_width, edgecolor='r')
+    ax2.plot(frame_input_bbox_center[0], frame_input_bbox_center[1], 'D', markerfacecolor='violet', markeredgecolor='k',
+             markersize=9)
     # cloud2
     ax2.plot(shifted_cloud[:, 0], shifted_cloud[:, 1], 'o', markerfacecolor='magenta', markeredgecolor='k',
              markersize=8)
@@ -370,6 +377,8 @@ def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_s
     rect4 = patches.Rectangle(xy=(shifted_box[0], shifted_box[1]), width=shifted_box[2] - shifted_box[0],
                               height=shifted_box[3] - shifted_box[1], fill=False,
                               linewidth=line_width, edgecolor='g')
+    ax2.plot(frame_target_bbox_center[0], frame_target_bbox_center[1], 'D', markerfacecolor='wheat',
+             markeredgecolor='k', markersize=9)
 
     ax1.add_patch(rect1)
     ax1.add_patch(rect2)
@@ -378,22 +387,27 @@ def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_s
 
     original_error = np.linalg.norm(true_cloud_key_point - original_shifted_cloud_key_point, 2)
     optimized_error = np.linalg.norm(true_cloud_key_point - shifted_cloud_key_point, 2)
+    original_error_bbox_center = np.linalg.norm(frame_target_bbox_center - original_shifted_cloud_key_point, 2)
+    optimized_error_bbox_center = np.linalg.norm(frame_target_bbox_center - shifted_cloud_key_point, 2)
 
-    ax1.set_title(f'Default | Error: {original_error:.2f}')
-    ax2.set_title(f'Optimized | Error: {optimized_error:.2f}')
+    ax1.set_title(f'Default | Error: {original_error:.2f} & {original_error_bbox_center:.2f}')
+    ax2.set_title(f'Optimized | Error: {optimized_error:.2f} & {optimized_error_bbox_center:.2f}')
 
     legends_dict = {'blue': 'Points at T',
                     'magenta': '(T-1) Shifted points at T',
                     'gray': '(T-1) Default Shifted points at T',
-                    'r': 'True Bounding Box',
-                    'g': 'Shifted Bounding Box',
+                    'r': 'T Bounding Box',
+                    'g': 'T-1 Bounding Box',
+                    'violet': 'T Bbox Center',
+                    'wheat': 'T-1 Bbox Center',
                     'aqua': f'Shifted {key_point_criteria}',
                     'orange': f'Default Shifted {key_point_criteria}',
                     'yellow': f'True {key_point_criteria}'}
 
     legend_patches = [mpatches.Patch(color=key, label=val) for key, val in legends_dict.items()]
     fig.legend(handles=legend_patches, loc=2)
-    fig.suptitle(f'1st Frame vs 12th Frame\n'
+    fig.suptitle(f'(T-1) vs T (0.4 sec interval) | '
+                 f'Error: L2(x, y) & L2(x, bbox_center) - x and y are center of clouds\n'
                  f'Overlap Threshold: {overlap_threshold}')
 
     if plot_save_path is None:
@@ -741,7 +755,8 @@ def optimize_optical_flow_object_level_for_frames_older(df, foreground_masks, op
 
 
 def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_flow_between_frames, original_shape,
-                                                  new_shape, circle_radius, future_frames_mode=False, plot=True):
+                                                  new_shape, circle_radius, future_frames_mode=False, plot=True,
+                                                  pull_towards_bbox_center=True):
     processed_frames = 0
     processed_tracks = 0
     tracks_skipped = 0
@@ -851,9 +866,9 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                                                               np.expand_dims(closest_n_shifted_point_pair, 0), 2,
                                                               axis=0)
                 xy_distance_closest_n_points_mean = xy_distance_closest_n_points.mean()
-                xy_per_dimension_overlap = np.equal(closest_n_true_point_pair, closest_n_shifted_point_pair)\
+                xy_per_dimension_overlap = np.equal(closest_n_true_point_pair, closest_n_shifted_point_pair) \
                     .astype(np.float).mean(0)
-                xy_overall_dimension_overlap = np.equal(closest_n_true_point_pair, closest_n_shifted_point_pair)\
+                xy_overall_dimension_overlap = np.equal(closest_n_true_point_pair, closest_n_shifted_point_pair) \
                     .astype(np.float).mean()
                 logger.info(f'xy_distance_closest_n_points_mean: {xy_distance_closest_n_points_mean}\n'
                             f'xy_per_dimension_overlap: {xy_per_dimension_overlap}'
@@ -889,9 +904,15 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                 shifted_cloud_key_point = key_point_criterion(past_flow_shifted_points.T, axis=0)
 
                 #  STEP: 2
-                xy_distance_closest_n_points_mean = np.linalg.norm(np.expand_dims(true_cloud_key_point, 0) -
-                                                                   np.expand_dims(shifted_cloud_key_point, 0), 2,
-                                                                   axis=0)
+                # Pull towards bbox center
+                if pull_towards_bbox_center:
+                    xy_distance_closest_n_points_mean = np.linalg.norm(np.expand_dims(bbox_center, 0) -
+                                                                       np.expand_dims(shifted_cloud_key_point, 0), 2,
+                                                                       axis=0)
+                else:
+                    xy_distance_closest_n_points_mean = np.linalg.norm(np.expand_dims(true_cloud_key_point, 0) -
+                                                                       np.expand_dims(shifted_cloud_key_point, 0), 2,
+                                                                       axis=0)
                 xy_distance_closest_n_points_mean_x, xy_distance_closest_n_points_mean_y = \
                     xy_distance_closest_n_points_mean
 
@@ -1139,8 +1160,177 @@ def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skippe
                                                        frame_input=input_frame_num,
                                                        frame_target=target_frame_num,
                                                        track_id=input_frame_track_id,
+                                                       frame_input_bbox_center=input_frame_bbox_center,
+                                                       frame_target_bbox_center=target_frame_bbox_center,
                                                        overlap_threshold=OVERLAP_THRESHOLD,
                                                        plot_save_path=plot_save_path)
+
+
+def verify_flow_correction_during_extraction(frame_t, frame_t_minus_one, frame_t_plus_one,
+                                             default_t_minus_one_flow, default_t_plus_one_flow,
+                                             optimized_t_minus_one_flow, optimized_t_plus_one_flow,
+                                             df, original_shape, new_shape,
+                                             frame_t_idx=0, frame_t_plus_one_idx=24,
+                                             frame_t_minus_one_idx=12, plot_save_path=None):
+    tracks_skipped = 0
+    frame_t_minus_one_annotation = get_frame_annotations_and_skip_lost(df, frame_t_minus_one_idx)
+    frame_t_minus_one_annotations, frame_t_minus_one_bbox_centers, frame_t_minus_one_track_ids = scale_annotations(
+        frame_t_minus_one_annotation,
+        original_scale=original_shape,
+        new_scale=new_shape,
+        return_track_id=True,
+        tracks_with_annotations=True)
+    frame_t_annotation = get_frame_annotations_and_skip_lost(df, frame_t_idx)
+    frame_t_annotations, frame_t_bbox_centers, frame_t_track_ids = scale_annotations(
+        frame_t_annotation,
+        original_scale=original_shape,
+        new_scale=new_shape,
+        return_track_id=True,
+        tracks_with_annotations=True)
+    frame_t_plus_one_annotation = get_frame_annotations_and_skip_lost(df, frame_t_plus_one_idx)
+    frame_t_plus_one_annotations, frame_t_plus_one_bbox_centers, frame_t_plus_one_track_ids = scale_annotations(
+        frame_t_plus_one_annotation,
+        original_scale=original_shape,
+        new_scale=new_shape,
+        return_track_id=True,
+        tracks_with_annotations=True)
+
+    for id_ in range(frame_t_minus_one_annotations.shape[0]):
+        frame_t_minus_one_mask = np.zeros_like(frame_t_minus_one)
+        frame_t_minus_one_mask[frame_t_minus_one_annotations[id_][1]:frame_t_minus_one_annotations[id_][3],
+        frame_t_minus_one_annotations[id_][0]:frame_t_minus_one_annotations[id_][2]] = \
+            frame_t_minus_one[frame_t_minus_one_annotations[id_][1]:frame_t_minus_one_annotations[id_][3],
+            frame_t_minus_one_annotations[id_][0]:frame_t_minus_one_annotations[id_][2]]
+
+        frame_t_minus_one_track_id = frame_t_minus_one_annotations[id_][-1].item()
+        frame_t_minus_one_bbox_center = frame_t_minus_one_bbox_centers[id_]
+        frame_t_minus_one_bbox = frame_t_minus_one_annotations[id_][:4]
+
+        frame_t_minus_one_object_idx = (frame_t_minus_one_mask > 0).nonzero()
+        frame_t_minus_one_object_idx = list(frame_t_minus_one_object_idx)
+        frame_t_minus_one_object_idx[0], frame_t_minus_one_object_idx[1] = \
+            frame_t_minus_one_object_idx[1], frame_t_minus_one_object_idx[0]
+
+        if frame_t_minus_one_object_idx[0].size != 0:
+            # optimized_t_minus_one_flow_idx = \
+            #     optimized_t_minus_one_flow[frame_t_minus_one_object_idx[0], frame_t_minus_one_object_idx[1]]
+            optimized_t_minus_one_flow_idx = \
+                optimized_t_minus_one_flow[frame_t_minus_one_object_idx[1], frame_t_minus_one_object_idx[0]]
+            frame_t_minus_one_object_idx_stacked = np.stack(frame_t_minus_one_object_idx)
+            optimized_t_minus_one_flow_idx = optimized_t_minus_one_flow_idx.T
+            optimized_t_minus_one_flow_shifted_points = \
+                np.zeros_like(frame_t_minus_one_object_idx_stacked, dtype=np.float)
+            optimized_t_minus_one_flow_shifted_points[0] = \
+                frame_t_minus_one_object_idx[0] + optimized_t_minus_one_flow_idx[0]
+            optimized_t_minus_one_flow_shifted_points[1] = \
+                frame_t_minus_one_object_idx[1] + optimized_t_minus_one_flow_idx[1]
+            # optimized_t_minus_one_flow_shifted_points = \
+            #     np.round(optimized_t_minus_one_flow_shifted_points).astype(np.int)
+
+            # default_t_minus_one_flow_idx = \
+            #     default_t_minus_one_flow[frame_t_minus_one_object_idx[0], frame_t_minus_one_object_idx[1]]
+            default_t_minus_one_flow_idx = \
+                default_t_minus_one_flow[frame_t_minus_one_object_idx[1], frame_t_minus_one_object_idx[0]]
+            default_t_minus_one_flow_idx = default_t_minus_one_flow_idx.T
+            default_t_minus_one_flow_shifted_points = \
+                np.zeros_like(frame_t_minus_one_object_idx_stacked, dtype=np.float)
+            default_t_minus_one_flow_shifted_points[0] = \
+                frame_t_minus_one_object_idx[0] + default_t_minus_one_flow_idx[0]
+            default_t_minus_one_flow_shifted_points[1] = \
+                frame_t_minus_one_object_idx[1] + default_t_minus_one_flow_idx[1]
+            # default_t_minus_one_flow_shifted_points = \
+            #     np.round(default_t_minus_one_flow_shifted_points).astype(np.int)
+
+            # logger.info(optimized_t_minus_one_flow_idx.T)
+            # logger.info(default_t_minus_one_flow_idx.T)
+
+            try:
+                frame_t_track_idx = frame_t_track_ids.tolist().index(frame_t_minus_one_track_id)
+            except ValueError:
+                logger.info(f'SKIPPING: Track id {frame_t_minus_one_track_id} absent in next frame!')
+                tracks_skipped += 1
+                continue
+
+            frame_t_mask = np.zeros_like(frame_t)
+            frame_t_mask[
+            frame_t_annotations[frame_t_track_idx][1]:frame_t_annotations[frame_t_track_idx][3],
+            frame_t_annotations[frame_t_track_idx][0]:frame_t_annotations[frame_t_track_idx][2]] = \
+                frame_t[
+                frame_t_annotations[frame_t_track_idx][1]:frame_t_annotations[frame_t_track_idx][3],
+                frame_t_annotations[frame_t_track_idx][0]:frame_t_annotations[frame_t_track_idx][2]]
+
+            frame_t_track_id = frame_t_annotations[frame_t_track_idx][-1].item()
+            frame_t_bbox_center = frame_t_bbox_centers[frame_t_track_idx]
+            frame_t_bbox = frame_t_annotations[frame_t_track_idx][:4]
+            # x_min, y_min, x_max, y_max = frame_t_bbox
+            # x, y, w, h = x_min, y_min, (x_max - x_min), (y_max - y_min)
+
+            frame_t_object_idx = (frame_t_mask > 0).nonzero()
+            frame_t_object_idx = list(frame_t_object_idx)
+            frame_t_object_idx[0], frame_t_object_idx[1] = frame_t_object_idx[1], frame_t_object_idx[0]
+            # frame_t_object_idx_stacked = np.stack(frame_t_object_idx)
+
+            # future frames
+
+            optimized_t_plus_one_flow_idx = \
+                optimized_t_plus_one_flow[frame_t_object_idx[1], frame_t_object_idx[0]]
+            frame_t_object_idx_stacked = np.stack(frame_t_object_idx)
+            optimized_t_plus_one_flow_idx = optimized_t_plus_one_flow_idx.T
+            optimized_t_plus_one_flow_shifted_points = \
+                np.zeros_like(frame_t_minus_one_object_idx_stacked, dtype=np.float)
+            optimized_t_plus_one_flow_shifted_points[0] = frame_t_object_idx[0] + optimized_t_plus_one_flow_idx[0]
+            optimized_t_plus_one_flow_shifted_points[1] = frame_t_object_idx[1] + optimized_t_plus_one_flow_idx[1]
+            # optimized_t_plus_one_flow_shifted_points = \
+            #     np.round(optimized_t_plus_one_flow_shifted_points).astype(np.int)
+
+            # default_t_plus_one_flow_idx = \
+            #     default_t_minus_one_flow[frame_t_object_idx[0], frame_t_object_idx[1]]
+            default_t_plus_one_flow_idx = \
+                default_t_plus_one_flow[frame_t_object_idx[1], frame_t_object_idx[0]]
+            default_t_plus_one_flow_idx = default_t_plus_one_flow_idx.T
+            default_t_minus_one_flow_shifted_points = \
+                np.zeros_like(frame_t_minus_one_object_idx_stacked, dtype=np.float)
+            default_t_minus_one_flow_shifted_points[0] = \
+                frame_t_object_idx[0] + default_t_plus_one_flow_idx[0]
+            default_t_minus_one_flow_shifted_points[1] = \
+                frame_t_object_idx[1] + default_t_plus_one_flow_idx[1]
+
+            frame_t_plus_one_mask = np.zeros_like(frame_t_plus_one)
+            frame_t_plus_one_mask[
+            frame_t_plus_one_annotations[frame_t_track_idx][1]:frame_t_plus_one_annotations[frame_t_track_idx][3],
+            frame_t_plus_one_annotations[frame_t_track_idx][0]:frame_t_plus_one_annotations[frame_t_track_idx][2]] = \
+                frame_t_plus_one[
+                frame_t_plus_one_annotations[frame_t_track_idx][1]:frame_t_plus_one_annotations[frame_t_track_idx][3],
+                frame_t_plus_one_annotations[frame_t_track_idx][0]:frame_t_plus_one_annotations[frame_t_track_idx][2]]
+
+            frame_t_plus_one_track_id = frame_t_plus_one_annotations[frame_t_track_idx][-1].item()
+            frame_t_plus_one_bbox_center = frame_t_plus_one_bbox_centers[frame_t_track_idx]
+            frame_t_plus_one_bbox = frame_t_plus_one_annotations[frame_t_track_idx][:4]
+            # x_min, y_min, x_max, y_max = frame_t_plus_one_bbox
+            # x, y, w, h = x_min, y_min, (x_max - x_min), (y_max - y_min)
+
+            frame_t_object_idx = (frame_t_plus_one_mask > 0).nonzero()
+            frame_t_object_idx = list(frame_t_object_idx)
+            frame_t_object_idx[0], frame_t_object_idx[1] = frame_t_object_idx[1], frame_t_object_idx[0]
+            # frame_t_object_idx_stacked = np.stack(frame_t_object_idx)
+
+            plot_true_and_shifted_same_plot_simple(true_cloud=frame_t_object_idx_stacked.T,
+                                                   shifted_cloud=optimized_t_minus_one_flow_shifted_points.T,
+                                                   original_shifted_cloud=default_t_minus_one_flow_shifted_points.T,
+                                                   true_box=frame_t_bbox,
+                                                   true_cloud_key_point=
+                                                   np.median(frame_t_object_idx_stacked.T, axis=0),
+                                                   shifted_cloud_key_point=
+                                                   np.median(optimized_t_minus_one_flow_shifted_points.T, axis=0),
+                                                   original_shifted_cloud_key_point=
+                                                   np.median(default_t_minus_one_flow_shifted_points.T, axis=0),
+                                                   key_point_criteria='Median',
+                                                   shifted_box=frame_t_minus_one_bbox,
+                                                   frame_input=frame_t_idx,
+                                                   frame_target=frame_t_minus_one_idx,
+                                                   track_id=frame_t_minus_one_track_id,
+                                                   overlap_threshold=OVERLAP_THRESHOLD,
+                                                   plot_save_path=plot_save_path)
 
 
 if __name__ == '__main__':

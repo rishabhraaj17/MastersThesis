@@ -126,7 +126,7 @@ def preprocess_optical_flow_optimized_data(classic_clustering=False, equal_time_
             last12_bg_sub_mask=last12_bg_sub_mask)
         # plot_extracted_features_and_verify_flow(features_, frames)
         accumulated_features = {**accumulated_features, **features_}
-        if save_per_part_path is not None:
+        if (part_idx % 170 == 0) and save_per_part_path is not None:
             Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
             f_n = f'time_distributed_dict_with_gt_bbox_centers_and_bbox_part_gt_velocity{part_idx}.pt'
             torch.save(accumulated_features, save_per_part_path + f_n)

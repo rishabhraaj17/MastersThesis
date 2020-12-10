@@ -804,11 +804,16 @@ class FeatureExtractor(object):
             mask[annotations[id_][1]:annotations[id_][3], annotations[id_][0]:annotations[id_][2]] = \
                 data_[annotations[id_][1]:annotations[id_][3], annotations[id_][0]:annotations[id_][2]]
             object_idx = (mask > 0).nonzero()
+            # We do not need to swap here as its coded later to swap
+            # object_idx = list(object_idx)
+            # object_idx[0], object_idx[1] = object_idx[1], object_idx[0]
             # plot_points_only(object_idx[0], object_idx[1])
             if object_idx[0].size != 0:
                 intensities = mask[object_idx[0], object_idx[1]]
                 flow_idx = flow[object_idx[0], object_idx[1]]
                 past_flow_idx = optical_flow_till_current_frame[object_idx[0], object_idx[1]]
+                # flow_idx = flow[object_idx[1], object_idx[0]]
+                # past_flow_idx = optical_flow_till_current_frame[object_idx[1], object_idx[0]]
 
                 if return_normalized:
                     flow_idx_normalized_0, f_max_0, f_min_0 = normalize(flow_idx[..., 0])
@@ -869,6 +874,7 @@ class FeatureExtractor(object):
                                          past_flow_idx[..., 1], past_flow_idx[..., 0],
                                          intensities)).transpose()
                     else:
+                        # we swap here to correct axes
                         data = np.stack((object_idx[1], object_idx[0], flow_idx[..., 1], flow_idx[..., 0],
                                          past_flow_idx[..., 1], past_flow_idx[..., 0])).transpose()
                     if np.isnan(data).any():
