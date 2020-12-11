@@ -756,7 +756,7 @@ def optimize_optical_flow_object_level_for_frames_older(df, foreground_masks, op
 
 def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_flow_between_frames, original_shape,
                                                   new_shape, circle_radius, future_frames_mode=False, plot=True,
-                                                  pull_towards_bbox_center=True):
+                                                  pull_towards_bbox_center=True, key_point_criterion=np.median):
     processed_frames = 0
     processed_tracks = 0
     tracks_skipped = 0
@@ -894,7 +894,7 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                 # Approach 2 - Working on mean/median of points - could go wrong for different features
 
                 # STEP: 1
-                key_point_criterion = np.median
+                # key_point_criterion = np.median
                 # take the mean distance between center
                 # true_cloud_key_point = object_idx_stacked.T.mean(0)
                 # shifted_cloud_key_point = past_flow_shifted_points.T.mean(0)
@@ -1045,7 +1045,8 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                                                            df, original_shape, new_shape, img_level=False,
                                                            object_level=True,
                                                            plot_save_path=plot_save_path, input_frame_num=first_key,
-                                                           target_frame_num=last_key)
+                                                           target_frame_num=last_key,
+                                                           key_point_criterion=key_point_criterion)
 
     logger.info(f'Frames processed: {processed_frames} | Tracks Processed: {processed_tracks} | '
                 f'Tracks Skipped: {tracks_skipped}')
@@ -1174,7 +1175,8 @@ def verify_flow_correction_old(final_12_frames_flow, foreground_masks, tracks_sk
 
 def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skipped, original_12_frames_flow,
                            df, original_shape, new_shape, img_level=False, object_level=True, input_frame_num=0,
-                           target_frame_num=12, plot_save_path=None, pull_towards_bbox_center=True):
+                           target_frame_num=12, plot_save_path=None, pull_towards_bbox_center=True,
+                           key_point_criterion=np.median):
     if img_level:
         activations = (foreground_masks[0] > 0).nonzero()
         frame_flow_idx = final_12_frames_flow[activations[0], activations[1]]
@@ -1286,7 +1288,7 @@ def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skippe
                     flow_shifted_points[0] = input_frame_object_idx[0] + flow_idx[0]
                     flow_shifted_points[1] = input_frame_object_idx[1] + flow_idx[1]
                 # 2. Pull points close once more
-                key_point_criterion = np.median
+                # key_point_criterion = np.median
                 shifted_cloud_key_point = key_point_criterion(flow_shifted_points.T, axis=0)
 
                 if pull_towards_bbox_center:
@@ -1538,9 +1540,7 @@ if __name__ == '__main__':
                                                   original_shape=o_shape, new_shape=n_shape,
                                                   circle_radius=6)
     # TODO:
-    #  1. Circular area. Take points from clouds. For true_cloud take actual displacement.
+    #  1. Circular area. Take points from clouds. For true_cloud take actual displacement. - SKIP
     #  2. Find out why clubbing together is not working out. - looks better with index swap and copy current flow map
     #  then shift - improvement - if overlap is good enough dont shift!! - Done
     #  3. Data distribution and characteristics of the gt flow and of flow.
-    #  4. Check the index swap thing during final flow in
-    #  _prepare_data_xyuv_for_all_object_of_interest_optimized_optical_flow if the indexes are correct!
