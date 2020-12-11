@@ -1288,14 +1288,26 @@ def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skippe
                 # 2. Pull points close once more
                 key_point_criterion = np.median
                 shifted_cloud_key_point = key_point_criterion(flow_shifted_points.T, axis=0)
-                xy_distance_closest_n_points_by_criteria = np.linalg.norm(np.expand_dims(target_frame_bbox_center, 0) -
-                                                                          np.expand_dims(shifted_cloud_key_point, 0), 2,
-                                                                          axis=0)
+
+                if pull_towards_bbox_center:
+                    xy_distance_closest_n_points_by_criteria = np.linalg.norm(
+                        np.expand_dims(target_frame_bbox_center, 0) -
+                        np.expand_dims(shifted_cloud_key_point, 0), 2,
+                        axis=0)
+                    shift_condition_base = flow_shifted_points.T.mean(0) < target_frame_bbox_center
+                else:
+                    target_cloud_key_point = key_point_criterion(target_frame_object_idx_stacked.T, axis=0)
+                    xy_distance_closest_n_points_by_criteria = np.linalg.norm(
+                        np.expand_dims(target_cloud_key_point, 0) -
+                        np.expand_dims(shifted_cloud_key_point, 0), 2,
+                        axis=0)
+                    # shift_condition_base = flow_shifted_points.T.mean(0) < target_frame_object_idx_stacked.T.mean(0)
+                    shift_condition_base =\
+                        np.median(flow_shifted_points.T, axis=0) < np.median(target_frame_object_idx_stacked.T, axis=0)
 
                 xy_distance_closest_n_points_mean_x, xy_distance_closest_n_points_mean_y = \
                     xy_distance_closest_n_points_by_criteria
 
-                shift_condition_base = flow_shifted_points.T.mean(0) < target_frame_bbox_center
                 shift_condition_base_x, shift_condition_base_y = shift_condition_base
 
                 if shift_condition_base_x and shift_condition_base_y:
