@@ -755,7 +755,8 @@ class FeatureExtractor(object):
         return all_agent_features
 
     @staticmethod
-    def _prepare_data_xyuv_for_all_object_of_interest_optimized_optical_flow(flow, interest_fr, processed_data,
+    def _prepare_data_xyuv_for_all_object_of_interest_optimized_optical_flow(flow_future_median, interest_fr,
+                                                                             processed_data,
                                                                              data_frame_num,
                                                                              use_intensities=False,
                                                                              evaluation_mode: bool = False,
@@ -764,7 +765,9 @@ class FeatureExtractor(object):
                                                                              new_shape=None, df=None,
                                                                              do_clustering=False,
                                                                              optical_flow_frame_num=None,
-                                                                             optical_flow_till_current_frame=None,
+                                                                             flow_past_median=None,
+                                                                             flow_past_mean=None,
+                                                                             flow_future_mean=None,
                                                                              return_normalized=False):
         if evaluation_mode:
             data_ = processed_data
@@ -810,16 +813,20 @@ class FeatureExtractor(object):
             # plot_points_only(object_idx[0], object_idx[1])
             if object_idx[0].size != 0:
                 intensities = mask[object_idx[0], object_idx[1]]
-                flow_idx = flow[object_idx[0], object_idx[1]]
-                past_flow_idx = optical_flow_till_current_frame[object_idx[0], object_idx[1]]
-                # flow_idx = flow[object_idx[1], object_idx[0]]
-                # past_flow_idx = optical_flow_till_current_frame[object_idx[1], object_idx[0]]
+                flow_idx_median = flow_future_median[object_idx[0], object_idx[1]]
+                past_flow_idx_median = flow_past_median[object_idx[0], object_idx[1]]
+
+                flow_idx_mean = flow_future_mean[object_idx[0], object_idx[1]]
+                past_flow_idx_mean = flow_past_mean[object_idx[0], object_idx[1]]
+
+                # flow_idx_median = flow[object_idx[1], object_idx[0]]
+                # past_flow_idx_median = optical_flow_till_current_frame[object_idx[1], object_idx[0]]
 
                 if return_normalized:
-                    flow_idx_normalized_0, f_max_0, f_min_0 = normalize(flow_idx[..., 0])
-                    flow_idx_normalized_1, f_max_1, f_min_1 = normalize(flow_idx[..., 1])
-                    past_flow_idx_normalized_0, past_f_max_0, past_f_min_0 = normalize(past_flow_idx[..., 0])
-                    past_flow_idx_normalized_1, past_f_max_1, past_f_min_1 = normalize(past_flow_idx[..., 1])
+                    flow_idx_normalized_0, f_max_0, f_min_0 = normalize(flow_idx_median[..., 0])
+                    flow_idx_normalized_1, f_max_1, f_min_1 = normalize(flow_idx_median[..., 1])
+                    past_flow_idx_normalized_0, past_f_max_0, past_f_min_0 = normalize(past_flow_idx_median[..., 0])
+                    past_flow_idx_normalized_1, past_f_max_1, past_f_min_1 = normalize(past_flow_idx_median[..., 1])
                     object_idx_normalized_0, max_0, min_0 = normalize(object_idx[0])
                     object_idx_normalized_1, max_1, min_1 = normalize(object_idx[1])
                     if use_intensities:
@@ -870,13 +877,18 @@ class FeatureExtractor(object):
                                                                 bbox=annotations[id_][:4]))
                 else:
                     if use_intensities:
-                        data = np.stack((object_idx[1], object_idx[0], flow_idx[..., 1], flow_idx[..., 0],
-                                         past_flow_idx[..., 1], past_flow_idx[..., 0],
+                        data = np.stack((object_idx[1], object_idx[0], flow_idx_median[..., 1], flow_idx_median[..., 0],
+                                         past_flow_idx_median[..., 1], past_flow_idx_median[..., 0],
                                          intensities)).transpose()
                     else:
                         # we swap here to correct axes
-                        data = np.stack((object_idx[1], object_idx[0], flow_idx[..., 1], flow_idx[..., 0],
-                                         past_flow_idx[..., 1], past_flow_idx[..., 0])).transpose()
+                        # data = np.stack((object_idx[1], object_idx[0], flow_idx_median[..., 1], flow_idx_median[..., 0],
+                        #                  past_flow_idx_median[..., 1], past_flow_idx_median[..., 0])).transpose()
+
+                        data = np.stack((object_idx[1], object_idx[0], flow_idx_median[..., 1], flow_idx_median[..., 0],
+                                         past_flow_idx_median[..., 1], past_flow_idx_median[..., 0],
+                                         flow_idx_mean[..., 1], flow_idx_mean[..., 0],
+                                         past_flow_idx_mean[..., 1], past_flow_idx_mean[..., 0])).transpose()
                     if np.isnan(data).any():
                         continue
 
@@ -1821,20 +1833,35 @@ class BackgroundSubtraction(FeatureExtractor):
             # displacement/time = velocity - wrong it already is velocity
             # of_flow_till_current_frame = of_flow_till_current_frame
             # fixme: put sum of past optimized OF here
-            past_12_frames_optical_flow_summed = optimize_optical_flow_object_level_for_frames(
+            past_12_frames_optical_flow_summed_median_based = optimize_optical_flow_object_level_for_frames(
                 df=df,
                 foreground_masks=last12_bg_sub_mask,
                 optical_flow_between_frames=past_12_frames_optical_flow,
                 original_shape=original_shape,
                 new_shape=resized_shape,
                 circle_radius=8,
-                plot=True)  # todo: add to parameter
+                plot=True,
+                pull_towards_bbox_center=True,
+                key_point_criterion=np.median,
+                plot_each_track=False)
+
+            past_12_frames_optical_flow_summed_mean_based = optimize_optical_flow_object_level_for_frames(
+                df=df,
+                foreground_masks=last12_bg_sub_mask,
+                optical_flow_between_frames=past_12_frames_optical_flow,
+                original_shape=original_shape,
+                new_shape=resized_shape,
+                circle_radius=8,
+                plot=True,
+                pull_towards_bbox_center=True,
+                key_point_criterion=np.mean,
+                plot_each_track=False)
 
             # flow between consecutive frames
             frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))
             future12_bg_sub_mask = {}
             future_12_frames_optical_flow = {}
-            flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))  # fixme: put sum of optimized of here
+            flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))  # put sum of optimized of - using other var
             last_frame_to_add_in_future_dict = list(last12_bg_sub_mask.keys())[-2]
             future12_bg_sub_mask.update({
                 last_frame_to_add_in_future_dict: last12_bg_sub_mask[last_frame_to_add_in_future_dict]})
@@ -1858,8 +1885,7 @@ class BackgroundSubtraction(FeatureExtractor):
                 # interest_fr = 8, thus we need interest_fr=7 which is actual_interest_fr=11
                 future_12_frames_optical_flow.update({f'{actual_of_i - 1}-{actual_of_i}': flow_per_frame})
 
-            # todo: put one past frame in future12_bg_sub_mask
-            future_12_frames_optical_flow_summed = optimize_optical_flow_object_level_for_frames(
+            future_12_frames_optical_flow_summed_median_based = optimize_optical_flow_object_level_for_frames(
                 df=df,
                 foreground_masks=future12_bg_sub_mask,
                 optical_flow_between_frames=future_12_frames_optical_flow,
@@ -1867,7 +1893,17 @@ class BackgroundSubtraction(FeatureExtractor):
                 new_shape=resized_shape,
                 circle_radius=8,
                 future_frames_mode=True,
-                plot=True)  # todo: add to parameter
+                plot=True, pull_towards_bbox_center=True, key_point_criterion=np.median, plot_each_track=False)
+
+            future_12_frames_optical_flow_summed_mean_based = optimize_optical_flow_object_level_for_frames(
+                df=df,
+                foreground_masks=future12_bg_sub_mask,
+                optical_flow_between_frames=future_12_frames_optical_flow,
+                original_shape=original_shape,
+                new_shape=resized_shape,
+                circle_radius=8,
+                future_frames_mode=True,
+                plot=True, pull_towards_bbox_center=True, key_point_criterion=np.mean, plot_each_track=False)
 
             if use_color:
                 data, data_, max_0, max_1, min_0, min_1, threshold_img = \
@@ -1910,8 +1946,9 @@ class BackgroundSubtraction(FeatureExtractor):
                 elif all_object_of_interest_only_with_optimized_of:
                     all_agent_features = \
                         self._prepare_data_xyuv_for_all_object_of_interest_optimized_optical_flow(
-                            future_12_frames_optical_flow_summed, interest_fr,
-                            mask,
+                            flow_future_median=future_12_frames_optical_flow_summed_median_based,
+                            interest_fr=interest_fr,
+                            processed_data=mask,
                             data_frame_num=actual_interest_fr,
                             evaluation_mode=True,
                             return_options=True,
@@ -1922,9 +1959,11 @@ class BackgroundSubtraction(FeatureExtractor):
                             do_clustering=classic_clustering,
                             optical_flow_frame_num=
                             frames_used_in_of_estimation,
-                            optical_flow_till_current_frame=
-                            past_12_frames_optical_flow_summed,
-                            return_normalized=return_normalized)
+                            flow_past_median=
+                            past_12_frames_optical_flow_summed_median_based,
+                            return_normalized=return_normalized,
+                            flow_future_mean=future_12_frames_optical_flow_summed_mean_based,
+                            flow_past_mean=past_12_frames_optical_flow_summed_mean_based)
                     of_flow_till_current_frame = flow
                     # data_all_frames.update({interest_fr: all_agent_features})
                     data_all_frames.update({actual_interest_fr.item(): all_agent_features})

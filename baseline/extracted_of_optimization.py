@@ -398,8 +398,8 @@ def plot_true_and_shifted_same_plot_simple(true_cloud, shifted_cloud, original_s
                     'gray': '(T-1) Default Shifted points at T',
                     'r': 'T Bounding Box',
                     'g': 'T-1 Bounding Box',
-                    'violet': 'T Bbox Center',
-                    'wheat': 'T-1 Bbox Center',
+                    'wheat': 'T Bbox Center',
+                    'violet': 'T-1 Bbox Center',
                     'aqua': f'Shifted {key_point_criteria}',
                     'orange': f'Default Shifted {key_point_criteria}',
                     'yellow': f'True {key_point_criteria}'}
@@ -756,7 +756,8 @@ def optimize_optical_flow_object_level_for_frames_older(df, foreground_masks, op
 
 def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_flow_between_frames, original_shape,
                                                   new_shape, circle_radius, future_frames_mode=False, plot=True,
-                                                  pull_towards_bbox_center=True, key_point_criterion=np.median):
+                                                  pull_towards_bbox_center=True, key_point_criterion=np.median,
+                                                  plot_each_track=False):
     processed_frames = 0
     processed_tracks = 0
     tracks_skipped = 0
@@ -967,14 +968,17 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
 
                 past_flow_shifted_points = (past_flow_shifted_points.T + shift_correction).T
 
+                criteria_name = key_point_criterion.__name__
                 if future_frames_mode:
-                    plot_save_path = f'../Plots/Optimization_plot/wit{int(OVERLAP_THRESHOLD * 100)}_threshold_future/'
+                    plot_save_path = f'../Plots/Optimization_plot/with{int(OVERLAP_THRESHOLD * 100)}_threshold' \
+                                     f'_future/criteria_{criteria_name}/'
                 else:
-                    plot_save_path = f'../Plots/Optimization_plot/wit{int(OVERLAP_THRESHOLD * 100)}_threshold/'
+                    plot_save_path = f'../Plots/Optimization_plot/with{int(OVERLAP_THRESHOLD * 100)}_threshold/' \
+                                     f'criteria_{criteria_name}/'
 
                 # plot_save_path = None
 
-                if plot:
+                if plot and plot_each_track:
                     plot_true_and_shifted_all_steps_simple(
                         true_cloud=object_idx_stacked.T,
                         shifted_cloud=past_flow_shifted_points.T,
