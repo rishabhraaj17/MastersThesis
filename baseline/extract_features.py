@@ -128,7 +128,8 @@ def preprocess_optical_flow_optimized_data(classic_clustering=False, equal_time_
         accumulated_features = {**accumulated_features, **features_}
         if (part_idx % 170 == 0) and save_per_part_path is not None:
             Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
-            f_n = f'time_distributed_dict_with_gt_bbox_centers_and_bbox_part_gt_velocity{part_idx}.pt'
+            f_n = f'time_distributed_dict_with_gt_bbox_centers_and_bbox_part_gt_velocity_optimized_of_{part_idx}.pt'
+            logger.info(f'Saving : {f_n}')
             torch.save(accumulated_features, save_per_part_path + f_n)
 
     return accumulated_features
