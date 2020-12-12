@@ -790,15 +790,22 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
             past_bbox_center = past_bbox_centers[id_]
             past_bbox = past_annotations[id_][:4]
 
-            past_object_idx = (past_mask > 0).nonzero()
-            past_object_idx = list(past_object_idx)
-            past_object_idx[0], past_object_idx[1] = past_object_idx[1], past_object_idx[0]
+            # past_object_idx = (past_mask > 0).nonzero()  # could replace with np.argwhere()
+            # past_object_idx = list(past_object_idx)
+            # past_object_idx[0], past_object_idx[1] = past_object_idx[1], past_object_idx[0]
+
+            past_object_idx = np.argwhere(past_mask).T
 
             if past_object_idx[0].size != 0:
-                past_flow_idx = of_between_frames_value[past_object_idx[0], past_object_idx[1]]
-                past_object_idx_stacked = np.stack(past_object_idx)
+                try:
+                    past_flow_idx = of_between_frames_value[past_object_idx[0], past_object_idx[1]]
+                except IndexError:
+                    logger.info('Had to skip due to Index error!')
+                    continue
+                # past_object_idx_stacked = np.stack(past_object_idx)
                 past_flow_idx = past_flow_idx.T
-                past_flow_shifted_points = np.zeros_like(past_object_idx_stacked, dtype=np.float)
+                # past_flow_shifted_points = np.zeros_like(past_object_idx_stacked, dtype=np.float)
+                past_flow_shifted_points = np.zeros_like(past_object_idx, dtype=np.float)
                 past_flow_shifted_points[0] = past_object_idx[0] + past_flow_idx[0] + SHIFT_X  # x -> u
                 past_flow_shifted_points[1] = past_object_idx[1] + past_flow_idx[1] + SHIFT_Y  # y -> v
                 past_flow_shifted_points = np.round(past_flow_shifted_points).astype(np.int)
@@ -822,10 +829,12 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                 x_min, y_min, x_max, y_max = bbox
                 x, y, w, h = x_min, y_min, (x_max - x_min), (y_max - y_min)
 
-                object_idx = (mask > 0).nonzero()
-                object_idx = list(object_idx)
-                object_idx[0], object_idx[1] = object_idx[1], object_idx[0]
-                object_idx_stacked = np.stack(object_idx)
+                # object_idx = (mask > 0).nonzero()
+                # object_idx = list(object_idx)
+                # object_idx[0], object_idx[1] = object_idx[1], object_idx[0]
+                # object_idx_stacked = np.stack(object_idx)
+
+                object_idx_stacked = object_idx = np.argwhere(mask).T
 
                 if object_idx_stacked.size == 0 or past_flow_shifted_points.size == 0:
                     continue
