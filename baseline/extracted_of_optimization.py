@@ -806,7 +806,7 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                 try:
                     track_idx_next_frame = track_ids.tolist().index(past_track_id)
                 except ValueError:
-                    logger.info(f'SKIPPING: Track id {past_track_id} absent in next frame!')
+                    logger.debug(f'SKIPPING: Track id {past_track_id} absent in next frame!')
                     tracks_skipped += 1
                     continue
 
@@ -871,9 +871,9 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                     .astype(np.float).mean(0)
                 xy_overall_dimension_overlap = np.equal(closest_n_true_point_pair, closest_n_shifted_point_pair) \
                     .astype(np.float).mean()
-                logger.info(f'xy_distance_closest_n_points_mean: {xy_distance_closest_n_points_mean}\n'
-                            f'xy_per_dimension_overlap: {xy_per_dimension_overlap}'
-                            f'xy_overall_dimension_overlap: {xy_overall_dimension_overlap}')
+                logger.debug(f'xy_distance_closest_n_points_mean: {xy_distance_closest_n_points_mean}\n'
+                             f'xy_per_dimension_overlap: {xy_per_dimension_overlap}'
+                             f'xy_overall_dimension_overlap: {xy_overall_dimension_overlap}')
 
                 #  STEP: 4.1
                 # using mean
@@ -1011,7 +1011,7 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
         for k, v in flow_dict_for_frame.items():
             features_x, features_y = v['features_xy'][1], v['features_xy'][0]
             flow_correction = v['shift_correction']
-            logger.info(f"Shift Correction: {flow_correction}")
+            logger.debug(f"Shift Correction: {flow_correction}")
             # updated_flow_map[features_x, features_y] = v['flow_uv'].T + flow_correction
             updated_flow_map[features_x, features_y] += flow_correction
             # logger.info(updated_flow_map[features_x, features_y])
@@ -1052,8 +1052,8 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                                                            target_frame_num=last_key,
                                                            key_point_criterion=key_point_criterion)
 
-    logger.info(f'Frames processed: {processed_frames} | Tracks Processed: {processed_tracks} | '
-                f'Tracks Skipped: {tracks_skipped}')
+    logger.debug(f'Frames processed: {processed_frames} | Tracks Processed: {processed_tracks} | '
+                 f'Tracks Skipped: {tracks_skipped}')
 
     return after_2nd_flow_correction  # or final_12_frames_flow
 
@@ -1180,7 +1180,7 @@ def verify_flow_correction_old(final_12_frames_flow, foreground_masks, tracks_sk
 def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skipped, original_12_frames_flow,
                            df, original_shape, new_shape, img_level=False, object_level=True, input_frame_num=0,
                            target_frame_num=12, plot_save_path=None, pull_towards_bbox_center=True,
-                           key_point_criterion=np.median):
+                           key_point_criterion=np.median, save_plot=False):
     if img_level:
         activations = (foreground_masks[0] > 0).nonzero()
         frame_flow_idx = final_12_frames_flow[activations[0], activations[1]]
@@ -1234,7 +1234,7 @@ def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skippe
                 try:
                     track_idx_next_frame = target_track_ids.tolist().index(input_frame_track_id)
                 except ValueError:
-                    logger.info(f'SKIPPING: Track id {input_frame_track_id} absent in next frame!')
+                    logger.debug(f'SKIPPING: Track id {input_frame_track_id} absent in next frame!')
                     tracks_skipped += 1
                     continue
 
@@ -1308,7 +1308,7 @@ def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skippe
                         np.expand_dims(shifted_cloud_key_point, 0), 2,
                         axis=0)
                     # shift_condition_base = flow_shifted_points.T.mean(0) < target_frame_object_idx_stacked.T.mean(0)
-                    shift_condition_base =\
+                    shift_condition_base = \
                         np.median(flow_shifted_points.T, axis=0) < np.median(target_frame_object_idx_stacked.T, axis=0)
 
                 xy_distance_closest_n_points_mean_x, xy_distance_closest_n_points_mean_y = \
@@ -1333,24 +1333,26 @@ def verify_flow_correction(final_12_frames_flow, foreground_masks, tracks_skippe
                 flow_shifted_points = (flow_shifted_points.T + shift_correction).T
                 # 3. Throw points - circle idea can work here - todo: if required
 
-                plot_true_and_shifted_same_plot_simple(true_cloud=target_frame_object_idx_stacked.T,
-                                                       shifted_cloud=flow_shifted_points.T,
-                                                       original_shifted_cloud=original_flow_shifted_points.T,
-                                                       true_box=target_frame_bbox,
-                                                       true_cloud_key_point=
-                                                       np.median(target_frame_object_idx_stacked.T, axis=0),
-                                                       shifted_cloud_key_point=np.median(flow_shifted_points.T, axis=0),
-                                                       original_shifted_cloud_key_point=
-                                                       np.median(original_flow_shifted_points.T, axis=0),
-                                                       key_point_criteria='Median',
-                                                       shifted_box=input_frame_bbox,
-                                                       frame_input=input_frame_num,
-                                                       frame_target=target_frame_num,
-                                                       track_id=input_frame_track_id,
-                                                       frame_input_bbox_center=input_frame_bbox_center,
-                                                       frame_target_bbox_center=target_frame_bbox_center,
-                                                       overlap_threshold=OVERLAP_THRESHOLD,
-                                                       plot_save_path=plot_save_path)
+                if save_plot:
+                    plot_true_and_shifted_same_plot_simple(true_cloud=target_frame_object_idx_stacked.T,
+                                                           shifted_cloud=flow_shifted_points.T,
+                                                           original_shifted_cloud=original_flow_shifted_points.T,
+                                                           true_box=target_frame_bbox,
+                                                           true_cloud_key_point=
+                                                           np.median(target_frame_object_idx_stacked.T, axis=0),
+                                                           shifted_cloud_key_point=
+                                                           np.median(flow_shifted_points.T, axis=0),
+                                                           original_shifted_cloud_key_point=
+                                                           np.median(original_flow_shifted_points.T, axis=0),
+                                                           key_point_criteria='Median',
+                                                           shifted_box=input_frame_bbox,
+                                                           frame_input=input_frame_num,
+                                                           frame_target=target_frame_num,
+                                                           track_id=input_frame_track_id,
+                                                           frame_input_bbox_center=input_frame_bbox_center,
+                                                           frame_target_bbox_center=target_frame_bbox_center,
+                                                           overlap_threshold=OVERLAP_THRESHOLD,
+                                                           plot_save_path=plot_save_path)
         return final_flow_vector_map
 
 
