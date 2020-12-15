@@ -800,7 +800,7 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
                 try:
                     past_flow_idx = of_between_frames_value[past_object_idx[0], past_object_idx[1]]
                 except IndexError:
-                    logger.info('Had to skip due to Index error!')
+                    logger.info('1. Had to skip due to Index error!')
                     continue
                 # past_object_idx_stacked = np.stack(past_object_idx)
                 past_flow_idx = past_flow_idx.T
@@ -1018,14 +1018,21 @@ def optimize_optical_flow_object_level_for_frames(df, foreground_masks, optical_
         updated_flow_map = of_between_frames_value.copy()
         original_flow_map = np.zeros_like(of_between_frames_value)
         for k, v in flow_dict_for_frame.items():
-            features_x, features_y = v['features_xy'][1], v['features_xy'][0]
+            # causing index error
+            # features_x, features_y = v['features_xy'][1], v['features_xy'][0]
+            # fixes index error
+            features_x, features_y = v['features_xy'][0], v['features_xy'][1]
             flow_correction = v['shift_correction']
             logger.debug(f"Shift Correction: {flow_correction}")
             # updated_flow_map[features_x, features_y] = v['flow_uv'].T + flow_correction
-            updated_flow_map[features_x, features_y] += flow_correction
+            try:
+                updated_flow_map[features_x, features_y] += flow_correction
+                original_flow_map[features_x, features_y] = v['flow_uv'].T
+            except IndexError:
+                logger.info('2. Had to skip due to Index error!')
+                continue
             # logger.info(updated_flow_map[features_x, features_y])
             # logger.info(of_between_frames_value[features_x, features_y])
-            original_flow_map[features_x, features_y] = v['flow_uv'].T
         # verify_flow_correction(updated_flow_map, foreground_masks, tracks_skipped, of_between_frames_value, df,
         #                        original_shape, new_shape, False, True, input_frame_num=bg_sub_mask_key,
         #                        target_frame_num=bg_sub_mask_key+1)
@@ -1546,7 +1553,10 @@ if __name__ == '__main__':
 
     # distance_weighted_optimization(features_path=save_path + file_name, plot_save_path=plt_save_path, alpha=1,
     #                                save_plots=True)
-    data = torch.load('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baseline/debug_of_opt_batch.pt')
+    # data = torch.load('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baseline/debug_of_opt_batch.pt')
+    # data = torch.load('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baseline/optimized_of_err_dict1.pt')
+    # data = torch.load('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baseline/optimized_of_err_dict2.pt')
+    data = torch.load('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baseline/optimized_of_err_dict3.pt')
     df_, fg_masks, of_flows, o_shape, n_shape = data['df'], data['foreground_masks'], \
                                                 data['optical_flow_between_frames'], data['original_shape'], \
                                                 data['new_shape']
