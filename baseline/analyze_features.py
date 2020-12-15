@@ -284,8 +284,17 @@ def analyze_train_data_distribution(ratio=1.0, optimized_of=False, top_k=1, alph
     for center_data in tqdm(center_data_list):
         c_data = np.array(center_data)
         try:
-            c_data_gt_vel.append(c_data[:, 4])
-            c_data_of_vel.append(c_data[:, 2] / 0.4)
+            of_val_data = c_data[:, 2]
+            rolled = np.rollaxis(of_val_data, -1).tolist()
+            of_data_x, of_data_y = rolled[1], rolled[0]
+            of_data = np.stack([of_data_x, of_data_y]).T
+            of_val_sign = np.sign(of_data)
+            gt_data = c_data[:, 4] * of_val_sign
+            of_data = of_data / 0.4
+            c_data_gt_vel.append(gt_data)
+            c_data_of_vel.append(of_data)
+            # c_data_gt_vel.append(c_data[:, 4])
+            # c_data_of_vel.append(c_data[:, 2] / 0.4)
         except IndexError:
             print(c_data.shape)
 
@@ -299,7 +308,7 @@ def analyze_train_data_distribution(ratio=1.0, optimized_of=False, top_k=1, alph
     c_data_of_vel = np.stack(c_data_of_vel)
 
     find_distribution(c_data_gt_vel, 'Ground Truth')
-    find_distribution(c_data_of_vel, 'Optical Flow')
+    # find_distribution(c_data_of_vel, 'Optical Flow')
 
 
 def analyze_train_data_via_plots(ratio=1.0, optimized_of=False, top_k=1, alpha=1, weight_points_inside_bbox_more=True):
@@ -481,5 +490,5 @@ def main(save=True, optimized_of=True, top_k=1, alpha=1, weight_points_inside_bb
 if __name__ == '__main__':
     # main(optimized_of=OPTIMIZED_OF, top_k=1, alpha=1, weight_points_inside_bbox_more=True, save=True,
     #      from_file=True, process_both=False)
-    # analyze_train_data_distribution()
-    analyze_train_data_via_plots()
+    analyze_train_data_distribution()
+    # analyze_train_data_via_plots()

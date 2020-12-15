@@ -75,6 +75,14 @@ def center_dataset_collate(batch):
         bbox_center_x_batched, bbox_center_y_batched = np.zeros(shape=(0, 2)), np.zeros(shape=(0, 2))
         bbox_x_batched, bbox_y_batched = np.zeros(shape=(0, 4)), np.zeros(shape=(0, 4))
         for features_center, frames, track_ids, bbox_center_x, bbox_center_y, bbox_x, bbox_y in zip(*data):
+            # fix the bug #################################################################################
+            center_xy, center_true_uv, center_past_uv, shifted_point, gt_past_velocity = \
+                features_center[0], features_center[1], features_center[2], features_center[3], features_center[4]
+            center_past_uv[0], center_past_uv[1] = center_past_uv[1], center_past_uv[0]
+            sign = np.sign(center_past_uv)
+            gt_past_velocity = gt_past_velocity * sign
+            features_center = np.stack([center_xy, center_true_uv, center_past_uv, shifted_point, gt_past_velocity])
+            ###############################################################################################
             center_features = np.concatenate((center_features, np.expand_dims(features_center, axis=0)))
             frames_batched = np.concatenate((frames_batched, np.expand_dims(frames, axis=(0, 1))))
             track_ids_batched = np.concatenate((track_ids_batched, np.expand_dims(track_ids, axis=(0, 1))))
