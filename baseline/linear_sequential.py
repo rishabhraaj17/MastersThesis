@@ -222,7 +222,7 @@ class BaselineSequential(LightningModule):
                             last_input_velocity = gt_past_velocity
                             last_pred_center = bb_center1
                         else:
-                            last_input_velocity = center_past_uv
+                            last_input_velocity = center_past_uv / 0.4
                             last_pred_center = center_xy
                     else:
                         last_input_velocity = gt_past_velocity
@@ -392,7 +392,7 @@ class BaselineSequentialV0(BaselineSequential):
                             last_input_velocity = gt_past_velocity
                             last_pred_center = bb_center1
                         else:
-                            last_input_velocity = center_past_uv
+                            last_input_velocity = center_past_uv / 0.4
                             last_pred_center = center_xy
                     else:
                         last_input_velocity = gt_past_velocity
@@ -471,7 +471,7 @@ class BaselineSequentialV1(BaselineSequential):
                                 last_input_velocity = gt_past_velocity
                                 last_pred_center = bb_center1
                             else:
-                                last_input_velocity = center_past_uv
+                                last_input_velocity = center_past_uv / 0.4
                                 last_pred_center = center_xy
                         else:
                             last_input_velocity = gt_past_velocity
@@ -673,7 +673,7 @@ def inference_core(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, ade
                         last_input_velocity_gt = gt_past_velocity.unsqueeze(0)
                         last_pred_center_gt = bb_center1
                     else:
-                        last_input_velocity_of = center_past_uv.unsqueeze(0)
+                        last_input_velocity_of = center_past_uv.unsqueeze(0) / 0.4
                         last_pred_center_of = center_xy
                         last_input_velocity_gt = gt_past_velocity.unsqueeze(0)
                         last_pred_center_gt = bb_center1
@@ -812,7 +812,7 @@ def inference_core_v0(ade_dataset_gt, ade_dataset_gt_of_gt, ade_dataset_linear, 
                         first_ts_velocity_linear = gt_past_velocity
                         last_true_center = bb_center1
                     else:
-                        last_input_velocity_of = center_past_uv.unsqueeze(0)
+                        last_input_velocity_of = center_past_uv.unsqueeze(0) / 0.4
                         last_pred_center_of = center_xy
                         last_input_velocity_gt = gt_past_velocity.unsqueeze(0)
                         last_pred_center_gt = bb_center1
@@ -1127,7 +1127,7 @@ def eval_models(dataset_load_path, meta, meta_video, meta_train_video_number, me
                 center_based, dataset_video, same_init):
     logger.info('Optical Flow Optimized!')
 
-    if NETWORK_TO_USE and TIME_STEPS == 5:
+    if NETWORK_TO_USE == NetworkType.V0 and TIME_STEPS == 5:
         time_steps = TIME_STEPS
         features_load_path = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
                              f'center_based_gt_velocity_of_optimized_t{time_steps}.pt'
@@ -1137,15 +1137,15 @@ def eval_models(dataset_load_path, meta, meta_video, meta_train_video_number, me
         train_set, val_set, test_set = prepare_datasets(features=feats)
         logger.info('Watch 1 predict else!')
 
-        of_model_version, of_model_epoch = 10, 142
-        gt_model_version, gt_model_epoch = 13, 392
+        of_model_version, of_model_epoch = 17, 51
+        gt_model_version, gt_model_epoch = 16, 356
 
         # T=5
         logger.info('T=5')
         eval_models_core(center_based, dataset_video, gt_model_epoch, gt_model_version, lr, meta,
                          meta_train_video_number, meta_val_video_number, meta_video, of_model_epoch, of_model_version,
                          same_init, test_set, time_steps, train_set, use_batch_norm, val_set)
-    elif NETWORK_TO_USE and TIME_STEPS == 10:
+    elif NETWORK_TO_USE == NetworkType.V0 and TIME_STEPS == 10:
         time_steps = TIME_STEPS
         features_load_path = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
                              f'center_based_gt_velocity_of_optimized_t{time_steps}.pt'
@@ -1154,15 +1154,15 @@ def eval_models(dataset_load_path, meta, meta_video, meta_train_video_number, me
         feats = torch.load(features_load_path)
         train_set, val_set, test_set = prepare_datasets(features=feats)
 
-        of_model_version, of_model_epoch = 11, 175
-        gt_model_version, gt_model_epoch = 12, 341
+        of_model_version, of_model_epoch = 22, 212,  # 11, 175
+        gt_model_version, gt_model_epoch = 23, 247,  # 12, 341
 
         # T=10
         logger.info('T=10')
         eval_models_core(center_based, dataset_video, gt_model_epoch, gt_model_version, lr, meta,
                          meta_train_video_number, meta_val_video_number, meta_video, of_model_epoch, of_model_version,
                          same_init, test_set, time_steps, train_set, use_batch_norm, val_set)
-    elif not NETWORK_TO_USE and TIME_STEPS == 20:
+    elif NETWORK_TO_USE == NetworkType.V2 and TIME_STEPS == 20:
         time_steps = TIME_STEPS
         features_load_path = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
                              f'center_based_gt_velocity_of_optimized_t{time_steps}.pt'
@@ -1171,8 +1171,8 @@ def eval_models(dataset_load_path, meta, meta_video, meta_train_video_number, me
         feats = torch.load(features_load_path)
         train_set, val_set, test_set = prepare_datasets(features=feats)
 
-        of_model_version, of_model_epoch = 8, 299
-        gt_model_version, gt_model_epoch = 9, 88
+        of_model_version, of_model_epoch = 21, 280
+        gt_model_version, gt_model_epoch = 20, 85
 
         # T=20
         logger.info('T=20')

@@ -34,9 +34,12 @@ META_VIDEO_LABEL = SDDVideoDatasets.LITTLE
 VIDEO_NUMBER = 3
 SAVE_PATH = f'{SAVE_BASE_PATH}{VIDEO_LABEL.value}/video{VIDEO_NUMBER}/'
 # FILE_NAME = 'time_distributed_dict_with_gt_bbox_centers_and_bbox_gt_velocity.pt'
+# for incomplete one
+FILE_NAME = '/parts/time_distributed_dict_with_gt_bbox_centers_and_bbox_part_gt_velocity_optimized_of_170.pt'
 T_STEPS = 20
-FILE_NAME = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
-            f'center_based_gt_velocity_of_optimized_t{T_STEPS}.pt'
+# for distribution and stuff
+# FILE_NAME = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
+#             f'center_based_gt_velocity_of_optimized_t{T_STEPS}.pt'
 LOAD_FILE = SAVE_PATH + FILE_NAME
 ANNOTATIONS_FILE = 'annotation_augmented.csv'
 ANNOTATIONS_PATH = f'{BASE_PATH}annotations/{VIDEO_LABEL.value}/video{VIDEO_NUMBER}/'
@@ -45,7 +48,7 @@ OPTIMIZED_OF = True
 META_PATH = '../Datasets/SDD/H_SDD.txt'
 META = SDDMeta(META_PATH)
 DF_SAVE_PATH = f'{SAVE_PATH}analysis2/'
-DF_FILE_NAME = f'optimized_of_analysis_t{TIME_STEPS}.csv' if OPTIMIZED_OF else f'analysis_t{TIME_STEPS}.csv'
+DF_FILE_NAME = f'optimized_of_v2_analysis_t{TIME_STEPS}.csv' if OPTIMIZED_OF else f'analysis_t{TIME_STEPS}.csv'
 
 
 # Create models from data
@@ -364,7 +367,14 @@ def analyze_extracted_features(features_dict: dict, test_mode=False, time_steps=
                                                                                 features_t_info, features_b_c_x,
                                                                                 features_b_c_y,
                                                                                 features_b_x, features_b_y):
-            of_flow = feature_x[:, :2] + feature_x[:, 2:4]
+            # bug-fix
+            of_displacements = feature_x[:, 2:4]
+            rolled = np.rollaxis(of_displacements, -1).tolist()
+            of_data_x, of_data_y = rolled[1], rolled[0]
+            of_data = np.stack([of_data_x, of_data_y]).T
+            of_data = of_data / 0.4
+            of_flow = feature_x[:, :2] + of_data
+            # of_flow = feature_x[:, :2] + feature_x[:, 2:4]
             if optimized_of:
                 _, of_flow_top_k = cost_function(of_flow, b_c_y, top_k=top_k, alpha=alpha, bbox=b_y,
                                                  weight_points_inside_bbox_more=weight_points_inside_bbox_more)
@@ -412,7 +422,7 @@ def parse_df_analysis(in_df, save_path=None):
     inside_bbox_list, per_stop_de_list, inside_bbox, per_stop_de = [], [], [], []
     inside_bbox_count, outside_bbox_count = [], []
     t_id, ade, fde = None, None, None
-    plot_folder = 'of_optimized_plots/' if OPTIMIZED_OF else 'plots/'
+    plot_folder = 'of_optimized_v2_plots/' if OPTIMIZED_OF else 'plots/'
     # plot_folder = 'non_bbox_of_optimized_plots/' if OPTIMIZED_OF else 'plots/'
     for idx, (index, row) in enumerate(tqdm(in_df.iterrows(), total=len(in_df))):
         if idx == 0:
@@ -488,7 +498,7 @@ def main(save=True, optimized_of=True, top_k=1, alpha=1, weight_points_inside_bb
 
 
 if __name__ == '__main__':
-    # main(optimized_of=OPTIMIZED_OF, top_k=1, alpha=1, weight_points_inside_bbox_more=True, save=True,
-    #      from_file=True, process_both=False)
-    analyze_train_data_distribution()
-    # analyze_train_data_via_plots()
+    main(optimized_of=OPTIMIZED_OF, top_k=1, alpha=1, weight_points_inside_bbox_more=True, save=True,
+         from_file=True, process_both=False)
+    # analyze_train_data_distribution()
+    # # analyze_train_data_via_plots()

@@ -394,7 +394,7 @@ def plot_violin_plot(ade_list, fde_list, save_path):
 
     plt.setp(axes, xticks=[y + 1 for y in range(len(data))],
              xticklabels=['ADE', 'FDE'])
-    fig.savefig(f"{save_path}ade_fde_violin.png")
+    fig.savefig(f"{save_path}ade_fde_violin_v2.png")
     plt.show()
 
 
