@@ -2,6 +2,7 @@ import warnings
 from pathlib import Path
 
 import numpy as np
+import ray
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -14,6 +15,7 @@ from unsupervised_tp_0.dataset import SDDSimpleDataset, resize_frames
 from baseline.extracted_of_optimization import cost_function
 from unsupervised_tp_0.nn_clustering_0 import find_center_point
 
+ray.init()
 initialize_logging()
 logger = get_logger(__name__)
 
@@ -101,7 +103,7 @@ def preprocess_optical_flow_optimized_data(classic_clustering=False, equal_time_
         feature_extractor = MOG2.for_frames()
         features_, remaining_frames, remaining_frames_idx, last_frame_from_last_used_batch, \
         past_12_frames_optical_flow, gt_velocity_dict, last_optical_flow_map, last12_bg_sub_mask = feature_extractor. \
-            keyframe_based_feature_extraction_optimized_optical_flow_from_frames_nn(
+            keyframe_based_feature_extraction_optimized_optical_flow_from_frames_nn_parallel(
             frames=frames, n=30,
             use_last_n_to_build_model=False,
             frames_to_build_model=num_frames_to_build_bg_sub_model,

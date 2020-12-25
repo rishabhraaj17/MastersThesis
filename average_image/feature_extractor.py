@@ -1,4 +1,6 @@
+import time
 from itertools import cycle
+import multiprocessing as mp
 from typing import Union, Optional
 
 import cv2 as cv
@@ -13,6 +15,7 @@ from skimage.transform import resize
 from skimage import color
 from sklearn.cluster import cluster_optics_dbscan
 from tqdm import tqdm
+import ray
 
 from average_image.bbox_utils import add_bbox_to_axes, resize_v_frames, get_frame_annotations, preprocess_annotations, \
     scale_annotations, get_frame_annotations_and_skip_lost
@@ -25,6 +28,13 @@ from average_image.layers import min_pool2d
 from average_image.utils import precision_recall, evaluate_clustering_per_frame, normalize, SDDMeta, \
     evaluate_clustering_non_cc, AgentFeatures, plot_extracted_features, plot_points_only
 from baseline.extracted_of_optimization import optimize_optical_flow_object_level_for_frames
+
+RAY_RESULT_IDS = []
+ASYNC_RESULTS = []
+
+
+def collect_async_result(result):
+    ASYNC_RESULTS.append(result)
 
 
 class FeatureExtractor(object):
@@ -1988,6 +1998,280 @@ class BackgroundSubtraction(FeatureExtractor):
                torch.arange(interest_fr + frame_numbers[0], frame_numbers[-1] + 1), \
                last_frame_from_last_used_batch, past_12_frames_optical_flow, gt_velocity_dict, last_optical_flow_map, \
                last12_bg_sub_mask
+
+    def keyframe_based_feature_extraction_optimized_optical_flow_from_frames_nn_parallel(
+            self, frames, n, frames_to_build_model,
+            original_shape, resized_shape,
+            equal_time_distributed=False,
+            var_threshold=100, use_color=False,
+            use_last_n_to_build_model=False,
+            object_of_interest_only=False,
+            classic_clustering=False,
+            track_ids=None,
+            all_object_of_interest_only=False,
+            time_gap_within_frames=3,
+            frame_numbers=None, df=None,
+            return_normalized=False,
+            remaining_frames=None,
+            remaining_frames_idx=None,
+            past_12_frames_optical_flow=None,
+            last_frame_from_last_used_batch=None,
+            gt_velocity_dict=None,
+            last_optical_flow_map=None,
+            last12_bg_sub_mask=None,
+            all_object_of_interest_only_with_optimized_of=True):
+
+        start_time = time.time()
+
+        pool = mp.Pool(mp.cpu_count())
+
+        self.original_shape = original_shape
+        interest_fr = None
+        actual_interest_fr = None
+        frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
+
+        # cat old frames
+        if remaining_frames is not None:
+            frames = np.concatenate((remaining_frames, frames), axis=0)
+            # remaining_frames_idx.tolist() + frame_numbers.tolist()
+            frame_numbers = torch.cat((remaining_frames_idx, frame_numbers))
+
+        kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
+        if n is not None:
+            if equal_time_distributed:
+                step = n // 2
+            else:
+                step = len(frames) / (n + 1)
+        else:
+            n = frames_to_build_model
+        total_frames = frames.shape[0]
+        data_all_frames = {}
+
+        parallel_execution_results = []
+        ray_results = []
+
+        for idx, (fr, actual_fr) in enumerate(tqdm(zip(range(frames.shape[0]), frame_numbers), total=frames.shape[0])):
+            if use_last_n_to_build_model:
+                selected_frames = [(fr + i) % total_frames for i in range(frames_to_build_model)]
+                frames_building_model = [frames[s] for s in selected_frames]
+            elif equal_time_distributed:
+                selected_past = [(fr - i * time_gap_within_frames) % total_frames for i in range(1, step + 1)]
+                selected_future = [(fr + i * time_gap_within_frames) % total_frames for i in range(1, step + 1)]
+                selected_frames = selected_past + selected_future
+                frames_building_model = [frames[s] for s in selected_frames]
+            else:
+                selected_frames = [int((step * i) + fr) % len(frames) for i in range(1, n + 1)]
+                frames_building_model = [frames[int((step * i) + fr) % len(frames)] for i in range(1, n + 1)]
+
+            algo = cv.createBackgroundSubtractorMOG2(history=n, varThreshold=var_threshold)
+            _ = self._process_preloaded_n_frames(n, frames_building_model, kernel, algo)
+
+            interest_fr = fr % total_frames
+            actual_interest_fr = actual_fr  # % total_frames
+
+            of_interest_fr = (fr + frames_to_build_model) % total_frames
+            actual_of_interest_fr = (actual_fr + frames_to_build_model)  # % total_frames
+
+            mask = algo.apply(frames[interest_fr], learningRate=0)
+            mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
+
+            # do not go in circle for flow estimation
+            if of_interest_fr < interest_fr:
+                break
+
+            last12_bg_sub_mask.update({actual_interest_fr.item(): mask})
+
+            # start at 12th frame and then only consider last 12 frames for velocity estimation
+            if actual_interest_fr != 0:
+                if interest_fr == 0:
+                    previous = cv.cvtColor(last_frame_from_last_used_batch, cv.COLOR_BGR2GRAY)
+                    next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+
+                    past_flow_per_frame, past_rgb, past_mag, past_ang = self.get_optical_flow(previous_frame=previous,
+                                                                                              next_frame=next_frame,
+                                                                                              all_results_out=True)
+                    past_12_frames_optical_flow.update(
+                        {f'{actual_interest_fr.item() - 1}-{actual_interest_fr.item()}': past_flow_per_frame})
+                else:
+                    previous = cv.cvtColor(frames[interest_fr - 1], cv.COLOR_BGR2GRAY)
+                    next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+
+                    past_flow_per_frame, past_rgb, past_mag, past_ang = self.get_optical_flow(previous_frame=previous,
+                                                                                              next_frame=next_frame,
+                                                                                              all_results_out=True)
+                    last_frame_from_last_used_batch = frames[interest_fr]
+                    past_12_frames_optical_flow.update(
+                        {f'{actual_interest_fr.item() - 1}-{actual_interest_fr.item()}': past_flow_per_frame})
+
+            if len(past_12_frames_optical_flow) > 12:
+                temp_past_12_frames_optical_flow = {}
+                for i in list(past_12_frames_optical_flow)[-12:]:
+                    temp_past_12_frames_optical_flow.update({i: past_12_frames_optical_flow[i]})
+                past_12_frames_optical_flow = temp_past_12_frames_optical_flow
+                temp_past_12_frames_optical_flow = None
+
+            if len(last12_bg_sub_mask) > 13:  # we need one more for of!
+                temp_last12_bg_sub_mask = {}
+                for i in list(last12_bg_sub_mask)[-13:]:
+                    temp_last12_bg_sub_mask.update({i: last12_bg_sub_mask[i]})
+                last12_bg_sub_mask = temp_last12_bg_sub_mask
+                temp_last12_bg_sub_mask = None
+
+            if actual_interest_fr < 12:
+                continue
+
+            # usual
+            # parallel_execution_results.append(self.core_feature_extraction_parallel(
+            #     actual_interest_fr, actual_of_interest_fr, classic_clustering,
+            #     data_all_frames, df, frames, interest_fr, kernel, last12_bg_sub_mask,
+            #     mask, n, of_interest_fr, original_shape, past_12_frames_optical_flow,
+            #     resized_shape, return_normalized, step, time_gap_within_frames,
+            #     total_frames, track_ids, var_threshold, idx))
+
+            # parallel - multiprocessing
+            # parallel_args = (actual_interest_fr, actual_of_interest_fr, classic_clustering,
+            #                  data_all_frames, df, frames, interest_fr, kernel, last12_bg_sub_mask,
+            #                  mask, n, of_interest_fr, original_shape, past_12_frames_optical_flow,
+            #                  resized_shape, return_normalized, step, time_gap_within_frames,
+            #                  total_frames, track_ids, var_threshold, idx)
+            # # parallel_execution_results.append(pool.apply(self.core_feature_extraction_parallel, args=parallel_args))
+            # # async is better
+            # parallel_execution_results.append(pool.apply_async(self.core_feature_extraction_parallel,
+            #                                                    args=parallel_args,
+            #                                                    callback=collect_async_result))
+
+            # ray
+            parallel_execution_results.append(self.core_feature_extraction_parallel.remote(
+                self, actual_interest_fr, actual_of_interest_fr, classic_clustering,
+                data_all_frames, df, frames, interest_fr, kernel, last12_bg_sub_mask,
+                mask, n, of_interest_fr, original_shape, past_12_frames_optical_flow,
+                resized_shape, return_normalized, step, time_gap_within_frames,
+                total_frames, track_ids, var_threshold, idx))
+
+        # parallel - multiprocessing
+        # pool.close()
+        # pool.join()
+        #
+        # ASYNC_RESULTS.sort(key=lambda x: x[1])
+        #
+        # for exec_res in ASYNC_RESULTS:
+        #     result, result_id = exec_res
+        #     data_all_frames.update({result_id: result})
+
+        # ray
+        ray_results = ray.get(parallel_execution_results)
+        for exec_res in ray_results:
+            result, result_id = exec_res
+            data_all_frames.update({result_id: result})
+
+        print("--- %s seconds ---" % (time.time() - start_time))
+
+        # for exec_res in parallel_execution_results:
+        #     result, result_id = exec_res
+        #     data_all_frames.update({result_id: result})
+        # print("--- %s seconds ---" % (time.time() - start_time))
+        # ASYNC_RESULTS = []
+        return data_all_frames, frames[interest_fr:, ...], \
+               torch.arange(interest_fr + frame_numbers[0], frame_numbers[-1] + 1), \
+               last_frame_from_last_used_batch, past_12_frames_optical_flow, gt_velocity_dict, last_optical_flow_map, \
+               last12_bg_sub_mask
+
+    @ray.remote(num_cpus=8)
+    def core_feature_extraction_parallel(self, actual_interest_fr, actual_of_interest_fr, classic_clustering,
+                                         data_all_frames, df, frames, interest_fr, kernel, last12_bg_sub_mask, mask, n,
+                                         of_interest_fr, original_shape, past_12_frames_optical_flow, resized_shape,
+                                         return_normalized, step, time_gap_within_frames, total_frames, track_ids,
+                                         var_threshold, current_idx):
+        past_12_frames_optical_flow_summed_median_based = optimize_optical_flow_object_level_for_frames(
+            df=df,
+            foreground_masks=last12_bg_sub_mask,
+            optical_flow_between_frames=past_12_frames_optical_flow,
+            original_shape=original_shape,
+            new_shape=resized_shape,
+            circle_radius=8,
+            plot=True,
+            pull_towards_bbox_center=True,
+            key_point_criterion=np.median,
+            plot_each_track=False)
+        past_12_frames_optical_flow_summed_mean_based = optimize_optical_flow_object_level_for_frames(
+            df=df,
+            foreground_masks=last12_bg_sub_mask,
+            optical_flow_between_frames=past_12_frames_optical_flow,
+            original_shape=original_shape,
+            new_shape=resized_shape,
+            circle_radius=8,
+            plot=True,
+            pull_towards_bbox_center=True,
+            key_point_criterion=np.mean,
+            plot_each_track=False)
+        # flow between consecutive frames
+        frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))
+        future12_bg_sub_mask = {}
+        future_12_frames_optical_flow = {}
+        flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))  # put sum of optimized of - using other var
+        last_frame_to_add_in_future_dict = list(last12_bg_sub_mask.keys())[-2]
+        future12_bg_sub_mask.update({
+            last_frame_to_add_in_future_dict: last12_bg_sub_mask[last_frame_to_add_in_future_dict]})
+        for of_i, actual_of_i in zip(range(interest_fr, of_interest_fr),
+                                     range(actual_interest_fr, actual_of_interest_fr)):
+            future_mask = self.bg_sub_for_frame_equal_time_distributed(frames=frames, fr=of_i,
+                                                                       time_gap_within_frames=
+                                                                       time_gap_within_frames,
+                                                                       total_frames=total_frames, step=step, n=n,
+                                                                       kernel=kernel, var_threshold=var_threshold,
+                                                                       interest_fr=of_i)
+            future12_bg_sub_mask.update({actual_of_i: future_mask})
+
+            previous = cv.cvtColor(frames[of_i], cv.COLOR_BGR2GRAY)
+            next_frame = cv.cvtColor(frames[of_i + 1], cv.COLOR_BGR2GRAY)
+
+            flow_per_frame, rgb, mag, ang = self.get_optical_flow(previous_frame=previous, next_frame=next_frame,
+                                                                  all_results_out=True)
+
+            future_12_frames_optical_flow.update({f'{actual_of_i - 1}-{actual_of_i}': flow_per_frame})
+        future_12_frames_optical_flow_summed_median_based = optimize_optical_flow_object_level_for_frames(
+            df=df,
+            foreground_masks=future12_bg_sub_mask,
+            optical_flow_between_frames=future_12_frames_optical_flow,
+            original_shape=original_shape,
+            new_shape=resized_shape,
+            circle_radius=8,
+            future_frames_mode=True,
+            plot=True, pull_towards_bbox_center=True, key_point_criterion=np.median, plot_each_track=False)
+        future_12_frames_optical_flow_summed_mean_based = optimize_optical_flow_object_level_for_frames(
+            df=df,
+            foreground_masks=future12_bg_sub_mask,
+            optical_flow_between_frames=future_12_frames_optical_flow,
+            original_shape=original_shape,
+            new_shape=resized_shape,
+            circle_radius=8,
+            future_frames_mode=True,
+            plot=True, pull_towards_bbox_center=True, key_point_criterion=np.mean, plot_each_track=False)
+        all_agent_features = \
+            self._prepare_data_xyuv_for_all_object_of_interest_optimized_optical_flow(
+                flow_future_median=future_12_frames_optical_flow_summed_median_based,
+                interest_fr=interest_fr,
+                processed_data=mask,
+                data_frame_num=actual_interest_fr,
+                evaluation_mode=True,
+                return_options=True,
+                track_ids=track_ids,
+                original_shape=original_shape,
+                new_shape=resized_shape,
+                df=df,
+                do_clustering=classic_clustering,
+                optical_flow_frame_num=
+                frames_used_in_of_estimation,
+                flow_past_median=
+                past_12_frames_optical_flow_summed_median_based,
+                return_normalized=return_normalized,
+                flow_future_mean=future_12_frames_optical_flow_summed_mean_based,
+                flow_past_mean=past_12_frames_optical_flow_summed_mean_based)
+        of_flow_till_current_frame = flow
+        # data_all_frames.update({interest_fr: all_agent_features})
+        # data_all_frames.update({actual_interest_fr.item(): all_agent_features})
+        # plot_extracted_features(all_agent_features, frames[actual_interest_fr])
+        return all_agent_features, actual_interest_fr
 
     def _core_processing(self, frame, kernel):
         mask = self.algo.apply(frame)

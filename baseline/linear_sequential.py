@@ -1171,8 +1171,8 @@ def eval_models(dataset_load_path, meta, meta_video, meta_train_video_number, me
         feats = torch.load(features_load_path)
         train_set, val_set, test_set = prepare_datasets(features=feats)
 
-        of_model_version, of_model_epoch = 21, 280
-        gt_model_version, gt_model_epoch = 20, 85
+        of_model_version, of_model_epoch = 15, 367  # 25, 19  # 21, 280
+        gt_model_version, gt_model_epoch = 14, 216  # 24, 6  # 20, 85
 
         # T=20
         logger.info('T=20')
@@ -1234,14 +1234,14 @@ if __name__ == '__main__':
         file_name = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
                     f'center_based_gt_velocity_of_optimized_t{TIME_STEPS}.pt'
 
-        main(do_train=train_mode, features_load_path=save_path + file_name, meta=dataset_meta,
-             meta_video=dataset_meta_video, meta_train_video_number=video_number, meta_val_video_number=video_number,
-             time_steps=TIME_STEPS, lr=LR, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS,
-             of_model_version=OF_VERSION, of_model_epoch=OF_EPOCH, gt_model_version=GT_VERSION,
-             gt_model_epoch=GT_EPOCH, use_batch_norm=USE_BATCH_NORM, center_based=CENTER_BASED, gt_based=GT_BASED,
-             dataset_video=video_label, loader_to_use_for_inference=NetworkMode.VALIDATION, same_init=SAME_INIT)
+        # main(do_train=train_mode, features_load_path=save_path + file_name, meta=dataset_meta,
+        #      meta_video=dataset_meta_video, meta_train_video_number=video_number, meta_val_video_number=video_number,
+        #      time_steps=TIME_STEPS, lr=LR, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS,
+        #      of_model_version=OF_VERSION, of_model_epoch=OF_EPOCH, gt_model_version=GT_VERSION,
+        #      gt_model_epoch=GT_EPOCH, use_batch_norm=USE_BATCH_NORM, center_based=CENTER_BASED, gt_based=GT_BASED,
+        #      dataset_video=video_label, loader_to_use_for_inference=NetworkMode.VALIDATION, same_init=SAME_INIT)
 
-        # eval_models(dataset_load_path=save_path, meta=dataset_meta, meta_video=dataset_meta_video,
-        #             meta_train_video_number=video_number, meta_val_video_number=video_number, lr=LR,
-        #             use_batch_norm=USE_BATCH_NORM, center_based=CENTER_BASED, dataset_video=video_label,
-        #             same_init=SAME_INIT)
+        eval_models(dataset_load_path=save_path, meta=dataset_meta, meta_video=dataset_meta_video,
+                    meta_train_video_number=video_number, meta_val_video_number=video_number, lr=LR,
+                    use_batch_norm=USE_BATCH_NORM, center_based=CENTER_BASED, dataset_video=video_label,
+                    same_init=SAME_INIT)
