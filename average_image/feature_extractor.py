@@ -15,7 +15,7 @@ from skimage.transform import resize
 from skimage import color
 from sklearn.cluster import cluster_optics_dbscan
 from tqdm import tqdm
-import ray
+# import ray
 
 from average_image.bbox_utils import add_bbox_to_axes, resize_v_frames, get_frame_annotations, preprocess_annotations, \
     scale_annotations, get_frame_annotations_and_skip_lost
@@ -1672,7 +1672,8 @@ class BackgroundSubtraction(FeatureExtractor):
             gt_velocity_dict=None,
             last_optical_flow_map=None,
             last12_bg_sub_mask=None,
-            all_object_of_interest_only_with_optimized_of=True):
+            all_object_of_interest_only_with_optimized_of=True,
+            resume_mode=False):
         self.original_shape = original_shape
         interest_fr = None
         actual_interest_fr = None
@@ -1843,148 +1844,151 @@ class BackgroundSubtraction(FeatureExtractor):
             # displacement/time = velocity - wrong it already is velocity
             # of_flow_till_current_frame = of_flow_till_current_frame
             # fixme: put sum of past optimized OF here
-            past_12_frames_optical_flow_summed_median_based = optimize_optical_flow_object_level_for_frames(
-                df=df,
-                foreground_masks=last12_bg_sub_mask,
-                optical_flow_between_frames=past_12_frames_optical_flow,
-                original_shape=original_shape,
-                new_shape=resized_shape,
-                circle_radius=8,
-                plot=True,
-                pull_towards_bbox_center=True,
-                key_point_criterion=np.median,
-                plot_each_track=False)
+            if not resume_mode:
+                past_12_frames_optical_flow_summed_median_based = optimize_optical_flow_object_level_for_frames(
+                    df=df,
+                    foreground_masks=last12_bg_sub_mask,
+                    optical_flow_between_frames=past_12_frames_optical_flow,
+                    original_shape=original_shape,
+                    new_shape=resized_shape,
+                    circle_radius=8,
+                    plot=True,
+                    pull_towards_bbox_center=True,
+                    key_point_criterion=np.median,
+                    plot_each_track=False)
 
-            past_12_frames_optical_flow_summed_mean_based = optimize_optical_flow_object_level_for_frames(
-                df=df,
-                foreground_masks=last12_bg_sub_mask,
-                optical_flow_between_frames=past_12_frames_optical_flow,
-                original_shape=original_shape,
-                new_shape=resized_shape,
-                circle_radius=8,
-                plot=True,
-                pull_towards_bbox_center=True,
-                key_point_criterion=np.mean,
-                plot_each_track=False)
+                past_12_frames_optical_flow_summed_mean_based = optimize_optical_flow_object_level_for_frames(
+                    df=df,
+                    foreground_masks=last12_bg_sub_mask,
+                    optical_flow_between_frames=past_12_frames_optical_flow,
+                    original_shape=original_shape,
+                    new_shape=resized_shape,
+                    circle_radius=8,
+                    plot=True,
+                    pull_towards_bbox_center=True,
+                    key_point_criterion=np.mean,
+                    plot_each_track=False)
 
-            # flow between consecutive frames
-            frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))
-            future12_bg_sub_mask = {}
-            future_12_frames_optical_flow = {}
-            flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))  # put sum of optimized of - using other var
-            last_frame_to_add_in_future_dict = list(last12_bg_sub_mask.keys())[-2]
-            future12_bg_sub_mask.update({
-                last_frame_to_add_in_future_dict: last12_bg_sub_mask[last_frame_to_add_in_future_dict]})
-            for of_i, actual_of_i in zip(range(interest_fr, of_interest_fr),
-                                         range(actual_interest_fr, actual_of_interest_fr)):
-                future_mask = self.bg_sub_for_frame_equal_time_distributed(frames=frames, fr=of_i,
-                                                                           time_gap_within_frames=
-                                                                           time_gap_within_frames,
-                                                                           total_frames=total_frames, step=step, n=n,
-                                                                           kernel=kernel, var_threshold=var_threshold,
-                                                                           interest_fr=of_i)
-                future12_bg_sub_mask.update({actual_of_i: future_mask})
+                # flow between consecutive frames
+                frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))
+                future12_bg_sub_mask = {}
+                future_12_frames_optical_flow = {}
+                flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))  # put sum of optimized of - using other var
+                last_frame_to_add_in_future_dict = list(last12_bg_sub_mask.keys())[-2]
+                future12_bg_sub_mask.update({
+                    last_frame_to_add_in_future_dict: last12_bg_sub_mask[last_frame_to_add_in_future_dict]})
+                for of_i, actual_of_i in zip(range(interest_fr, of_interest_fr),
+                                             range(actual_interest_fr, actual_of_interest_fr)):
+                    future_mask = self.bg_sub_for_frame_equal_time_distributed(frames=frames, fr=of_i,
+                                                                               time_gap_within_frames=
+                                                                               time_gap_within_frames,
+                                                                               total_frames=total_frames, step=step, n=n,
+                                                                               kernel=kernel, var_threshold=var_threshold,
+                                                                               interest_fr=of_i)
+                    future12_bg_sub_mask.update({actual_of_i: future_mask})
 
-                previous = cv.cvtColor(frames[of_i], cv.COLOR_BGR2GRAY)
-                next_frame = cv.cvtColor(frames[of_i + 1], cv.COLOR_BGR2GRAY)
+                    previous = cv.cvtColor(frames[of_i], cv.COLOR_BGR2GRAY)
+                    next_frame = cv.cvtColor(frames[of_i + 1], cv.COLOR_BGR2GRAY)
 
-                flow_per_frame, rgb, mag, ang = self.get_optical_flow(previous_frame=previous, next_frame=next_frame,
-                                                                      all_results_out=True)
-                # flow += flow_per_frame
-                # for 1st flow map the frame to add flow is actual_interest_fr - 1 | actual_interest_fr = 12 =
-                # interest_fr = 8, thus we need interest_fr=7 which is actual_interest_fr=11
-                future_12_frames_optical_flow.update({f'{actual_of_i - 1}-{actual_of_i}': flow_per_frame})
+                    flow_per_frame, rgb, mag, ang = self.get_optical_flow(previous_frame=previous, next_frame=next_frame,
+                                                                          all_results_out=True)
+                    # flow += flow_per_frame
+                    # for 1st flow map the frame to add flow is actual_interest_fr - 1 | actual_interest_fr = 12 =
+                    # interest_fr = 8, thus we need interest_fr=7 which is actual_interest_fr=11
+                    future_12_frames_optical_flow.update({f'{actual_of_i - 1}-{actual_of_i}': flow_per_frame})
 
-            future_12_frames_optical_flow_summed_median_based = optimize_optical_flow_object_level_for_frames(
-                df=df,
-                foreground_masks=future12_bg_sub_mask,
-                optical_flow_between_frames=future_12_frames_optical_flow,
-                original_shape=original_shape,
-                new_shape=resized_shape,
-                circle_radius=8,
-                future_frames_mode=True,
-                plot=True, pull_towards_bbox_center=True, key_point_criterion=np.median, plot_each_track=False)
+            # if not resume_mode:
+                future_12_frames_optical_flow_summed_median_based = optimize_optical_flow_object_level_for_frames(
+                    df=df,
+                    foreground_masks=future12_bg_sub_mask,
+                    optical_flow_between_frames=future_12_frames_optical_flow,
+                    original_shape=original_shape,
+                    new_shape=resized_shape,
+                    circle_radius=8,
+                    future_frames_mode=True,
+                    plot=True, pull_towards_bbox_center=True, key_point_criterion=np.median, plot_each_track=False)
 
-            future_12_frames_optical_flow_summed_mean_based = optimize_optical_flow_object_level_for_frames(
-                df=df,
-                foreground_masks=future12_bg_sub_mask,
-                optical_flow_between_frames=future_12_frames_optical_flow,
-                original_shape=original_shape,
-                new_shape=resized_shape,
-                circle_radius=8,
-                future_frames_mode=True,
-                plot=True, pull_towards_bbox_center=True, key_point_criterion=np.mean, plot_each_track=False)
+                future_12_frames_optical_flow_summed_mean_based = optimize_optical_flow_object_level_for_frames(
+                    df=df,
+                    foreground_masks=future12_bg_sub_mask,
+                    optical_flow_between_frames=future_12_frames_optical_flow,
+                    original_shape=original_shape,
+                    new_shape=resized_shape,
+                    circle_radius=8,
+                    future_frames_mode=True,
+                    plot=True, pull_towards_bbox_center=True, key_point_criterion=np.mean, plot_each_track=False)
 
-            if use_color:
-                data, data_, max_0, max_1, min_0, min_1, threshold_img = \
-                    self._prepare_data_xyuv_color(frames[interest_fr],
-                                                  flow, interest_fr,
-                                                  mask,
-                                                  evaluation_mode
-                                                  =True,
-                                                  lab_space=True)
-            else:
-                if object_of_interest_only:
-                    # Add classic clustering in them
-                    data, data_, max_0, max_1, min_0, min_1, options = \
-                        self._prepare_data_xyuv_for_object_of_interest(flow, interest_fr,
-                                                                       mask, data_frame_num=actual_interest_fr,
-                                                                       evaluation_mode=True,
-                                                                       return_options=True,
-                                                                       original_shape=original_shape,
-                                                                       new_shape=resized_shape,
-                                                                       df=df)
-                elif all_object_of_interest_only:
-                    all_agent_features = \
-                        self._prepare_data_xyuv_for_all_object_of_interest(flow, interest_fr,
+            # if not resume_mode:
+                if use_color:
+                    data, data_, max_0, max_1, min_0, min_1, threshold_img = \
+                        self._prepare_data_xyuv_color(frames[interest_fr],
+                                                      flow, interest_fr,
+                                                      mask,
+                                                      evaluation_mode
+                                                      =True,
+                                                      lab_space=True)
+                else:
+                    if object_of_interest_only:
+                        # Add classic clustering in them
+                        data, data_, max_0, max_1, min_0, min_1, options = \
+                            self._prepare_data_xyuv_for_object_of_interest(flow, interest_fr,
                                                                            mask, data_frame_num=actual_interest_fr,
                                                                            evaluation_mode=True,
                                                                            return_options=True,
-                                                                           track_ids=track_ids,
                                                                            original_shape=original_shape,
                                                                            new_shape=resized_shape,
-                                                                           df=df, do_clustering=classic_clustering,
-                                                                           optical_flow_frame_num=
-                                                                           frames_used_in_of_estimation,
-                                                                           optical_flow_till_current_frame=
-                                                                           past_12_frames_optical_flow,
-                                                                           return_normalized=return_normalized)
-                    of_flow_till_current_frame = flow
-                    # data_all_frames.update({interest_fr: all_agent_features})
-                    data_all_frames.update({actual_interest_fr.item(): all_agent_features})
-                    # plot_extracted_features(all_agent_features, frames[actual_interest_fr])
-                elif all_object_of_interest_only_with_optimized_of:
-                    all_agent_features = \
-                        self._prepare_data_xyuv_for_all_object_of_interest_optimized_optical_flow(
-                            flow_future_median=future_12_frames_optical_flow_summed_median_based,
-                            interest_fr=interest_fr,
-                            processed_data=mask,
-                            data_frame_num=actual_interest_fr,
-                            evaluation_mode=True,
-                            return_options=True,
-                            track_ids=track_ids,
-                            original_shape=original_shape,
-                            new_shape=resized_shape,
-                            df=df,
-                            do_clustering=classic_clustering,
-                            optical_flow_frame_num=
-                            frames_used_in_of_estimation,
-                            flow_past_median=
-                            past_12_frames_optical_flow_summed_median_based,
-                            return_normalized=return_normalized,
-                            flow_future_mean=future_12_frames_optical_flow_summed_mean_based,
-                            flow_past_mean=past_12_frames_optical_flow_summed_mean_based)
-                    of_flow_till_current_frame = flow
-                    # data_all_frames.update({interest_fr: all_agent_features})
-                    data_all_frames.update({actual_interest_fr.item(): all_agent_features})
-                    # plot_extracted_features(all_agent_features, frames[actual_interest_fr])
-                else:
-                    # Add classic clustering in them
-                    data, data_, max_0, max_1, min_0, min_1, threshold_img, options = \
-                        self._prepare_data_xyuv(flow, interest_fr,
-                                                mask,
-                                                evaluation_mode=True,
-                                                return_options=True)
+                                                                           df=df)
+                    elif all_object_of_interest_only:
+                        all_agent_features = \
+                            self._prepare_data_xyuv_for_all_object_of_interest(flow, interest_fr,
+                                                                               mask, data_frame_num=actual_interest_fr,
+                                                                               evaluation_mode=True,
+                                                                               return_options=True,
+                                                                               track_ids=track_ids,
+                                                                               original_shape=original_shape,
+                                                                               new_shape=resized_shape,
+                                                                               df=df, do_clustering=classic_clustering,
+                                                                               optical_flow_frame_num=
+                                                                               frames_used_in_of_estimation,
+                                                                               optical_flow_till_current_frame=
+                                                                               past_12_frames_optical_flow,
+                                                                               return_normalized=return_normalized)
+                        of_flow_till_current_frame = flow
+                        # data_all_frames.update({interest_fr: all_agent_features})
+                        data_all_frames.update({actual_interest_fr.item(): all_agent_features})
+                        # plot_extracted_features(all_agent_features, frames[actual_interest_fr])
+                    elif all_object_of_interest_only_with_optimized_of:
+                        all_agent_features = \
+                            self._prepare_data_xyuv_for_all_object_of_interest_optimized_optical_flow(
+                                flow_future_median=future_12_frames_optical_flow_summed_median_based,
+                                interest_fr=interest_fr,
+                                processed_data=mask,
+                                data_frame_num=actual_interest_fr,
+                                evaluation_mode=True,
+                                return_options=True,
+                                track_ids=track_ids,
+                                original_shape=original_shape,
+                                new_shape=resized_shape,
+                                df=df,
+                                do_clustering=classic_clustering,
+                                optical_flow_frame_num=
+                                frames_used_in_of_estimation,
+                                flow_past_median=
+                                past_12_frames_optical_flow_summed_median_based,
+                                return_normalized=return_normalized,
+                                flow_future_mean=future_12_frames_optical_flow_summed_mean_based,
+                                flow_past_mean=past_12_frames_optical_flow_summed_mean_based)
+                        of_flow_till_current_frame = flow
+                        # data_all_frames.update({interest_fr: all_agent_features})
+                        data_all_frames.update({actual_interest_fr.item(): all_agent_features})
+                        # plot_extracted_features(all_agent_features, frames[actual_interest_fr])
+                    else:
+                        # Add classic clustering in them
+                        data, data_, max_0, max_1, min_0, min_1, threshold_img, options = \
+                            self._prepare_data_xyuv(flow, interest_fr,
+                                                    mask,
+                                                    evaluation_mode=True,
+                                                    return_options=True)
             # past_12_frames_optical_flow = past_12_frames_optical_flow[1:]  # fixme!
 
             # for gt_key, gt_value in gt_velocity_dict.items():
@@ -2159,7 +2163,7 @@ class BackgroundSubtraction(FeatureExtractor):
         #     data_all_frames.update({result_id: result})
 
         # ray
-        ray_results = ray.get(parallel_execution_results)
+        # ray_results = ray.get(parallel_execution_results)
         for exec_res in ray_results:
             result, result_id = exec_res
             data_all_frames.update({result_id: result})
@@ -2176,7 +2180,7 @@ class BackgroundSubtraction(FeatureExtractor):
                last_frame_from_last_used_batch, past_12_frames_optical_flow, gt_velocity_dict, last_optical_flow_map, \
                last12_bg_sub_mask
 
-    @ray.remote(num_cpus=8)
+    # @ray.remote(num_cpus=8)
     def core_feature_extraction_parallel(self, actual_interest_fr, actual_of_interest_fr, classic_clustering,
                                          data_all_frames, df, frames, interest_fr, kernel, last12_bg_sub_mask, mask, n,
                                          of_interest_fr, original_shape, past_12_frames_optical_flow, resized_shape,
