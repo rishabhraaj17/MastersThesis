@@ -1760,7 +1760,7 @@ class BackgroundSubtraction(FeatureExtractor):
             # start at 12th frame and then only consider last 12 frames for velocity estimation
             if actual_interest_fr != 0:
                 if interest_fr == 0:
-                    previous = cv.cvtColor(last_frame_from_last_used_batch, cv.COLOR_BGR2GRAY)
+                    previous = cv.cvtColor(last_frame_from_last_used_batch.astype(np.uint8), cv.COLOR_BGR2GRAY)
                     next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
 
                     past_flow_per_frame, past_rgb, past_mag, past_ang = self.get_optical_flow(previous_frame=previous,

@@ -114,7 +114,7 @@ def preprocess_data(classic_clustering=False, equal_time_distributed=True, save_
     return accumulated_features
 
 
-def get_resume_data(part_idx, frames, frame_numbers, last_itr_frames, last_itr_frame_numbers, resume_past_12_of):
+def get_resume_data_v0(part_idx, frames, frame_numbers, last_itr_frames, last_itr_frame_numbers, resume_past_12_of):
     save_per_part_path = SAVE_PATH + 'parts/'
     file_name = f'time_distributed_dict_with_gt_bbox_centers_and_bbox_part_gt_velocity_optimized_of_{part_idx}.pt'
     # processed_data = torch.load(save_per_part_path + file_name)
@@ -138,13 +138,6 @@ def get_resume_data(part_idx, frames, frame_numbers, last_itr_frames, last_itr_f
                                                               interest_fr=idx)
             last12_bg_sub_mask.update({p_idx.item(): fg_mask})
         for idx, p_idx in zip(range(1, 4), frame_numbers):
-            # fg_mask = bg_sub_for_frame_equal_time_distributed(frames=frames, fr=idx,
-            #                                                   time_gap_within_frames=3,
-            #                                                   total_frames=frames_count, step=30//2, n=30,
-            #                                                   kernel=kernel, var_threshold=None,
-            #                                                   interest_fr=idx)
-            # last12_bg_sub_mask.update({p_idx.item(): fg_mask})
-
             previous = cv.cvtColor(frames[idx - 1], cv.COLOR_BGR2GRAY)
             next_frame = cv.cvtColor(frames[idx], cv.COLOR_BGR2GRAY)
 
@@ -153,12 +146,7 @@ def get_resume_data(part_idx, frames, frame_numbers, last_itr_frames, last_itr_f
                 next_frame=next_frame,
                 all_results_out=True)
             resume_past_12_of.update({f'{p_idx}-{p_idx + 1}': past_flow_per_frame})
-        # fg_mask = bg_sub_for_frame_equal_time_distributed(frames=frames, fr=3,
-        #                                                   time_gap_within_frames=3,
-        #                                                   total_frames=frames_count, step=30 // 2, n=30,
-        #                                                   kernel=kernel, var_threshold=None,
-        #                                                   interest_fr=3)
-        # last12_bg_sub_mask.update({3: fg_mask})
+
     if part_idx > 0:
         if last_itr_frame_numbers is not None:
             last_round_frames = torch.cat((last_itr_frame_numbers, frame_numbers[:4]))
@@ -182,13 +170,6 @@ def get_resume_data(part_idx, frames, frame_numbers, last_itr_frames, last_itr_f
             last12_bg_sub_mask.update({p_idx: fg_mask})
 
         for idx, p_idx in zip(range(4, 17), past_12_idx[:-1]):
-            # fg_mask = bg_sub_for_frame_equal_time_distributed(frames=frames_for_of, fr=idx,
-            #                                                   time_gap_within_frames=3,
-            #                                                   total_frames=frames_count, step=30 // 2, n=30,
-            #                                                   kernel=kernel, var_threshold=None,
-            #                                                   interest_fr=idx)
-            # last12_bg_sub_mask.update({p_idx: fg_mask})
-
             previous = cv.cvtColor(frames_for_of[idx - 1], cv.COLOR_BGR2GRAY)
             next_frame = cv.cvtColor(frames_for_of[idx], cv.COLOR_BGR2GRAY)
 
@@ -198,12 +179,63 @@ def get_resume_data(part_idx, frames, frame_numbers, last_itr_frames, last_itr_f
                 all_results_out=True)
             resume_past_12_of.update({f'{p_idx}-{p_idx + 1}': past_flow_per_frame})
 
-        # fg_mask = bg_sub_for_frame_equal_time_distributed(frames=frames_for_of, fr=17,
-        #                                                   time_gap_within_frames=3,
-        #                                                   total_frames=frames_count, step=30 // 2, n=30,
-        #                                                   kernel=kernel, var_threshold=None,
-        #                                                   interest_fr=17)
-        # last12_bg_sub_mask.update({past_12_idx[-1]: fg_mask})
+    # resume_past_12_of = None
+    if len(resume_past_12_of) > 12:
+        temp_past_12_frames_optical_flow = {}
+        for i in list(resume_past_12_of)[-12:]:
+            temp_past_12_frames_optical_flow.update({i: resume_past_12_of[i]})
+        resume_past_12_of = temp_past_12_frames_optical_flow
+
+    if len(last12_bg_sub_mask) > 13:
+        temp_last12_bg_sub_mask = {}
+        for i in list(last12_bg_sub_mask)[-13:]:
+            temp_last12_bg_sub_mask.update({i: last12_bg_sub_mask[i]})
+        last12_bg_sub_mask = temp_last12_bg_sub_mask
+
+    return features_, remaining_frames, remaining_frames_idx, last_frame_from_last_used_batch, \
+           resume_past_12_of, last12_bg_sub_mask, total_frames
+
+
+def get_resume_data(part_idx, frames, frame_numbers, last_itr_frames, last_itr_frame_numbers, resume_past_12_of):
+    features_, total_frames = None, None
+    remaining_frames, remaining_frames_idx, last_frame_from_last_used_batch = None, None, None
+    past_12_frames_optical_flow, last12_bg_sub_mask = {}, {}
+
+    remaining_frames_idx = frame_numbers[4:]
+    last_frame_from_last_used_batch_idx = frame_numbers[3]
+    kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
+
+    if last_itr_frame_numbers is not None or last_itr_frames is not None:
+        if last_itr_frame_numbers is not None:
+            last_round_frames = torch.cat((last_itr_frame_numbers, frame_numbers[:4]))
+            total_frames = torch.cat((last_itr_frames[-12:], frames), 0)
+            last_frame_from_last_used_batch = (total_frames[15].permute(1, 2, 0) * 255).int().numpy()
+
+        features_idx_ = list(range(last_frame_from_last_used_batch_idx - 15, last_frame_from_last_used_batch_idx + 1))
+        past_12_idx = list(range(last_frame_from_last_used_batch_idx - 12, last_frame_from_last_used_batch_idx + 1))
+
+        # total_frames = (total_frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
+        frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
+        remaining_frames = (last_itr_frames[-12:] * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
+        frames_for_of = np.concatenate((remaining_frames, frames), axis=0)
+        frames_count = frames_for_of.shape[0]
+        for idx, p_idx in zip(range(3, 16), past_12_idx):
+            fg_mask = bg_sub_for_frame_equal_time_distributed(frames=frames_for_of, fr=idx,
+                                                              time_gap_within_frames=3,
+                                                              total_frames=frames_count, step=30 // 2, n=30,
+                                                              kernel=kernel, var_threshold=None,
+                                                              interest_fr=idx)
+            last12_bg_sub_mask.update({p_idx: fg_mask})
+
+        for idx, p_idx in zip(range(4, 17), past_12_idx[:-1]):
+            previous = cv.cvtColor(frames_for_of[idx - 1], cv.COLOR_BGR2GRAY)
+            next_frame = cv.cvtColor(frames_for_of[idx], cv.COLOR_BGR2GRAY)
+
+            past_flow_per_frame, past_rgb, past_mag, past_ang = FeatureExtractor.get_optical_flow(
+                previous_frame=previous,
+                next_frame=next_frame,
+                all_results_out=True)
+            resume_past_12_of.update({f'{p_idx}-{p_idx + 1}': past_flow_per_frame})
 
     # resume_past_12_of = None
     if len(resume_past_12_of) > 12:
@@ -237,48 +269,67 @@ def preprocess_optical_flow_optimized_data(classic_clustering=False, equal_time_
     past_12_frames_optical_flow, last_itr_past_12_frames_optical_flow, last_itr_past_12_bg_sub_mask = {}, {}, {}
     gt_velocity_dict, accumulated_features = {}, {}
     last_itr_frames, last_itr_frame_numbers = None, None
-    resume_past_12_of = {}
-    if resume and resume_idx is not None:
-        file_name = f'time_distributed_dict_with_gt_bbox_centers_and_bbox_part_gt_velocity_optimized_of_{resume_idx}.pt'
-        # accumulated_features = torch.load(save_per_part_path + file_name)
+    resume_past_12_of, r_last12_bg_sub_mask = {}, {}
+    r_remaining_frames_idx, r_last_frame_from_last_used_batch = None, None
+
     for part_idx, data in enumerate(tqdm(data_loader)):
         frames, frame_numbers = data
         frames = frames.squeeze()
         feature_extractor = MOG2.for_frames()
-        if resume and part_idx <= resume_idx:
-            # features_, remaining_frames, remaining_frames_idx, last_frame_from_last_used_batch, \
-            # past_12_frames_optical_flow, gt_velocity_dict, last_optical_flow_map, last12_bg_sub_mask = feature_extractor. \
-            #     keyframe_based_feature_extraction_optimized_optical_flow_from_frames_nn(
-            #     frames=frames, n=30,
-            #     use_last_n_to_build_model=False,
-            #     frames_to_build_model=num_frames_to_build_bg_sub_model,
-            #     original_shape=sdd_simple.original_shape,
-            #     resized_shape=sdd_simple.new_scale,
-            #     classic_clustering=classic_clustering,
-            #     object_of_interest_only=False,
-            #     var_threshold=None, track_ids=None,
-            #     all_object_of_interest_only=False,
-            #     all_object_of_interest_only_with_optimized_of=True,
-            #     equal_time_distributed=equal_time_distributed,
-            #     frame_numbers=frame_numbers,
-            #     df=sdd_simple.annotations_df,
-            #     return_normalized=False,
-            #     remaining_frames=remaining_frames,
-            #     remaining_frames_idx=remaining_frames_idx,
-            #     past_12_frames_optical_flow=past_12_frames_optical_flow,
-            #     last_frame_from_last_used_batch=
-            #     last_frame_from_last_used_batch,
-            #     gt_velocity_dict=gt_velocity_dict,
-            #     last_optical_flow_map=last_optical_flow_map,
-            #     last12_bg_sub_mask=last12_bg_sub_mask,
-            #     resume_mode=True)
-            last_itr_past_12_frames_optical_flow = copy.deepcopy(resume_past_12_of)
-            r_features_, r_remaining_frames, r_remaining_frames_idx, r_last_frame_from_last_used_batch, \
-            resume_past_12_of, r_last12_bg_sub_mask, r_total_frames = get_resume_data(
-                part_idx, frames, frame_numbers, last_itr_frames, last_itr_frame_numbers,
-                resume_past_12_of)
-            last_itr_frames, last_itr_frame_numbers = frames.clone(), frame_numbers.clone()
-            # else:
+        if resume:
+            if part_idx < resume_idx - 2:
+                continue
+            elif part_idx == resume_idx - 2 or part_idx == resume_idx - 1 or part_idx == resume_idx:
+                # last_itr_past_12_frames_optical_flow = copy.deepcopy(resume_past_12_of)
+                # _past_12_frames_optical_flow = copy.deepcopy(resume_past_12_of)
+                # _last12_bg_sub_mask = copy.deepcopy(r_last12_bg_sub_mask)
+                # _remaining_frames_idx = copy.deepcopy(r_remaining_frames_idx)
+                # _last_frame_from_last_used_batch = copy.deepcopy(r_last_frame_from_last_used_batch)
+                past_12_frames_optical_flow = copy.deepcopy(resume_past_12_of)
+                last12_bg_sub_mask = copy.deepcopy(r_last12_bg_sub_mask)
+                remaining_frames_idx = copy.deepcopy(r_remaining_frames_idx)
+                last_frame_from_last_used_batch = copy.deepcopy(r_last_frame_from_last_used_batch)
+
+                r_features_, r_remaining_frames, r_remaining_frames_idx, r_last_frame_from_last_used_batch, \
+                resume_past_12_of, r_last12_bg_sub_mask, r_total_frames = get_resume_data(
+                    part_idx, frames, frame_numbers, last_itr_frames, last_itr_frame_numbers,
+                    resume_past_12_of)
+                last_itr_frames, last_itr_frame_numbers = frames.clone(), frame_numbers.clone()
+                if part_idx == resume_idx:
+                    past_12_frames_optical_flow = copy.deepcopy(resume_past_12_of)
+                    last12_bg_sub_mask = copy.deepcopy(r_last12_bg_sub_mask)
+                    remaining_frames_idx = copy.deepcopy(r_remaining_frames_idx)
+                    last_frame_from_last_used_batch = copy.deepcopy(r_last_frame_from_last_used_batch)
+                    remaining_frames = copy.deepcopy(r_remaining_frames)
+            else:
+                features_, remaining_frames, remaining_frames_idx, last_frame_from_last_used_batch, \
+                past_12_frames_optical_flow, gt_velocity_dict, last_optical_flow_map, last12_bg_sub_mask = feature_extractor. \
+                    keyframe_based_feature_extraction_optimized_optical_flow_from_frames_nn(
+                    frames=frames, n=30,
+                    use_last_n_to_build_model=False,
+                    frames_to_build_model=num_frames_to_build_bg_sub_model,
+                    original_shape=sdd_simple.original_shape,
+                    resized_shape=sdd_simple.new_scale,
+                    classic_clustering=classic_clustering,
+                    object_of_interest_only=False,
+                    var_threshold=None, track_ids=None,
+                    all_object_of_interest_only=False,
+                    all_object_of_interest_only_with_optimized_of=True,
+                    equal_time_distributed=equal_time_distributed,
+                    frame_numbers=frame_numbers,
+                    df=sdd_simple.annotations_df,
+                    return_normalized=False,
+                    remaining_frames=remaining_frames,
+                    remaining_frames_idx=remaining_frames_idx,
+                    past_12_frames_optical_flow=past_12_frames_optical_flow,
+                    last_frame_from_last_used_batch=
+                    last_frame_from_last_used_batch,
+                    gt_velocity_dict=gt_velocity_dict,
+                    last_optical_flow_map=last_optical_flow_map,
+                    last12_bg_sub_mask=last12_bg_sub_mask,
+                    resume_mode=False)  # fixme: remove
+                accumulated_features = {**accumulated_features, **features_}
+        else:
             features_, remaining_frames, remaining_frames_idx, last_frame_from_last_used_batch, \
             past_12_frames_optical_flow, gt_velocity_dict, last_optical_flow_map, last12_bg_sub_mask = feature_extractor. \
                 keyframe_based_feature_extraction_optimized_optical_flow_from_frames_nn(
@@ -304,16 +355,17 @@ def preprocess_optical_flow_optimized_data(classic_clustering=False, equal_time_
                 gt_velocity_dict=gt_velocity_dict,
                 last_optical_flow_map=last_optical_flow_map,
                 last12_bg_sub_mask=last12_bg_sub_mask,
-                resume_mode=True)  # fixme: remove
-            # last_itr_past_12_frames_optical_flow = resume_past_12_of
+                resume_mode=False)
             accumulated_features = {**accumulated_features, **features_}
-            last_itr_past_12_bg_sub_mask = copy.deepcopy(r_last12_bg_sub_mask)
+        # last_itr_past_12_bg_sub_mask = copy.deepcopy(r_last12_bg_sub_mask)
+        # last12_bg_sub_mask = copy.deepcopy(r_last12_bg_sub_mask)
 
         # plot_extracted_features_and_verify_flow(features_, frames)
         # accumulated_features = {**accumulated_features, **features_}
         if (part_idx % 170 == 0) and not part_idx < resume_idx and save_per_part_path is not None:
             Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
-            f_n = f'time_distributed_dict_with_gt_bbox_centers_and_bbox_part_gt_velocity_optimized_of_{part_idx}.pt'
+            f_n = f'time_distributed_dict_with_gt_bbox_centers_and_' \
+                  f'bbox_part_gt_velocity_optimized_of_resumed_{part_idx}.pt'
             logger.info(f'Saving : {f_n}')
             torch.save(accumulated_features, save_per_part_path + f_n)
 
