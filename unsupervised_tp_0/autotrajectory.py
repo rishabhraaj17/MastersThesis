@@ -195,18 +195,18 @@ def extract_overfit_dataset(path):
             image_t_plus_one = frame
         else:
             continue
-    torchvision.io.write_jpeg(ref_image, 'overfit/ref_image.jpeg', 100)
-    torchvision.io.write_jpeg(image_t, 'overfit/image_t.jpeg', 100)
-    torchvision.io.write_jpeg(image_t_minus_one, 'overfit/image_t_minus_one.jpeg', 100)
-    torchvision.io.write_jpeg(image_t_plus_one, 'overfit/image_t_plus_one.jpeg', 100)
+    torchvision.io.write_jpeg(ref_image, 'overfit_images/ref_image.jpeg', 100)
+    torchvision.io.write_jpeg(image_t, 'overfit_images/image_t.jpeg', 100)
+    torchvision.io.write_jpeg(image_t_minus_one, 'overfit_images/image_t_minus_one.jpeg', 100)
+    torchvision.io.write_jpeg(image_t_plus_one, 'overfit_images/image_t_plus_one.jpeg', 100)
     return ref_image, image_t_minus_one, image_t, image_t_plus_one
 
 
 def load_images():
-    ref_image = torchvision.io.read_image('overfit/ref_image.jpeg')
-    image_t = torchvision.io.read_image('overfit/image_t.jpeg')
-    image_t_minus_one = torchvision.io.read_image('overfit/image_t_minus_one.jpeg')
-    image_t_plus_one = torchvision.io.read_image('overfit/image_t_plus_one.jpeg')
+    ref_image = torchvision.io.read_image('overfit_images/ref_image.jpeg')
+    image_t = torchvision.io.read_image('overfit_images/image_t.jpeg')
+    image_t_minus_one = torchvision.io.read_image('overfit_images/image_t_minus_one.jpeg')
+    image_t_plus_one = torchvision.io.read_image('overfit_images/image_t_plus_one.jpeg')
     return ref_image, image_t_minus_one, image_t, image_t_plus_one
 
 
