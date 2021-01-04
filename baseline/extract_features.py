@@ -5,7 +5,9 @@ from pathlib import Path
 import cv2 as cv
 import numpy as np
 # import ray
+import matplotlib.pyplot as plt
 import torch
+from matplotlib import patches
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -27,10 +29,12 @@ BASE_PATH = "../Datasets/SDD/"
 # BASE_PATH = "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/"
 VIDEO_LABEL = SDDVideoClasses.LITTLE
 VIDEO_NUMBER = 3
-SAVE_PATH = f'{SAVE_BASE_PATH}{VIDEO_LABEL.value}/video{VIDEO_NUMBER}/'
-FILE_NAME_STEP_1 = 'time_distributed_dict_with_gt_bbox_centers_and_bbox_gt_velocity.pt'
+# SAVE_PATH = f'{SAVE_BASE_PATH}{VIDEO_LABEL.value}/video{VIDEO_NUMBER}/'
+SAVE_PATH = f'{SAVE_BASE_PATH}{VIDEO_LABEL.value}/video{VIDEO_NUMBER}/parts/'
+# FILE_NAME_STEP_1 = 'time_distributed_dict_with_gt_bbox_centers_and_bbox_gt_velocity.pt'
+FILE_NAME_STEP_1 = 'time_distributed_dict_with_gt_bbox_centers_and_bbox_part_gt_velocity_optimized_of_680.pt'
 LOAD_FILE_STEP_1 = SAVE_PATH + FILE_NAME_STEP_1
-TIME_STEPS = 10
+TIME_STEPS = 5
 
 ENABLE_OF_OPTIMIZATION = True
 ALPHA = 1
@@ -38,7 +42,100 @@ TOP_K = 1
 WEIGHT_POINTS_INSIDE_BBOX_MORE = True
 
 # -1 for both steps
-EXECUTE_STEP = 1
+EXECUTE_STEP = 2
+
+
+def plot_object_tracks(shifted_points_gt, true_points, center_true, shifted_points_of, bbox_true, line_width=None,
+                       plot_save_path=None):
+    rows = TIME_STEPS // 5
+    k = 0
+    fig, ax = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12 * rows, 6 * rows))
+    ax.plot(true_points[:, 0], true_points[:, 1], 'o', markerfacecolor='blue',
+            markeredgecolor='k', markersize=8)
+    ax.plot(shifted_points_gt[:, 0], shifted_points_gt[:, 1], 'o', markerfacecolor='magenta',
+            markeredgecolor='k', markersize=8)
+    ax.plot(shifted_points_of[:, 0], shifted_points_of[:, 1], 'o', markerfacecolor='pink',
+            markeredgecolor='k', markersize=8)
+    ax.plot(center_true[0], center_true[1], '*', markerfacecolor='yellow',
+            markeredgecolor='k', markersize=9)
+    rect_true = patches.Rectangle(xy=(bbox_true[0], bbox_true[1]),
+                                  width=bbox_true[2] - bbox_true[0],
+                                  height=bbox_true[3] - bbox_true[1], fill=False,
+                                  linewidth=line_width, edgecolor='g')
+    ax.add_patch(rect_true)
+    # ax[c].add_patch(rect_shifted)
+    # fig, ax = plt.subplots(rows, 5, sharex='none', sharey='none', figsize=(24 * rows, 6 * rows))
+    # for r in range(rows):
+    #     for c in range(5):
+    #         if rows == 1:
+    #             ax[c].plot(true_points[k][:, 0], true_points[k][:, 1], 'o', markerfacecolor='blue',
+    #                        markeredgecolor='k', markersize=8)
+    #             ax[c].plot(shifted_points_gt[k][:, 0], shifted_points_gt[k][:, 1], 'o', markerfacecolor='magenta',
+    #                        markeredgecolor='k', markersize=8)
+    #             ax[c].plot(shifted_points_of[k][:, 0], shifted_points_of[k][:, 1], 'o', markerfacecolor='pink',
+    #                        markeredgecolor='k', markersize=8)
+    #             ax[c].plot(center_true[k][0], center_true[k][1], '*', markerfacecolor='yellow',
+    #                        markeredgecolor='k', markersize=9)
+    #             # ax[c].plot(center_shifted[k][0], center_shifted[k][1], '*', markerfacecolor='orange',
+    #             #            markeredgecolor='k', markersize=9)
+    #             rect_true = patches.Rectangle(xy=(bbox_true[k][0], bbox_true[k][1]),
+    #                                           width=bbox_true[k][2] - bbox_true[k][0],
+    #                                           height=bbox_true[k][3] - bbox_true[k][1], fill=False,
+    #                                           linewidth=line_width, edgecolor='g')
+    #             # rect_shifted = patches.Rectangle(xy=(bbox_shifted[k][0], bbox_shifted[k][1]),
+    #             #                                  width=bbox_shifted[k][2] - bbox_shifted[k][0],
+    #             #                                  height=bbox_shifted[k][3] - bbox_shifted[k][1], fill=False,
+    #             #                                  linewidth=line_width, edgecolor='r')
+    #             # ax[c].set_title(f'Frame: {frames[k]} | TrackId: {track_ids[k]}')
+    #             ax[c].add_patch(rect_true)
+    #             # ax[c].add_patch(rect_shifted)
+    #         else:
+    #             ax[r, c].plot(true_points[k][:, 0], true_points[k][:, 1], 'o', markerfacecolor='blue',
+    #                           markeredgecolor='k', markersize=8)
+    #             ax[r, c].plot(shifted_points_gt[k][:, 0], shifted_points_gt[k][:, 1], 'o', markerfacecolor='magenta',
+    #                           markeredgecolor='k', markersize=8)
+    #             ax[r, c].plot(shifted_points_of[k][:, 0], shifted_points_of[k][:, 1], 'o', markerfacecolor='pink',
+    #                           markeredgecolor='k', markersize=8)
+    #             ax[r, c].plot(center_true[k][0], center_true[k][1], '*', markerfacecolor='yellow',
+    #                           markeredgecolor='k', markersize=9)
+    #             # ax[r, c].plot(center_shifted[k][0], center_shifted[k][1], '*', markerfacecolor='orange',
+    #             #               markeredgecolor='k', markersize=9)
+    #             rect_true = patches.Rectangle(xy=(bbox_true[k][0], bbox_true[k][1]),
+    #                                           width=bbox_true[k][2] - bbox_true[k][0],
+    #                                           height=bbox_true[k][3] - bbox_true[k][1], fill=False,
+    #                                           linewidth=line_width, edgecolor='g')
+    #             # rect_shifted = patches.Rectangle(xy=(bbox_shifted[k][0], bbox_shifted[k][1]),
+    #             #                                  width=bbox_shifted[k][2] - bbox_shifted[k][0],
+    #             #                                  height=bbox_shifted[k][3] - bbox_shifted[k][1], fill=False,
+    #             #                                  linewidth=line_width, edgecolor='r')
+    #             # ax[r, c].set_title(f'Frame: {frames[k]} | TrackId: {track_ids[k]}')
+    #             ax[r, c].add_patch(rect_true)
+    #             # ax[r, c].add_patch(rect_shifted)
+    #         k += 1
+
+    # legends_dict = {'blue': 'Points at T',
+    #                 'magenta': '(T-1) GT Shifted points at T',
+    #                 'pink': '(T-1) OF Shifted points at T',
+    #                 'g': 'T Bounding Box',
+    #                 'r': 'T-1 Bounding Box',
+    #                 'yellow': 'T Bbox Center',
+    #                 'orange': 'T-1 Bbox Center'}
+    legends_dict = {'blue': 'Points at T',
+                    'magenta': '(T-1) GT Shifted points at T',
+                    'pink': '(T-1) OF Shifted points at T',
+                    'g': 'T Bounding Box',
+                    'yellow': 'T Bbox Center'}
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+    fig.suptitle(f'Object Features movement')
+
+    if plot_save_path is None:
+        plt.show()
+    else:
+        Path(plot_save_path).mkdir(parents=True, exist_ok=True)
+        # plt.savefig(plot_save_path + f'fig_tracks_{frames[0]}{"_".join([str(t) for t in track_ids])}.png')
+        plt.close()
 
 
 def _process_preloaded_n_frames(n, frames, kernel, algo):
@@ -476,18 +573,20 @@ def center_based_dataset(features):
           features['gt_velocity_y']
     skipped_counter = 0
     features_center = []
-    for feat1, velocity_x, y_center, y_bbox in tqdm(zip(features_x, gt_velocity_x, center_y, bbox_y),
-                                                    total=len(features_x)):
+    for feat1, feat2, velocity_x, y_center, y_bbox in tqdm(zip(features_x, features_y, gt_velocity_x, center_y, bbox_y),
+                                                           total=len(features_x)):
         f1_list = []
-        for f1, vx, y_cen, y_box in zip(feat1, velocity_x, y_center, y_bbox):
+        for f1, f2, vx, y_cen, y_box in zip(feat1, feat2, velocity_x, y_center, y_bbox):
             center_xy, center_true_uv, center_past_uv = find_center_point(f1)
             if ENABLE_OF_OPTIMIZATION:
                 shifted_points = f1[:, :2] + f1[:, 2:4]
+                shifted_points_gt = f1[:, :2] + vx * 0.4
+                plot_object_tracks(shifted_points_gt, f2[:, :2], y_cen, shifted_points, y_box)
                 _, weighted_shifted_points_top_k = cost_function(shifted_points, y_cen, top_k=TOP_K, alpha=ALPHA,
                                                                  bbox=y_box,
                                                                  weight_points_inside_bbox_more=
                                                                  WEIGHT_POINTS_INSIDE_BBOX_MORE)
-                shifted_points_center = weighted_shifted_points_top_k[0]
+                shifted_points_center = weighted_shifted_points_top_k[0]  # shifted center - make it int
             else:
                 shifted_points_center = (f1[:, :2] + f1[:, 2:4]).mean(axis=0)
             try:
@@ -544,7 +643,7 @@ def step_two():
     logger.info(f'Preparing the features for video {VIDEO_LABEL.value}, video {VIDEO_NUMBER}, {TIME_STEPS} time-steps')
     features = center_based_dataset(features_save_dict)
     file_name = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
-                f'center_based_gt_velocity_of_optimized_t{TIME_STEPS}.pt'
+                f'center_based_gt_velocity_of_optimized_v2_t{TIME_STEPS}.pt'
     if SAVE_PATH:
         Path(SAVE_PATH).mkdir(parents=True, exist_ok=True)
     torch.save(features, SAVE_PATH + file_name)

@@ -950,7 +950,7 @@ def find_center_point(points):
         if d < dist:
             idx = p
             dist = d
-    return points[idx, :2], points[idx, 2:4], points[idx, 4:]
+    return points[idx, :2], points[idx, 2:4], points[idx, 4:6]
 
 
 def center_based_dataset(features):

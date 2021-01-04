@@ -375,6 +375,7 @@ def plot_track_analysis(track_id, ade, fde, inside_bbox, per_spot_de, save_path,
     fig.suptitle(f'Track Id : {track_id}')
     if save_path is not None:
         fig.savefig(f"{save_path}{idx}_track_id_{track_id}.png")
+        plt.close()
     else:
         plt.show()
 

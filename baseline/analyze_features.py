@@ -35,20 +35,20 @@ VIDEO_NUMBER = 3
 SAVE_PATH = f'{SAVE_BASE_PATH}{VIDEO_LABEL.value}/video{VIDEO_NUMBER}/'
 # FILE_NAME = 'time_distributed_dict_with_gt_bbox_centers_and_bbox_gt_velocity.pt'
 # for incomplete one
-FILE_NAME = '/parts/time_distributed_dict_with_gt_bbox_centers_and_bbox_part_gt_velocity_optimized_of_170.pt'
+FILE_NAME = '/parts/time_distributed_dict_with_gt_bbox_centers_and_bbox_part_gt_velocity_optimized_of_680.pt'
 T_STEPS = 20
 # for distribution and stuff
 # FILE_NAME = f'time_distributed_velocity_features_with_frame_track_rnn_bbox_gt_centers_and_bbox_' \
-#             f'center_based_gt_velocity_of_optimized_t{T_STEPS}.pt'
+#             f'center_based_gt_velocity_of_optimized_v2_t{T_STEPS}.pt'
 LOAD_FILE = SAVE_PATH + FILE_NAME
 ANNOTATIONS_FILE = 'annotation_augmented.csv'
 ANNOTATIONS_PATH = f'{BASE_PATH}annotations/{VIDEO_LABEL.value}/video{VIDEO_NUMBER}/'
-TIME_STEPS = 100
+TIME_STEPS = 100  # 100
 OPTIMIZED_OF = True
 META_PATH = '../Datasets/SDD/H_SDD.txt'
 META = SDDMeta(META_PATH)
 DF_SAVE_PATH = f'{SAVE_PATH}analysis2/'
-DF_FILE_NAME = f'optimized_of_v2_analysis_t{TIME_STEPS}.csv' if OPTIMIZED_OF else f'analysis_t{TIME_STEPS}.csv'
+DF_FILE_NAME = f'optimized_of_v2_analysis_t{TIME_STEPS}.csv' if OPTIMIZED_OF else f'analysis_v2_t{TIME_STEPS}.csv'
 
 
 # Create models from data
@@ -273,7 +273,7 @@ def plot_object_tracks(shifted_points_gt, true_points, frames, track_ids, center
         plt.show()
     else:
         Path(plot_save_path).mkdir(parents=True, exist_ok=True)
-        plt.savefig(plot_save_path + f'fig_tracks_{frames[0]}{"_".join(track_ids)}.png')
+        plt.savefig(plot_save_path + f'fig_tracks_{frames[0]}{"_".join([str(t) for t in track_ids])}.png')
         plt.close()
 
 
@@ -343,7 +343,8 @@ def analyze_train_data_via_plots(ratio=1.0, optimized_of=False, top_k=1, alpha=1
             true_points.append(feat_y[:, :2])
         plot_object_tracks(shifted_points_gt=shifted_points_gt, true_points=true_points, frames=frames,
                            shifted_points_of=shifted_points_of, track_ids=track_ids, center_shifted=center_x,
-                           center_true=center_y, bbox_shifted=bbox_x, bbox_true=bbox_y)
+                           center_true=center_y, bbox_shifted=bbox_x, bbox_true=bbox_y,
+                           plot_save_path=SAVE_PATH + 'data_analysis/')
 
 
 def analyze_extracted_features(features_dict: dict, test_mode=False, time_steps=TIME_STEPS, track_info=None, ratio=1.0,
@@ -499,6 +500,6 @@ def main(save=True, optimized_of=True, top_k=1, alpha=1, weight_points_inside_bb
 
 if __name__ == '__main__':
     main(optimized_of=OPTIMIZED_OF, top_k=1, alpha=1, weight_points_inside_bbox_more=True, save=True,
-         from_file=True, process_both=False)
+         from_file=False, process_both=False)
     # analyze_train_data_distribution()
-    # # analyze_train_data_via_plots()
+    # analyze_train_data_via_plots()
