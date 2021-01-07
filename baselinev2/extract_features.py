@@ -72,7 +72,7 @@ def plot_image(im):
     plt.show()
 
 
-def plot_with_one_bboxes(img, boxes):
+def plot_one_with_bounding_boxes(img, boxes):
     fig, axs = plt.subplots(1, 1, sharex='none', sharey='none',
                             figsize=(12, 10))
     axs.imshow(img, cmap='gray')
@@ -82,6 +82,45 @@ def plot_with_one_bboxes(img, boxes):
                                  linewidth=None)
         axs.add_patch(rect)
     plt.show()
+
+
+def plot_two_with_bounding_boxes(img0, boxes0, img1, boxes1, frame_number):
+    fig, ax = plt.subplots(1, 2, sharex='none', sharey='none',
+                           figsize=(12, 10))
+    ax[0].imshow(img0, cmap='gray')
+    ax[1].imshow(img1, cmap='gray')
+    add_box_to_axes(ax[0], boxes0)
+    add_box_to_axes(ax[1], boxes1)
+    ax[0].set_title('GT')
+    ax[1].set_title('OF')
+    fig.suptitle(f'Frame: {frame_number}')
+    plt.show()
+
+
+def plot_two_with_bounding_boxes_and_rgb(img0, boxes0, img1, boxes1, rgb0, rgb1, frame_number, additional_text=None):
+    fig, ax = plt.subplots(2, 2, sharex='none', sharey='none', figsize=(12, 10))
+    ax[0, 0].imshow(img0, cmap='gray')
+    ax[0, 1].imshow(img1, cmap='gray')
+    ax[1, 0].imshow(rgb0)
+    ax[1, 1].imshow(rgb1)
+    add_box_to_axes(ax[0, 0], boxes0)
+    add_box_to_axes(ax[0, 1], boxes1)
+    add_box_to_axes(ax[1, 0], boxes0)
+    add_box_to_axes(ax[1, 1], boxes1)
+    ax[0, 0].set_title('GT/FG Mask')
+    ax[0, 1].set_title('OF/FG Mask')
+    ax[1, 0].set_title('GT/RGB')
+    ax[1, 1].set_title('OF/RGB')
+    fig.suptitle(f'Frame: {frame_number} | {additional_text}')
+    plt.show()
+
+
+def add_box_to_axes(ax, boxes):
+    for box in boxes:
+        rect = patches.Rectangle(xy=(box[0], box[1]), width=box[2] - box[0], height=box[3] - box[1],
+                                 edgecolor='r', fill=False,
+                                 linewidth=None)
+        ax.add_patch(rect)
 
 
 def plot_processing_steps(xy_cloud, shifted_xy_cloud, xy_box, shifted_xy_box,
@@ -417,6 +456,14 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                                                    total_frames=frames_count, step=step, n=n,
                                                    kernel=kernel, var_threshold=var_threshold)
 
+                # just for validation #####################################################################
+                frame_annotation = get_frame_annotations_and_skip_lost(df, frame_number.item())
+                annotations, bbox_centers = scale_annotations(frame_annotation,
+                                                              original_scale=original_shape,
+                                                              new_scale=new_shape, return_track_id=False,
+                                                              tracks_with_annotations=True)
+                ###########################################################################################
+
                 for b_idx, track in enumerate(last_frame_live_tracks):
                     current_track_idx, box = track.idx, track.bbox
                     xy = extract_features_per_bounding_box(box, last_frame_mask)
@@ -476,6 +523,14 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                                                           final_bbox=np.array(shifted_box)))
                     if current_track_idx not in track_ids_used:
                         track_ids_used.append(current_track_idx)
+
+                plot_two_with_bounding_boxes_and_rgb(last_frame_mask, [t.bbox for t in last_frame_live_tracks],
+                                                     fg_mask, [t.bbox for t in running_tracks],
+                                                     last_frame, frame, frame_idx, additional_text='Past-Future')
+
+                plot_two_with_bounding_boxes_and_rgb(fg_mask, annotations[:, :-1],
+                                                     fg_mask, [t.bbox for t in last_frame_live_tracks],
+                                                     frame, frame, frame_idx)
                 accumulated_features.update({frame_idx: FrameFeatures(frame_number=frame_idx,
                                                                       object_features=object_features)})
 
@@ -493,5 +548,6 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
 
 
 if __name__ == '__main__':
-    feats = preprocess_data(var_threshold=150, plot=False)
+    # feats = preprocess_data(var_threshold=150, plot=False)
+    feats = preprocess_data(var_threshold=None, plot=False)
     print()
