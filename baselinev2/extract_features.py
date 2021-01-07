@@ -40,13 +40,17 @@ EXECUTE_STEP = 2
 
 
 class ObjectFeatures(object):
-    def __init__(self, idx, xy, uv, bbox, bbox_center):
+    def __init__(self, idx, xy, past_xy, final_xy, flow, past_flow, past_bbox, final_bbox, is_track_live=True):
         super(ObjectFeatures, self).__init__()
         self.idx = idx
         self.xy = xy
-        self.uv = uv
-        self.bbox = bbox
-        self.bbox_center = bbox_center
+        self.flow = flow
+        self.past_bbox = past_bbox
+        self.final_bbox = final_bbox
+        self.past_flow = past_flow
+        self.final_xy = final_xy
+        self.past_xy = past_xy
+        self.is_track_live = is_track_live
 
 
 class FrameFeatures(object):
@@ -54,6 +58,13 @@ class FrameFeatures(object):
         super(FrameFeatures, self).__init__()
         self.frame_number = frame_number
         self.object_features = object_features
+
+
+class Track(object):
+    def __init__(self, bbox, idx):
+        super(Track, self).__init__()
+        self.idx = idx
+        self.bbox = bbox
 
 
 def plot_image(im):
@@ -279,7 +290,7 @@ def associate_frame_with_ground_truth(frames, frame_numbers):
     return 0
 
 
-def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=None, overlap_percent=0.1):
+def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=None, overlap_percent=0.1, plot=False):
     # feature_extractor = MOG2.for_frames()
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
@@ -292,7 +303,7 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
     step = n // 2
     save_per_part_path += 'parts/'
     first_frame_bounding_boxes, first_frame_mask, last_frame, second_last_frame = None, None, None, None
-    last_frame_bounding_boxes, last_frame_mask = None, None
+    last_frame_live_tracks, last_frame_mask = None, None
     current_track_idx, track_ids_used = 0, []
     accumulated_features = {}
     for part_idx, data in enumerate(tqdm(data_loader)):
@@ -301,7 +312,7 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
         frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
         frames_count = frames.shape[0]
         original_shape = new_shape = [frames.shape[1], frames.shape[2]]
-        for frame_idx, (frame, frame_number) in enumerate(zip(frames, frame_numbers)):
+        for frame_idx, (frame, frame_number) in tqdm(enumerate(zip(frames, frame_numbers)), total=len(frame_numbers)):
             if part_idx == 0 and frame_idx == 0:
                 first_frame_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=frame_idx,
                                                             time_gap_within_frames=3,
@@ -315,10 +326,11 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                 first_frame_bounding_boxes = first_annotations[:, :-1]
                 last_frame = frame.copy()
                 second_last_frame = last_frame.copy()
-                last_frame_bounding_boxes = first_frame_bounding_boxes.copy()
+                # last_frame_bounding_boxes = first_frame_bounding_boxes.copy()
+                last_frame_live_tracks = [Track(box, idx) for idx, box in enumerate(first_frame_bounding_boxes)]
                 last_frame_mask = first_frame_mask.copy()
             else:
-                bounding_boxes = []
+                running_tracks, object_features = [], []
                 second_last_frame_gs = cv.cvtColor(second_last_frame, cv.COLOR_BGR2GRAY)
                 last_frame_gs = cv.cvtColor(last_frame, cv.COLOR_BGR2GRAY)
                 frame_gs = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
@@ -334,7 +346,8 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                                                    time_gap_within_frames=3,
                                                    total_frames=frames_count, step=step, n=n,
                                                    kernel=kernel, var_threshold=var_threshold)
-                for b_idx, box in enumerate(last_frame_bounding_boxes):
+                for b_idx, track in enumerate(last_frame_live_tracks):
+                    current_track_idx, box = track.idx, track.bbox
                     temp_mask = np.zeros_like(last_frame_mask)
                     temp_mask[box[1]:box[3], box[0]:box[2]] = last_frame_mask[box[1]:box[3], box[0]:box[2]]
                     xy = np.argwhere(temp_mask)
@@ -362,7 +375,7 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     box_center = get_bbox_center(box)
                     shifted_box_center = get_bbox_center(shifted_box)
                     box_center_diff = shifted_box_center - box_center
-                    bounding_boxes.append(shifted_box)
+                    # running_tracks.append(Track(bbox=shifted_box, idx=current_track_idx))
 
                     # features to keep - throw N% and keep N%
 
@@ -375,11 +388,26 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     data_x_cf, data_y_cf = rolled_cf[1], rolled_cf[0]
                     xy_current_frame = np.stack([data_x_cf, data_y_cf]).T
 
+                    if xy_current_frame.size == 0:
+                        object_features.append(ObjectFeatures(idx=current_track_idx,
+                                                              xy=xy_current_frame,
+                                                              past_xy=xy,
+                                                              final_xy=xy_current_frame,
+                                                              flow=xy_displacement,
+                                                              past_flow=past_xy_displacement,
+                                                              past_bbox=box,
+                                                              final_bbox=np.array(shifted_box),
+                                                              is_track_live=False))
+                        continue
+
+                    running_tracks.append(Track(bbox=shifted_box, idx=current_track_idx))
+
                     # compare activations to keep and throw
                     distance_matrix = clouds_distance_matrix(xy_current_frame, shifted_xy)
-                    closest_n_point_pair_idx = smallest_n_indices(
-                        distance_matrix,
-                        int(min(xy_current_frame.shape[0], shifted_xy.shape[0]) * overlap_percent))
+                    n_point_pair_count = int(min(xy_current_frame.shape[0], shifted_xy.shape[0]) * overlap_percent)
+                    n_point_pair_count = n_point_pair_count if n_point_pair_count > 0 \
+                        else min(xy_current_frame.shape[0], shifted_xy.shape[0])
+                    closest_n_point_pair_idx = smallest_n_indices(distance_matrix, n_point_pair_count)
 
                     closest_n_xy_current_frame_pair = xy_current_frame[closest_n_point_pair_idx[..., 0]]
                     closest_n_shifted_xy_pair = shifted_xy[closest_n_point_pair_idx[..., 1]]
@@ -392,22 +420,34 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                         .astype(np.float).mean(0)
                     xy_overall_dimension_overlap = np.equal(
                         closest_n_xy_current_frame_pair, closest_n_shifted_xy_pair).astype(np.float).mean()
-                    logger.info(f'xy_distance_closest_n_points_mean: {xy_distance_closest_n_points_mean}\n'
-                                f'xy_per_dimension_overlap: {xy_per_dimension_overlap}'
-                                f'xy_overall_dimension_overlap: {xy_overall_dimension_overlap}')
+                    logger.debug(f'xy_distance_closest_n_points_mean: {xy_distance_closest_n_points_mean}\n'
+                                 f'xy_per_dimension_overlap: {xy_per_dimension_overlap}'
+                                 f'xy_overall_dimension_overlap: {xy_overall_dimension_overlap}')
                     filtered_shifted_xy = filter_features(shifted_xy, closest_n_shifted_xy_pair)
                     final_features_xy = append_features(filtered_shifted_xy, closest_n_xy_current_frame_pair)
-                    plot_processing_steps(xy_cloud=xy, shifted_xy_cloud=shifted_xy, xy_box=box,
-                                          shifted_xy_box=shifted_box, final_cloud=final_features_xy,
-                                          xy_cloud_current_frame=xy_current_frame, frame_number=frame_idx,
-                                          track_id=current_track_idx, selected_past=closest_n_shifted_xy_pair,
-                                          selected_current=closest_n_xy_current_frame_pair)
+                    if plot:
+                        plot_processing_steps(xy_cloud=xy, shifted_xy_cloud=shifted_xy, xy_box=box,
+                                              shifted_xy_box=shifted_box, final_cloud=final_features_xy,
+                                              xy_cloud_current_frame=xy_current_frame, frame_number=frame_idx,
+                                              track_id=current_track_idx, selected_past=closest_n_shifted_xy_pair,
+                                              selected_current=closest_n_xy_current_frame_pair)
+                    object_features.append(ObjectFeatures(idx=current_track_idx,
+                                                          xy=xy_current_frame,
+                                                          past_xy=xy,
+                                                          final_xy=final_features_xy,
+                                                          flow=xy_displacement,
+                                                          past_flow=past_xy_displacement,
+                                                          past_bbox=box,
+                                                          final_bbox=np.array(shifted_box)))
                     track_ids_used.append(current_track_idx)
-                    current_track_idx += 1
-                    print()
+                    # current_track_idx += 1
+                accumulated_features.update({frame_idx: FrameFeatures(frame_number=frame_idx,
+                                                                      object_features=object_features)})
 
                 second_last_frame = last_frame.copy()
                 last_frame = frame.copy()
+                last_frame_mask = fg_mask.copy()
+                last_frame_live_tracks = np.stack(running_tracks) if len(running_tracks) != 0 else []
         gt_associated_frame = associate_frame_with_ground_truth(frames, frame_numbers)
         if save_per_part_path is not None:
             Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
@@ -418,4 +458,5 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
 
 
 if __name__ == '__main__':
-    feats = preprocess_data(var_threshold=150)
+    feats = preprocess_data(var_threshold=150, plot=False)
+    print()
