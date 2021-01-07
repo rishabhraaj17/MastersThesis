@@ -258,6 +258,87 @@ def corner_width_height_to_min_max(bbox, bottom_left=True):
     return [x_min, y_min, x_max, y_max]
 
 
+def extract_features_per_bounding_box(box, mask):
+    temp_mask = np.zeros_like(mask)
+    temp_mask[box[1]:box[3], box[0]:box[2]] = mask[box[1]:box[3], box[0]:box[2]]
+    xy = np.argwhere(temp_mask)
+    rolled = np.rollaxis(xy, -1).tolist()
+    data_x, data_y = rolled[1], rolled[0]
+    xy = np.stack([data_x, data_y]).T
+    return xy
+
+
+def evaluate_shifted_bounding_box(box, shifted_xy, xy):
+    xy_center = np.round(xy.mean(axis=0)).astype(np.int)
+    shifted_xy_center = np.round(shifted_xy.mean(axis=0)).astype(np.int)
+    center_shift = shifted_xy_center - xy_center
+    box_c_x, box_c_y, w, h = min_max_to_centroids(box)
+    shifted_box = centroids_to_min_max([box_c_x + center_shift[0], box_c_y + center_shift[1], w, h])
+    return shifted_box
+
+
+def calculate_difference_between_centers(box, shifted_box):
+    box_center = get_bbox_center(box)
+    shifted_box_center = get_bbox_center(shifted_box)
+    return shifted_box_center - box_center
+
+
+def optical_flow_processing(frame, last_frame, second_last_frame, return_everything=False):
+    second_last_frame_gs = cv.cvtColor(second_last_frame, cv.COLOR_BGR2GRAY)
+    last_frame_gs = cv.cvtColor(last_frame, cv.COLOR_BGR2GRAY)
+    frame_gs = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+    past_flow, past_rgb, past_mag, past_ang = FeatureExtractor.get_optical_flow(
+        previous_frame=second_last_frame_gs,
+        next_frame=last_frame_gs,
+        all_results_out=True)
+    flow, rgb, mag, ang = FeatureExtractor.get_optical_flow(
+        previous_frame=last_frame_gs,
+        next_frame=frame_gs,
+        all_results_out=True)
+    if return_everything:
+        return [[flow, rgb, mag, ang], [past_flow, past_rgb, past_mag, past_ang]]
+    return flow, past_flow
+
+
+def points_pair_stat_analysis(closest_n_shifted_xy_pair, closest_n_xy_current_frame_pair):
+    xy_distance_closest_n_points = np.linalg.norm(
+        np.expand_dims(closest_n_xy_current_frame_pair, 0) -
+        np.expand_dims(closest_n_shifted_xy_pair, 0), 2, axis=0)
+    xy_distance_closest_n_points_mean = xy_distance_closest_n_points.mean()
+    xy_per_dimension_overlap = np.equal(closest_n_xy_current_frame_pair, closest_n_shifted_xy_pair) \
+        .astype(np.float).mean(0)
+    xy_overall_dimension_overlap = np.equal(
+        closest_n_xy_current_frame_pair, closest_n_shifted_xy_pair).astype(np.float).mean()
+    logger.debug(f'xy_distance_closest_n_points_mean: {xy_distance_closest_n_points_mean}\n'
+                 f'xy_per_dimension_overlap: {xy_per_dimension_overlap}'
+                 f'xy_overall_dimension_overlap: {xy_overall_dimension_overlap}')
+
+
+def features_filter_append_preprocessing(overlap_percent, shifted_xy, xy_current_frame):
+    distance_matrix = clouds_distance_matrix(xy_current_frame, shifted_xy)
+    n_point_pair_count = int(min(xy_current_frame.shape[0], shifted_xy.shape[0]) * overlap_percent)
+    n_point_pair_count = n_point_pair_count if n_point_pair_count > 0 \
+        else min(xy_current_frame.shape[0], shifted_xy.shape[0])
+    closest_n_point_pair_idx = smallest_n_indices(distance_matrix, n_point_pair_count)
+    closest_n_xy_current_frame_pair = xy_current_frame[closest_n_point_pair_idx[..., 0]]
+    closest_n_shifted_xy_pair = shifted_xy[closest_n_point_pair_idx[..., 1]]
+    return closest_n_shifted_xy_pair, closest_n_xy_current_frame_pair
+
+
+def first_frame_processing_and_gt_association(df, first_frame_mask, frame_idx, frame_number, frames, frames_count,
+                                              kernel, n, new_shape, original_shape, step, var_threshold):
+    first_frame_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=frame_idx,
+                                                time_gap_within_frames=3,
+                                                total_frames=frames_count, step=step, n=n,
+                                                kernel=kernel, var_threshold=var_threshold)
+    first_frame_annotation = get_frame_annotations_and_skip_lost(df, frame_number.item())
+    first_annotations, first_bbox_centers = scale_annotations(first_frame_annotation,
+                                                              original_scale=original_shape,
+                                                              new_scale=new_shape, return_track_id=False,
+                                                              tracks_with_annotations=True)
+    return first_annotations, first_frame_mask
+
+
 def build_mog2_bg_model(n, frames, kernel, algo):
     out = None
     for frame in range(0, n):
@@ -314,15 +395,14 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
         original_shape = new_shape = [frames.shape[1], frames.shape[2]]
         for frame_idx, (frame, frame_number) in tqdm(enumerate(zip(frames, frame_numbers)), total=len(frame_numbers)):
             if part_idx == 0 and frame_idx == 0:
-                first_frame_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=frame_idx,
-                                                            time_gap_within_frames=3,
-                                                            total_frames=frames_count, step=step, n=n,
-                                                            kernel=kernel, var_threshold=var_threshold)
-                first_frame_annotation = get_frame_annotations_and_skip_lost(df, frame_number.item())
-                first_annotations, first_bbox_centers = scale_annotations(first_frame_annotation,
-                                                                          original_scale=original_shape,
-                                                                          new_scale=new_shape, return_track_id=False,
-                                                                          tracks_with_annotations=True)
+                first_annotations, first_frame_mask = first_frame_processing_and_gt_association(
+                    df, first_frame_mask,
+                    frame_idx, frame_number,
+                    frames, frames_count,
+                    kernel, n, new_shape,
+                    original_shape, step,
+                    var_threshold)
+
                 first_frame_bounding_boxes = first_annotations[:, :-1]
                 last_frame = frame.copy()
                 second_last_frame = last_frame.copy()
@@ -330,30 +410,16 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                 last_frame_mask = first_frame_mask.copy()
             else:
                 running_tracks, object_features = [], []
-                second_last_frame_gs = cv.cvtColor(second_last_frame, cv.COLOR_BGR2GRAY)
-                last_frame_gs = cv.cvtColor(last_frame, cv.COLOR_BGR2GRAY)
-                frame_gs = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-                past_flow, past_rgb, past_mag, past_ang = FeatureExtractor.get_optical_flow(
-                    previous_frame=second_last_frame_gs,
-                    next_frame=last_frame_gs,
-                    all_results_out=True)
-                flow, rgb, mag, ang = FeatureExtractor.get_optical_flow(
-                    previous_frame=last_frame_gs,
-                    next_frame=frame_gs,
-                    all_results_out=True)
+                flow, past_flow = optical_flow_processing(frame, last_frame, second_last_frame)
+
                 fg_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=frame_idx,
                                                    time_gap_within_frames=3,
                                                    total_frames=frames_count, step=step, n=n,
                                                    kernel=kernel, var_threshold=var_threshold)
+
                 for b_idx, track in enumerate(last_frame_live_tracks):
                     current_track_idx, box = track.idx, track.bbox
-                    temp_mask = np.zeros_like(last_frame_mask)
-                    temp_mask[box[1]:box[3], box[0]:box[2]] = last_frame_mask[box[1]:box[3], box[0]:box[2]]
-                    xy = np.argwhere(temp_mask)
-
-                    rolled = np.rollaxis(xy, -1).tolist()
-                    data_x, data_y = rolled[1], rolled[0]
-                    xy = np.stack([data_x, data_y]).T
+                    xy = extract_features_per_bounding_box(box, last_frame_mask)
 
                     if xy.size == 0:
                         continue
@@ -364,25 +430,12 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
 
                     # shift bounding box by the average flow for localization
                     shifted_xy = xy + xy_displacement
-                    xy_center = np.round(xy.mean(axis=0)).astype(np.int)
-                    shifted_xy_center = np.round(shifted_xy.mean(axis=0)).astype(np.int)
-                    center_shift = shifted_xy_center - xy_center
-                    box_c_x, box_c_y, w, h = min_max_to_centroids(box)
-                    shifted_box = centroids_to_min_max([box_c_x + center_shift[0], box_c_y + center_shift[1], w, h])
-                    box_center = get_bbox_center(box)
-                    shifted_box_center = get_bbox_center(shifted_box)
-                    box_center_diff = shifted_box_center - box_center
+                    shifted_box = evaluate_shifted_bounding_box(box, shifted_xy, xy)
+                    # box_center_diff = calculate_difference_between_centers(box, shifted_box)
 
                     # features to keep - throw N% and keep N%
-
                     # get activations
-                    temp_mask_current_frame = np.zeros_like(fg_mask)
-                    temp_mask_current_frame[shifted_box[1]:shifted_box[3], shifted_box[0]:shifted_box[2]] = \
-                        fg_mask[shifted_box[1]:shifted_box[3], shifted_box[0]:shifted_box[2]]
-                    xy_current_frame = np.argwhere(temp_mask_current_frame)
-                    rolled_cf = np.rollaxis(xy_current_frame, -1).tolist()
-                    data_x_cf, data_y_cf = rolled_cf[1], rolled_cf[0]
-                    xy_current_frame = np.stack([data_x_cf, data_y_cf]).T
+                    xy_current_frame = extract_features_per_bounding_box(shifted_box, fg_mask)
 
                     if xy_current_frame.size == 0:
                         object_features.append(ObjectFeatures(idx=current_track_idx,
@@ -399,28 +452,14 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     running_tracks.append(Track(bbox=shifted_box, idx=current_track_idx))
 
                     # compare activations to keep and throw
-                    distance_matrix = clouds_distance_matrix(xy_current_frame, shifted_xy)
-                    n_point_pair_count = int(min(xy_current_frame.shape[0], shifted_xy.shape[0]) * overlap_percent)
-                    n_point_pair_count = n_point_pair_count if n_point_pair_count > 0 \
-                        else min(xy_current_frame.shape[0], shifted_xy.shape[0])
-                    closest_n_point_pair_idx = smallest_n_indices(distance_matrix, n_point_pair_count)
+                    closest_n_shifted_xy_pair, closest_n_xy_current_frame_pair = features_filter_append_preprocessing(
+                        overlap_percent, shifted_xy, xy_current_frame)
 
-                    closest_n_xy_current_frame_pair = xy_current_frame[closest_n_point_pair_idx[..., 0]]
-                    closest_n_shifted_xy_pair = shifted_xy[closest_n_point_pair_idx[..., 1]]
+                    # points_pair_stat_analysis(closest_n_shifted_xy_pair, closest_n_xy_current_frame_pair)
 
-                    xy_distance_closest_n_points = np.linalg.norm(
-                        np.expand_dims(closest_n_xy_current_frame_pair, 0) -
-                        np.expand_dims(closest_n_shifted_xy_pair, 0), 2, axis=0)
-                    xy_distance_closest_n_points_mean = xy_distance_closest_n_points.mean()
-                    xy_per_dimension_overlap = np.equal(closest_n_xy_current_frame_pair, closest_n_shifted_xy_pair) \
-                        .astype(np.float).mean(0)
-                    xy_overall_dimension_overlap = np.equal(
-                        closest_n_xy_current_frame_pair, closest_n_shifted_xy_pair).astype(np.float).mean()
-                    logger.debug(f'xy_distance_closest_n_points_mean: {xy_distance_closest_n_points_mean}\n'
-                                 f'xy_per_dimension_overlap: {xy_per_dimension_overlap}'
-                                 f'xy_overall_dimension_overlap: {xy_overall_dimension_overlap}')
                     filtered_shifted_xy = filter_features(shifted_xy, closest_n_shifted_xy_pair)
                     final_features_xy = append_features(filtered_shifted_xy, closest_n_xy_current_frame_pair)
+
                     if plot:
                         plot_processing_steps(xy_cloud=xy, shifted_xy_cloud=shifted_xy, xy_box=box,
                                               shifted_xy_box=shifted_box, final_cloud=final_features_xy,
@@ -435,7 +474,8 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                                                           past_flow=past_xy_displacement,
                                                           past_bbox=box,
                                                           final_bbox=np.array(shifted_box)))
-                    track_ids_used.append(current_track_idx)
+                    if current_track_idx not in track_ids_used:
+                        track_ids_used.append(current_track_idx)
                 accumulated_features.update({frame_idx: FrameFeatures(frame_number=frame_idx,
                                                                       object_features=object_features)})
 
