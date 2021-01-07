@@ -326,7 +326,6 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                 first_frame_bounding_boxes = first_annotations[:, :-1]
                 last_frame = frame.copy()
                 second_last_frame = last_frame.copy()
-                # last_frame_bounding_boxes = first_frame_bounding_boxes.copy()
                 last_frame_live_tracks = [Track(box, idx) for idx, box in enumerate(first_frame_bounding_boxes)]
                 last_frame_mask = first_frame_mask.copy()
             else:
@@ -362,8 +361,6 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     # calculate flow for the features
                     xy_displacement = flow[xy[:, 1], xy[:, 0]]
                     past_xy_displacement = past_flow[xy[:, 1], xy[:, 0]]
-                    # xy_displacement = flow[xy[:, 0], xy[:, 1]]
-                    # past_xy_displacement = past_flow[xy[:, 0], xy[:, 1]]
 
                     # shift bounding box by the average flow for localization
                     shifted_xy = xy + xy_displacement
@@ -375,7 +372,6 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     box_center = get_bbox_center(box)
                     shifted_box_center = get_bbox_center(shifted_box)
                     box_center_diff = shifted_box_center - box_center
-                    # running_tracks.append(Track(bbox=shifted_box, idx=current_track_idx))
 
                     # features to keep - throw N% and keep N%
 
@@ -440,7 +436,6 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                                                           past_bbox=box,
                                                           final_bbox=np.array(shifted_box)))
                     track_ids_used.append(current_track_idx)
-                    # current_track_idx += 1
                 accumulated_features.update({frame_idx: FrameFeatures(frame_number=frame_idx,
                                                                       object_features=object_features)})
 
