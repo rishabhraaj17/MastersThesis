@@ -11,8 +11,9 @@ from tqdm import tqdm
 
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost, scale_annotations, cal_centers
 from average_image.constants import SDDVideoClasses, OBJECT_CLASS_COLOR_MAPPING, ObjectClasses
+from average_image.feature_clustering import MeanShiftClustering
 from average_image.feature_extractor import MOG2, FeatureExtractor
-from baseline.extracted_of_optimization import clouds_distance_matrix, smallest_n_indices
+from baseline.extracted_of_optimization import clouds_distance_matrix, smallest_n_indices, find_points_inside_circle
 from log import initialize_logging, get_logger
 from unsupervised_tp_0.dataset import SDDSimpleDataset, resize_frames
 
@@ -72,6 +73,73 @@ def plot_image(im):
     plt.show()
 
 
+def plot_features_with_circle(features, features_inside_circle, center, radius, mask=None):
+    fig, axs = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+    circle = plt.Circle((center[0], center[1]), radius, color='green', fill=False)
+    axs.plot(features[:, 0], features[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k',
+             markersize=8)
+    axs.plot(features_inside_circle[:, 0], features_inside_circle[:, 1], 'o', markerfacecolor='yellow',
+             markeredgecolor='k', markersize=8)
+    axs.add_artist(circle)
+    if mask is not None:
+        axs.imshow(mask, 'gray')
+    plt.show()
+
+
+def plot_features(features, features_inside_circle, features_skipped=None, mask=None, cluster_centers=None,
+                  marker_size=1, num_clusters=None, frame_number=None):
+    fig, axs = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+    axs.plot(features[:, 0], features[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k',
+             markersize=marker_size)
+    axs.plot(features_inside_circle[:, 0], features_inside_circle[:, 1], 'o', markerfacecolor='yellow',
+             markeredgecolor='k', markersize=marker_size)
+    if mask is not None:
+        axs.imshow(mask, 'gray')
+    if features_skipped is not None:
+        axs.plot(features_skipped[:, 0], features_skipped[:, 1], 'o', markerfacecolor='aqua',
+                 markeredgecolor='k', markersize=marker_size)
+    if cluster_centers is not None:
+        axs.plot(cluster_centers[:, 0], cluster_centers[:, 1], '*', markerfacecolor='lavender', markeredgecolor='k',
+                 markersize=marker_size+4)
+        fig.suptitle(f'Frame: {frame_number} | Clusters Count: {num_clusters}')
+    plt.show()
+
+
+def plot_features_with_mask(features, features_inside_circle, center, radius, mask, box=None, m_size=4,
+                            current_boxes=None):
+    fig, axs = plt.subplots(2, 1, sharex='none', sharey='none', figsize=(12, 10))
+    circle = plt.Circle((center[0], center[1]), radius, color='green', fill=False)
+    axs[0].plot(features[:, 0], features[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k',
+                markersize=m_size)
+    axs[0].plot(features_inside_circle[:, 0], features_inside_circle[:, 1], 'o', markerfacecolor='yellow',
+                markeredgecolor='k', markersize=m_size)
+    axs[0].add_artist(circle)
+    axs[0].imshow(mask, 'binary')
+    axs[1].imshow(mask, 'gray')
+    if box is not None:
+        rect0 = patches.Rectangle(xy=(box[0], box[1]), width=box[2] - box[0], height=box[3] - box[1],
+                                  edgecolor='r', fill=False, linewidth=None)
+        rect1 = patches.Rectangle(xy=(box[0], box[1]), width=box[2] - box[0], height=box[3] - box[1],
+                                  edgecolor='r', fill=False, linewidth=None)
+        axs[0].add_patch(rect0)
+        axs[1].add_patch(rect1)
+    if current_boxes is not None:
+        add_box_to_axes(axs[0], current_boxes, 'orange')
+        add_box_to_axes(axs[1], current_boxes, 'orange')
+    plt.show()
+
+
+def mean_shift_clustering(data, bandwidth: float = 0.1, min_bin_freq: int = 3, max_iter: int = 300,
+                          bin_seeding: bool = False, cluster_all: bool = True):
+    mean_shift = MeanShiftClustering(data=data, bandwidth=bandwidth, min_bin_freq=min_bin_freq, max_iter=max_iter,
+                                     bin_seeding=bin_seeding, cluster_all=cluster_all)
+    mean_shift.cluster(renormalize=False)
+    labels_unique, points_per_cluster = np.unique(mean_shift.labels, return_counts=True)
+    mean_shift.cluster_distribution = dict(zip(labels_unique, points_per_cluster))
+    n_clusters_ = len(labels_unique)
+    return mean_shift, n_clusters_
+
+
 def plot_one_with_bounding_boxes(img, boxes):
     fig, axs = plt.subplots(1, 1, sharex='none', sharey='none',
                             figsize=(12, 10))
@@ -115,10 +183,10 @@ def plot_two_with_bounding_boxes_and_rgb(img0, boxes0, img1, boxes1, rgb0, rgb1,
     plt.show()
 
 
-def add_box_to_axes(ax, boxes):
+def add_box_to_axes(ax, boxes, edge_color='r'):
     for box in boxes:
         rect = patches.Rectangle(xy=(box[0], box[1]), width=box[2] - box[0], height=box[3] - box[1],
-                                 edgecolor='r', fill=False,
+                                 edgecolor=edge_color, fill=False,
                                  linewidth=None)
         ax.add_patch(rect)
 
@@ -313,7 +381,7 @@ def evaluate_shifted_bounding_box(box, shifted_xy, xy):
     center_shift = shifted_xy_center - xy_center
     box_c_x, box_c_y, w, h = min_max_to_centroids(box)
     shifted_box = centroids_to_min_max([box_c_x + center_shift[0], box_c_y + center_shift[1], w, h])
-    return shifted_box
+    return shifted_box, shifted_xy_center
 
 
 def calculate_difference_between_centers(box, shifted_box):
@@ -410,7 +478,8 @@ def associate_frame_with_ground_truth(frames, frame_numbers):
     return 0
 
 
-def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=None, overlap_percent=0.1, plot=False):
+def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=None, overlap_percent=0.1, plot=False,
+                    radius=50):
     # feature_extractor = MOG2.for_frames()
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
@@ -477,14 +546,36 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
 
                     # shift bounding box by the average flow for localization
                     shifted_xy = xy + xy_displacement
-                    shifted_box = evaluate_shifted_bounding_box(box, shifted_xy, xy)
+                    shifted_box, shifted_xy_center = evaluate_shifted_bounding_box(box, shifted_xy, xy)
                     # box_center_diff = calculate_difference_between_centers(box, shifted_box)
 
                     # features to keep - throw N% and keep N%
                     # get activations
                     xy_current_frame = extract_features_per_bounding_box(shifted_box, fg_mask)
 
+                    # todo: can be removed
+                    # all_cloud = extract_features_per_bounding_box([0, 0, fg_mask.shape[0], fg_mask.shape[1]], fg_mask)
+                    # points_current_frame_inside_circle_of_validity_idx = find_points_inside_circle(
+                    #     cloud=all_cloud,
+                    #     circle_radius=radius,
+                    #     circle_center=shifted_xy_center
+                    # )
+                    # features_inside_circle = all_cloud[points_current_frame_inside_circle_of_validity_idx]
+                    # plot_features_with_mask(all_cloud, features_inside_circle, center=shifted_xy_center,
+                    #                         radius=radius, mask=fg_mask, box=shifted_box, m_size=1)
+
                     if xy_current_frame.size == 0:
+                        all_cloud = extract_features_per_bounding_box([0, 0, fg_mask.shape[0], fg_mask.shape[1]],
+                                                                      fg_mask)
+                        points_current_frame_inside_circle_of_validity_idx = find_points_inside_circle(
+                            cloud=all_cloud,
+                            circle_radius=radius,
+                            circle_center=shifted_xy_center
+                        )
+                        features_inside_circle = all_cloud[points_current_frame_inside_circle_of_validity_idx]
+                        plot_features_with_mask(all_cloud, features_inside_circle, center=shifted_xy_center,
+                                                radius=radius, mask=fg_mask, box=shifted_box, m_size=1,
+                                                current_boxes=annotations[:, :-1])
                         object_features.append(ObjectFeatures(idx=current_track_idx,
                                                               xy=xy_current_frame,
                                                               past_xy=xy,
@@ -510,7 +601,7 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     if plot:
                         plot_processing_steps(xy_cloud=xy, shifted_xy_cloud=shifted_xy, xy_box=box,
                                               shifted_xy_box=shifted_box, final_cloud=final_features_xy,
-                                              xy_cloud_current_frame=xy_current_frame, frame_number=frame_idx,
+                                              xy_cloud_current_frame=xy_current_frame, frame_number=frame_number.item(),
                                               track_id=current_track_idx, selected_past=closest_n_shifted_xy_pair,
                                               selected_current=closest_n_xy_current_frame_pair)
                     object_features.append(ObjectFeatures(idx=current_track_idx,
@@ -524,15 +615,50 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     if current_track_idx not in track_ids_used:
                         track_ids_used.append(current_track_idx)
 
-                plot_two_with_bounding_boxes_and_rgb(last_frame_mask, [t.bbox for t in last_frame_live_tracks],
-                                                     fg_mask, [t.bbox for t in running_tracks],
-                                                     last_frame, frame, frame_idx, additional_text='Past-Future')
+                # begin tracks
+                feature_idx_covered = []
+                all_cloud = extract_features_per_bounding_box([0, 0, fg_mask.shape[0], fg_mask.shape[1]],
+                                                              fg_mask)
+                for t in running_tracks:
+                    b_center = get_bbox_center(t.bbox).flatten()
+                    points_current_frame_inside_circle_of_validity_idx = find_points_inside_circle(
+                        cloud=all_cloud,
+                        circle_radius=radius,
+                        circle_center=b_center
+                    )
+                    features_inside_circle = all_cloud[points_current_frame_inside_circle_of_validity_idx]
+                    # plot_features_with_mask(all_cloud, features_inside_circle, center=b_center,
+                    #                         radius=radius, mask=fg_mask, box=t.bbox, m_size=1,
+                    #                         current_boxes=annotations[:, :-1])
+                    feature_idx_covered.extend(points_current_frame_inside_circle_of_validity_idx)
 
-                plot_two_with_bounding_boxes_and_rgb(fg_mask, annotations[:, :-1],
-                                                     fg_mask, [t.bbox for t in last_frame_live_tracks],
-                                                     frame, frame, frame_idx)
-                accumulated_features.update({frame_idx: FrameFeatures(frame_number=frame_idx,
-                                                                      object_features=object_features)})
+                features_covered = all_cloud[feature_idx_covered]
+                all_indexes = np.arange(start=0, stop=all_cloud.shape[0])
+                features_skipped_idx = np.setdiff1d(all_indexes, feature_idx_covered)
+
+                if features_skipped_idx.size != 0:
+                    features_skipped = all_cloud[features_skipped_idx]
+
+                    # cluster to group points
+                    # mean_shift, n_clusters = mean_shift_clustering(features_skipped, bin_seeding=False,
+                    #                                                min_bin_freq=3, cluster_all=True)
+                    mean_shift, n_clusters = mean_shift_clustering(features_skipped, bin_seeding=False, min_bin_freq=8,
+                                                                   cluster_all=True, bandwidth=4, max_iter=100)
+
+                    plot_features(all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
+                                  cluster_centers=mean_shift.cluster_centers, num_clusters=n_clusters,
+                                  frame_number=frame_number)
+
+                # plot_two_with_bounding_boxes_and_rgb(last_frame_mask, [t.bbox for t in last_frame_live_tracks],
+                #                                      fg_mask, [t.bbox for t in running_tracks],
+                #                                      last_frame, frame, frame_number.item(),
+                #                                      additional_text='Past-Future')
+
+                # plot_two_with_bounding_boxes_and_rgb(fg_mask, annotations[:, :-1],
+                #                                      fg_mask, [t.bbox for t in last_frame_live_tracks],
+                #                                      frame, frame, frame_number.item())
+                accumulated_features.update({frame_number.item(): FrameFeatures(frame_number=frame_number.item(),
+                                                                                object_features=object_features)})
 
                 second_last_frame = last_frame.copy()
                 last_frame = frame.copy()
@@ -549,5 +675,5 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
 
 if __name__ == '__main__':
     # feats = preprocess_data(var_threshold=150, plot=False)
-    feats = preprocess_data(var_threshold=None, plot=False)
+    feats = preprocess_data(var_threshold=None, plot=False, radius=100)
     print()
