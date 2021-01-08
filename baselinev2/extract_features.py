@@ -100,7 +100,7 @@ def plot_features(features, features_inside_circle, features_skipped=None, mask=
                  markeredgecolor='k', markersize=marker_size)
     if cluster_centers is not None:
         axs.plot(cluster_centers[:, 0], cluster_centers[:, 1], '*', markerfacecolor='lavender', markeredgecolor='k',
-                 markersize=marker_size+4)
+                 markersize=marker_size + 4)
         fig.suptitle(f'Frame: {frame_number} | Clusters Count: {num_clusters}')
     plt.show()
 
@@ -138,6 +138,38 @@ def mean_shift_clustering(data, bandwidth: float = 0.1, min_bin_freq: int = 3, m
     mean_shift.cluster_distribution = dict(zip(labels_unique, points_per_cluster))
     n_clusters_ = len(labels_unique)
     return mean_shift, n_clusters_
+
+
+def extract_features_inside_circle(fg_mask, radius, circle_center):
+    all_cloud = extract_features_per_bounding_box([0, 0, fg_mask.shape[0], fg_mask.shape[1]], fg_mask)
+    points_current_frame_inside_circle_of_validity_idx = find_points_inside_circle(
+        cloud=all_cloud,
+        circle_radius=radius,
+        circle_center=circle_center
+    )
+    features_inside_circle = all_cloud[points_current_frame_inside_circle_of_validity_idx]
+    return all_cloud, features_inside_circle
+
+
+def features_included_in_live_tracks(annotations, fg_mask, radius, running_tracks, plot=False):
+    feature_idx_covered = []
+    all_cloud = extract_features_per_bounding_box([0, 0, fg_mask.shape[0], fg_mask.shape[1]],
+                                                  fg_mask)
+    for t in running_tracks:
+        b_center = get_bbox_center(t.bbox).flatten()
+        points_current_frame_inside_circle_of_validity_idx = find_points_inside_circle(
+            cloud=all_cloud,
+            circle_radius=radius,
+            circle_center=b_center
+        )
+        features_inside_circle = all_cloud[points_current_frame_inside_circle_of_validity_idx]
+        if plot:
+            plot_features_with_mask(all_cloud, features_inside_circle, center=b_center,
+                                    radius=radius, mask=fg_mask, box=t.bbox, m_size=1,
+                                    current_boxes=annotations[:, :-1])
+        feature_idx_covered.extend(points_current_frame_inside_circle_of_validity_idx)
+    features_covered = all_cloud[feature_idx_covered]
+    return all_cloud, feature_idx_covered, features_covered
 
 
 def plot_one_with_bounding_boxes(img, boxes):
@@ -553,29 +585,12 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     # get activations
                     xy_current_frame = extract_features_per_bounding_box(shifted_box, fg_mask)
 
-                    # todo: can be removed
-                    # all_cloud = extract_features_per_bounding_box([0, 0, fg_mask.shape[0], fg_mask.shape[1]], fg_mask)
-                    # points_current_frame_inside_circle_of_validity_idx = find_points_inside_circle(
-                    #     cloud=all_cloud,
-                    #     circle_radius=radius,
-                    #     circle_center=shifted_xy_center
-                    # )
-                    # features_inside_circle = all_cloud[points_current_frame_inside_circle_of_validity_idx]
-                    # plot_features_with_mask(all_cloud, features_inside_circle, center=shifted_xy_center,
-                    #                         radius=radius, mask=fg_mask, box=shifted_box, m_size=1)
-
                     if xy_current_frame.size == 0:
-                        all_cloud = extract_features_per_bounding_box([0, 0, fg_mask.shape[0], fg_mask.shape[1]],
-                                                                      fg_mask)
-                        points_current_frame_inside_circle_of_validity_idx = find_points_inside_circle(
-                            cloud=all_cloud,
-                            circle_radius=radius,
-                            circle_center=shifted_xy_center
-                        )
-                        features_inside_circle = all_cloud[points_current_frame_inside_circle_of_validity_idx]
-                        plot_features_with_mask(all_cloud, features_inside_circle, center=shifted_xy_center,
-                                                radius=radius, mask=fg_mask, box=shifted_box, m_size=1,
-                                                current_boxes=annotations[:, :-1])
+                        all_cloud, features_inside_circle = extract_features_inside_circle(fg_mask, radius,
+                                                                                           shifted_xy_center)
+                        # plot_features_with_mask(all_cloud, features_inside_circle, center=shifted_xy_center,
+                        #                         radius=radius, mask=fg_mask, box=shifted_box, m_size=1,
+                        #                         current_boxes=annotations[:, :-1])
                         object_features.append(ObjectFeatures(idx=current_track_idx,
                                                               xy=xy_current_frame,
                                                               past_xy=xy,
@@ -616,23 +631,9 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                         track_ids_used.append(current_track_idx)
 
                 # begin tracks
-                feature_idx_covered = []
-                all_cloud = extract_features_per_bounding_box([0, 0, fg_mask.shape[0], fg_mask.shape[1]],
-                                                              fg_mask)
-                for t in running_tracks:
-                    b_center = get_bbox_center(t.bbox).flatten()
-                    points_current_frame_inside_circle_of_validity_idx = find_points_inside_circle(
-                        cloud=all_cloud,
-                        circle_radius=radius,
-                        circle_center=b_center
-                    )
-                    features_inside_circle = all_cloud[points_current_frame_inside_circle_of_validity_idx]
-                    # plot_features_with_mask(all_cloud, features_inside_circle, center=b_center,
-                    #                         radius=radius, mask=fg_mask, box=t.bbox, m_size=1,
-                    #                         current_boxes=annotations[:, :-1])
-                    feature_idx_covered.extend(points_current_frame_inside_circle_of_validity_idx)
+                all_cloud, feature_idx_covered, features_covered = features_included_in_live_tracks(
+                    annotations, fg_mask, radius, running_tracks)
 
-                features_covered = all_cloud[feature_idx_covered]
                 all_indexes = np.arange(start=0, stop=all_cloud.shape[0])
                 features_skipped_idx = np.setdiff1d(all_indexes, feature_idx_covered)
 
@@ -645,8 +646,9 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     mean_shift, n_clusters = mean_shift_clustering(features_skipped, bin_seeding=False, min_bin_freq=8,
                                                                    cluster_all=True, bandwidth=4, max_iter=100)
 
+                    cluster_centers = mean_shift.cluster_centers
                     plot_features(all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
-                                  cluster_centers=mean_shift.cluster_centers, num_clusters=n_clusters,
+                                  cluster_centers=cluster_centers, num_clusters=n_clusters,
                                   frame_number=frame_number)
 
                 # plot_two_with_bounding_boxes_and_rgb(last_frame_mask, [t.bbox for t in last_frame_live_tracks],
