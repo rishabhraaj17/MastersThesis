@@ -617,7 +617,8 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
     kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
     n = 30
     step = n // 2
-    save_per_part_path += 'parts/'
+    if save_per_part_path is not None:
+        save_per_part_path += 'parts/'
     first_frame_bounding_boxes, first_frame_mask, last_frame, second_last_frame = None, None, None, None
     last_frame_live_tracks, last_frame_mask = None, None
     current_track_idx, track_ids_used = 0, []
@@ -842,10 +843,11 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
 if __name__ == '__main__':
     # feats = preprocess_data(var_threshold=150, plot=False)
     version = 0
-    video_save_path = f'../Plots/baseline_v2/v{version}/extraction.mov'
-    features_save_path = f'../Plots/baseline_v2/v{version}/features.pt'
+    video_save_path = f'../Plots/baseline_v2/v{version}/'
+    features_save_path = f'../Plots/baseline_v2/v{version}/'
     Path(video_save_path).mkdir(parents=True, exist_ok=True)
     Path(features_save_path).mkdir(parents=True, exist_ok=True)
-    feats = preprocess_data(var_threshold=None, plot=False, radius=100)
-    torch.save(feats, features_save_path)
+    feats = preprocess_data(var_threshold=None, plot=False, radius=100, save_per_part_path=None, video_mode=True,
+                            video_save_path=video_save_path + 'extraction.mov', desired_fps=2)
+    torch.save(feats, features_save_path + 'features.pt')
     print()
