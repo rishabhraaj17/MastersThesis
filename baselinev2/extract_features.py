@@ -142,6 +142,52 @@ def mean_shift_clustering(data, bandwidth: float = 0.1, min_bin_freq: int = 3, m
     return mean_shift, n_clusters_
 
 
+def prune_cluster_centers_proximity_based(cluster_centers, radius, mean_shift):
+    rejected_cluster_centers = []
+    pruned_cluster_centers = []
+    pruned_cluster_centers_idx = []
+    for cluster_center in cluster_centers:
+        if not np.isin(cluster_center, pruned_cluster_centers).all() \
+                or not np.isin(cluster_center, rejected_cluster_centers).all():
+            centers_inside_idx = find_points_inside_circle(cluster_centers,
+                                                           circle_center=cluster_center,
+                                                           circle_radius=radius)
+            # sort on the basis of cluster distribution
+            centers_inside_idx = centers_inside_idx.tolist()
+            centers_inside_idx.sort(key=lambda x: mean_shift.cluster_distribution[x], reverse=True)
+            centers_inside_idx = np.array(centers_inside_idx)
+
+            if not np.isin(cluster_centers[centers_inside_idx[0]], pruned_cluster_centers).all():
+                pruned_cluster_centers.append(cluster_centers[centers_inside_idx[0]])
+                pruned_cluster_centers_idx.append(centers_inside_idx[0])
+            if len(centers_inside_idx) > 1:
+                rejected_cluster_centers.extend(
+                    [cluster_centers[c_idx] for c_idx in centers_inside_idx[1:]
+                     if not np.isin(c_idx, pruned_cluster_centers).all()])
+    pruned_cluster_centers = np.stack(pruned_cluster_centers)
+    return pruned_cluster_centers, pruned_cluster_centers_idx
+
+
+def prune_based_on_cluster_density(mean_shift, pruned_cluster_centers, pruned_cluster_centers_idx,
+                                   min_points_in_cluster=5):
+    final_cluster_centers, final_cluster_centers_idx = [], []
+    for cluster_center, cluster_center_idx in zip(pruned_cluster_centers, pruned_cluster_centers_idx):
+        if mean_shift.cluster_distribution[cluster_center_idx] > min_points_in_cluster:
+            final_cluster_centers.append(cluster_center)
+            final_cluster_centers_idx.append(cluster_center_idx)
+    final_cluster_centers = np.stack(final_cluster_centers) \
+        if len(final_cluster_centers) > 0 else np.empty(shape=(0,))
+    return final_cluster_centers, final_cluster_centers_idx
+
+
+def prune_clusters(cluster_centers, mean_shift, radius, min_points_in_cluster=5):
+    pruned_cluster_centers, pruned_cluster_centers_idx = prune_cluster_centers_proximity_based(
+        cluster_centers, radius, mean_shift)
+    final_cluster_centers, final_cluster_centers_idx = prune_based_on_cluster_density(
+        mean_shift, pruned_cluster_centers, pruned_cluster_centers_idx, min_points_in_cluster=min_points_in_cluster)
+    return final_cluster_centers, final_cluster_centers_idx
+
+
 def extract_features_inside_circle(fg_mask, radius, circle_center):
     all_cloud = extract_features_per_bounding_box([0, 0, fg_mask.shape[0], fg_mask.shape[1]], fg_mask)
     points_current_frame_inside_circle_of_validity_idx = find_points_inside_circle(
@@ -513,7 +559,7 @@ def associate_frame_with_ground_truth(frames, frame_numbers):
 
 
 def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=None, overlap_percent=0.1, plot=False,
-                    radius=50):
+                    radius=50, min_points_in_cluster=5):
     # feature_extractor = MOG2.for_frames()
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
@@ -656,36 +702,17 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
 
                     # prune cluster centers
                     # combine centers inside radius + eliminate noise
-                    rejected_cluster_centers = []
-                    pruned_cluster_centers = []
-                    pruned_cluster_centers_idx = []
-                    for cluster_center in cluster_centers:
-                        if not np.isin(cluster_center, pruned_cluster_centers).all() \
-                                or not np.isin(cluster_center, rejected_cluster_centers).all():
-                            centers_inside_idx = find_points_inside_circle(cluster_centers,
-                                                                           circle_center=cluster_center,
-                                                                           circle_radius=radius)
-                            # sort on the basis of cluster distribution
-                            centers_inside_idx = centers_inside_idx.tolist()
-                            centers_inside_idx.sort(key=lambda x: mean_shift.cluster_distribution[x], reverse=True)
-                            centers_inside_idx = np.array(centers_inside_idx)
+                    final_cluster_centers, final_cluster_centers_idx = prune_clusters(
+                        cluster_centers, mean_shift, radius+50, min_points_in_cluster=min_points_in_cluster)
 
-                            if not np.isin(cluster_centers[centers_inside_idx[0]], pruned_cluster_centers).all():
-                                pruned_cluster_centers.append(cluster_centers[centers_inside_idx[0]])
-                                pruned_cluster_centers_idx.append(centers_inside_idx[0])
-                            if len(centers_inside_idx) > 1:
-                                rejected_cluster_centers.extend(
-                                    [cluster_centers[c_idx] for c_idx in centers_inside_idx[1:]
-                                     if not np.isin(c_idx, pruned_cluster_centers).all()])
-
-                    pruned_cluster_centers = np.stack(pruned_cluster_centers)
-                    logger.info(f'Cluster Center Count: {n_clusters}, Pruned Count: {pruned_cluster_centers.shape[0]}')
-                    plot_features(
-                        all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
-                        cluster_centers=pruned_cluster_centers, num_clusters=pruned_cluster_centers.shape[0],
-                        frame_number=frame_number, boxes=annotations[:, :-1],
-                        additional_text=f'Pruned Cluster Distribution: '
-                                        f'{[mean_shift.cluster_distribution[x] for x in pruned_cluster_centers_idx]}')
+                    if final_cluster_centers.size != 0:
+                        plot_features(
+                            all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
+                            cluster_centers=final_cluster_centers, num_clusters=final_cluster_centers.shape[0],
+                            frame_number=frame_number, boxes=annotations[:, :-1],
+                            additional_text=
+                            f'Original Cluster Center Count: {n_clusters}\nPruned Cluster Distribution: '
+                            f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
 
                 # plot_two_with_bounding_boxes_and_rgb(last_frame_mask, [t.bbox for t in last_frame_live_tracks],
                 #                                      fg_mask, [t.bbox for t in running_tracks],
