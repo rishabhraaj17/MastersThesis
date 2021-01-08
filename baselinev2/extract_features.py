@@ -263,6 +263,49 @@ def plot_two_with_bounding_boxes_and_rgb(img0, boxes0, img1, boxes1, rgb0, rgb1,
     plt.show()
 
 
+def plot_for_video(gt_rgb, gt_mask, last_frame_rgb, last_frame_mask, current_frame_rgb, current_frame_mask,
+                   gt_annotations, last_frame_annotation, current_frame_annotation, new_track_annotation,
+                   frame_number, additional_text=None, video_mode=False):
+    fig, ax = plt.subplots(3, 2, sharex='none', sharey='none', figsize=(12, 10))
+    ax_gt_rgb, ax_gt_mask, ax_last_frame_rgb, ax_last_frame_mask, ax_current_frame_rgb, ax_current_frame_mask = \
+        ax[0, 0], ax[0, 1], ax[1, 0], ax[1, 1], ax[2, 0], ax[2, 1]
+    ax_gt_rgb.imshow(gt_rgb)
+    ax_gt_mask.imshow(gt_mask, cmap='gray')
+    ax_last_frame_rgb.imshow(last_frame_rgb)
+    ax_last_frame_mask.imshow(last_frame_mask, cmap='gray')
+    ax_current_frame_rgb.imshow(current_frame_rgb)
+    ax_current_frame_mask.imshow(current_frame_mask, cmap='gray')
+
+    add_box_to_axes(ax_gt_rgb, gt_annotations)
+    add_box_to_axes(ax_gt_mask, gt_annotations)
+    add_box_to_axes(ax_last_frame_rgb, last_frame_annotation)
+    add_box_to_axes(ax_last_frame_mask, last_frame_annotation)
+    add_box_to_axes(ax_current_frame_rgb, current_frame_annotation)
+    add_box_to_axes(ax_current_frame_mask, current_frame_annotation)
+    add_box_to_axes(ax_current_frame_rgb, new_track_annotation, 'green')
+    add_box_to_axes(ax_current_frame_mask, new_track_annotation, 'green')
+
+    ax_gt_rgb.set_title('GT/RGB')
+    ax_gt_mask.set_title('GT/FG Mask')
+    ax_last_frame_rgb.set_title('(T-1)/RGB')
+    ax_last_frame_mask.set_title('(T-1)/FG Mask')
+    ax_current_frame_rgb.set_title('(T)/RGB')
+    ax_current_frame_mask.set_title('(T)/FG Mask')
+
+    fig.suptitle(f'Frame: {frame_number}\n{additional_text}')
+
+    legends_dict = {'r': 'Bounding Box',
+                    'green': 'New track Box'}
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
+    if video_mode:
+        plt.close()
+    else:
+        plt.show()
+
+
 def add_box_to_axes(ax, boxes, edge_color='r'):
     for box in boxes:
         rect = patches.Rectangle(xy=(box[0], box[1]), width=box[2] - box[0], height=box[3] - box[1],
@@ -685,6 +728,7 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                 all_indexes = np.arange(start=0, stop=all_cloud.shape[0])
                 features_skipped_idx = np.setdiff1d(all_indexes, feature_idx_covered)
 
+                new_track_boxes = []
                 if features_skipped_idx.size != 0:
                     features_skipped = all_cloud[features_skipped_idx]
 
@@ -696,16 +740,27 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     # prune cluster centers
                     # combine centers inside radius + eliminate noise
                     final_cluster_centers, final_cluster_centers_idx = prune_clusters(
-                        cluster_centers, mean_shift, radius+50, min_points_in_cluster=min_points_in_cluster)
+                        cluster_centers, mean_shift, radius + 50, min_points_in_cluster=min_points_in_cluster)
 
                     if final_cluster_centers.size != 0:
-                        plot_features(
-                            all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
-                            cluster_centers=final_cluster_centers, num_clusters=final_cluster_centers.shape[0],
-                            frame_number=frame_number, boxes=annotations[:, :-1],
-                            additional_text=
-                            f'Original Cluster Center Count: {n_clusters}\nPruned Cluster Distribution: '
-                            f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
+                        t_w, t_h = 100, 100
+                        # start new potential tracks
+                        for cluster_center in final_cluster_centers:
+                            cluster_center_x, cluster_center_y = np.round(cluster_center).astype(np.int)
+                            t_id = max(track_ids_used) + 1
+                            t_box = centroids_to_min_max([cluster_center_x, cluster_center_y, t_w, t_h])
+                            if not (np.sign(t_box) < 0).any():
+                                running_tracks.append(Track(bbox=t_box, idx=t_id))
+                                track_ids_used.append(t_id)
+                                new_track_boxes.append(t_box)
+
+                        # plot_features(
+                        #     all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
+                        #     cluster_centers=final_cluster_centers, num_clusters=final_cluster_centers.shape[0],
+                        #     frame_number=frame_number, boxes=annotations[:, :-1],
+                        #     additional_text=
+                        #     f'Original Cluster Center Count: {n_clusters}\nPruned Cluster Distribution: '
+                        #     f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
 
                 # plot_two_with_bounding_boxes_and_rgb(last_frame_mask, [t.bbox for t in last_frame_live_tracks],
                 #                                      fg_mask, [t.bbox for t in running_tracks],
@@ -715,6 +770,23 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                 # plot_two_with_bounding_boxes_and_rgb(fg_mask, annotations[:, :-1],
                 #                                      fg_mask, [t.bbox for t in last_frame_live_tracks],
                 #                                      frame, frame, frame_number.item())
+
+                new_track_boxes = np.stack(new_track_boxes) if len(new_track_boxes) > 0 else np.empty(shape=(0,))
+                plot_for_video(
+                    gt_rgb=frame, gt_mask=fg_mask, last_frame_rgb=last_frame,
+                    last_frame_mask=last_frame_mask, current_frame_rgb=frame,
+                    current_frame_mask=fg_mask, gt_annotations=annotations[:, :-1],
+                    last_frame_annotation=[t.bbox for t in last_frame_live_tracks],
+                    current_frame_annotation=[t.bbox for t in running_tracks],
+                    new_track_annotation=new_track_boxes,
+                    frame_number=frame_number,
+                    additional_text=
+                    # f'Track Ids Used: {track_ids_used}\n'
+                    f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
+                    f'Track Ids Killed: '
+                    f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
+                    video_mode=False)
+
                 accumulated_features.update({frame_number.item(): FrameFeatures(frame_number=frame_number.item(),
                                                                                 object_features=object_features)})
 
