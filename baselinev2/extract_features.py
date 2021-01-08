@@ -762,15 +762,6 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                         #     f'Original Cluster Center Count: {n_clusters}\nPruned Cluster Distribution: '
                         #     f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
 
-                # plot_two_with_bounding_boxes_and_rgb(last_frame_mask, [t.bbox for t in last_frame_live_tracks],
-                #                                      fg_mask, [t.bbox for t in running_tracks],
-                #                                      last_frame, frame, frame_number.item(),
-                #                                      additional_text='Past-Future')
-
-                # plot_two_with_bounding_boxes_and_rgb(fg_mask, annotations[:, :-1],
-                #                                      fg_mask, [t.bbox for t in last_frame_live_tracks],
-                #                                      frame, frame, frame_number.item())
-
                 new_track_boxes = np.stack(new_track_boxes) if len(new_track_boxes) > 0 else np.empty(shape=(0,))
                 plot_for_video(
                     gt_rgb=frame, gt_mask=fg_mask, last_frame_rgb=last_frame,
