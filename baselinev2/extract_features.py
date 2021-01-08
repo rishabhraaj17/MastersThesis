@@ -647,8 +647,32 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                                                                    cluster_all=True, bandwidth=4, max_iter=100)
 
                     cluster_centers = mean_shift.cluster_centers
+
                     plot_features(all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
                                   cluster_centers=cluster_centers, num_clusters=n_clusters,
+                                  frame_number=frame_number)
+
+                    # prune cluster centers
+                    # combine centers inside radius + eliminate noise
+                    rejected_cluster_centers = []
+                    pruned_cluster_centers = []
+                    for cluster_center in cluster_centers:
+                        if not np.isin(cluster_center, pruned_cluster_centers).all()\
+                                or not np.isin(cluster_center, rejected_cluster_centers).all():
+                            centers_inside_idx = find_points_inside_circle(cluster_centers,
+                                                                           circle_center=cluster_center,
+                                                                           circle_radius=radius)
+                            if not np.isin(cluster_centers[centers_inside_idx[0]], pruned_cluster_centers).all():
+                                pruned_cluster_centers.append(cluster_centers[centers_inside_idx[0]])
+                            if len(centers_inside_idx) > 1:
+                                rejected_cluster_centers.extend(
+                                    [cluster_centers[c_idx] for c_idx in centers_inside_idx[1:]
+                                     if not np.isin(c_idx, pruned_cluster_centers).all()])
+
+                    pruned_cluster_centers = np.stack(pruned_cluster_centers)
+                    logger.info(f'Cluster Center Count: {n_clusters}, Pruned Count: {pruned_cluster_centers.shape[0]}')
+                    plot_features(all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
+                                  cluster_centers=pruned_cluster_centers, num_clusters=pruned_cluster_centers.shape[0],
                                   frame_number=frame_number)
 
                 # plot_two_with_bounding_boxes_and_rgb(last_frame_mask, [t.bbox for t in last_frame_live_tracks],
