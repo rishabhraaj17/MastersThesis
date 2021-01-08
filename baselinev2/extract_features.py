@@ -634,8 +634,8 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     xy_current_frame = extract_features_per_bounding_box(shifted_box, fg_mask)
 
                     if xy_current_frame.size == 0:
-                        all_cloud, features_inside_circle = extract_features_inside_circle(fg_mask, radius,
-                                                                                           shifted_xy_center)
+                        # all_cloud, features_inside_circle = extract_features_inside_circle(fg_mask, radius,
+                        #                                                                    shifted_xy_center)
                         # plot_features_with_mask(all_cloud, features_inside_circle, center=shifted_xy_center,
                         #                         radius=radius, mask=fg_mask, box=shifted_box, m_size=1,
                         #                         current_boxes=annotations[:, :-1])
@@ -689,16 +689,9 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     features_skipped = all_cloud[features_skipped_idx]
 
                     # cluster to group points
-                    # mean_shift, n_clusters = mean_shift_clustering(features_skipped, bin_seeding=False,
-                    #                                                min_bin_freq=3, cluster_all=True)
                     mean_shift, n_clusters = mean_shift_clustering(features_skipped, bin_seeding=False, min_bin_freq=8,
                                                                    cluster_all=True, bandwidth=4, max_iter=100)
-
                     cluster_centers = mean_shift.cluster_centers
-
-                    # plot_features(all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
-                    #               cluster_centers=cluster_centers, num_clusters=n_clusters,
-                    #               frame_number=frame_number)
 
                     # prune cluster centers
                     # combine centers inside radius + eliminate noise
