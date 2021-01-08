@@ -1,8 +1,10 @@
+import os
 from typing import Optional, Any, List, Tuple, Union
 
 import pandas as pd
 
 import torch
+import torchvision
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 from torchvision.datasets.vision import VisionDataset
@@ -228,7 +230,10 @@ class SDDSimpleDataset(Dataset):
         self.scale = scale
         self.single_track_mode = single_track_mode
         self.track_id = track_id
-        self.original_shape = None
+
+        ref_image_path = os.path.split(annotation_path)[0] + '/reference.jpg'
+        ref_image = torchvision.io.read_image(ref_image_path)
+        self.original_shape = [ref_image.shape[1], ref_image.shape[2]]
         self.new_scale = None
 
         # self.video_frames = video_frames

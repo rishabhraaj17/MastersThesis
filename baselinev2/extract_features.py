@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 from matplotlib import patches
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -265,8 +266,8 @@ def plot_two_with_bounding_boxes_and_rgb(img0, boxes0, img1, boxes1, rgb0, rgb1,
 
 def plot_for_video(gt_rgb, gt_mask, last_frame_rgb, last_frame_mask, current_frame_rgb, current_frame_mask,
                    gt_annotations, last_frame_annotation, current_frame_annotation, new_track_annotation,
-                   frame_number, additional_text=None, video_mode=False):
-    fig, ax = plt.subplots(3, 2, sharex='none', sharey='none', figsize=(12, 10))
+                   frame_number, additional_text=None, video_mode=False, original_dims=None):
+    fig, ax = plt.subplots(3, 2, sharex='none', sharey='none', figsize=original_dims or (12, 10))
     ax_gt_rgb, ax_gt_mask, ax_last_frame_rgb, ax_last_frame_mask, ax_current_frame_rgb, ax_current_frame_mask = \
         ax[0, 0], ax[0, 1], ax[1, 0], ax[1, 1], ax[2, 0], ax[2, 1]
     ax_gt_rgb.imshow(gt_rgb)
@@ -304,6 +305,8 @@ def plot_for_video(gt_rgb, gt_mask, last_frame_rgb, last_frame_mask, current_fra
         plt.close()
     else:
         plt.show()
+
+    return fig
 
 
 def add_box_to_axes(ax, boxes, edge_color='r'):
@@ -602,7 +605,8 @@ def associate_frame_with_ground_truth(frames, frame_numbers):
 
 
 def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=None, overlap_percent=0.1, plot=False,
-                    radius=50, min_points_in_cluster=5):
+                    radius=50, min_points_in_cluster=5, video_mode=False, video_save_path=None, plot_scale_factor=1,
+                    desired_fps=5):
     # feature_extractor = MOG2.for_frames()
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
@@ -618,6 +622,21 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
     last_frame_live_tracks, last_frame_mask = None, None
     current_track_idx, track_ids_used = 0, []
     accumulated_features = {}
+
+    out = None
+    frames_shape = sdd_simple.original_shape
+    if video_mode:
+        if frames_shape[0] < frames_shape[1]:
+            original_dims = (
+                frames_shape[1] / 100 * plot_scale_factor, frames_shape[0] / 100 * plot_scale_factor)
+            out = cv.VideoWriter(video_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                                 (frames_shape[1], frames_shape[0]))
+        else:
+            original_dims = (
+                frames_shape[0] / 100 * plot_scale_factor, frames_shape[1] / 100 * plot_scale_factor)
+            out = cv.VideoWriter(video_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                                 (frames_shape[0], frames_shape[1]))
+
     for part_idx, data in enumerate(tqdm(data_loader)):
         frames, frame_numbers = data
         frames = frames.squeeze()
@@ -763,20 +782,44 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                         #     f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
 
                 new_track_boxes = np.stack(new_track_boxes) if len(new_track_boxes) > 0 else np.empty(shape=(0,))
-                plot_for_video(
-                    gt_rgb=frame, gt_mask=fg_mask, last_frame_rgb=last_frame,
-                    last_frame_mask=last_frame_mask, current_frame_rgb=frame,
-                    current_frame_mask=fg_mask, gt_annotations=annotations[:, :-1],
-                    last_frame_annotation=[t.bbox for t in last_frame_live_tracks],
-                    current_frame_annotation=[t.bbox for t in running_tracks],
-                    new_track_annotation=new_track_boxes,
-                    frame_number=frame_number,
-                    additional_text=
-                    # f'Track Ids Used: {track_ids_used}\n'
-                    f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
-                    f'Track Ids Killed: '
-                    f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
-                    video_mode=False)
+
+                if video_mode:
+                    fig = plot_for_video(
+                        gt_rgb=frame, gt_mask=fg_mask, last_frame_rgb=last_frame,
+                        last_frame_mask=last_frame_mask, current_frame_rgb=frame,
+                        current_frame_mask=fg_mask, gt_annotations=annotations[:, :-1],
+                        last_frame_annotation=[t.bbox for t in last_frame_live_tracks],
+                        current_frame_annotation=[t.bbox for t in running_tracks],
+                        new_track_annotation=new_track_boxes,
+                        frame_number=frame_number,
+                        additional_text=
+                        # f'Track Ids Used: {track_ids_used}\n'
+                        f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
+                        f'Track Ids Killed: '
+                        f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
+                        video_mode=video_mode)
+
+                    canvas = FigureCanvas(fig)
+                    canvas.draw()
+
+                    buf = canvas.buffer_rgba()
+                    out_frame = np.asarray(buf, dtype=np.uint8)[:, :, :-1]
+                    out.write(out_frame)
+                else:
+                    fig = plot_for_video(
+                        gt_rgb=frame, gt_mask=fg_mask, last_frame_rgb=last_frame,
+                        last_frame_mask=last_frame_mask, current_frame_rgb=frame,
+                        current_frame_mask=fg_mask, gt_annotations=annotations[:, :-1],
+                        last_frame_annotation=[t.bbox for t in last_frame_live_tracks],
+                        current_frame_annotation=[t.bbox for t in running_tracks],
+                        new_track_annotation=new_track_boxes,
+                        frame_number=frame_number,
+                        additional_text=
+                        # f'Track Ids Used: {track_ids_used}\n'
+                        f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
+                        f'Track Ids Killed: '
+                        f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
+                        video_mode=False)
 
                 accumulated_features.update({frame_number.item(): FrameFeatures(frame_number=frame_number.item(),
                                                                                 object_features=object_features)})
@@ -790,11 +833,19 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
             Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
             f_n = f'time_distributed_dict_with_gt_bbox_centers_and_bbox_part_gt_velocity{part_idx}.pt'
             torch.save(accumulated_features, save_per_part_path + f_n)
+        if video_mode:
+            out.release()
 
     return accumulated_features
 
 
 if __name__ == '__main__':
     # feats = preprocess_data(var_threshold=150, plot=False)
+    version = 0
+    video_save_path = f'../Plots/baseline_v2/v{version}/extraction.mov'
+    features_save_path = f'../Plots/baseline_v2/v{version}/features.pt'
+    Path(video_save_path).mkdir(parents=True, exist_ok=True)
+    Path(features_save_path).mkdir(parents=True, exist_ok=True)
     feats = preprocess_data(var_threshold=None, plot=False, radius=100)
+    torch.save(feats, features_save_path)
     print()
