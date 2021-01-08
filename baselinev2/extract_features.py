@@ -266,7 +266,7 @@ def plot_two_with_bounding_boxes_and_rgb(img0, boxes0, img1, boxes1, rgb0, rgb1,
 
 def plot_for_video(gt_rgb, gt_mask, last_frame_rgb, last_frame_mask, current_frame_rgb, current_frame_mask,
                    gt_annotations, last_frame_annotation, current_frame_annotation, new_track_annotation,
-                   frame_number, additional_text=None, video_mode=False, original_dims=None):
+                   frame_number, additional_text=None, video_mode=False, original_dims=None, plot_save_path=None):
     fig, ax = plt.subplots(3, 2, sharex='none', sharey='none', figsize=original_dims or (12, 10))
     ax_gt_rgb, ax_gt_mask, ax_last_frame_rgb, ax_last_frame_mask, ax_current_frame_rgb, ax_current_frame_mask = \
         ax[0, 0], ax[0, 1], ax[1, 0], ax[1, 1], ax[2, 0], ax[2, 1]
@@ -304,7 +304,12 @@ def plot_for_video(gt_rgb, gt_mask, last_frame_rgb, last_frame_mask, current_fra
     if video_mode:
         plt.close()
     else:
-        plt.show()
+        if plot_save_path is not None:
+            Path(plot_save_path).mkdir(parents=True, exist_ok=True)
+            fig.savefig(plot_save_path + f"frame_{frame_number}.png")
+            plt.close()
+        else:
+            plt.show()
 
     return fig
 
@@ -606,7 +611,7 @@ def associate_frame_with_ground_truth(frames, frame_numbers):
 
 def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=None, overlap_percent=0.1, plot=False,
                     radius=50, min_points_in_cluster=5, video_mode=False, video_save_path=None, plot_scale_factor=1,
-                    desired_fps=5):
+                    desired_fps=5, custom_video_shape=True, plot_save_path=None):
     # feature_extractor = MOG2.for_frames()
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
@@ -626,17 +631,19 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
 
     out = None
     frames_shape = sdd_simple.original_shape
+    video_shape = (1200, 1000) if custom_video_shape else frames_shape
     if video_mode:
         if frames_shape[0] < frames_shape[1]:
             original_dims = (
                 frames_shape[1] / 100 * plot_scale_factor, frames_shape[0] / 100 * plot_scale_factor)
             out = cv.VideoWriter(video_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
-                                 (frames_shape[1], frames_shape[0]))
+                                 (1200, 1000))  # (video_shape[0], video_shape[1]))
+            # (video_shape[1], video_shape[0]))
         else:
             original_dims = (
                 frames_shape[0] / 100 * plot_scale_factor, frames_shape[1] / 100 * plot_scale_factor)
             out = cv.VideoWriter(video_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
-                                 (frames_shape[0], frames_shape[1]))
+                                 (1200, 1000))  # (video_shape[0], video_shape[1]))
 
     for part_idx, data in enumerate(tqdm(data_loader)):
         frames, frame_numbers = data
@@ -805,6 +812,7 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
 
                     buf = canvas.buffer_rgba()
                     out_frame = np.asarray(buf, dtype=np.uint8)[:, :, :-1]
+                    out_frame = out_frame.reshape(1200, 1000, 3)
                     out.write(out_frame)
                 else:
                     fig = plot_for_video(
@@ -820,7 +828,8 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                         f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
                         f'Track Ids Killed: '
                         f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
-                        video_mode=False)
+                        video_mode=False,
+                        plot_save_path=plot_save_path)
 
                 accumulated_features.update({frame_number.item(): FrameFeatures(frame_number=frame_number.item(),
                                                                                 object_features=object_features)})
@@ -844,10 +853,12 @@ if __name__ == '__main__':
     # feats = preprocess_data(var_threshold=150, plot=False)
     version = 0
     video_save_path = f'../Plots/baseline_v2/v{version}/'
+    plot_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/plots/'
     features_save_path = f'../Plots/baseline_v2/v{version}/'
     Path(video_save_path).mkdir(parents=True, exist_ok=True)
     Path(features_save_path).mkdir(parents=True, exist_ok=True)
-    feats = preprocess_data(var_threshold=None, plot=False, radius=100, save_per_part_path=None, video_mode=True,
-                            video_save_path=video_save_path + 'extraction.mov', desired_fps=2)
+    feats = preprocess_data(var_threshold=None, plot=False, radius=100, save_per_part_path=None, video_mode=False,
+                            video_save_path=video_save_path + 'extraction.avi', desired_fps=2,
+                            plot_save_path=plot_save_path, min_points_in_cluster=3)
     torch.save(feats, features_save_path + 'features.pt')
     print()
