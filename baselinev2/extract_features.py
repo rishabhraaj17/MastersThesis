@@ -74,6 +74,45 @@ def plot_image(im):
     plt.show()
 
 
+def plot_features_simple(features, bbox=None):
+    fig, axs = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+    axs.plot(features[:, 0], features[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k', markersize=8)
+    if bbox is not None:
+        add_box_to_axes(axs, bbox)
+    plt.show()
+
+
+def plot_features_with_mask_simple(features, mask, bbox=None):
+    fig, axs = plt.subplots(2, 1, sharex='none', sharey='none', figsize=(12, 10))
+    axs[0].imshow(mask, cmap='gray')
+    axs[1].plot(features[:, 0], features[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k', markersize=8)
+    if bbox is not None:
+        add_box_to_axes(axs[0], bbox)
+        add_box_to_axes(axs[1], bbox)
+    plt.show()
+
+
+def plot_features_overlayed_mask_simple(features, mask, bbox=None):
+    fig, axs = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+    axs.imshow(mask, cmap='gray')
+    axs.plot(features[:, 0], features[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k', markersize=8)
+    if bbox is not None:
+        add_box_to_axes(axs, bbox)
+    plt.show()
+
+
+def plot_features_with_mask_and_rgb_simple(features, mask, rgb, bbox=None):
+    fig, axs = plt.subplots(3, 1, sharex='none', sharey='none', figsize=(12, 10))
+    axs[0].imshow(mask, cmap='gray')
+    axs[1].plot(features[:, 0], features[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k', markersize=8)
+    axs[2].imshow(rgb)
+    if bbox is not None:
+        add_box_to_axes(axs[0], bbox)
+        add_box_to_axes(axs[1], bbox)
+        add_box_to_axes(axs[2], bbox)
+    plt.show()
+
+
 def plot_features_with_circle(features, features_inside_circle, center, radius, mask=None):
     fig, axs = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
     circle = plt.Circle((center[0], center[1]), radius, color='green', fill=False)
@@ -190,7 +229,8 @@ def prune_clusters(cluster_centers, mean_shift, radius, min_points_in_cluster=5)
 
 
 def extract_features_inside_circle(fg_mask, radius, circle_center):
-    all_cloud = extract_features_per_bounding_box([0, 0, fg_mask.shape[0], fg_mask.shape[1]], fg_mask)
+    # all_cloud = extract_features_per_bounding_box([0, 0, fg_mask.shape[0], fg_mask.shape[1]], fg_mask)
+    all_cloud = extract_mask_features(fg_mask)
     points_current_frame_inside_circle_of_validity_idx = find_points_inside_circle(
         cloud=all_cloud,
         circle_radius=radius,
@@ -202,8 +242,9 @@ def extract_features_inside_circle(fg_mask, radius, circle_center):
 
 def features_included_in_live_tracks(annotations, fg_mask, radius, running_tracks, plot=False):
     feature_idx_covered = []
-    all_cloud = extract_features_per_bounding_box([0, 0, fg_mask.shape[0], fg_mask.shape[1]],
-                                                  fg_mask)
+    # all_cloud = extract_features_per_bounding_box([0, 0, fg_mask.shape[0], fg_mask.shape[1]],
+    #                                               fg_mask)
+    all_cloud = extract_mask_features(fg_mask)
     for t in running_tracks:
         b_center = get_bbox_center(t.bbox).flatten()
         points_current_frame_inside_circle_of_validity_idx = find_points_inside_circle(
@@ -506,6 +547,14 @@ def extract_features_per_bounding_box(box, mask):
     return xy
 
 
+def extract_mask_features(mask):
+    xy = np.argwhere(mask)
+    rolled = np.rollaxis(xy, -1).tolist()
+    data_x, data_y = rolled[1], rolled[0]
+    xy = np.stack([data_x, data_y]).T
+    return xy
+
+
 def evaluate_shifted_bounding_box(box, shifted_xy, xy):
     xy_center = np.round(xy.mean(axis=0)).astype(np.int)
     shifted_xy_center = np.round(shifted_xy.mean(axis=0)).astype(np.int)
@@ -611,7 +660,7 @@ def associate_frame_with_ground_truth(frames, frame_numbers):
 
 def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=None, overlap_percent=0.1, plot=False,
                     radius=50, min_points_in_cluster=5, video_mode=False, video_save_path=None, plot_scale_factor=1,
-                    desired_fps=5, custom_video_shape=True, plot_save_path=None):
+                    desired_fps=5, custom_video_shape=True, plot_save_path=None, save_checkpoint=False):
     # feature_extractor = MOG2.for_frames()
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
@@ -838,6 +887,17 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                 last_frame = frame.copy()
                 last_frame_mask = fg_mask.copy()
                 last_frame_live_tracks = np.stack(running_tracks) if len(running_tracks) != 0 else []
+
+                if save_checkpoint:
+                    resume_dict = {'frame_number': frame_number,
+                                   'part_idx': part_idx,
+                                   'second_last_frame': second_last_frame,
+                                   'last_frame': last_frame,
+                                   'last_frame_mask': last_frame_mask,
+                                   'last_frame_live_tracks': last_frame_live_tracks,
+                                   'running_tracks': running_tracks,
+                                   'track_ids_used': track_ids_used,
+                                   'new_track_boxes': new_track_boxes}
         gt_associated_frame = associate_frame_with_ground_truth(frames, frame_numbers)
         if save_per_part_path is not None:
             Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
@@ -859,6 +919,6 @@ if __name__ == '__main__':
     Path(features_save_path).mkdir(parents=True, exist_ok=True)
     feats = preprocess_data(var_threshold=None, plot=False, radius=100, save_per_part_path=None, video_mode=False,
                             video_save_path=video_save_path + 'extraction.avi', desired_fps=2,
-                            plot_save_path=plot_save_path, min_points_in_cluster=3)
+                            plot_save_path=plot_save_path, min_points_in_cluster=5)
     torch.save(feats, features_save_path + 'features.pt')
     print()
