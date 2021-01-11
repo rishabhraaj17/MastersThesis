@@ -70,10 +70,11 @@ class FrameFeatures(object):
 
 
 class Track(object):
-    def __init__(self, bbox, idx):
+    def __init__(self, bbox, idx, gt_track_idx=None):
         super(Track, self).__init__()
         self.idx = idx
         self.bbox = bbox
+        self.gt_track_idx = gt_track_idx
 
 
 def plot_image(im):
@@ -350,7 +351,7 @@ def plot_two_with_bounding_boxes_and_rgb(img0, boxes0, img1, boxes1, rgb0, rgb1,
 
 def plot_for_video(gt_rgb, gt_mask, last_frame_rgb, last_frame_mask, current_frame_rgb, current_frame_mask,
                    gt_annotations, last_frame_annotation, current_frame_annotation, new_track_annotation,
-                   frame_number, additional_text=None, video_mode=False, original_dims=None, plot_save_path=None):
+                   frame_number, additional_text=None, video_mode=False, original_dims=None, save_path=None):
     fig, ax = plt.subplots(3, 2, sharex='none', sharey='none', figsize=original_dims or (12, 10))
     ax_gt_rgb, ax_gt_mask, ax_last_frame_rgb, ax_last_frame_mask, ax_current_frame_rgb, ax_current_frame_mask = \
         ax[0, 0], ax[0, 1], ax[1, 0], ax[1, 1], ax[2, 0], ax[2, 1]
@@ -388,9 +389,61 @@ def plot_for_video(gt_rgb, gt_mask, last_frame_rgb, last_frame_mask, current_fra
     if video_mode:
         plt.close()
     else:
-        if plot_save_path is not None:
-            Path(plot_save_path).mkdir(parents=True, exist_ok=True)
-            fig.savefig(plot_save_path + f"frame_{frame_number}.png")
+        if save_path is not None:
+            Path(save_path).mkdir(parents=True, exist_ok=True)
+            fig.savefig(save_path + f"frame_{frame_number}.png")
+            plt.close()
+        else:
+            plt.show()
+
+    return fig
+
+
+def plot_for_one_track(gt_rgb, gt_mask, last_frame_rgb, last_frame_mask, current_frame_rgb, current_frame_mask,
+                       gt_annotations, last_frame_annotation, current_frame_annotation, new_track_annotation,
+                       frame_number, track_idx, additional_text=None, video_mode=False, original_dims=None,
+                       save_path=None):
+    fig, ax = plt.subplots(3, 2, sharex='none', sharey='none', figsize=original_dims or (12, 10))
+    ax_gt_rgb, ax_gt_mask, ax_last_frame_rgb, ax_last_frame_mask, ax_current_frame_rgb, ax_current_frame_mask = \
+        ax[0, 0], ax[0, 1], ax[1, 0], ax[1, 1], ax[2, 0], ax[2, 1]
+    ax_gt_rgb.imshow(gt_rgb)
+    ax_gt_mask.imshow(gt_mask, cmap='gray')
+    ax_last_frame_rgb.imshow(last_frame_rgb)
+    ax_last_frame_mask.imshow(last_frame_mask, cmap='gray')
+    ax_current_frame_rgb.imshow(current_frame_rgb)
+    ax_current_frame_mask.imshow(current_frame_mask, cmap='gray')
+
+    add_one_box_to_axis(ax_gt_rgb, box=gt_annotations[track_idx], color='r')
+    add_one_box_to_axis(ax_gt_mask, box=gt_annotations[track_idx], color='r')
+    add_one_box_to_axis(ax_last_frame_rgb, box=last_frame_annotation[track_idx], color='r')
+    add_one_box_to_axis(ax_last_frame_mask, box=last_frame_annotation[track_idx], color='r')
+    add_one_box_to_axis(ax_current_frame_rgb, box=current_frame_annotation[track_idx], color='r')
+    add_one_box_to_axis(ax_current_frame_mask, box=current_frame_annotation[track_idx], color='r')
+    if new_track_annotation.size != 0:
+        add_one_box_to_axis(ax_current_frame_rgb, box=new_track_annotation[track_idx], color='r')
+        add_one_box_to_axis(ax_current_frame_mask, box=new_track_annotation[track_idx], color='r')
+
+    ax_gt_rgb.set_title('GT/RGB')
+    ax_gt_mask.set_title('GT/FG Mask')
+    ax_last_frame_rgb.set_title('(T-1)/RGB')
+    ax_last_frame_mask.set_title('(T-1)/FG Mask')
+    ax_current_frame_rgb.set_title('(T)/RGB')
+    ax_current_frame_mask.set_title('(T)/FG Mask')
+
+    fig.suptitle(f'Frame: {frame_number}\n{additional_text}')
+
+    legends_dict = {'r': 'Bounding Box',
+                    'green': 'New track Box'}
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
+    if video_mode:
+        plt.close()
+    else:
+        if save_path is not None:
+            Path(save_path).mkdir(parents=True, exist_ok=True)
+            fig.savefig(save_path + f"frame_{frame_number}.png")
             plt.close()
         else:
             plt.show()
@@ -412,7 +465,7 @@ def plot_processing_steps(xy_cloud, shifted_xy_cloud, xy_box, shifted_xy_box,
                           true_cloud_key_point=None, shifted_cloud_key_point=None,
                           overlap_threshold=None, shift_corrected_cloud_key_point=None,
                           key_point_criteria=None, shift_correction=None,
-                          line_width=None, plot_save_path=None):
+                          line_width=None, save_path=None):
     fig, ax = plt.subplots(2, 2, sharex='none', sharey='none', figsize=(14, 12))
     ax1, ax2, ax3, ax4 = ax[0, 0], ax[0, 1], ax[1, 0], ax[1, 1]
 
@@ -507,11 +560,11 @@ def plot_processing_steps(xy_cloud, shifted_xy_cloud, xy_box, shifted_xy_box,
     fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}')  # \nShift Correction: {shift_correction}\n'
     # f'Overlap Threshold: {overlap_threshold}')
 
-    if plot_save_path is None:
+    if save_path is None:
         plt.show()
     else:
-        Path(plot_save_path).mkdir(parents=True, exist_ok=True)
-        plt.savefig(plot_save_path + f'fig_frame_{frame_number}_track_{track_id}.png')
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path + f'fig_frame_{frame_number}_track_{track_id}.png')
         plt.close()
 
 
@@ -718,8 +771,9 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
     if save_per_part_path is not None:
         save_per_part_path += 'parts/'
     first_frame_bounding_boxes, first_frame_mask, last_frame, second_last_frame = None, None, None, None
-    last_frame_live_tracks, last_frame_mask = None, None
+    first_frame_live_tracks, last_frame_live_tracks, last_frame_mask = None, None, None
     current_track_idx, track_ids_used = 0, []
+    selected_track_distances = []
     accumulated_features = {}
 
     out = None
@@ -759,7 +813,9 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                 first_frame_bounding_boxes = first_annotations[:, :-1]
                 last_frame = frame.copy()
                 second_last_frame = last_frame.copy()
-                last_frame_live_tracks = [Track(box, idx) for idx, box in enumerate(first_frame_bounding_boxes)]
+                # last_frame_live_tracks = [Track(box, idx) for idx, box in enumerate(first_frame_bounding_boxes)]
+                last_frame_live_tracks = [Track(box, idx, gt_t_id) for idx, (box, gt_t_id) in
+                                          enumerate(zip(first_frame_bounding_boxes, first_annotations[:, -1]))]
                 last_frame_mask = first_frame_mask.copy()
             else:
                 running_tracks, object_features = [], []
@@ -855,6 +911,9 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
 
                 # NOTE: running ADE/FDE
                 r_boxes = [b.bbox for b in running_tracks]
+                r_boxes_idx = [b.idx for b in running_tracks]
+                select_track_idx = 4
+
                 # bbox_distance_to_of_centers = []
                 # for a_box in annotations[:, :-1]:
                 #     a_box_center = get_bbox_center(a_box).flatten()
@@ -874,11 +933,14 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                 boxes_distance = []
                 r_boxes, a_boxes = r_boxes.numpy(), a_boxes.numpy()
                 for a_box_idx, r_box_idx in zip(*match_idx):
-                    dist = np.linalg.norm((get_bbox_center(a_boxes[a_box_idx]).flatten(),
+                    dist = np.linalg.norm((get_bbox_center(a_boxes[a_box_idx]).flatten() -
                                            get_bbox_center(r_boxes[r_box_idx]).flatten()), 2) * ratio
                     boxes_distance.append([(a_box_idx, r_box_idx), dist])
                     bbox_distance_to_of_centers_iou_based.append([a_boxes[a_box_idx], dist, r_boxes[r_box_idx],
                                                                   iou_boxes[a_box_idx, r_box_idx]])
+                    if select_track_idx == [r_boxes_idx[i] for i, b in enumerate(r_boxes)
+                                            if (b == r_boxes[r_box_idx]).all()][0]:
+                        selected_track_distances.append(dist)
 
                 plot_mask_matching_bbox(fg_mask, bbox_distance_to_of_centers_iou_based, frame_number,
                                         save_path=f'{plot_save_path}iou_distance{min_points_in_cluster}/')
@@ -968,7 +1030,24 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                         f'Track Ids Killed: '
                         f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
                         video_mode=False,
-                        plot_save_path=f'{plot_save_path}plots{min_points_in_cluster}/')
+                        save_path=f'{plot_save_path}plots{min_points_in_cluster}/')
+                    # fig = plot_for_one_track(
+                    #     gt_rgb=frame, gt_mask=fg_mask, last_frame_rgb=last_frame,
+                    #     last_frame_mask=last_frame_mask, current_frame_rgb=frame,
+                    #     current_frame_mask=fg_mask, gt_annotations=annotations[:, :-1],
+                    #     last_frame_annotation=[t.bbox for t in last_frame_live_tracks],
+                    #     current_frame_annotation=[t.bbox for t in running_tracks],
+                    #     new_track_annotation=new_track_boxes,
+                    #     frame_number=frame_number,
+                    #     additional_text=
+                    #     f'Track Idx Shown: {last_frame_live_tracks[4].gt_track_idx}\n'
+                    #     f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
+                    #     f'Track Ids Killed: '
+                    #     f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
+                    #     video_mode=False,
+                    #     save_path=None,
+                    #     track_idx=4)
+                    # save_path=f'{plot_save_path}plots{min_points_in_cluster}/')
 
                 # STEP 4i: save stuff and reiterate
                 accumulated_features.update({frame_number.item(): FrameFeatures(frame_number=frame_number.item(),
@@ -1010,6 +1089,6 @@ if __name__ == '__main__':
     Path(features_save_path).mkdir(parents=True, exist_ok=True)
     feats = preprocess_data(var_threshold=None, plot=False, radius=100, save_per_part_path=None, video_mode=False,
                             video_save_path=video_save_path + 'extraction.avi', desired_fps=2,
-                            plot_save_path=plot_save_path, min_points_in_cluster=5, begin_track_mode=True)
+                            plot_save_path=plot_save_path, min_points_in_cluster=8, begin_track_mode=True)
     torch.save(feats, features_save_path + 'features.pt')
     print()
