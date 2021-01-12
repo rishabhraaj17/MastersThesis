@@ -184,10 +184,18 @@ def plot_features(features, features_inside_circle, features_skipped=None, mask=
                  markeredgecolor='k', markersize=marker_size)
     if cluster_centers is not None:
         axs.plot(cluster_centers[:, 0], cluster_centers[:, 1], '*', markerfacecolor='lavender', markeredgecolor='k',
-                 markersize=marker_size + 4)
+                 markersize=marker_size + 8)
         fig.suptitle(f'Frame: {frame_number} | Clusters Count: {num_clusters}\n {additional_text}')
     if boxes is not None:
         add_box_to_axes(axs, boxes)
+
+    legends_dict = {'yellow': 'Inside Circle',
+                    'blue': 'Features',
+                    'aqua': 'Skipped Features'}
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
     plt.show()
 
 
@@ -757,7 +765,7 @@ def associate_frame_with_ground_truth(frames, frame_numbers):
 def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=None, overlap_percent=0.1, plot=False,
                     radius=50, min_points_in_cluster=5, video_mode=False, video_save_path=None, plot_scale_factor=1,
                     desired_fps=5, custom_video_shape=True, plot_save_path=None, save_checkpoint=False,
-                    begin_track_mode=True):
+                    begin_track_mode=True, use_circle_to_keep_track_alive=True):
     # feature_extractor = MOG2.for_frames()
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
@@ -819,7 +827,7 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                 last_frame_mask = first_frame_mask.copy()
             else:
                 running_tracks, object_features = [], []
-                # STEP 2: Get the OF for both ((t-1), t) and ((t-2), (t-1))
+                # STEP 2: Get the OF for both ((t-1), t) and ((t), (t+1))
                 flow, past_flow = optical_flow_processing(frame, last_frame, second_last_frame)
 
                 # STEP 3: Get Background Subtracted foreground mask for the current frame
@@ -860,22 +868,38 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     xy_current_frame = extract_features_per_bounding_box(shifted_box, fg_mask)
 
                     if xy_current_frame.size == 0:
+                        # STEP 4e: a> if no feature detected inside bounding box
+                        #  -> put a circle of radius N pixels around the center of the shifted bounding box
+                        #  -> if features detected inside this circle
+                        #  -> shift the bounding box there then, throw and take 80% of the points
+                        #  -> keep the track alive
+                        shifted_box_center = get_bbox_center(shifted_box).flatten()
                         # all_cloud, features_inside_circle = extract_features_inside_circle(fg_mask, radius,
                         #                                                                    shifted_xy_center)
-                        # plot_features_with_mask(all_cloud, features_inside_circle, center=shifted_xy_center,
-                        #                         radius=radius, mask=fg_mask, box=shifted_box, m_size=1,
-                        #                         current_boxes=annotations[:, :-1])
-                        # STEP 4e: Kill the track if corresponding features are not detected in the next time-step
-                        object_features.append(ObjectFeatures(idx=current_track_idx,
-                                                              xy=xy_current_frame,
-                                                              past_xy=xy,
-                                                              final_xy=xy_current_frame,
-                                                              flow=xy_displacement,
-                                                              past_flow=past_xy_displacement,
-                                                              past_bbox=box,
-                                                              final_bbox=np.array(shifted_box),
-                                                              is_track_live=False))
-                        continue
+                        all_cloud, features_inside_circle = extract_features_inside_circle(fg_mask, radius,
+                                                                                           shifted_box_center)
+                        if features_inside_circle.size != 0 and use_circle_to_keep_track_alive:
+                            shifted_box, shifted_xy_center = evaluate_shifted_bounding_box(
+                                box=shifted_box, shifted_xy=features_inside_circle, xy=shifted_xy)
+                            xy_current_frame = features_inside_circle.copy()
+                            # plot_features_with_mask(all_cloud, features_inside_circle, center=shifted_xy_center,
+                            #                         radius=radius, mask=fg_mask, box=shifted_box, m_size=1,
+                            #                         current_boxes=annotations[:, :-1])
+                        else:
+                            # plot_features_with_mask(all_cloud, features_inside_circle, center=shifted_xy_center,
+                            #                         radius=radius, mask=fg_mask, box=shifted_box, m_size=1,
+                            #                         current_boxes=annotations[:, :-1])
+                            # STEP 4e: b>Kill the track if corresponding features are not detected in the next time-step
+                            object_features.append(ObjectFeatures(idx=current_track_idx,
+                                                                  xy=xy_current_frame,
+                                                                  past_xy=xy,
+                                                                  final_xy=xy_current_frame,
+                                                                  flow=xy_displacement,
+                                                                  past_flow=past_xy_displacement,
+                                                                  past_bbox=box,
+                                                                  final_bbox=np.array(shifted_box),
+                                                                  is_track_live=False))
+                            continue
 
                     running_tracks.append(Track(bbox=shifted_box, idx=current_track_idx))
 
@@ -928,6 +952,8 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                 a_boxes = torch.from_numpy(annotations[:, :-1])
                 iou_boxes = torchvision.ops.box_iou(a_boxes, r_boxes).numpy()
                 match_idx = np.where(iou_boxes)
+                # TODO: get the track match pair for the iou overlap
+                #  -> missing tracks - FP/FN
 
                 bbox_distance_to_of_centers_iou_based = []
                 boxes_distance = []
@@ -982,13 +1008,13 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                                     track_ids_used.append(t_id)
                                     new_track_boxes.append(t_box)
 
-                            # plot_features(
-                            #     all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
-                            #     cluster_centers=final_cluster_centers, num_clusters=final_cluster_centers.shape[0],
-                            #     frame_number=frame_number, boxes=annotations[:, :-1],
-                            #     additional_text=
-                            #     f'Original Cluster Center Count: {n_clusters}\nPruned Cluster Distribution: '
-                            #     f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
+                            plot_features(
+                                all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
+                                cluster_centers=final_cluster_centers, num_clusters=final_cluster_centers.shape[0],
+                                frame_number=frame_number, boxes=annotations[:, :-1],
+                                additional_text=
+                                f'Original Cluster Center Count: {n_clusters}\nPruned Cluster Distribution: '
+                                f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
 
                 new_track_boxes = np.stack(new_track_boxes) if len(new_track_boxes) > 0 else np.empty(shape=(0,))
 
@@ -1088,7 +1114,9 @@ if __name__ == '__main__':
     Path(video_save_path).mkdir(parents=True, exist_ok=True)
     Path(features_save_path).mkdir(parents=True, exist_ok=True)
     feats = preprocess_data(var_threshold=None, plot=False, radius=100, save_per_part_path=None, video_mode=False,
-                            video_save_path=video_save_path + 'extraction.avi', desired_fps=2,
+                            video_save_path=video_save_path + 'extraction.avi', desired_fps=2, overlap_percent=0.4,
                             plot_save_path=plot_save_path, min_points_in_cluster=8, begin_track_mode=True)
     torch.save(feats, features_save_path + 'features.pt')
     print()
+    # TODO:
+    #  -> Use torchvision box conversion
