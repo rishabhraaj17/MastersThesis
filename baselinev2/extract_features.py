@@ -17,7 +17,8 @@ from average_image.constants import SDDVideoClasses, OBJECT_CLASS_COLOR_MAPPING,
 from average_image.feature_clustering import MeanShiftClustering
 from average_image.feature_extractor import MOG2, FeatureExtractor
 from average_image.utils import SDDMeta
-from baseline.extracted_of_optimization import clouds_distance_matrix, smallest_n_indices, find_points_inside_circle
+from baseline.extracted_of_optimization import clouds_distance_matrix, smallest_n_indices, find_points_inside_circle, \
+    is_point_inside_circle
 from log import initialize_logging, get_logger
 from unsupervised_tp_0.dataset import SDDSimpleDataset, resize_frames
 
@@ -199,6 +200,38 @@ def plot_features(features, features_inside_circle, features_skipped=None, mask=
     plt.show()
 
 
+def plot_features_with_circles(features, features_inside_circle, features_skipped=None, mask=None, cluster_centers=None,
+                               marker_size=1, num_clusters=None, frame_number=None, additional_text=None, boxes=None,
+                               radius=None):
+    fig, axs = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+    axs.plot(features[:, 0], features[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k',
+             markersize=marker_size)
+    axs.plot(features_inside_circle[:, 0], features_inside_circle[:, 1], 'o', markerfacecolor='yellow',
+             markeredgecolor='k', markersize=marker_size)
+    if mask is not None:
+        axs.imshow(mask, 'gray')
+    if features_skipped is not None:
+        axs.plot(features_skipped[:, 0], features_skipped[:, 1], 'o', markerfacecolor='aqua',
+                 markeredgecolor='k', markersize=marker_size)
+    if cluster_centers is not None:
+        axs.plot(cluster_centers[:, 0], cluster_centers[:, 1], '*', markerfacecolor='lavender', markeredgecolor='k',
+                 markersize=marker_size + 8)
+        fig.suptitle(f'Frame: {frame_number} | Clusters Count: {num_clusters}\n {additional_text}')
+        for c_center in cluster_centers:
+            axs.add_artist(plt.Circle((c_center[0], c_center[1]), radius, color='green', fill=False))
+    if boxes is not None:
+        add_box_to_axes(axs, boxes)
+
+    legends_dict = {'yellow': 'Inside Circle',
+                    'blue': 'Features',
+                    'aqua': 'Skipped Features'}
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
+    plt.show()
+
+
 def plot_features_with_mask(features, features_inside_circle, center, radius, mask, box=None, m_size=4,
                             current_boxes=None):
     fig, axs = plt.subplots(2, 1, sharex='none', sharey='none', figsize=(12, 10))
@@ -234,7 +267,7 @@ def mean_shift_clustering(data, bandwidth: float = 0.1, min_bin_freq: int = 3, m
     return mean_shift, n_clusters_
 
 
-def prune_cluster_centers_proximity_based(cluster_centers, radius, mean_shift):
+def prune_cluster_centers_proximity_based_v0(cluster_centers, radius, mean_shift):
     rejected_cluster_centers = []
     pruned_cluster_centers = []
     pruned_cluster_centers_idx = []
@@ -260,6 +293,87 @@ def prune_cluster_centers_proximity_based(cluster_centers, radius, mean_shift):
     return pruned_cluster_centers, pruned_cluster_centers_idx
 
 
+def prune_cluster_centers_proximity_based_v1(cluster_centers, radius, cluster_distribution):
+    rejected_cluster_centers = []
+    rejected_cluster_centers_idx = []
+    pruned_cluster_centers = []
+    pruned_cluster_centers_idx = []
+    for cluster_center in cluster_centers:
+        if not np.isin(cluster_center, pruned_cluster_centers).all() \
+                or not np.isin(cluster_center, rejected_cluster_centers).all():
+
+            if not is_cluster_center_in_the_radius_of_one_of_pruned_centers(
+                    cluster_center, pruned_cluster_centers, radius, rejected_cluster_centers):
+
+                centers_inside_idx = find_points_inside_circle(cluster_centers,
+                                                               circle_center=cluster_center,
+                                                               circle_radius=radius)
+                # sort on the basis of cluster distribution
+                centers_inside_idx = centers_inside_idx.tolist()
+                centers_inside_idx.sort(key=lambda x: cluster_distribution[x], reverse=True)
+                centers_inside_idx = np.array(centers_inside_idx)
+
+                if not np.isin(cluster_centers[centers_inside_idx[0]], pruned_cluster_centers).all():
+                    pruned_cluster_centers.append(cluster_centers[centers_inside_idx[0]])
+                    pruned_cluster_centers_idx.append(centers_inside_idx[0])
+
+                if len(centers_inside_idx) > 1:
+                    for c_idx in centers_inside_idx[1:]:
+                        if not np.isin(cluster_centers[c_idx], pruned_cluster_centers).all() or \
+                                not np.isin(cluster_centers[c_idx], rejected_cluster_centers).all():
+                            rejected_cluster_centers.append(cluster_centers[c_idx])
+                            rejected_cluster_centers_idx.append(c_idx)
+
+    pruned_cluster_centers = np.stack(pruned_cluster_centers)
+    return pruned_cluster_centers, pruned_cluster_centers_idx
+
+
+def prune_cluster_centers_proximity_based(cluster_centers, radius, cluster_distribution):
+    rejected_cluster_centers = []
+    rejected_cluster_centers_idx = []
+    pruned_cluster_centers = []
+    pruned_cluster_centers_idx = []
+    for cluster_center in cluster_centers:
+        if not np.isin(cluster_center, pruned_cluster_centers).all() \
+                or not np.isin(cluster_center, rejected_cluster_centers).all():
+
+            centers_inside_idx = find_points_inside_circle(cluster_centers,
+                                                           circle_center=cluster_center,
+                                                           circle_radius=radius)
+            # sort on the basis of cluster distribution
+            centers_inside_idx = centers_inside_idx.tolist()
+            centers_inside_idx.sort(key=lambda x: cluster_distribution[x], reverse=True)
+            centers_inside_idx = np.array(centers_inside_idx)
+
+            for center_inside_idx in centers_inside_idx:
+                if not is_cluster_center_in_the_radius_of_one_of_pruned_centers(
+                        cluster_centers[center_inside_idx], pruned_cluster_centers, radius, rejected_cluster_centers):
+
+                    if not np.isin(cluster_centers[center_inside_idx], pruned_cluster_centers).all() and \
+                            not np.isin(cluster_centers[center_inside_idx], rejected_cluster_centers).all():
+                        pruned_cluster_centers.append(cluster_centers[center_inside_idx])
+                        pruned_cluster_centers_idx.append(center_inside_idx)
+                else:
+                    if not np.isin(cluster_centers[center_inside_idx], rejected_cluster_centers).all() and \
+                            not np.isin(cluster_centers[center_inside_idx], pruned_cluster_centers).all():
+                        rejected_cluster_centers.append(cluster_centers[center_inside_idx])
+                        rejected_cluster_centers_idx.append(center_inside_idx)
+
+    pruned_cluster_centers = np.stack(pruned_cluster_centers)
+    return pruned_cluster_centers, pruned_cluster_centers_idx
+
+
+def is_cluster_center_in_the_radius_of_one_of_pruned_centers(cluster_center, pruned_cluster_centers, radius,
+                                                             rejected_cluster_centers):
+    for pruned_cluster_center in pruned_cluster_centers:
+        if is_point_inside_circle(circle_x=pruned_cluster_center[0], circle_y=pruned_cluster_center[1],
+                                  rad=radius, x=cluster_center[0], y=cluster_center[1]):
+            # rejected_cluster_centers.append(cluster_center)
+            return True
+
+    return False
+
+
 def prune_based_on_cluster_density(mean_shift, pruned_cluster_centers, pruned_cluster_centers_idx,
                                    min_points_in_cluster=5):
     final_cluster_centers, final_cluster_centers_idx = [], []
@@ -274,7 +388,7 @@ def prune_based_on_cluster_density(mean_shift, pruned_cluster_centers, pruned_cl
 
 def prune_clusters(cluster_centers, mean_shift, radius, min_points_in_cluster=5):
     pruned_cluster_centers, pruned_cluster_centers_idx = prune_cluster_centers_proximity_based(
-        cluster_centers, radius, mean_shift)
+        cluster_centers, radius, mean_shift.cluster_distribution)
     final_cluster_centers, final_cluster_centers_idx = prune_based_on_cluster_density(
         mean_shift, pruned_cluster_centers, pruned_cluster_centers_idx, min_points_in_cluster=min_points_in_cluster)
     return final_cluster_centers, final_cluster_centers_idx
@@ -1008,10 +1122,10 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                                     track_ids_used.append(t_id)
                                     new_track_boxes.append(t_box)
 
-                            plot_features(
+                            plot_features_with_circles(
                                 all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
                                 cluster_centers=final_cluster_centers, num_clusters=final_cluster_centers.shape[0],
-                                frame_number=frame_number, boxes=annotations[:, :-1],
+                                frame_number=frame_number, boxes=annotations[:, :-1], radius=radius + 50,
                                 additional_text=
                                 f'Original Cluster Center Count: {n_clusters}\nPruned Cluster Distribution: '
                                 f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
@@ -1115,7 +1229,7 @@ if __name__ == '__main__':
     Path(features_save_path).mkdir(parents=True, exist_ok=True)
     feats = preprocess_data(var_threshold=None, plot=False, radius=100, save_per_part_path=None, video_mode=False,
                             video_save_path=video_save_path + 'extraction.avi', desired_fps=2, overlap_percent=0.4,
-                            plot_save_path=plot_save_path, min_points_in_cluster=8, begin_track_mode=True)
+                            plot_save_path=plot_save_path, min_points_in_cluster=16, begin_track_mode=True)
     torch.save(feats, features_save_path + 'features.pt')
     print()
     # TODO:
