@@ -766,6 +766,16 @@ def corner_width_height_to_min_max(bbox, bottom_left=True):
     return [x_min, y_min, x_max, y_max]
 
 
+def is_box_overlapping_live_boxes(box, live_boxes, threshold=0):
+    box = torch.from_numpy(box).unsqueeze(0)
+    for l_box in live_boxes:
+        l_box = torch.from_numpy(l_box).unsqueeze(0)
+        iou = torchvision.ops.box_iou(l_box, box).squeeze().item()
+        if iou > threshold and iou > 0:
+            return True
+    return False
+
+
 def extract_features_per_bounding_box(box, mask):
     temp_mask = np.zeros_like(mask)
     temp_mask[box[1]:box[3], box[0]:box[2]] = mask[box[1]:box[3], box[0]:box[2]]
@@ -1151,7 +1161,9 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                                     torch.tensor([cluster_center_x, cluster_center_y, t_w, t_h]),
                                     'cxcywh', 'xyxy').int().numpy()
                                 # Note: Do not start track if bbox is out of frame
-                                if not (np.sign(t_box) < 0).any():
+                                if not (np.sign(t_box) < 0).any() and \
+                                        not is_box_overlapping_live_boxes(t_box, [t.bbox for t in running_tracks]):
+                                    # NOTE: the second check might result in killing potential tracks!
                                     running_tracks.append(Track(bbox=t_box, idx=t_id))
                                     track_ids_used.append(t_id)
                                     new_track_boxes.append(t_box)
@@ -1165,6 +1177,17 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                             #     f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
 
                 new_track_boxes = np.stack(new_track_boxes) if len(new_track_boxes) > 0 else np.empty(shape=(0,))
+
+                # # NMS Debugging
+                # current_track_boxes = [t.bbox for t in running_tracks]
+                # current_track_boxes = torch.tensor(current_track_boxes)
+                # current_track_boxes_iou = torchvision.ops.box_iou(current_track_boxes, current_track_boxes).numpy()
+                # current_match_a, current_match_b = np.where(current_track_boxes_iou)
+                # print()
+                # print(f'Frame: {frame_number}')
+                # print(current_track_boxes_iou)
+                # print()
+                # print(f'{current_match_a} <|> {current_match_b}')
 
                 if video_mode:
                     fig = plot_for_video(
@@ -1263,8 +1286,9 @@ if __name__ == '__main__':
     Path(features_save_path).mkdir(parents=True, exist_ok=True)
     feats = preprocess_data(var_threshold=None, plot=False, radius=100, save_per_part_path=None, video_mode=False,
                             video_save_path=video_save_path + 'extraction.avi', desired_fps=2, overlap_percent=0.4,
-                            plot_save_path=plot_save_path, min_points_in_cluster=16, begin_track_mode=True)
+                            plot_save_path=plot_save_path, min_points_in_cluster=16, begin_track_mode=True,
+                            use_circle_to_keep_track_alive=False)
     torch.save(feats, features_save_path + 'features.pt')
     print()
-    # TODO:
-    #  -> rn one object has sometimes 3 boxes -> NMS?
+    # NOTE:
+    #  -> setting use_circle_to_keep_track_alive=False to avoid noisy new tracks to pick up true live tracks
