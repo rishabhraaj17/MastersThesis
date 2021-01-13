@@ -788,8 +788,11 @@ def evaluate_shifted_bounding_box(box, shifted_xy, xy):
     xy_center = np.round(xy.mean(axis=0)).astype(np.int)
     shifted_xy_center = np.round(shifted_xy.mean(axis=0)).astype(np.int)
     center_shift = shifted_xy_center - xy_center
-    box_c_x, box_c_y, w, h = min_max_to_centroids(box)
-    shifted_box = centroids_to_min_max([box_c_x + center_shift[0], box_c_y + center_shift[1], w, h])
+    # box_c_x, box_c_y, w, h = min_max_to_centroids(box)
+    box_c_x, box_c_y, w, h = torchvision.ops.box_convert(torch.from_numpy(box), 'xyxy', 'cxcywh').numpy()
+    # shifted_box = centroids_to_min_max([box_c_x + center_shift[0], box_c_y + center_shift[1], w, h])
+    shifted_box = torchvision.ops.box_convert(torch.tensor([box_c_x + center_shift[0], box_c_y + center_shift[1], w, h])
+                                              , 'cxcywh', 'xyxy').numpy()
     return shifted_box, shifted_xy_center
 
 
@@ -1143,7 +1146,10 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                             for cluster_center in final_cluster_centers:
                                 cluster_center_x, cluster_center_y = np.round(cluster_center).astype(np.int)
                                 t_id = max(track_ids_used) + 1
-                                t_box = centroids_to_min_max([cluster_center_x, cluster_center_y, t_w, t_h])
+                                # t_box = centroids_to_min_max([cluster_center_x, cluster_center_y, t_w, t_h])
+                                t_box = torchvision.ops.box_convert(
+                                    torch.tensor([cluster_center_x, cluster_center_y, t_w, t_h]),
+                                    'cxcywh', 'xyxy').numpy()
                                 # Note: Do not start track if bbox is out of frame
                                 if not (np.sign(t_box) < 0).any():
                                     running_tracks.append(Track(bbox=t_box, idx=t_id))
@@ -1261,5 +1267,4 @@ if __name__ == '__main__':
     torch.save(feats, features_save_path + 'features.pt')
     print()
     # TODO:
-    #  -> Use torchvision box conversion
     #  -> rn one object has sometimes 3 boxes -> NMS?
