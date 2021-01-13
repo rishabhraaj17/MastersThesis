@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import patches
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+import pytorch_lightning.metrics as plm
 import torch
 import torchvision
 from torch.utils.data import DataLoader
@@ -707,6 +708,16 @@ def append_features(features, features_to_append):
     return np.concatenate((features, features_to_append), axis=0)
 
 
+def filter_for_one_to_one_matches(iou_matrix):
+    for d_i, dimension in enumerate(iou_matrix):
+        count = np.unique(np.where(dimension))
+        if len(count) > 1:
+            max_score = np.max(dimension)
+            dimension = [c if c == max_score else 0 for c in dimension]
+            iou_matrix[d_i] = dimension
+    return iou_matrix
+
+
 def get_bbox_center(b_box):
     x_min = b_box[0]
     y_min = b_box[1]
@@ -879,7 +890,7 @@ def associate_frame_with_ground_truth(frames, frame_numbers):
 def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=None, overlap_percent=0.1, plot=False,
                     radius=50, min_points_in_cluster=5, video_mode=False, video_save_path=None, plot_scale_factor=1,
                     desired_fps=5, custom_video_shape=True, plot_save_path=None, save_checkpoint=False,
-                    begin_track_mode=True, use_circle_to_keep_track_alive=True):
+                    begin_track_mode=True, use_circle_to_keep_track_alive=True, iou_threshold=0.5):
     # feature_extractor = MOG2.for_frames()
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
@@ -895,6 +906,7 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
     first_frame_bounding_boxes, first_frame_mask, last_frame, second_last_frame = None, None, None, None
     first_frame_live_tracks, last_frame_live_tracks, last_frame_mask = None, None, None
     current_track_idx, track_ids_used = 0, []
+    precision_list, recall_list, matching_boxes_with_iou_list = [], [], []
     selected_track_distances = []
     accumulated_features = {}
 
@@ -1065,9 +1077,25 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                 r_boxes = torch.tensor(r_boxes, dtype=torch.int)
                 a_boxes = torch.from_numpy(annotations[:, :-1])
                 iou_boxes = torchvision.ops.box_iou(a_boxes, r_boxes).numpy()
+                iou_boxes_threshold = iou_boxes.copy()
+                iou_boxes_threshold[iou_boxes_threshold < iou_threshold] = 0
+                iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold)
+                iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold.T).T
                 match_idx = np.where(iou_boxes)
-                # TODO: get the track match pair for the iou overlap
-                #  -> missing tracks - FP/FN
+                a_match_idx_threshold, r_match_idx_threshold = np.where(iou_boxes_threshold)
+                matching_boxes_with_iou = [(a, r, iou_boxes_threshold[a, r])
+                                           for a, r in zip(a_match_idx_threshold, r_match_idx_threshold)]
+
+                #  precision/recall
+                tp = len(a_match_idx_threshold)
+                fp = len(r_boxes) - len(a_match_idx_threshold)
+                fn = len(a_boxes) - len(a_match_idx_threshold)
+
+                precision = tp / (tp + fp)
+                recall = tp / (tp + fn)
+                precision_list.append(precision)
+                recall_list.append(recall)
+                matching_boxes_with_iou_list.append(matching_boxes_with_iou)
 
                 bbox_distance_to_of_centers_iou_based = []
                 boxes_distance = []
@@ -1122,13 +1150,13 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                                     track_ids_used.append(t_id)
                                     new_track_boxes.append(t_box)
 
-                            plot_features_with_circles(
-                                all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
-                                cluster_centers=final_cluster_centers, num_clusters=final_cluster_centers.shape[0],
-                                frame_number=frame_number, boxes=annotations[:, :-1], radius=radius + 50,
-                                additional_text=
-                                f'Original Cluster Center Count: {n_clusters}\nPruned Cluster Distribution: '
-                                f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
+                            # plot_features_with_circles(
+                            #     all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
+                            #     cluster_centers=final_cluster_centers, num_clusters=final_cluster_centers.shape[0],
+                            #     frame_number=frame_number, boxes=annotations[:, :-1], radius=radius + 50,
+                            #     additional_text=
+                            #     f'Original Cluster Center Count: {n_clusters}\nPruned Cluster Distribution: '
+                            #     f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
 
                 new_track_boxes = np.stack(new_track_boxes) if len(new_track_boxes) > 0 else np.empty(shape=(0,))
 
@@ -1165,7 +1193,7 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                         new_track_annotation=new_track_boxes,
                         frame_number=frame_number,
                         additional_text=
-                        # f'Track Ids Used: {track_ids_used}\n'
+                        f'Precision: {precision} | Recall: {recall}\n'
                         f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
                         f'Track Ids Killed: '
                         f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
@@ -1234,3 +1262,4 @@ if __name__ == '__main__':
     print()
     # TODO:
     #  -> Use torchvision box conversion
+    #  -> rn one object has sometimes 3 boxes -> NMS?
