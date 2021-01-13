@@ -792,7 +792,7 @@ def evaluate_shifted_bounding_box(box, shifted_xy, xy):
     box_c_x, box_c_y, w, h = torchvision.ops.box_convert(torch.from_numpy(box), 'xyxy', 'cxcywh').numpy()
     # shifted_box = centroids_to_min_max([box_c_x + center_shift[0], box_c_y + center_shift[1], w, h])
     shifted_box = torchvision.ops.box_convert(torch.tensor([box_c_x + center_shift[0], box_c_y + center_shift[1], w, h])
-                                              , 'cxcywh', 'xyxy').numpy()
+                                              , 'cxcywh', 'xyxy').int().numpy()
     return shifted_box, shifted_xy_center
 
 
@@ -1149,7 +1149,7 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                                 # t_box = centroids_to_min_max([cluster_center_x, cluster_center_y, t_w, t_h])
                                 t_box = torchvision.ops.box_convert(
                                     torch.tensor([cluster_center_x, cluster_center_y, t_w, t_h]),
-                                    'cxcywh', 'xyxy').numpy()
+                                    'cxcywh', 'xyxy').int().numpy()
                                 # Note: Do not start track if bbox is out of frame
                                 if not (np.sign(t_box) < 0).any():
                                     running_tracks.append(Track(bbox=t_box, idx=t_id))
