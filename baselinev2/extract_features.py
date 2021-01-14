@@ -940,7 +940,7 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     radius=50, min_points_in_cluster=5, video_mode=False, video_save_path=None, plot_scale_factor=1,
                     desired_fps=5, custom_video_shape=True, plot_save_path=None, save_checkpoint=False,
                     begin_track_mode=True, use_circle_to_keep_track_alive=True, iou_threshold=0.5, generic_box_wh=100,
-                    extra_radius=50):
+                    extra_radius=50, use_is_box_overlapping_live_boxes=True):
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
                                   step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
@@ -956,6 +956,7 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
     first_frame_live_tracks, last_frame_live_tracks, last_frame_mask = None, None, None
     current_track_idx, track_ids_used = 0, []
     precision_list, recall_list, matching_boxes_with_iou_list = [], [], []
+    tp_list, fp_list, fn_list = [], [], []
     selected_track_distances = []
     accumulated_features = {}
 
@@ -1140,6 +1141,10 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                 fp = len(r_boxes) - len(a_match_idx_threshold)
                 fn = len(a_boxes) - len(a_match_idx_threshold)
 
+                tp_list.append(tp)
+                fp_list.append(fp)
+                fn_list.append(fn)
+
                 precision = tp / (tp + fp)
                 recall = tp / (tp + fn)
                 precision_list.append(precision)
@@ -1198,13 +1203,20 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                                     torch.tensor([cluster_center_x, cluster_center_y, t_w, t_h]),
                                     'cxcywh', 'xyxy').int().numpy()
                                 # Note: Do not start track if bbox is out of frame
-                                if not (np.sign(t_box) < 0).any() and \
-                                        not is_box_overlapping_live_boxes(t_box, [t.bbox for t in running_tracks]):
-                                    # NOTE: the second check might result in killing potential tracks!
-                                    t_id = max(track_ids_used) + 1
-                                    running_tracks.append(Track(bbox=t_box, idx=t_id))
-                                    track_ids_used.append(t_id)
-                                    new_track_boxes.append(t_box)
+                                if use_is_box_overlapping_live_boxes:
+                                    if not (np.sign(t_box) < 0).any() and \
+                                            not is_box_overlapping_live_boxes(t_box, [t.bbox for t in running_tracks]):
+                                        # NOTE: the second check might result in killing potential tracks!
+                                        t_id = max(track_ids_used) + 1
+                                        running_tracks.append(Track(bbox=t_box, idx=t_id))
+                                        track_ids_used.append(t_id)
+                                        new_track_boxes.append(t_box)
+                                else:
+                                    if not (np.sign(t_box) < 0).any():
+                                        t_id = max(track_ids_used) + 1
+                                        running_tracks.append(Track(bbox=t_box, idx=t_id))
+                                        track_ids_used.append(t_id)
+                                        new_track_boxes.append(t_box)
 
                             # plot_features_with_circles(
                             #     all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
@@ -1302,7 +1314,11 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                                    'last_frame_live_tracks': last_frame_live_tracks,
                                    'running_tracks': running_tracks,
                                    'track_ids_used': track_ids_used,
-                                   'new_track_boxes': new_track_boxes}
+                                   'new_track_boxes': new_track_boxes,
+                                   'precision': precision_list,
+                                   'recall': recall_list,
+                                   'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
+                                   'accumulated_features': accumulated_features}
         gt_associated_frame = associate_frame_with_ground_truth(frames, frame_numbers)
         if save_per_part_path is not None:
             Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
@@ -1318,7 +1334,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                               radius=50, min_points_in_cluster=5, video_mode=False, video_save_path=None,
                               plot_scale_factor=1, desired_fps=5, custom_video_shape=True, plot_save_path=None,
                               save_checkpoint=False, plot=False, begin_track_mode=True, generic_box_wh=100,
-                              use_circle_to_keep_track_alive=True, iou_threshold=0.5, extra_radius=50):
+                              use_circle_to_keep_track_alive=True, iou_threshold=0.5, extra_radius=50,
+                              use_is_box_overlapping_live_boxes=True, premature_kill_save=False):
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
                                   step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
@@ -1334,6 +1351,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
     first_frame_live_tracks, last_frame_live_tracks, last_frame_mask = None, None, None
     current_track_idx, track_ids_used = 0, []
     precision_list, recall_list, matching_boxes_with_iou_list = [], [], []
+    tp_list, fp_list, fn_list = [], [], []
     selected_track_distances = []
     accumulated_features = {}
 
@@ -1392,7 +1410,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         # STEP 4h: c> prune cluster centers
                         # combine centers inside radius + eliminate noise
                         final_cluster_centers, final_cluster_centers_idx = prune_clusters(
-                            cluster_centers, mean_shift, radius + extra_radius, min_points_in_cluster=min_points_in_cluster)
+                            cluster_centers, mean_shift, radius + extra_radius,
+                            min_points_in_cluster=min_points_in_cluster)
 
                         if final_cluster_centers.size != 0:
                             t_w, t_h = generic_box_wh, generic_box_wh  # 100, 100
@@ -1443,6 +1462,10 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                     tp = len(a_match_idx_threshold)
                     fp = len(r_boxes) - len(a_match_idx_threshold)
                     fn = len(a_boxes) - len(a_match_idx_threshold)
+
+                    tp_list.append(tp)
+                    fp_list.append(fp)
+                    fn_list.append(fn)
 
                     precision = tp / (tp + fp)
                     recall = tp / (tp + fn)
@@ -1604,6 +1627,10 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                     fp = len(r_boxes) - len(a_match_idx_threshold)
                     fn = len(a_boxes) - len(a_match_idx_threshold)
 
+                    tp_list.append(tp)
+                    fp_list.append(fp)
+                    fn_list.append(fn)
+
                     precision = tp / (tp + fp)
                     recall = tp / (tp + fn)
                     precision_list.append(precision)
@@ -1648,7 +1675,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                             # STEP 4h: c> prune cluster centers
                             # combine centers inside radius + eliminate noise
                             final_cluster_centers, final_cluster_centers_idx = prune_clusters(
-                                cluster_centers, mean_shift, radius + extra_radius, min_points_in_cluster=min_points_in_cluster)
+                                cluster_centers, mean_shift, radius + extra_radius,
+                                min_points_in_cluster=min_points_in_cluster)
 
                             if final_cluster_centers.size != 0:
                                 t_w, t_h = generic_box_wh, generic_box_wh  # 100, 100
@@ -1661,13 +1689,21 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                         torch.tensor([cluster_center_x, cluster_center_y, t_w, t_h]),
                                         'cxcywh', 'xyxy').int().numpy()
                                     # Note: Do not start track if bbox is out of frame
-                                    if not (np.sign(t_box) < 0).any() and \
-                                            not is_box_overlapping_live_boxes(t_box, [t.bbox for t in running_tracks]):
-                                        # NOTE: the second check might result in killing potential tracks!
-                                        t_id = max(track_ids_used) + 1
-                                        running_tracks.append(Track(bbox=t_box, idx=t_id))
-                                        track_ids_used.append(t_id)
-                                        new_track_boxes.append(t_box)
+                                    if use_is_box_overlapping_live_boxes:
+                                        if not (np.sign(t_box) < 0).any() and \
+                                                not is_box_overlapping_live_boxes(t_box,
+                                                                                  [t.bbox for t in running_tracks]):
+                                            # NOTE: the second check might result in killing potential tracks!
+                                            t_id = max(track_ids_used) + 1
+                                            running_tracks.append(Track(bbox=t_box, idx=t_id))
+                                            track_ids_used.append(t_id)
+                                            new_track_boxes.append(t_box)
+                                    else:
+                                        if not (np.sign(t_box) < 0).any():
+                                            t_id = max(track_ids_used) + 1
+                                            running_tracks.append(Track(bbox=t_box, idx=t_id))
+                                            track_ids_used.append(t_id)
+                                            new_track_boxes.append(t_box)
 
                                 # plot_features_with_circles(
                                 #     all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
@@ -1750,7 +1786,14 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                        'last_frame_live_tracks': last_frame_live_tracks,
                                        'running_tracks': running_tracks,
                                        'track_ids_used': track_ids_used,
-                                       'new_track_boxes': new_track_boxes}
+                                       'new_track_boxes': new_track_boxes,
+                                       'precision': precision_list,
+                                       'recall': recall_list,
+                                       'tp_list': tp_list,
+                                       'fp_list': fp_list,
+                                       'fn_list': fn_list,
+                                       'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
+                                       'accumulated_features': accumulated_features}
             # gt_associated_frame = associate_frame_with_ground_truth(frames, frame_numbers)
             if save_per_part_path is not None:
                 Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
@@ -1762,6 +1805,36 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
         if video_mode:
             logger.info('Saving video before exiting!')
             out.release()
+        if premature_kill_save:
+            resume_dict = {'frame_number': frame_number,
+                           'part_idx': part_idx,
+                           'second_last_frame': second_last_frame,
+                           'last_frame': last_frame,
+                           'last_frame_mask': last_frame_mask,
+                           'last_frame_live_tracks': last_frame_live_tracks,
+                           'running_tracks': running_tracks,
+                           'track_ids_used': track_ids_used,
+                           'new_track_boxes': new_track_boxes,
+                           'precision': precision_list,
+                           'recall': recall_list,
+                           'tp_list': tp_list,
+                           'fp_list': fp_list,
+                           'fn_list': fn_list,
+                           'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
+                           'accumulated_features': accumulated_features}
+            Path(features_save_path).mkdir(parents=True, exist_ok=True)
+            f_n = f'premature_kill_features_dict.pt'
+            torch.save(accumulated_features, save_per_part_path + f_n)
+
+        tp_sum, fp_sum, fn_sum = np.array(tp_list).sum(), np.array(fp_list).sum(), np.array(fn_list).sum()
+        precision = tp_sum / (tp_sum + fn_sum)
+        recall = tp_sum / (tp_sum + fn_sum)
+        logger.log(f'Precision: {precision} | Recall: {recall}')
+
+    tp_sum, fp_sum, fn_sum = np.array(tp_list).sum(), np.array(fp_list).sum(), np.array(fn_list).sum()
+    precision = tp_sum / (tp_sum + fn_sum)
+    recall = tp_sum / (tp_sum + fn_sum)
+    logger.log(f'Precision: {precision} | Recall: {recall}')
 
     out.release()
     return accumulated_features
@@ -1779,14 +1852,17 @@ if __name__ == '__main__':
     #                         video_save_path=video_save_path + 'extraction.avi', desired_fps=2, overlap_percent=0.4,
     #                         plot_save_path=plot_save_path, min_points_in_cluster=16, begin_track_mode=True,
     #                         use_circle_to_keep_track_alive=False)
-    feats = preprocess_data_zero_shot(var_threshold=None, plot=False, radius=100, save_per_part_path=None,
+    feats = preprocess_data_zero_shot(var_threshold=None, plot=False, radius=60, save_per_part_path=None,
                                       video_mode=True, video_save_path=video_save_path + 'extraction.avi',
                                       desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
-                                      min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.0,
-                                      use_circle_to_keep_track_alive=False, custom_video_shape=False)
+                                      min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
+                                      use_circle_to_keep_track_alive=False, custom_video_shape=False,
+                                      extra_radius=0, generic_box_wh=50)
     torch.save(feats, features_save_path + 'features.pt')
     print()
     # NOTE:
     #  -> setting use_circle_to_keep_track_alive=False to avoid noisy new tracks to pick up true live tracks
     #  -> Crowded - Death Circle [ smaller one 4]
     #  -> Good one - Little - 0 smaller, 3 big n good
+    #  -> radius=60, extra_radius=0, generic_box_wh=50, use_circle_to_keep_track_alive=False, min_points_in_cluster=16
+    #  , use_is_box_overlapping_live_boxes=True --- looks good
