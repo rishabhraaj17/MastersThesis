@@ -939,7 +939,8 @@ def associate_frame_with_ground_truth(frames, frame_numbers):
 def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=None, overlap_percent=0.1, plot=False,
                     radius=50, min_points_in_cluster=5, video_mode=False, video_save_path=None, plot_scale_factor=1,
                     desired_fps=5, custom_video_shape=True, plot_save_path=None, save_checkpoint=False,
-                    begin_track_mode=True, use_circle_to_keep_track_alive=True, iou_threshold=0.5):
+                    begin_track_mode=True, use_circle_to_keep_track_alive=True, iou_threshold=0.5, generic_box_wh=100,
+                    extra_radius=50):
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
                                   step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
@@ -1183,10 +1184,11 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                         # STEP 4h: c> prune cluster centers
                         # combine centers inside radius + eliminate noise
                         final_cluster_centers, final_cluster_centers_idx = prune_clusters(
-                            cluster_centers, mean_shift, radius + 50, min_points_in_cluster=min_points_in_cluster)
+                            cluster_centers, mean_shift, radius + extra_radius,
+                            min_points_in_cluster=min_points_in_cluster)
 
                         if final_cluster_centers.size != 0:
-                            t_w, t_h = 100, 100
+                            t_w, t_h = generic_box_wh, generic_box_wh  # 100, 100
                             # STEP 4h: d> start new potential tracks
                             for cluster_center in final_cluster_centers:
                                 cluster_center_x, cluster_center_y = np.round(cluster_center).astype(np.int)
@@ -1315,8 +1317,8 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
 def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=None, overlap_percent=0.1,
                               radius=50, min_points_in_cluster=5, video_mode=False, video_save_path=None,
                               plot_scale_factor=1, desired_fps=5, custom_video_shape=True, plot_save_path=None,
-                              save_checkpoint=False, plot=False, begin_track_mode=True,
-                              use_circle_to_keep_track_alive=True, iou_threshold=0.5):
+                              save_checkpoint=False, plot=False, begin_track_mode=True, generic_box_wh=100,
+                              use_circle_to_keep_track_alive=True, iou_threshold=0.5, extra_radius=50):
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
                                   step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
@@ -1359,7 +1361,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
             frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
             frames_count = frames.shape[0]
             original_shape = new_shape = [frames.shape[1], frames.shape[2]]
-            for frame_idx, (frame, frame_number) in tqdm(enumerate(zip(frames, frame_numbers)), total=len(frame_numbers)):
+            for frame_idx, (frame, frame_number) in tqdm(enumerate(zip(frames, frame_numbers)),
+                                                         total=len(frame_numbers)):
                 if part_idx == 0 and frame_idx == 0:
                     # STEP 1: a> Get GT for the first frame
                     validation_annotations, first_frame_mask = first_frame_processing_and_gt_association(
@@ -1389,10 +1392,10 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         # STEP 4h: c> prune cluster centers
                         # combine centers inside radius + eliminate noise
                         final_cluster_centers, final_cluster_centers_idx = prune_clusters(
-                            cluster_centers, mean_shift, radius + 50, min_points_in_cluster=min_points_in_cluster)
+                            cluster_centers, mean_shift, radius + extra_radius, min_points_in_cluster=min_points_in_cluster)
 
                         if final_cluster_centers.size != 0:
-                            t_w, t_h = 100, 100
+                            t_w, t_h = generic_box_wh, generic_box_wh  # 100, 100
                             # STEP 4h: d> start new potential tracks
                             for cluster_center in final_cluster_centers:
                                 cluster_center_x, cluster_center_y = np.round(cluster_center).astype(np.int)
@@ -1560,7 +1563,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         if plot:
                             plot_processing_steps(xy_cloud=xy, shifted_xy_cloud=shifted_xy, xy_box=box,
                                                   shifted_xy_box=shifted_box, final_cloud=final_features_xy,
-                                                  xy_cloud_current_frame=xy_current_frame, frame_number=frame_number.item(),
+                                                  xy_cloud_current_frame=xy_current_frame,
+                                                  frame_number=frame_number.item(),
                                                   track_id=current_track_idx, selected_past=closest_n_shifted_xy_pair,
                                                   selected_current=closest_n_xy_current_frame_pair)
                         # STEP 4g: save the information gathered
@@ -1619,8 +1623,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                                 if (b == r_boxes[r_box_idx]).all()][0]:
                             selected_track_distances.append(dist)
 
-                    plot_mask_matching_bbox(fg_mask, bbox_distance_to_of_centers_iou_based, frame_number,
-                                            save_path=f'{plot_save_path}zero_shot/iou_distance{min_points_in_cluster}/')
+                    # plot_mask_matching_bbox(fg_mask, bbox_distance_to_of_centers_iou_based, frame_number,
+                    #                         save_path=f'{plot_save_path}zero_shot/iou_distance{min_points_in_cluster}/')
 
                     # STEP 4h: begin tracks
                     new_track_boxes = []
@@ -1644,14 +1648,14 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                             # STEP 4h: c> prune cluster centers
                             # combine centers inside radius + eliminate noise
                             final_cluster_centers, final_cluster_centers_idx = prune_clusters(
-                                cluster_centers, mean_shift, radius + 50, min_points_in_cluster=min_points_in_cluster)
+                                cluster_centers, mean_shift, radius + extra_radius, min_points_in_cluster=min_points_in_cluster)
 
                             if final_cluster_centers.size != 0:
-                                t_w, t_h = 100, 100
+                                t_w, t_h = generic_box_wh, generic_box_wh  # 100, 100
                                 # STEP 4h: d> start new potential tracks
                                 for cluster_center in final_cluster_centers:
                                     cluster_center_x, cluster_center_y = np.round(cluster_center).astype(np.int)
-                                    t_id = max(track_ids_used) + 1
+                                    # t_id = max(track_ids_used) + 1
                                     # t_box = centroids_to_min_max([cluster_center_x, cluster_center_y, t_w, t_h])
                                     t_box = torchvision.ops.box_convert(
                                         torch.tensor([cluster_center_x, cluster_center_y, t_w, t_h]),
@@ -1660,6 +1664,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                     if not (np.sign(t_box) < 0).any() and \
                                             not is_box_overlapping_live_boxes(t_box, [t.bbox for t in running_tracks]):
                                         # NOTE: the second check might result in killing potential tracks!
+                                        t_id = max(track_ids_used) + 1
                                         running_tracks.append(Track(bbox=t_box, idx=t_id))
                                         track_ids_used.append(t_id)
                                         new_track_boxes.append(t_box)
@@ -1701,7 +1706,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                             f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
                             f'Track Ids Killed: '
                             f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
-                            video_mode=video_mode, original_dims=original_dims)
+                            video_mode=video_mode, original_dims=original_dims, zero_shot=True)
 
                         canvas = FigureCanvas(fig)
                         canvas.draw()
@@ -1777,9 +1782,11 @@ if __name__ == '__main__':
     feats = preprocess_data_zero_shot(var_threshold=None, plot=False, radius=100, save_per_part_path=None,
                                       video_mode=True, video_save_path=video_save_path + 'extraction.avi',
                                       desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
-                                      min_points_in_cluster=16, begin_track_mode=True,
+                                      min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.0,
                                       use_circle_to_keep_track_alive=False, custom_video_shape=False)
     torch.save(feats, features_save_path + 'features.pt')
     print()
     # NOTE:
     #  -> setting use_circle_to_keep_track_alive=False to avoid noisy new tracks to pick up true live tracks
+    #  -> Crowded - Death Circle [ smaller one 4]
+    #  -> Good one - Little - 0 smaller, 3 big n good
