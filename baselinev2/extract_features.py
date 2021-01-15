@@ -1,6 +1,6 @@
 from itertools import cycle
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, Dict
 
 import cv2 as cv
 import numpy as np
@@ -47,7 +47,7 @@ DATASET_META = SDDMeta(META_PATH)
 META_LABEL = SDDVideoDatasets.LITTLE
 
 # -1 for both steps
-EXECUTE_STEP = 2
+EXECUTE_STEP = 1
 
 
 class ObjectFeatures(object):
@@ -800,6 +800,15 @@ def corner_width_height_to_min_max(bbox, bottom_left=True):
         x_min = x_max - width
         y_min = y_max - height
     return [x_min, y_min, x_max, y_max]
+
+
+def eval_metrics(features_file):
+    features = torch.load(features_file)
+    tp_list, fp_list, fn_list = features['tp_list'], features['fp_list'], features['fn_list']
+    tp_sum, fp_sum, fn_sum = np.array(tp_list).sum(), np.array(fp_list).sum(), np.array(fn_list).sum()
+    precision = tp_sum / (tp_sum + fp_sum)
+    recall = tp_sum / (tp_sum + fn_sum)
+    logger.info(f'Precision: {precision} | Recall: {recall}')
 
 
 def is_box_overlapping_live_boxes(box, live_boxes, threshold=0):
@@ -1612,27 +1621,49 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                     r_boxes = torch.tensor(r_boxes, dtype=torch.int)
                     a_boxes = torch.from_numpy(annotations[:, :-1])
-                    iou_boxes = torchvision.ops.box_iou(a_boxes, r_boxes).numpy()
+                    try:
+                        iou_boxes = torchvision.ops.box_iou(a_boxes, r_boxes).numpy()
+                    except IndexError:
+                        if a_boxes.ndim < 2:
+                            a_boxes = a_boxes.unsqueeze(0)
+                        if r_boxes.ndim < 2:
+                            r_boxes = r_boxes.unsqueeze(0)
+                        logger.info(f'a_boxes -> ndim: {a_boxes.ndim}, shape: {a_boxes.shape}')
+                        logger.info(f'r_boxes -> ndim: {r_boxes.ndim}, shape: {r_boxes.shape}')
+                        # iou_boxes = torchvision.ops.box_iou(a_boxes, r_boxes).numpy()
+                        iou_boxes = torch.randn((0)).numpy()
+
                     iou_boxes_threshold = iou_boxes.copy()
                     iou_boxes_threshold[iou_boxes_threshold < iou_threshold] = 0
                     iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold)
                     iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold.T).T
                     match_idx = np.where(iou_boxes)
-                    a_match_idx_threshold, r_match_idx_threshold = np.where(iou_boxes_threshold)
-                    matching_boxes_with_iou = [(a, r, iou_boxes_threshold[a, r])
-                                               for a, r in zip(a_match_idx_threshold, r_match_idx_threshold)]
+                    if iou_boxes_threshold.size != 0:
+                        a_match_idx_threshold, r_match_idx_threshold = np.where(iou_boxes_threshold)
+                        matching_boxes_with_iou = [(a, r, iou_boxes_threshold[a, r])
+                                                   for a, r in zip(a_match_idx_threshold, r_match_idx_threshold)]
+                        #  precision/recall
+                        tp = len(a_match_idx_threshold)
+                        fp = len(r_boxes) - len(a_match_idx_threshold)
+                        fn = len(a_boxes) - len(a_match_idx_threshold)
 
-                    #  precision/recall
-                    tp = len(a_match_idx_threshold)
-                    fp = len(r_boxes) - len(a_match_idx_threshold)
-                    fn = len(a_boxes) - len(a_match_idx_threshold)
+                        precision = tp / (tp + fp)
+                        recall = tp / (tp + fn)
+                    else:
+                        a_match_idx_threshold, r_match_idx_threshold, matching_boxes_with_iou = [], [], []
+
+                        #  precision/recall
+                        tp = 0
+                        fp = 0
+                        fn = len(a_boxes)
+
+                        precision = 0
+                        recall = 0
 
                     tp_list.append(tp)
                     fp_list.append(fp)
                     fn_list.append(fn)
 
-                    precision = tp / (tp + fp)
-                    recall = tp / (tp + fn)
                     precision_list.append(precision)
                     recall_list.append(recall)
                     matching_boxes_with_iou_list.append(matching_boxes_with_iou)
@@ -1806,35 +1837,35 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
             logger.info('Saving video before exiting!')
             out.release()
         if premature_kill_save:
-            resume_dict = {'frame_number': frame_number,
-                           'part_idx': part_idx,
-                           'second_last_frame': second_last_frame,
-                           'last_frame': last_frame,
-                           'last_frame_mask': last_frame_mask,
-                           'last_frame_live_tracks': last_frame_live_tracks,
-                           'running_tracks': running_tracks,
-                           'track_ids_used': track_ids_used,
-                           'new_track_boxes': new_track_boxes,
-                           'precision': precision_list,
-                           'recall': recall_list,
-                           'tp_list': tp_list,
-                           'fp_list': fp_list,
-                           'fn_list': fn_list,
-                           'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
-                           'accumulated_features': accumulated_features}
+            premature_save_dict = {'frame_number': frame_number,
+                                   'part_idx': part_idx,
+                                   'second_last_frame': second_last_frame,
+                                   'last_frame': last_frame,
+                                   'last_frame_mask': last_frame_mask,
+                                   'last_frame_live_tracks': last_frame_live_tracks,
+                                   'running_tracks': running_tracks,
+                                   'track_ids_used': track_ids_used,
+                                   'new_track_boxes': new_track_boxes,
+                                   'precision': precision_list,
+                                   'recall': recall_list,
+                                   'tp_list': tp_list,
+                                   'fp_list': fp_list,
+                                   'fn_list': fn_list,
+                                   'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
+                                   'accumulated_features': accumulated_features}
             Path(features_save_path).mkdir(parents=True, exist_ok=True)
             f_n = f'premature_kill_features_dict.pt'
-            torch.save(accumulated_features, save_per_part_path + f_n)
+            torch.save(premature_save_dict, features_save_path + f_n)
 
         tp_sum, fp_sum, fn_sum = np.array(tp_list).sum(), np.array(fp_list).sum(), np.array(fn_list).sum()
-        precision = tp_sum / (tp_sum + fn_sum)
+        precision = tp_sum / (tp_sum + fp_sum)
         recall = tp_sum / (tp_sum + fn_sum)
-        logger.log(f'Precision: {precision} | Recall: {recall}')
+        logger.info(f'Precision: {precision} | Recall: {recall}')
 
     tp_sum, fp_sum, fn_sum = np.array(tp_list).sum(), np.array(fp_list).sum(), np.array(fn_list).sum()
-    precision = tp_sum / (tp_sum + fn_sum)
+    precision = tp_sum / (tp_sum + fp_sum)
     recall = tp_sum / (tp_sum + fn_sum)
-    logger.log(f'Precision: {precision} | Recall: {recall}')
+    logger.info(f'Precision: {precision} | Recall: {recall}')
 
     out.release()
     return accumulated_features
@@ -1842,27 +1873,45 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
 if __name__ == '__main__':
     # feats = preprocess_data(var_threshold=150, plot=False)
+    eval_mode = False
     version = 0
     video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/'
     plot_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/'
     features_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/'
     Path(video_save_path).mkdir(parents=True, exist_ok=True)
     Path(features_save_path).mkdir(parents=True, exist_ok=True)
-    # feats = preprocess_data(var_threshold=None, plot=False, radius=100, save_per_part_path=None, video_mode=False,
-    #                         video_save_path=video_save_path + 'extraction.avi', desired_fps=2, overlap_percent=0.4,
-    #                         plot_save_path=plot_save_path, min_points_in_cluster=16, begin_track_mode=True,
-    #                         use_circle_to_keep_track_alive=False)
-    feats = preprocess_data_zero_shot(var_threshold=None, plot=False, radius=60, save_per_part_path=None,
-                                      video_mode=True, video_save_path=video_save_path + 'extraction.avi',
-                                      desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
-                                      min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
-                                      use_circle_to_keep_track_alive=False, custom_video_shape=False,
-                                      extra_radius=0, generic_box_wh=50)
-    torch.save(feats, features_save_path + 'features.pt')
-    print()
+    if not eval_mode and EXECUTE_STEP == 1:
+        # feats = preprocess_data(var_threshold=None, plot=False, radius=100, save_per_part_path=None, video_mode=False,
+        #                         video_save_path=video_save_path + 'extraction.avi', desired_fps=2, overlap_percent=0.4,
+        #                         plot_save_path=plot_save_path, min_points_in_cluster=16, begin_track_mode=True,
+        #                         use_circle_to_keep_track_alive=False)
+        feats = preprocess_data_zero_shot(var_threshold=None, plot=False, radius=60, save_per_part_path=None,
+                                          video_mode=True, video_save_path=video_save_path + 'extraction.avi',
+                                          desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
+                                          min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
+                                          use_circle_to_keep_track_alive=False, custom_video_shape=False,
+                                          extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True)
+        torch.save(feats, features_save_path + 'features.pt')
+    elif not eval_mode and EXECUTE_STEP == 2:
+        extracted_features_path = '../Plots/baseline_v2/v0/quad1/features.pt'
+        extracted_features: Dict[int, Sequence[ObjectFeatures]] = torch.load(extracted_features_path)
+        time_step_between_frames = 12
+        for frame_number, object_feature_list in tqdm(extracted_features.items()):
+            for object_feature in object_feature_list:
+                current_track_idx = object_feature.idx
+            for ts in range(time_step_between_frames):
+                pass
+        print()
+    else:
+        feat_file_path = '../Plots/baseline_v2/v0/deathCircle4/' \
+                         'use_is_box_overlapping_live_boxes/premature_kill_features_dict.pt'
+        eval_metrics(feat_file_path)
     # NOTE:
     #  -> setting use_circle_to_keep_track_alive=False to avoid noisy new tracks to pick up true live tracks
     #  -> Crowded - Death Circle [ smaller one 4]
     #  -> Good one - Little - 0 smaller, 3 big n good
     #  -> radius=60, extra_radius=0, generic_box_wh=50, use_circle_to_keep_track_alive=False, min_points_in_cluster=16
     #  , use_is_box_overlapping_live_boxes=True --- looks good
+    #  -> too less frames, bg fails
+    #  -> Interesting: gates[2,3,8], hyang[0,3,4,7s,], nexus[3?,4?,], quad[1,]
+    #  -> Extraction time: gates3 - 1day
