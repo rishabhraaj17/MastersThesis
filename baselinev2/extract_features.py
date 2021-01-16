@@ -17,7 +17,7 @@ from average_image.bbox_utils import get_frame_annotations_and_skip_lost, scale_
 from average_image.constants import SDDVideoClasses, OBJECT_CLASS_COLOR_MAPPING, ObjectClasses, SDDVideoDatasets
 from average_image.feature_clustering import MeanShiftClustering
 from average_image.feature_extractor import MOG2, FeatureExtractor
-from average_image.utils import SDDMeta
+from average_image.utils import SDDMeta, is_inside_bbox
 from baseline.extracted_of_optimization import clouds_distance_matrix, smallest_n_indices, find_points_inside_circle, \
     is_point_inside_circle
 from log import initialize_logging, get_logger
@@ -1344,7 +1344,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                               plot_scale_factor=1, desired_fps=5, custom_video_shape=True, plot_save_path=None,
                               save_checkpoint=False, plot=False, begin_track_mode=True, generic_box_wh=100,
                               use_circle_to_keep_track_alive=True, iou_threshold=0.5, extra_radius=50,
-                              use_is_box_overlapping_live_boxes=True, premature_kill_save=False):
+                              use_is_box_overlapping_live_boxes=True, premature_kill_save=False,
+                              distance_threshold=2):
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
                                   step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
@@ -1361,6 +1362,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
     current_track_idx, track_ids_used = 0, []
     precision_list, recall_list, matching_boxes_with_iou_list = [], [], []
     tp_list, fp_list, fn_list = [], [], []
+    meter_tp_list, meter_fp_list, meter_fn_list = [], [], []
+    center_inside_tp_list, center_inside_fp_list, center_inside_fn_list = [], [], []
     selected_track_distances = []
     accumulated_features = {}
 
@@ -1670,16 +1673,76 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                     bbox_distance_to_of_centers_iou_based = []
                     boxes_distance = []
+                    # boxes_distance_for_metric = []
                     r_boxes, a_boxes = r_boxes.numpy(), a_boxes.numpy()
+
+                    iou_boxes = filter_for_one_to_one_matches(iou_boxes)
+                    iou_boxes = filter_for_one_to_one_matches(iou_boxes.T).T
+
+                    match_idx = np.where(iou_boxes)
+                    matched_boxes_l2_distance_matrix = np.zeros_like(iou_boxes)
+                    predicted_box_center_inside_gt_box_matrix = np.zeros_like(iou_boxes)
+
                     for a_box_idx, r_box_idx in zip(*match_idx):
                         dist = np.linalg.norm((get_bbox_center(a_boxes[a_box_idx]).flatten() -
                                                get_bbox_center(r_boxes[r_box_idx]).flatten()), 2) * ratio
                         boxes_distance.append([(a_box_idx, r_box_idx), dist])
+                        # boxes_distance_for_metric.append([a_box_idx, r_box_idx, dist])
+                        matched_boxes_l2_distance_matrix[a_box_idx, r_box_idx] = dist
+                        predicted_box_center_inside_gt_box_matrix[a_box_idx, r_box_idx] = is_inside_bbox(
+                            point=get_bbox_center(r_boxes[r_box_idx]).flatten(), bbox=a_boxes[a_box_idx]
+                        )
                         bbox_distance_to_of_centers_iou_based.append([a_boxes[a_box_idx], dist, r_boxes[r_box_idx],
                                                                       iou_boxes[a_box_idx, r_box_idx]])
                         if select_track_idx == [r_boxes_idx[i] for i, b in enumerate(r_boxes)
                                                 if (b == r_boxes[r_box_idx]).all()][0]:
                             selected_track_distances.append(dist)
+
+                    # boxes_distance_for_metric = np.array(boxes_distance_for_metric)
+                    matched_boxes_l2_distance_matrix[matched_boxes_l2_distance_matrix > distance_threshold] = 0
+                    a_matched_boxes_l2_distance_matrix_idx, r_matched_boxes_l2_distance_matrix_idx = np.where(
+                        matched_boxes_l2_distance_matrix
+                    )
+
+                    a_predicted_box_center_inside_gt_box_matrix_idx, r_predicted_box_center_inside_gt_box_matrix_idx = \
+                        np.where(predicted_box_center_inside_gt_box_matrix)
+
+                    if len(a_match_idx_threshold) != 0:
+                        meter_tp = len(a_matched_boxes_l2_distance_matrix_idx)
+                        meter_fp = len(r_boxes) - len(a_matched_boxes_l2_distance_matrix_idx)
+                        meter_fn = len(a_boxes) - len(a_matched_boxes_l2_distance_matrix_idx)
+
+                        meter_precision = meter_tp / (meter_tp + meter_fp)
+                        meter_recall = meter_tp / (meter_tp + meter_fn)
+
+                        center_tp = len(a_predicted_box_center_inside_gt_box_matrix_idx)
+                        center_fp = len(r_boxes) - len(a_predicted_box_center_inside_gt_box_matrix_idx)
+                        center_fn = len(a_boxes) - len(a_predicted_box_center_inside_gt_box_matrix_idx)
+
+                        center_precision = center_tp / (center_tp + center_fp)
+                        center_recall = center_tp / (center_tp + center_fn)
+                    else:
+                        meter_tp = 0
+                        meter_fp = 0
+                        meter_fn = len(a_boxes)
+
+                        meter_precision = 0
+                        meter_recall = 0
+
+                        center_tp = 0
+                        center_fp = 0
+                        center_fn = len(a_boxes)
+
+                        center_precision = 0
+                        center_recall = 0
+
+                    meter_tp_list.append(meter_tp)
+                    meter_fp_list.append(meter_fp)
+                    meter_fn_list.append(meter_fn)
+
+                    center_inside_tp_list.append(center_tp)
+                    center_inside_fp_list.append(center_fp)
+                    center_inside_fn_list.append(center_fn)
 
                     # plot_mask_matching_bbox(fg_mask, bbox_distance_to_of_centers_iou_based, frame_number,
                     #                         save_path=f'{plot_save_path}zero_shot/iou_distance{min_points_in_cluster}/')
@@ -1769,6 +1832,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                             new_track_annotation=new_track_boxes,
                             frame_number=frame_number,
                             additional_text=
+                            f'Distance based - Precision: {meter_precision} | Recall: {meter_recall}\n'
+                            f'Center Inside based - Precision: {center_precision} | Recall: {center_recall}\n'
                             f'Precision: {precision} | Recall: {recall}\n'
                             f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
                             f'Track Ids Killed: '
@@ -1793,6 +1858,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                             frame_number=frame_number,
                             additional_text=
                             f'Precision: {precision} | Recall: {recall}\n'
+                            f'Distance based - Precision: {meter_precision} | Recall: {meter_recall}\n'
+                            f'Center Inside based - Precision: {center_precision} | Recall: {center_recall}\n'
                             f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
                             f'Track Ids Killed: '
                             f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
@@ -1823,6 +1890,12 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                        'tp_list': tp_list,
                                        'fp_list': fp_list,
                                        'fn_list': fn_list,
+                                       'meter_tp_list': meter_tp_list,
+                                       'meter_fp_list': meter_fp_list,
+                                       'meter_fn_list': meter_fn_list,
+                                       'center_inside_tp_list': center_inside_tp_list,
+                                       'center_inside_fp_list': center_inside_fp_list,
+                                       'center_inside_fn_list': center_inside_fn_list,
                                        'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
                                        'accumulated_features': accumulated_features}
             # gt_associated_frame = associate_frame_with_ground_truth(frames, frame_numbers)
@@ -1851,6 +1924,12 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                    'tp_list': tp_list,
                                    'fp_list': fp_list,
                                    'fn_list': fn_list,
+                                   'meter_tp_list': meter_tp_list,
+                                   'meter_fp_list': meter_fp_list,
+                                   'meter_fn_list': meter_fn_list,
+                                   'center_inside_tp_list': center_inside_tp_list,
+                                   'center_inside_fp_list': center_inside_fp_list,
+                                   'center_inside_fn_list': center_inside_fn_list,
                                    'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
                                    'accumulated_features': accumulated_features}
             Path(features_save_path).mkdir(parents=True, exist_ok=True)
@@ -1862,10 +1941,40 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
         recall = tp_sum / (tp_sum + fn_sum)
         logger.info(f'Precision: {precision} | Recall: {recall}')
 
+        # Distance Based
+        tp_sum, fp_sum, fn_sum = \
+            np.array(meter_tp_list).sum(), np.array(meter_fp_list).sum(), np.array(meter_fn_list).sum()
+        precision = tp_sum / (tp_sum + fp_sum)
+        recall = tp_sum / (tp_sum + fn_sum)
+        logger.info(f'L2 Distance Based - Precision: {precision} | Recall: {recall}')
+
+        # Center Inside Based
+        tp_sum, fp_sum, fn_sum = \
+            np.array(center_inside_tp_list).sum(), np.array(center_inside_fp_list).sum(), \
+            np.array(center_inside_fn_list).sum()
+        precision = tp_sum / (tp_sum + fp_sum)
+        recall = tp_sum / (tp_sum + fn_sum)
+        logger.info(f'Center Inside Based - Precision: {precision} | Recall: {recall}')
+
     tp_sum, fp_sum, fn_sum = np.array(tp_list).sum(), np.array(fp_list).sum(), np.array(fn_list).sum()
     precision = tp_sum / (tp_sum + fp_sum)
     recall = tp_sum / (tp_sum + fn_sum)
     logger.info(f'Precision: {precision} | Recall: {recall}')
+
+    # Distance Based
+    tp_sum, fp_sum, fn_sum = \
+        np.array(meter_tp_list).sum(), np.array(meter_fp_list).sum(), np.array(meter_fn_list).sum()
+    precision = tp_sum / (tp_sum + fp_sum)
+    recall = tp_sum / (tp_sum + fn_sum)
+    logger.info(f'L2 Distance Based - Precision: {precision} | Recall: {recall}')
+
+    # Center Inside Based
+    tp_sum, fp_sum, fn_sum = \
+        np.array(center_inside_tp_list).sum(), np.array(center_inside_fp_list).sum(), \
+        np.array(center_inside_fn_list).sum()
+    precision = tp_sum / (tp_sum + fp_sum)
+    recall = tp_sum / (tp_sum + fn_sum)
+    logger.info(f'Center Inside Based - Precision: {precision} | Recall: {recall}')
 
     out.release()
     return accumulated_features
