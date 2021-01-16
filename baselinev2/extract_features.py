@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 from matplotlib import patches
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import pytorch_lightning.metrics as plm
+import scipy
+import skimage
 import torch
 import torchvision
 from torch.utils.data import DataLoader
@@ -1363,6 +1365,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
     precision_list, recall_list, matching_boxes_with_iou_list = [], [], []
     tp_list, fp_list, fn_list = [], [], []
     meter_tp_list, meter_fp_list, meter_fn_list = [], [], []
+    l2_distance_hungarian_tp_list, l2_distance_hungarian_fp_list, l2_distance_hungarian_fn_list = [], [], []
     center_inside_tp_list, center_inside_fp_list, center_inside_fn_list = [], [], []
     selected_track_distances = []
     accumulated_features = {}
@@ -1378,6 +1381,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
             out = cv.VideoWriter(video_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
                                  (video_shape[1], video_shape[0]))  # (1200, 1000))  # (video_shape[0], video_shape[1]))
             # (video_shape[1], video_shape[0]))
+            video_shape[0], video_shape[1] = video_shape[1], video_shape[0]
         else:
             original_dims = (
                 frames_shape[0] / 100 * plot_scale_factor, frames_shape[1] / 100 * plot_scale_factor)
@@ -1463,6 +1467,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                     iou_boxes = torchvision.ops.box_iou(a_boxes, r_boxes).numpy()
                     iou_boxes_threshold = iou_boxes.copy()
                     iou_boxes_threshold[iou_boxes_threshold < iou_threshold] = 0
+                    # TODO: Replace with Hungarian
                     iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold)
                     iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold.T).T
                     match_idx = np.where(iou_boxes)
@@ -1638,6 +1643,27 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                     iou_boxes_threshold = iou_boxes.copy()
                     iou_boxes_threshold[iou_boxes_threshold < iou_threshold] = 0
+                    # TODO: Replace with Hungarian
+                    a_boxes_np, r_boxes_np = a_boxes.numpy(), r_boxes.numpy()
+                    l2_distance_boxes_score_matrix = np.zeros(shape=(len(a_boxes_np), len(r_boxes_np)))
+                    for a_i, a_box in enumerate(a_boxes_np):
+                        for r_i, r_box in enumerate(r_boxes_np):
+                            dist = np.linalg.norm((get_bbox_center(a_box).flatten() -
+                                                   get_bbox_center(r_box).flatten()), 2) * ratio
+                            l2_distance_boxes_score_matrix[a_i, r_i] = dist
+
+                    l2_distance_boxes_score_matrix = 2 - l2_distance_boxes_score_matrix
+                    l2_distance_boxes_score_matrix[l2_distance_boxes_score_matrix < 0] = 10
+                    # Hungarian
+                    # match_rows, match_cols = scipy.optimize.linear_sum_assignment(-l2_distance_boxes_score_matrix)
+                    match_rows, match_cols = scipy.optimize.linear_sum_assignment(l2_distance_boxes_score_matrix)
+                    actually_matched_mask = l2_distance_boxes_score_matrix[match_rows, match_cols] < 10
+                    match_rows = match_rows[actually_matched_mask]
+                    match_cols = match_cols[actually_matched_mask]
+
+                    matched_distance_array = [(i, j, l2_distance_boxes_score_matrix[i, j])
+                                              for i, j in zip(match_rows, match_cols)]
+
                     iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold)
                     iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold.T).T
                     match_idx = np.where(iou_boxes)
@@ -1672,10 +1698,12 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                     matching_boxes_with_iou_list.append(matching_boxes_with_iou)
 
                     bbox_distance_to_of_centers_iou_based = []
+                    bbox_distance_to_of_centers_iou_based_idx = []
                     boxes_distance = []
                     # boxes_distance_for_metric = []
                     r_boxes, a_boxes = r_boxes.numpy(), a_boxes.numpy()
 
+                    # TODO: Replace with Hungarian
                     iou_boxes = filter_for_one_to_one_matches(iou_boxes)
                     iou_boxes = filter_for_one_to_one_matches(iou_boxes.T).T
 
@@ -1694,6 +1722,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         )
                         bbox_distance_to_of_centers_iou_based.append([a_boxes[a_box_idx], dist, r_boxes[r_box_idx],
                                                                       iou_boxes[a_box_idx, r_box_idx]])
+                        bbox_distance_to_of_centers_iou_based_idx.append([a_box_idx, r_box_idx, dist,
+                                                                          iou_boxes[a_box_idx, r_box_idx]])
                         if select_track_idx == [r_boxes_idx[i] for i, b in enumerate(r_boxes)
                                                 if (b == r_boxes[r_box_idx]).all()][0]:
                             selected_track_distances.append(dist)
@@ -1721,6 +1751,17 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                         center_precision = center_tp / (center_tp + center_fp)
                         center_recall = center_tp / (center_tp + center_fn)
+                        
+                        if len(match_rows) != len(match_cols):
+                            logger.info('Matching arrays length not same!')
+                        l2_distance_hungarian_tp = len(match_rows)
+                        l2_distance_hungarian_fp = len(r_boxes) - len(match_rows)
+                        l2_distance_hungarian_fn = len(a_boxes) - len(match_rows)
+
+                        l2_distance_hungarian_precision = \
+                            l2_distance_hungarian_tp / (l2_distance_hungarian_tp + l2_distance_hungarian_fp)
+                        l2_distance_hungarian_recall = \
+                            l2_distance_hungarian_tp / (l2_distance_hungarian_tp + l2_distance_hungarian_fn)
                     else:
                         meter_tp = 0
                         meter_fp = 0
@@ -1735,6 +1776,13 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                         center_precision = 0
                         center_recall = 0
+                        
+                        l2_distance_hungarian_tp = 0
+                        l2_distance_hungarian_fp = 0
+                        l2_distance_hungarian_fn = len(a_boxes)
+
+                        l2_distance_hungarian_precision = 0
+                        l2_distance_hungarian_recall = 0
 
                     meter_tp_list.append(meter_tp)
                     meter_fp_list.append(meter_fp)
@@ -1743,6 +1791,10 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                     center_inside_tp_list.append(center_tp)
                     center_inside_fp_list.append(center_fp)
                     center_inside_fn_list.append(center_fn)
+                    
+                    l2_distance_hungarian_tp_list.append(l2_distance_hungarian_tp)
+                    l2_distance_hungarian_fp_list.append(l2_distance_hungarian_fp)
+                    l2_distance_hungarian_fn_list.append(l2_distance_hungarian_fn)
 
                     # plot_mask_matching_bbox(fg_mask, bbox_distance_to_of_centers_iou_based, frame_number,
                     #                         save_path=f'{plot_save_path}zero_shot/iou_distance{min_points_in_cluster}/')
@@ -1832,7 +1884,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                             new_track_annotation=new_track_boxes,
                             frame_number=frame_number,
                             additional_text=
-                            f'Distance based - Precision: {meter_precision} | Recall: {meter_recall}\n'
+                            f'Distance based - Precision: {l2_distance_hungarian_precision} | '
+                            f'Recall: {l2_distance_hungarian_recall}\n'
                             f'Center Inside based - Precision: {center_precision} | Recall: {center_recall}\n'
                             f'Precision: {precision} | Recall: {recall}\n'
                             f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
@@ -1845,6 +1898,9 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                         buf = canvas.buffer_rgba()
                         out_frame = np.asarray(buf, dtype=np.uint8)[:, :, :-1]
+                        if out_frame.shape[0] != video_shape[1] or out_frame.shape[1] != video_shape[0]:
+                            out_frame = skimage.transform.resize(out_frame, (video_shape[1], video_shape[0]))
+                            out_frame = (out_frame * 255).astype(np.uint8)
                         # out_frame = out_frame.reshape(1200, 1000, 3)
                         out.write(out_frame)
                     else:
@@ -1858,7 +1914,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                             frame_number=frame_number,
                             additional_text=
                             f'Precision: {precision} | Recall: {recall}\n'
-                            f'Distance based - Precision: {meter_precision} | Recall: {meter_recall}\n'
+                            f'Distance based - Precision: {l2_distance_hungarian_precision} | '
+                            f'Recall: {l2_distance_hungarian_recall}\n'
                             f'Center Inside based - Precision: {center_precision} | Recall: {center_recall}\n'
                             f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
                             f'Track Ids Killed: '
@@ -1943,7 +2000,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
         # Distance Based
         tp_sum, fp_sum, fn_sum = \
-            np.array(meter_tp_list).sum(), np.array(meter_fp_list).sum(), np.array(meter_fn_list).sum()
+            np.array(l2_distance_hungarian_tp_list).sum(), np.array(l2_distance_hungarian_fp_list).sum(), \
+            np.array(l2_distance_hungarian_fn_list).sum()
         precision = tp_sum / (tp_sum + fp_sum)
         recall = tp_sum / (tp_sum + fn_sum)
         logger.info(f'L2 Distance Based - Precision: {precision} | Recall: {recall}')
@@ -1963,7 +2021,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
     # Distance Based
     tp_sum, fp_sum, fn_sum = \
-        np.array(meter_tp_list).sum(), np.array(meter_fp_list).sum(), np.array(meter_fn_list).sum()
+        np.array(l2_distance_hungarian_tp_list).sum(), np.array(l2_distance_hungarian_fp_list).sum(), \
+        np.array(l2_distance_hungarian_fn_list).sum()
     precision = tp_sum / (tp_sum + fp_sum)
     recall = tp_sum / (tp_sum + fn_sum)
     logger.info(f'L2 Distance Based - Precision: {precision} | Recall: {recall}')
@@ -2024,3 +2083,4 @@ if __name__ == '__main__':
     #  -> too less frames, bg fails
     #  -> Interesting: gates[2,3,8], hyang[0,3,4,7s,], nexus[3?,4?,], quad[1,]
     #  -> Extraction time: gates3 - 1day
+    #  -> What about stationary objects? Decreasing Recall
