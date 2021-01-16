@@ -1955,35 +1955,35 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                        'center_inside_fn_list': center_inside_fn_list,
                                        'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
                                        'accumulated_features': accumulated_features}
-                    if save_every_n_batch_itr is not None:
-                        save_dict = {'frame_number': frame_number,
-                                     'part_idx': part_idx,
-                                     'second_last_frame': second_last_frame,
-                                     'last_frame': last_frame,
-                                     'last_frame_mask': last_frame_mask,
-                                     'last_frame_live_tracks': last_frame_live_tracks,
-                                     'running_tracks': running_tracks,
-                                     'track_ids_used': track_ids_used,
-                                     'new_track_boxes': new_track_boxes,
-                                     'precision': precision_list,
-                                     'recall': recall_list,
-                                     'tp_list': tp_list,
-                                     'fp_list': fp_list,
-                                     'fn_list': fn_list,
-                                     'meter_tp_list': meter_tp_list,
-                                     'meter_fp_list': meter_fp_list,
-                                     'meter_fn_list': meter_fn_list,
-                                     'center_inside_tp_list': center_inside_tp_list,
-                                     'center_inside_fp_list': center_inside_fp_list,
-                                     'center_inside_fn_list': center_inside_fn_list,
-                                     'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
-                                     'accumulated_features': accumulated_features}
-                        if part_idx % save_every_n_batch_itr == 0:
-                            Path(video_save_path + 'parts/').mkdir(parents=True, exist_ok=True)
-                            f_n = f'features_dict_part{part_idx}.pt'
-                            torch.save(save_dict, video_save_path + 'parts/' + f_n)
+            if save_every_n_batch_itr is not None:
+                save_dict = {'frame_number': frame_number,
+                             'part_idx': part_idx,
+                             'second_last_frame': second_last_frame,
+                             'last_frame': last_frame,
+                             'last_frame_mask': last_frame_mask,
+                             'last_frame_live_tracks': last_frame_live_tracks,
+                             'running_tracks': running_tracks,
+                             'track_ids_used': track_ids_used,
+                             'new_track_boxes': new_track_boxes,
+                             'precision': precision_list,
+                             'recall': recall_list,
+                             'tp_list': tp_list,
+                             'fp_list': fp_list,
+                             'fn_list': fn_list,
+                             'meter_tp_list': meter_tp_list,
+                             'meter_fp_list': meter_fp_list,
+                             'meter_fn_list': meter_fn_list,
+                             'center_inside_tp_list': center_inside_tp_list,
+                             'center_inside_fp_list': center_inside_fp_list,
+                             'center_inside_fn_list': center_inside_fn_list,
+                             'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
+                             'accumulated_features': accumulated_features}
+                if part_idx % save_every_n_batch_itr == 0 and part_idx != 0:
+                    Path(video_save_path + 'parts/').mkdir(parents=True, exist_ok=True)
+                    f_n = f'features_dict_part{part_idx}.pt'
+                    torch.save(save_dict, video_save_path + 'parts/' + f_n)
 
-                            accumulated_features = {}
+                    accumulated_features = {}
             # gt_associated_frame = associate_frame_with_ground_truth(frames, frame_numbers)
             if save_per_part_path is not None:
                 Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
