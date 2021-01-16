@@ -65,6 +65,9 @@ class ObjectFeatures(object):
         self.past_xy = past_xy
         self.is_track_live = is_track_live
 
+    def __eq__(self, other):
+        return self.idx == other.idx
+
 
 class FrameFeatures(object):
     def __init__(self, frame_number: int, object_features: Sequence[ObjectFeatures]):
@@ -1953,6 +1956,9 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                        'center_inside_tp_list': center_inside_tp_list,
                                        'center_inside_fp_list': center_inside_fp_list,
                                        'center_inside_fn_list': center_inside_fn_list,
+                                       'l2_distance_hungarian_tp_list': l2_distance_hungarian_tp_list,
+                                       'l2_distance_hungarian_fp_list': l2_distance_hungarian_fp_list,
+                                       'l2_distance_hungarian_fn_list': l2_distance_hungarian_fn_list,
                                        'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
                                        'accumulated_features': accumulated_features}
             if save_every_n_batch_itr is not None:
@@ -1976,6 +1982,9 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                              'center_inside_tp_list': center_inside_tp_list,
                              'center_inside_fp_list': center_inside_fp_list,
                              'center_inside_fn_list': center_inside_fn_list,
+                             'l2_distance_hungarian_tp_list': l2_distance_hungarian_tp_list,
+                             'l2_distance_hungarian_fp_list': l2_distance_hungarian_fp_list,
+                             'l2_distance_hungarian_fn_list': l2_distance_hungarian_fn_list,
                              'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
                              'accumulated_features': accumulated_features}
                 if part_idx % save_every_n_batch_itr == 0 and part_idx != 0:
@@ -2016,6 +2025,9 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                    'center_inside_tp_list': center_inside_tp_list,
                                    'center_inside_fp_list': center_inside_fp_list,
                                    'center_inside_fn_list': center_inside_fn_list,
+                                   'l2_distance_hungarian_tp_list': l2_distance_hungarian_tp_list,
+                                   'l2_distance_hungarian_fp_list': l2_distance_hungarian_fp_list,
+                                   'l2_distance_hungarian_fn_list': l2_distance_hungarian_fn_list,
                                    'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
                                    'accumulated_features': accumulated_features}
             Path(features_save_path).mkdir(parents=True, exist_ok=True)
@@ -2092,13 +2104,26 @@ if __name__ == '__main__':
         torch.save(feats, features_save_path + 'features.pt')
     elif not eval_mode and EXECUTE_STEP == 2:
         extracted_features_path = '../Plots/baseline_v2/v0/quad1/features.pt'
-        extracted_features: Dict[int, Sequence[ObjectFeatures]] = torch.load(extracted_features_path)
-        time_step_between_frames = 12
-        for frame_number, object_feature_list in tqdm(extracted_features.items()):
-            for object_feature in object_feature_list:
-                current_track_idx = object_feature.idx
-            for ts in range(time_step_between_frames):
-                pass
+        extracted_features: Dict[int, FrameFeatures] = torch.load(extracted_features_path)
+        # Scrapped ###################################################################################################
+        # time_step_between_frames = 12
+        # for frame_number, frame_features in tqdm(extracted_features.items()):
+        #     for object_feature in frame_features.object_features:
+        #         current_track_idx = object_feature.idx
+        #         obj_flow = object_feature.flow
+        #         obj_past_flow = object_feature.past_flow
+        #         for ts in range(1, time_step_between_frames):
+        #             next_frame_features: FrameFeatures = extracted_features[frame_number + ts]
+        #             next_frame_number: int = next_frame_features.frame_number
+        #             next_frame_obj_features: Sequence[ObjectFeatures] = next_frame_features.object_features
+        #             for next_frame_object_feature in next_frame_obj_features:
+        #                 if next_frame_object_feature == object_feature:
+        #                     print()
+        #                 else:
+        #                     print()
+        #                 print()
+        ##############################################################################################################
+        # out = process_complex_features_rnn(extracted_features, time_steps=5)
         print()
     else:
         feat_file_path = '../Plots/baseline_v2/v0/deathCircle4/' \
