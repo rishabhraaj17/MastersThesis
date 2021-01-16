@@ -1347,7 +1347,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                               save_checkpoint=False, plot=False, begin_track_mode=True, generic_box_wh=100,
                               use_circle_to_keep_track_alive=True, iou_threshold=0.5, extra_radius=50,
                               use_is_box_overlapping_live_boxes=True, premature_kill_save=False,
-                              distance_threshold=2):
+                              distance_threshold=2, save_every_n_batch_itr=None):
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
                                   step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
@@ -1751,7 +1751,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                         center_precision = center_tp / (center_tp + center_fp)
                         center_recall = center_tp / (center_tp + center_fn)
-                        
+
                         if len(match_rows) != len(match_cols):
                             logger.info('Matching arrays length not same!')
                         l2_distance_hungarian_tp = len(match_rows)
@@ -1776,7 +1776,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                         center_precision = 0
                         center_recall = 0
-                        
+
                         l2_distance_hungarian_tp = 0
                         l2_distance_hungarian_fp = 0
                         l2_distance_hungarian_fn = len(a_boxes)
@@ -1791,7 +1791,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                     center_inside_tp_list.append(center_tp)
                     center_inside_fp_list.append(center_fp)
                     center_inside_fn_list.append(center_fn)
-                    
+
                     l2_distance_hungarian_tp_list.append(l2_distance_hungarian_tp)
                     l2_distance_hungarian_fp_list.append(l2_distance_hungarian_fp)
                     l2_distance_hungarian_fn_list.append(l2_distance_hungarian_fn)
@@ -1955,6 +1955,35 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                        'center_inside_fn_list': center_inside_fn_list,
                                        'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
                                        'accumulated_features': accumulated_features}
+                    if save_every_n_batch_itr is not None:
+                        save_dict = {'frame_number': frame_number,
+                                     'part_idx': part_idx,
+                                     'second_last_frame': second_last_frame,
+                                     'last_frame': last_frame,
+                                     'last_frame_mask': last_frame_mask,
+                                     'last_frame_live_tracks': last_frame_live_tracks,
+                                     'running_tracks': running_tracks,
+                                     'track_ids_used': track_ids_used,
+                                     'new_track_boxes': new_track_boxes,
+                                     'precision': precision_list,
+                                     'recall': recall_list,
+                                     'tp_list': tp_list,
+                                     'fp_list': fp_list,
+                                     'fn_list': fn_list,
+                                     'meter_tp_list': meter_tp_list,
+                                     'meter_fp_list': meter_fp_list,
+                                     'meter_fn_list': meter_fn_list,
+                                     'center_inside_tp_list': center_inside_tp_list,
+                                     'center_inside_fp_list': center_inside_fp_list,
+                                     'center_inside_fn_list': center_inside_fn_list,
+                                     'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
+                                     'accumulated_features': accumulated_features}
+                        if part_idx % save_every_n_batch_itr == 0:
+                            Path(video_save_path + 'parts/').mkdir(parents=True, exist_ok=True)
+                            f_n = f'features_dict_part{part_idx}.pt'
+                            torch.save(save_dict, video_save_path + 'parts/' + f_n)
+
+                            accumulated_features = {}
             # gt_associated_frame = associate_frame_with_ground_truth(frames, frame_numbers)
             if save_per_part_path is not None:
                 Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
@@ -2058,7 +2087,8 @@ if __name__ == '__main__':
                                           desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
                                           min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
                                           use_circle_to_keep_track_alive=False, custom_video_shape=False,
-                                          extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True)
+                                          extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True,
+                                          save_every_n_batch_itr=50)
         torch.save(feats, features_save_path + 'features.pt')
     elif not eval_mode and EXECUTE_STEP == 2:
         extracted_features_path = '../Plots/baseline_v2/v0/quad1/features.pt'
