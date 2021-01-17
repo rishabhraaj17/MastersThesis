@@ -1350,12 +1350,12 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                               save_checkpoint=False, plot=False, begin_track_mode=True, generic_box_wh=100,
                               use_circle_to_keep_track_alive=True, iou_threshold=0.5, extra_radius=50,
                               use_is_box_overlapping_live_boxes=True, premature_kill_save=False,
-                              distance_threshold=2, save_every_n_batch_itr=None):
+                              distance_threshold=2, save_every_n_batch_itr=None, drop_last_batch=True):
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
                                   step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
                                   single_track_mode=False, track_id=5, multiple_videos=False)
-    data_loader = DataLoader(sdd_simple, batch_size)
+    data_loader = DataLoader(sdd_simple, batch_size, drop_last=drop_last_batch)
     df = sdd_simple.annotations_df
     kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
     n = 30
@@ -2054,6 +2054,31 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
         precision = tp_sum / (tp_sum + fp_sum)
         recall = tp_sum / (tp_sum + fn_sum)
         logger.info(f'Center Inside Based - Precision: {precision} | Recall: {recall}')
+    finally:
+        tp_sum, fp_sum, fn_sum = np.array(tp_list).sum(), np.array(fp_list).sum(), np.array(fn_list).sum()
+        precision = tp_sum / (tp_sum + fp_sum)
+        recall = tp_sum / (tp_sum + fn_sum)
+        logger.info(f'Precision: {precision} | Recall: {recall}')
+
+        # Distance Based
+        tp_sum, fp_sum, fn_sum = \
+            np.array(l2_distance_hungarian_tp_list).sum(), np.array(l2_distance_hungarian_fp_list).sum(), \
+            np.array(l2_distance_hungarian_fn_list).sum()
+        precision = tp_sum / (tp_sum + fp_sum)
+        recall = tp_sum / (tp_sum + fn_sum)
+        logger.info(f'L2 Distance Based - Precision: {precision} | Recall: {recall}')
+
+        # Center Inside Based
+        tp_sum, fp_sum, fn_sum = \
+            np.array(center_inside_tp_list).sum(), np.array(center_inside_fp_list).sum(), \
+            np.array(center_inside_fn_list).sum()
+        precision = tp_sum / (tp_sum + fp_sum)
+        recall = tp_sum / (tp_sum + fn_sum)
+        logger.info(f'Center Inside Based - Precision: {precision} | Recall: {recall}')
+
+        Path(features_save_path).mkdir(parents=True, exist_ok=True)
+        f_n = f'accumulated_features_from_finally.pt'
+        torch.save(accumulated_features, features_save_path + f_n)
 
     tp_sum, fp_sum, fn_sum = np.array(tp_list).sum(), np.array(fp_list).sum(), np.array(fn_list).sum()
     precision = tp_sum / (tp_sum + fp_sum)
