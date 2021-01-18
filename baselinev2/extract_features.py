@@ -1649,23 +1649,26 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                     # TODO: Replace with Hungarian
                     a_boxes_np, r_boxes_np = a_boxes.numpy(), r_boxes.numpy()
                     l2_distance_boxes_score_matrix = np.zeros(shape=(len(a_boxes_np), len(r_boxes_np)))
-                    for a_i, a_box in enumerate(a_boxes_np):
-                        for r_i, r_box in enumerate(r_boxes_np):
-                            dist = np.linalg.norm((get_bbox_center(a_box).flatten() -
-                                                   get_bbox_center(r_box).flatten()), 2) * ratio
-                            l2_distance_boxes_score_matrix[a_i, r_i] = dist
+                    if r_boxes_np.size != 0:
+                        for a_i, a_box in enumerate(a_boxes_np):
+                            for r_i, r_box in enumerate(r_boxes_np):
+                                dist = np.linalg.norm((get_bbox_center(a_box).flatten() -
+                                                       get_bbox_center(r_box).flatten()), 2) * ratio
+                                l2_distance_boxes_score_matrix[a_i, r_i] = dist
 
-                    l2_distance_boxes_score_matrix = 2 - l2_distance_boxes_score_matrix
-                    l2_distance_boxes_score_matrix[l2_distance_boxes_score_matrix < 0] = 10
-                    # Hungarian
-                    # match_rows, match_cols = scipy.optimize.linear_sum_assignment(-l2_distance_boxes_score_matrix)
-                    match_rows, match_cols = scipy.optimize.linear_sum_assignment(l2_distance_boxes_score_matrix)
-                    actually_matched_mask = l2_distance_boxes_score_matrix[match_rows, match_cols] < 10
-                    match_rows = match_rows[actually_matched_mask]
-                    match_cols = match_cols[actually_matched_mask]
+                        l2_distance_boxes_score_matrix = 2 - l2_distance_boxes_score_matrix
+                        l2_distance_boxes_score_matrix[l2_distance_boxes_score_matrix < 0] = 10
+                        # Hungarian
+                        # match_rows, match_cols = scipy.optimize.linear_sum_assignment(-l2_distance_boxes_score_matrix)
+                        match_rows, match_cols = scipy.optimize.linear_sum_assignment(l2_distance_boxes_score_matrix)
+                        actually_matched_mask = l2_distance_boxes_score_matrix[match_rows, match_cols] < 10
+                        match_rows = match_rows[actually_matched_mask]
+                        match_cols = match_cols[actually_matched_mask]
 
-                    matched_distance_array = [(i, j, l2_distance_boxes_score_matrix[i, j])
-                                              for i, j in zip(match_rows, match_cols)]
+                        matched_distance_array = [(i, j, l2_distance_boxes_score_matrix[i, j])
+                                                  for i, j in zip(match_rows, match_cols)]
+                    else:
+                        match_rows, match_cols = np.array([]), np.array([])
 
                     iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold)
                     iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold.T).T
@@ -1733,14 +1736,21 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                     # boxes_distance_for_metric = np.array(boxes_distance_for_metric)
                     matched_boxes_l2_distance_matrix[matched_boxes_l2_distance_matrix > distance_threshold] = 0
-                    a_matched_boxes_l2_distance_matrix_idx, r_matched_boxes_l2_distance_matrix_idx = np.where(
-                        matched_boxes_l2_distance_matrix
-                    )
+                    if r_boxes_np.size != 0:
+                        a_matched_boxes_l2_distance_matrix_idx, r_matched_boxes_l2_distance_matrix_idx = np.where(
+                            matched_boxes_l2_distance_matrix
+                        )
+    
+                        a_predicted_box_center_inside_gt_box_matrix_idx,\
+                        r_predicted_box_center_inside_gt_box_matrix_idx = \
+                            np.where(predicted_box_center_inside_gt_box_matrix)
+                    else:
+                        a_matched_boxes_l2_distance_matrix_idx, \
+                        r_matched_boxes_l2_distance_matrix_idx = np.array([]), np.array([])
+                        a_predicted_box_center_inside_gt_box_matrix_idx, \
+                        r_predicted_box_center_inside_gt_box_matrix_idx = np.array([]), np.array([])
 
-                    a_predicted_box_center_inside_gt_box_matrix_idx, r_predicted_box_center_inside_gt_box_matrix_idx = \
-                        np.where(predicted_box_center_inside_gt_box_matrix)
-
-                    if len(a_match_idx_threshold) != 0:
+                    if len(match_rows) != 0:
                         meter_tp = len(a_matched_boxes_l2_distance_matrix_idx)
                         meter_fp = len(r_boxes) - len(a_matched_boxes_l2_distance_matrix_idx)
                         meter_fn = len(a_boxes) - len(a_matched_boxes_l2_distance_matrix_idx)
@@ -1935,6 +1945,14 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                     last_frame_mask = fg_mask.copy()
                     last_frame_live_tracks = np.stack(running_tracks) if len(running_tracks) != 0 else []
 
+                    batch_tp_sum, batch_fp_sum, batch_fn_sum = \
+                        np.array(l2_distance_hungarian_tp_list).sum(), np.array(l2_distance_hungarian_fp_list).sum(), \
+                        np.array(l2_distance_hungarian_fn_list).sum()
+                    batch_precision = batch_tp_sum / (batch_tp_sum + batch_fp_sum)
+                    batch_recall = batch_tp_sum / (batch_tp_sum + batch_fn_sum)
+                    logger.info(f'Batch: {part_idx}, '
+                                f'L2 Distance Based - Precision: {batch_precision} | Recall: {batch_recall}')
+
                     if save_checkpoint:
                         resume_dict = {'frame_number': frame_number,
                                        'part_idx': part_idx,
@@ -2076,9 +2094,35 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
         recall = tp_sum / (tp_sum + fn_sum)
         logger.info(f'Center Inside Based - Precision: {precision} | Recall: {recall}')
 
+        premature_save_dict = {'frame_number': frame_number,
+                               'part_idx': part_idx,
+                               'second_last_frame': second_last_frame,
+                               'last_frame': last_frame,
+                               'last_frame_mask': last_frame_mask,
+                               'last_frame_live_tracks': last_frame_live_tracks,
+                               'running_tracks': running_tracks,
+                               'track_ids_used': track_ids_used,
+                               'new_track_boxes': new_track_boxes,
+                               'precision': precision_list,
+                               'recall': recall_list,
+                               'tp_list': tp_list,
+                               'fp_list': fp_list,
+                               'fn_list': fn_list,
+                               'meter_tp_list': meter_tp_list,
+                               'meter_fp_list': meter_fp_list,
+                               'meter_fn_list': meter_fn_list,
+                               'center_inside_tp_list': center_inside_tp_list,
+                               'center_inside_fp_list': center_inside_fp_list,
+                               'center_inside_fn_list': center_inside_fn_list,
+                               'l2_distance_hungarian_tp_list': l2_distance_hungarian_tp_list,
+                               'l2_distance_hungarian_fp_list': l2_distance_hungarian_fp_list,
+                               'l2_distance_hungarian_fn_list': l2_distance_hungarian_fn_list,
+                               'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
+                               'accumulated_features': accumulated_features}
+
         Path(features_save_path).mkdir(parents=True, exist_ok=True)
         f_n = f'accumulated_features_from_finally.pt'
-        torch.save(accumulated_features, features_save_path + f_n)
+        torch.save(premature_save_dict, features_save_path + f_n)
 
     tp_sum, fp_sum, fn_sum = np.array(tp_list).sum(), np.array(fp_list).sum(), np.array(fn_list).sum()
     precision = tp_sum / (tp_sum + fp_sum)
@@ -2105,6 +2149,199 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
     return accumulated_features
 
 
+def keyframe_based_feature_extraction_zero_shot(frames, n, frames_to_build_model, var_threshold=None,
+                                                time_gap_within_frames=3, frame_numbers=None, remaining_frames=None,
+                                                remaining_frames_idx=None, past_12_frames_optical_flow=None,
+                                                last_frame_from_last_used_batch=None, last12_bg_sub_mask=None,
+                                                resume_mode=False):
+    interest_fr = None
+    actual_interest_fr = None
+    frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
+
+    # cat old frames
+    if remaining_frames is not None:
+        frames = np.concatenate((remaining_frames, frames), axis=0)
+        frame_numbers = torch.cat((remaining_frames_idx, frame_numbers))
+
+    kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
+    step = 0
+    if n is not None:
+        step = n // 2
+    else:
+        n = frames_to_build_model
+    total_frames = frames.shape[0]
+    data_all_frames = {}
+
+    for fr, actual_fr in tqdm(zip(range(frames.shape[0]), frame_numbers), total=frames.shape[0]):
+        interest_fr = fr % total_frames
+        actual_interest_fr = actual_fr
+
+        of_interest_fr = (fr + frames_to_build_model) % total_frames
+        actual_of_interest_fr = (actual_fr + frames_to_build_model)
+
+        mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=fr,
+                                        time_gap_within_frames=time_gap_within_frames,
+                                        total_frames=total_frames, step=step, n=n,
+                                        kernel=kernel, var_threshold=var_threshold)
+
+        # do not go in circle for flow estimation
+        if of_interest_fr < interest_fr:
+            break
+
+        last12_bg_sub_mask.update({actual_interest_fr.item(): mask})
+
+        # start at 12th frame and then only consider last 12 frames for velocity estimation
+        if actual_interest_fr != 0:
+            if interest_fr == 0:
+                previous = cv.cvtColor(last_frame_from_last_used_batch.astype(np.uint8), cv.COLOR_BGR2GRAY)
+                next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+
+                past_flow_per_frame, past_rgb, past_mag, past_ang = FeatureExtractor.get_optical_flow(
+                    previous_frame=previous,
+                    next_frame=next_frame,
+                    all_results_out=True)
+                past_12_frames_optical_flow.update(
+                    {f'{actual_interest_fr.item() - 1}-{actual_interest_fr.item()}': past_flow_per_frame})
+            else:
+                previous = cv.cvtColor(frames[interest_fr - 1], cv.COLOR_BGR2GRAY)
+                next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+
+                past_flow_per_frame, past_rgb, past_mag, past_ang = FeatureExtractor.get_optical_flow(
+                    previous_frame=previous,
+                    next_frame=next_frame,
+                    all_results_out=True)
+                last_frame_from_last_used_batch = frames[interest_fr]
+                past_12_frames_optical_flow.update(
+                    {f'{actual_interest_fr.item() - 1}-{actual_interest_fr.item()}': past_flow_per_frame})
+
+        if len(past_12_frames_optical_flow) > 12:
+            temp_past_12_frames_optical_flow = {}
+            for i in list(past_12_frames_optical_flow)[-12:]:
+                temp_past_12_frames_optical_flow.update({i: past_12_frames_optical_flow[i]})
+            past_12_frames_optical_flow = temp_past_12_frames_optical_flow
+            temp_past_12_frames_optical_flow = None
+
+        if len(last12_bg_sub_mask) > 13:  # we need one more for of?
+            temp_last12_bg_sub_mask = {}
+            for i in list(last12_bg_sub_mask)[-13:]:
+                temp_last12_bg_sub_mask.update({i: last12_bg_sub_mask[i]})
+            last12_bg_sub_mask = temp_last12_bg_sub_mask
+            temp_last12_bg_sub_mask = None
+
+        if actual_interest_fr < 12:
+            continue
+
+        if not resume_mode:
+            # flow between consecutive frames
+            frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))
+            future12_bg_sub_mask = {}
+            future_12_frames_optical_flow = {}
+            flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))  # put sum of optimized of - using other var
+            last_frame_to_add_in_future_dict = list(last12_bg_sub_mask.keys())[-2]
+            future12_bg_sub_mask.update({
+                last_frame_to_add_in_future_dict: last12_bg_sub_mask[last_frame_to_add_in_future_dict]})
+            for of_i, actual_of_i in zip(range(interest_fr, of_interest_fr),
+                                         range(actual_interest_fr, actual_of_interest_fr)):
+                future_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=of_i,
+                                                       time_gap_within_frames=time_gap_within_frames,
+                                                       total_frames=total_frames, step=step, n=n,
+                                                       kernel=kernel, var_threshold=var_threshold)
+                future12_bg_sub_mask.update({actual_of_i: future_mask})
+
+                previous = cv.cvtColor(frames[of_i], cv.COLOR_BGR2GRAY)
+                next_frame = cv.cvtColor(frames[of_i + 1], cv.COLOR_BGR2GRAY)
+
+                flow_per_frame, rgb, mag, ang = FeatureExtractor.get_optical_flow(previous_frame=previous,
+                                                                                  next_frame=next_frame,
+                                                                                  all_results_out=True)
+                future_12_frames_optical_flow.update({f'{actual_of_i - 1}-{actual_of_i}': flow_per_frame})
+
+    return data_all_frames, frames[interest_fr:, ...], \
+           torch.arange(interest_fr + frame_numbers[0], frame_numbers[-1] + 1), \
+           last_frame_from_last_used_batch, past_12_frames_optical_flow, last12_bg_sub_mask
+
+
+def preprocess_data_zero_shot_12_frames_apart(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=None,
+                                              overlap_percent=0.1, radius=50, min_points_in_cluster=5, video_mode=False,
+                                              video_save_path=None, plot_scale_factor=1, desired_fps=5, plot=False,
+                                              custom_video_shape=True, plot_save_path=None, save_checkpoint=False,
+                                              begin_track_mode=True, generic_box_wh=100, distance_threshold=2,
+                                              use_circle_to_keep_track_alive=True, iou_threshold=0.5, extra_radius=50,
+                                              use_is_box_overlapping_live_boxes=True, premature_kill_save=False,
+                                              save_every_n_batch_itr=None, num_frames_to_build_bg_sub_model=12):
+    sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
+                                  num_videos=1, video_number_to_use=VIDEO_NUMBER,
+                                  step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
+                                  single_track_mode=False, track_id=5, multiple_videos=False)
+    data_loader = DataLoader(sdd_simple, batch_size)
+    df = sdd_simple.annotations_df
+    kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
+    n = 30
+    step = n // 2
+    if save_per_part_path is not None:
+        save_per_part_path += 'parts/'
+    first_frame_bounding_boxes, first_frame_mask, last_frame, second_last_frame = None, None, None, None
+    first_frame_live_tracks, last_frame_live_tracks, last_frame_mask = None, None, None
+    current_track_idx, track_ids_used = 0, []
+    precision_list, recall_list, matching_boxes_with_iou_list = [], [], []
+    tp_list, fp_list, fn_list = [], [], []
+    meter_tp_list, meter_fp_list, meter_fn_list = [], [], []
+    l2_distance_hungarian_tp_list, l2_distance_hungarian_fp_list, l2_distance_hungarian_fn_list = [], [], []
+    center_inside_tp_list, center_inside_fp_list, center_inside_fn_list = [], [], []
+    selected_track_distances = []
+    accumulated_features = {}
+
+    out = None
+    frames_shape = sdd_simple.original_shape
+    video_shape = (1200, 1000) if custom_video_shape else frames_shape
+    original_dims = None
+    if video_mode:
+        if frames_shape[0] < frames_shape[1]:
+            original_dims = (
+                frames_shape[1] / 100 * plot_scale_factor, frames_shape[0] / 100 * plot_scale_factor)
+            out = cv.VideoWriter(video_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                                 (video_shape[1], video_shape[0]))  # (1200, 1000))  # (video_shape[0], video_shape[1]))
+            # (video_shape[1], video_shape[0]))
+            video_shape[0], video_shape[1] = video_shape[1], video_shape[0]
+        else:
+            original_dims = (
+                frames_shape[0] / 100 * plot_scale_factor, frames_shape[1] / 100 * plot_scale_factor)
+            out = cv.VideoWriter(video_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                                 (video_shape[0], video_shape[1]))  # (1200, 1000))  # (video_shape[0], video_shape[1]))
+
+    try:
+        for part_idx, data in enumerate(tqdm(data_loader)):
+            frames, frame_numbers = data
+            frames = frames.squeeze()
+            frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
+            frames_count = frames.shape[0]
+            original_shape = new_shape = [frames.shape[1], frames.shape[2]]
+
+            remaining_frames, remaining_frames_idx, last_frame_from_last_used_batch = None, None, None
+            past_12_frames_optical_flow, last_itr_past_12_frames_optical_flow, last_itr_past_12_bg_sub_mask = {}, {}, {}
+            last_optical_flow_map, last12_bg_sub_mask = None, {}
+
+            features_, remaining_frames, remaining_frames_idx, last_frame_from_last_used_batch, \
+            past_12_frames_optical_flow, last12_bg_sub_mask = \
+                keyframe_based_feature_extraction_zero_shot(
+                    frames=frames, n=30,
+                    frames_to_build_model=num_frames_to_build_bg_sub_model,
+                    var_threshold=None, frame_numbers=frame_numbers,
+                    remaining_frames=remaining_frames,
+                    remaining_frames_idx=remaining_frames_idx,
+                    past_12_frames_optical_flow=past_12_frames_optical_flow,
+                    last_frame_from_last_used_batch=
+                    last_frame_from_last_used_batch,
+                    last12_bg_sub_mask=last12_bg_sub_mask,
+                    resume_mode=True)  # fixme: remove
+            accumulated_features = {**accumulated_features, **features_}
+    except KeyboardInterrupt:
+        print()
+
+    out.release()
+    return accumulated_features
+
+
 if __name__ == '__main__':
     # feats = preprocess_data(var_threshold=150, plot=False)
     eval_mode = False
@@ -2125,7 +2362,7 @@ if __name__ == '__main__':
                                           min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
                                           use_circle_to_keep_track_alive=False, custom_video_shape=False,
                                           extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True,
-                                          save_every_n_batch_itr=50)
+                                          save_every_n_batch_itr=50, drop_last_batch=True)
         torch.save(feats, features_save_path + 'features.pt')
     elif not eval_mode and EXECUTE_STEP == 2:
         extracted_features_path = '../Plots/baseline_v2/v0/quad1/features.pt'
@@ -2150,6 +2387,15 @@ if __name__ == '__main__':
         ##############################################################################################################
         # out = process_complex_features_rnn(extracted_features, time_steps=5)
         print()
+    elif not eval_mode and EXECUTE_STEP == 3:
+        feats = preprocess_data_zero_shot_12_frames_apart(
+            var_threshold=None, plot=False, radius=60, save_per_part_path=None,
+            video_mode=True, video_save_path=video_save_path + 'extraction.avi',
+            desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
+            min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
+            use_circle_to_keep_track_alive=False, custom_video_shape=False,
+            extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True,
+            save_every_n_batch_itr=50)
     else:
         feat_file_path = '../Plots/baseline_v2/v0/deathCircle4/' \
                          'use_is_box_overlapping_live_boxes/premature_kill_features_dict.pt'
@@ -2161,6 +2407,6 @@ if __name__ == '__main__':
     #  -> radius=60, extra_radius=0, generic_box_wh=50, use_circle_to_keep_track_alive=False, min_points_in_cluster=16
     #  , use_is_box_overlapping_live_boxes=True --- looks good
     #  -> too less frames, bg fails
-    #  -> Interesting: gates[2,3,8], hyang[0,3,4,7s,], nexus[3?,4?,], quad[1,]
+    #  -> Interesting: gates[2,3,8, 4--], hyang[0,3,4,7s, 8,9], nexus[3?,4?,], quad[1,], deatCircle[2, 4]
     #  -> Extraction time: gates3 - 1day
     #  -> What about stationary objects? Decreasing Recall
