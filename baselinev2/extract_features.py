@@ -89,6 +89,14 @@ def plot_image(im):
     plt.show()
 
 
+def plot_image_simple(im, bbox=None):
+    fig, axs = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+    axs.imshow(im, cmap='gray')
+    if bbox is not None:
+        add_box_to_axes(axs, bbox)
+    plt.show()
+
+
 def plot_features_simple(features, bbox=None):
     fig, axs = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
     axs.plot(features[:, 0], features[:, 1], 'o', markerfacecolor='blue', markeredgecolor='k', markersize=8)
@@ -227,6 +235,9 @@ def plot_features_with_circles(features, features_inside_circle, features_skippe
             axs.add_artist(plt.Circle((c_center[0], c_center[1]), radius, color='green', fill=False))
     if boxes is not None:
         add_box_to_axes(axs, boxes)
+        # for box in boxes:
+        #     box_center = get_bbox_center(box).flatten()
+        #     axs.add_artist(plt.Circle((box_center[0], box_center[1]), 70.71, color='red', fill=False))
 
     legends_dict = {'yellow': 'Inside Circle',
                     'blue': 'Features',
@@ -1452,9 +1463,10 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                     new_track_boxes.append(t_box)
 
                             # plot_features_with_circles(
-                            #     all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
+                            #     all_cloud, features_covered, features_skipped, first_frame_mask, marker_size=8,
                             #     cluster_centers=final_cluster_centers, num_clusters=final_cluster_centers.shape[0],
-                            #     frame_number=frame_number, boxes=annotations[:, :-1], radius=radius + 50,
+                            #     frame_number=frame_number, boxes=validation_annotations[:, :-1],
+                            #     radius=radius+extra_radius,
                             #     additional_text=
                             #     f'Original Cluster Center Count: {n_clusters}\nPruned Cluster Distribution: '
                             #     f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
@@ -1740,8 +1752,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         a_matched_boxes_l2_distance_matrix_idx, r_matched_boxes_l2_distance_matrix_idx = np.where(
                             matched_boxes_l2_distance_matrix
                         )
-    
-                        a_predicted_box_center_inside_gt_box_matrix_idx,\
+
+                        a_predicted_box_center_inside_gt_box_matrix_idx, \
                         r_predicted_box_center_inside_gt_box_matrix_idx = \
                             np.where(predicted_box_center_inside_gt_box_matrix)
                     else:
@@ -1866,7 +1878,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                                 # plot_features_with_circles(
                                 #     all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
-                                #     cluster_centers=final_cluster_centers, num_clusters=final_cluster_centers.shape[0],
+                                #     cluster_centers=final_cluster_centers,
+                                #     num_clusters=final_cluster_centers.shape[0],
                                 #     frame_number=frame_number, boxes=annotations[:, :-1], radius=radius + 50,
                                 #     additional_text=
                                 #     f'Original Cluster Center Count: {n_clusters}\nPruned Cluster Distribution: '
