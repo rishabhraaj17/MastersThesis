@@ -818,6 +818,21 @@ def corner_width_height_to_min_max(bbox, bottom_left=True):
     return [x_min, y_min, x_max, y_max]
 
 
+def calculate_flexible_bounding_box(cluster_center_idx, cluster_center_x, cluster_center_y, mean_shift):
+    points_in_current_cluster_idx = np.argwhere(mean_shift.labels == cluster_center_idx)
+    points_in_current_cluster = mean_shift.data[points_in_current_cluster_idx].squeeze()
+    max_value_x = max(points_in_current_cluster[:, 0])
+    min_value_x = min(points_in_current_cluster[:, 0])
+    max_value_y = max(points_in_current_cluster[:, 1])
+    min_value_y = min(points_in_current_cluster[:, 1])
+    flexible_height = max_value_y - min_value_y
+    flexible_width = max_value_x - min_value_x
+    flexible_box = torchvision.ops.box_convert(
+        torch.tensor([cluster_center_x, cluster_center_y, flexible_width, flexible_height]),
+        'cxcywh', 'xyxy').int().numpy()
+    return flexible_box, points_in_current_cluster
+
+
 def eval_metrics(features_file):
     features = torch.load(features_file)
     tp_list, fp_list, fn_list = features['tp_list'], features['fp_list'], features['fn_list']
@@ -1446,8 +1461,12 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         if final_cluster_centers.size != 0:
                             t_w, t_h = generic_box_wh, generic_box_wh  # 100, 100
                             # STEP 4h: d> start new potential tracks
-                            for cluster_center in final_cluster_centers:
+                            for cluster_center, cluster_center_idx in \
+                                    zip(final_cluster_centers, final_cluster_centers_idx):
                                 cluster_center_x, cluster_center_y = np.round(cluster_center).astype(np.int)
+
+                                # flexible_box, points_in_current_cluster = calculate_flexible_bounding_box(
+                                #     cluster_center_idx, cluster_center_x, cluster_center_y, mean_shift)
 
                                 # t_box = centroids_to_min_max([cluster_center_x, cluster_center_y, t_w, t_h])
                                 t_box = torchvision.ops.box_convert(
