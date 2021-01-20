@@ -931,11 +931,13 @@ def features_filter_append_preprocessing(overlap_percent, shifted_xy, xy_current
 
 
 def first_frame_processing_and_gt_association(df, first_frame_mask, frame_idx, frame_number, frames, frames_count,
-                                              kernel, n, new_shape, original_shape, step, var_threshold):
+                                              kernel, n, new_shape, original_shape, step, var_threshold,
+                                              detect_shadows=True):
     first_frame_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=frame_idx,
                                                 time_gap_within_frames=3,
                                                 total_frames=frames_count, step=step, n=n,
-                                                kernel=kernel, var_threshold=var_threshold)
+                                                kernel=kernel, var_threshold=var_threshold,
+                                                detect_shadows=detect_shadows)
     first_frame_annotation = get_frame_annotations_and_skip_lost(df, frame_number.item())
     first_annotations, first_bbox_centers = scale_annotations(first_frame_annotation,
                                                               original_scale=original_shape,
@@ -958,13 +960,13 @@ def build_mog2_bg_model(n, frames, kernel, algo):
 
 
 def get_mog2_foreground_mask(frames, interest_frame_idx, time_gap_within_frames, total_frames, step, n, kernel,
-                             var_threshold):
+                             var_threshold, detect_shadows=True):
     selected_past = [(interest_frame_idx - i * time_gap_within_frames) % total_frames for i in range(1, step + 1)]
     selected_future = [(interest_frame_idx + i * time_gap_within_frames) % total_frames for i in range(1, step + 1)]
     selected_frames = selected_past + selected_future
     frames_building_model = [frames[s] for s in selected_frames]
 
-    algo = cv.createBackgroundSubtractorMOG2(history=n, varThreshold=var_threshold)
+    algo = cv.createBackgroundSubtractorMOG2(history=n, varThreshold=var_threshold, detectShadows=detect_shadows)
     _ = build_mog2_bg_model(n, frames_building_model, kernel, algo)
 
     mask = algo.apply(frames[interest_frame_idx], learningRate=0)
@@ -980,7 +982,7 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     radius=50, min_points_in_cluster=5, video_mode=False, video_save_path=None, plot_scale_factor=1,
                     desired_fps=5, custom_video_shape=True, plot_save_path=None, save_checkpoint=False,
                     begin_track_mode=True, use_circle_to_keep_track_alive=True, iou_threshold=0.5, generic_box_wh=100,
-                    extra_radius=50, use_is_box_overlapping_live_boxes=True):
+                    extra_radius=50, use_is_box_overlapping_live_boxes=True, detect_shadows=True):
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
                                   step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
@@ -1031,7 +1033,7 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                     frames, frames_count,
                     kernel, n, new_shape,
                     original_shape, step,
-                    var_threshold)
+                    var_threshold, detect_shadows=detect_shadows)
 
                 # STEP 1: b> Store them for the next ts and update these variables in further iterations
                 first_frame_bounding_boxes = first_annotations[:, :-1]
@@ -1050,7 +1052,8 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                 fg_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=frame_idx,
                                                    time_gap_within_frames=3,
                                                    total_frames=frames_count, step=step, n=n,
-                                                   kernel=kernel, var_threshold=var_threshold)
+                                                   kernel=kernel, var_threshold=var_threshold,
+                                                   detect_shadows=detect_shadows)
 
                 # Note: Only for validation purposes
                 # just for validation #####################################################################
@@ -1376,7 +1379,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                               save_checkpoint=False, plot=False, begin_track_mode=True, generic_box_wh=100,
                               use_circle_to_keep_track_alive=True, iou_threshold=0.5, extra_radius=50,
                               use_is_box_overlapping_live_boxes=True, premature_kill_save=False,
-                              distance_threshold=2, save_every_n_batch_itr=None, drop_last_batch=True):
+                              distance_threshold=2, save_every_n_batch_itr=None, drop_last_batch=True,
+                              detect_shadows=True):
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
                                   step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
@@ -1434,7 +1438,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         frames, frames_count,
                         kernel, n, new_shape,
                         original_shape, step,
-                        var_threshold)
+                        var_threshold, detect_shadows=detect_shadows)
 
                     running_tracks, new_track_boxes = [], []
                     all_cloud, feature_idx_covered, features_covered = features_included_in_live_tracks(
@@ -1556,7 +1560,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                     fg_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=frame_idx,
                                                        time_gap_within_frames=3,
                                                        total_frames=frames_count, step=step, n=n,
-                                                       kernel=kernel, var_threshold=var_threshold)
+                                                       kernel=kernel, var_threshold=var_threshold,
+                                                       detect_shadows=detect_shadows)
 
                     # Note: Only for validation purposes
                     # just for validation #####################################################################
@@ -2185,7 +2190,7 @@ def keyframe_based_feature_extraction_zero_shot(frames, n, frames_to_build_model
                                                 time_gap_within_frames=3, frame_numbers=None, remaining_frames=None,
                                                 remaining_frames_idx=None, past_12_frames_optical_flow=None,
                                                 last_frame_from_last_used_batch=None, last12_bg_sub_mask=None,
-                                                resume_mode=False):
+                                                resume_mode=False, detect_shadows=True):
     interest_fr = None
     actual_interest_fr = None
     frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
@@ -2214,7 +2219,8 @@ def keyframe_based_feature_extraction_zero_shot(frames, n, frames_to_build_model
         mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=fr,
                                         time_gap_within_frames=time_gap_within_frames,
                                         total_frames=total_frames, step=step, n=n,
-                                        kernel=kernel, var_threshold=var_threshold)
+                                        kernel=kernel, var_threshold=var_threshold,
+                                        detect_shadows=detect_shadows)
 
         # do not go in circle for flow estimation
         if of_interest_fr < interest_fr:
@@ -2277,7 +2283,8 @@ def keyframe_based_feature_extraction_zero_shot(frames, n, frames_to_build_model
                 future_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=of_i,
                                                        time_gap_within_frames=time_gap_within_frames,
                                                        total_frames=total_frames, step=step, n=n,
-                                                       kernel=kernel, var_threshold=var_threshold)
+                                                       kernel=kernel, var_threshold=var_threshold,
+                                                       detect_shadows=detect_shadows)
                 future12_bg_sub_mask.update({actual_of_i: future_mask})
 
                 previous = cv.cvtColor(frames[of_i], cv.COLOR_BGR2GRAY)
@@ -2394,7 +2401,7 @@ if __name__ == '__main__':
                                           min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
                                           use_circle_to_keep_track_alive=False, custom_video_shape=False,
                                           extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True,
-                                          save_every_n_batch_itr=50, drop_last_batch=True)
+                                          save_every_n_batch_itr=50, drop_last_batch=True, detect_shadows=False)
         torch.save(feats, features_save_path + 'features.pt')
     elif not eval_mode and EXECUTE_STEP == 2:
         extracted_features_path = '../Plots/baseline_v2/v0/quad1/features.pt'
