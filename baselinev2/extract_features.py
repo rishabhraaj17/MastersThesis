@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import patches
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+import matplotlib.lines as mlines
 import pytorch_lightning.metrics as plm
 import scipy
 import skimage
@@ -95,6 +96,46 @@ def plot_image_simple(im, bbox=None):
     if bbox is not None:
         add_box_to_axes(axs, bbox)
     plt.show()
+
+
+def plot_image_set_of_boxes(im, bbox1=None, bbox2=None):
+    fig, axs = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+    axs.imshow(im, cmap='gray')
+    if bbox1 is not None or bbox2 is not None:
+        add_box_to_axes(axs, bbox1, 'r')
+        add_box_to_axes(axs, bbox2, 'aqua')
+
+        legends_dict = {'r': 'GT Bounding Box',
+                        'aqua': 'Generated Bounding Box'}
+
+        legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+        fig.legend(handles=legend_patches, loc=2)
+    plt.show()
+
+
+def plot_random_legends():
+    blue_star = mlines.Line2D([], [], color='white', marker='*', linestyle='None',
+                              markersize=10, label='Cluster\'s Centroid', markeredgecolor='black')
+    red_square = mlines.Line2D([], [], color='red', marker='o', linestyle='None',
+                               markersize=10, label='Region of Validity', markerfacecolor='white')
+    purple_triangle = mlines.Line2D([], [], color='green', marker='o', linestyle='None',
+                                    markersize=10, label='Cluster Pool Region', markerfacecolor='white')
+    purple_triangle0 = mlines.Line2D([], [], color='yellow', marker='o', linestyle='None',
+                                     markersize=10, label='Inside Region of Validity')
+    purple_triangle1 = mlines.Line2D([], [], color='aqua', marker='o', linestyle='None',
+                                     markersize=10, label='New track candidate activations')
+
+    plt.legend(handles=[blue_star, red_square, purple_triangle, purple_triangle0, purple_triangle1])
+
+    plt.show()
+    # fig, axs = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+    # legends_dict = {'*': 'Cluster\'s Centroid',
+    #                 'g': 'Cluster Pool Region',
+    #                 'r': 'Ground Truth Bounding Box'}
+    #
+    # legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    # fig.legend(handles=legend_patches, loc=2)
+    # plt.show()
 
 
 def plot_features_simple(features, bbox=None):
