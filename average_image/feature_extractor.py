@@ -951,6 +951,231 @@ class FeatureExtractor(object):
         else:
             data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
                              flow_idx_normalized_0)).transpose()
+        if return_options:
+            options = {
+                'max_0': max_0,
+                'min_0': min_0,
+                'max_1': max_1,
+                'min_1': min_1,
+                'f_max_0': f_max_0,
+                'f_min_0': f_min_0,
+                'f_max_1': f_max_1,
+                'f_min_1': f_min_1
+            }
+            return data, data_, max_0, max_1, min_0, min_1, threshold_img, options
+        return data, data_, max_0, max_1, min_0, min_1, threshold_img
+
+    @staticmethod
+    def _prepare_data_xyuv_for_object_of_interest(flow, fr, processed_data, data_frame_num, use_intensities=False,
+                                                  evaluation_mode: bool = False, return_options: bool = False,
+                                                  original_shape=None, new_shape=None, df=None):  # fixme
+        if evaluation_mode:
+            data_ = processed_data
+        else:
+            data_ = processed_data[fr]
+        data_ = np.abs(data_)
+        mask = np.zeros_like(data_)
+        frame_annotation = get_frame_annotations(df, data_frame_num)
+        annotation, _ = scale_annotations(frame_annotation, original_scale=original_shape,
+                                          new_scale=new_shape, return_track_id=False,
+                                          tracks_with_annotations=True)
+        mask[annotation[1]:annotation[3], annotation[0]:annotation[2]] = \
+            data_[annotation[1]:annotation[3], annotation[0]:annotation[2]]
+        object_idx = (mask > 0).nonzero()
+        intensities = mask[object_idx[0], object_idx[1]]
+        flow_idx = flow[object_idx[0], object_idx[1]]
+        flow_idx_normalized_0, f_max_0, f_min_0 = normalize(flow_idx[..., 0])
+        flow_idx_normalized_1, f_max_1, f_min_1 = normalize(flow_idx[..., 1])
+        object_idx_normalized_0, max_0, min_0 = normalize(object_idx[0])
+        object_idx_normalized_1, max_1, min_1 = normalize(object_idx[1])
+        if use_intensities:
+            data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                             flow_idx_normalized_0, intensities)).transpose()
+        else:
+            data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                             flow_idx_normalized_0)).transpose()
+        if return_options:
+            options = {
+                'max_0': max_0,
+                'min_0': min_0,
+                'max_1': max_1,
+                'min_1': min_1,
+                'f_max_0': f_max_0,
+                'f_min_0': f_min_0,
+                'f_max_1': f_max_1,
+                'f_min_1': f_min_1
+            }
+            return data, data_, max_0, max_1, min_0, min_1, options
+        return data, data_, max_0, max_1, min_0, min_1
+
+    @staticmethod
+    def _prepare_data_xyuv_for_all_object_of_interest(flow, fr, processed_data, data_frame_num, use_intensities=False,
+                                                      evaluation_mode: bool = False, return_options: bool = False,
+                                                      track_ids=None, original_shape=None, new_shape=None, df=None,
+                                                      do_clustering=False, optical_flow_frame_num=None,
+                                                      optical_flow_till_current_frame=None, return_normalized=False):
+        if evaluation_mode:
+            data_ = processed_data
+        else:
+            data_ = processed_data[fr]
+        data_ = np.abs(data_)
+        all_agent_features = []
+        data_frame_num = data_frame_num.item()
+        frame_annotation = get_frame_annotations_and_skip_lost(df, data_frame_num)
+        annotations, bbox_centers = scale_annotations(frame_annotation, original_scale=original_shape,
+                                                      new_scale=new_shape, return_track_id=False,
+                                                      tracks_with_annotations=True)
+        for id_ in range(annotations.shape[0]):
+            mask = np.zeros_like(data_)
+            mask[annotations[id_][1]:annotations[id_][3], annotations[id_][0]:annotations[id_][2]] = \
+                data_[annotations[id_][1]:annotations[id_][3], annotations[id_][0]:annotations[id_][2]]
+            object_idx = (mask > 0).nonzero()
+            # plot_points_only(object_idx[0], object_idx[1])
+            if object_idx[0].size != 0:
+                intensities = mask[object_idx[0], object_idx[1]]
+                flow_idx = flow[object_idx[0], object_idx[1]]
+                past_flow_idx = optical_flow_till_current_frame[object_idx[0], object_idx[1]]
+
+                if return_normalized:
+                    flow_idx_normalized_0, f_max_0, f_min_0 = normalize(flow_idx[..., 0])
+                    flow_idx_normalized_1, f_max_1, f_min_1 = normalize(flow_idx[..., 1])
+                    past_flow_idx_normalized_0, past_f_max_0, past_f_min_0 = normalize(past_flow_idx[..., 0])
+                    past_flow_idx_normalized_1, past_f_max_1, past_f_min_1 = normalize(past_flow_idx[..., 1])
+                    object_idx_normalized_0, max_0, min_0 = normalize(object_idx[0])
+                    object_idx_normalized_1, max_1, min_1 = normalize(object_idx[1])
+                    if use_intensities:
+                        data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                                         flow_idx_normalized_0, past_flow_idx_normalized_1, past_flow_idx_normalized_0,
+                                         intensities)).transpose()
+                    else:
+                        data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                                         flow_idx_normalized_0, past_flow_idx_normalized_1, past_flow_idx_normalized_0,
+                                         )).transpose()
+                    if np.isnan(data).any():
+                        continue
+                    options = {
+                        'max_0': max_0,
+                        'min_0': min_0,
+                        'max_1': max_1,
+                        'min_1': min_1,
+                        'f_max_0': f_max_0,
+                        'f_min_0': f_min_0,
+                        'f_max_1': f_max_1,
+                        'f_min_1': f_min_1,
+                        'past_f_max_0': past_f_max_0,
+                        'past_f_min_0': past_f_min_0,
+                        'past_f_max_1': past_f_max_1,
+                        'past_f_min_1': past_f_min_1
+                    }
+                    if do_clustering:
+                        cluster_algo, n_clusters_ = FeatureExtractor._perform_clustering(data, max_0, max_1, min_0,
+                                                                                         min_1,
+                                                                                         bandwidth=0.1,
+                                                                                         renormalize=True,
+                                                                                         min_bin_freq=3,
+                                                                                         max_iter=300)
+                        all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id_][-1].item(),
+                                                                frame_number=data_frame_num,
+                                                                normalize_params=options,
+                                                                cluster_centers=cluster_algo.cluster_centers,
+                                                                cluster_labels=cluster_algo.labels,
+                                                                optical_flow_frame_num=optical_flow_frame_num,
+                                                                bbox_center=bbox_centers[id_],
+                                                                bbox=annotations[id_][:4]))
+                    else:
+                        all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id_][-1].item(),
+                                                                frame_number=data_frame_num,
+                                                                normalize_params=options,
+                                                                optical_flow_frame_num=optical_flow_frame_num,
+                                                                bbox_center=bbox_centers[id_],
+                                                                bbox=annotations[id_][:4]))
+                else:
+                    if use_intensities:
+                        data = np.stack((object_idx[1], object_idx[0], flow_idx[..., 1], flow_idx[..., 0],
+                                         past_flow_idx[..., 1], past_flow_idx[..., 0],
+                                         intensities)).transpose()
+                    else:
+                        data = np.stack((object_idx[1], object_idx[0], flow_idx[..., 1], flow_idx[..., 0],
+                                         past_flow_idx[..., 1], past_flow_idx[..., 0])).transpose()
+                    if np.isnan(data).any():
+                        continue
+
+                    if do_clustering:
+                        return NotImplemented
+                    else:
+                        all_agent_features.append(AgentFeatures(features=data, track_id=annotations[id_][-1].item(),
+                                                                frame_number=data_frame_num,
+                                                                normalize_params=None,
+                                                                optical_flow_frame_num=optical_flow_frame_num,
+                                                                bbox_center=bbox_centers[id_],
+                                                                bbox=annotations[id_][:4]))
+
+        return all_agent_features
+
+    @staticmethod
+    def _prepare_data_xy_weighted_uv(flow, fr, processed_data, mag, use_intensities=False,
+                                     evaluation_mode: bool = False,
+                                     weight: float = 1.0):
+        if evaluation_mode:
+            data_ = processed_data
+        else:
+            data_ = processed_data[fr]
+        data_ = np.abs(data_)
+        threshold_img = np.zeros_like(data_)
+        object_idx = (data_ > 0).nonzero()
+        intensities = data_[object_idx[0], object_idx[1]]
+        flow_idx = flow[object_idx[0], object_idx[1]]
+        flow_idx_normalized_0, f_max_0, f_min_0 = normalize(flow_idx[..., 0])
+        flow_idx_normalized_1, f_max_1, f_min_1 = normalize(flow_idx[..., 1])
+
+        mag_idx = mag[object_idx[0], object_idx[1]]
+        mag_idx_normalized, mag_idx_max, mag_idx_min = normalize(mag_idx)
+        mag_idx_normalized *= weight
+        flow_idx_normalized_0, flow_idx_normalized_1 = flow_idx_normalized_0 * mag_idx_normalized \
+            , flow_idx_normalized_1 * mag_idx_normalized
+
+        threshold_img[object_idx[0], object_idx[1]] = data_[object_idx[0], object_idx[1]]
+        object_idx_normalized_0, max_0, min_0 = normalize(object_idx[0])
+        object_idx_normalized_1, max_1, min_1 = normalize(object_idx[1])
+        if use_intensities:
+            data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                             flow_idx_normalized_0, intensities)).transpose()
+        else:
+            data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                             flow_idx_normalized_0)).transpose()
+        return data, data_, max_0, max_1, min_0, min_1, threshold_img
+
+    @staticmethod
+    def _prepare_data_xyuv_color(image, flow, fr, processed_data, use_intensities=False, evaluation_mode: bool = False,
+                                 lab_space: bool = False):
+        if evaluation_mode:
+            data_ = processed_data
+            im = image
+        else:
+            data_ = processed_data[fr]
+            im = image[fr]
+        if im.shape[0] != data_.shape[0]:
+            im = (resize(im, output_shape=(data_.shape[0], data_.shape[1])) * 255).astype(np.uint8)
+        if lab_space:
+            im = color.rgb2lab(im)
+        data_ = np.abs(data_)
+        threshold_img = np.zeros_like(data_)
+        object_idx = (data_ > 0).nonzero()
+        intensities = data_[object_idx[0], object_idx[1]]
+        colors = im[object_idx[0], object_idx[1]]
+        colors = colors / 255
+        flow_idx = flow[object_idx[0], object_idx[1]]
+        flow_idx_normalized_0, f_max_0, f_min_0 = normalize(flow_idx[..., 0])
+        flow_idx_normalized_1, f_max_1, f_min_1 = normalize(flow_idx[..., 1])
+        threshold_img[object_idx[0], object_idx[1]] = data_[object_idx[0], object_idx[1]]
+        object_idx_normalized_0, max_0, min_0 = normalize(object_idx[0])
+        object_idx_normalized_1, max_1, min_1 = normalize(object_idx[1])
+        if use_intensities:
+            data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                             flow_idx_normalized_0, intensities)).transpose()
+        else:
+            data = np.stack((object_idx_normalized_1, object_idx_normalized_0, flow_idx_normalized_1,
+                             flow_idx_normalized_0, colors[..., 0], colors[..., 1], colors[..., 2])).transpose()
         return data, data_, max_0, max_1, min_0, min_1, threshold_img
 
     @staticmethod
