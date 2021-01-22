@@ -1,0 +1,3 @@
+[submodule "OpenTraj"]
+	path = OpenTraj
+	url = https://github.com/crowdbotp/OpenTraj
