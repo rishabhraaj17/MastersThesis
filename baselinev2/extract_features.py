@@ -1,3 +1,4 @@
+from enum import Enum
 from itertools import cycle
 from pathlib import Path
 from typing import Sequence, Dict
@@ -49,8 +50,17 @@ META_PATH = '../Datasets/SDD/H_SDD.txt'
 DATASET_META = SDDMeta(META_PATH)
 META_LABEL = SDDVideoDatasets.LITTLE
 
-# -1 for both steps
-EXECUTE_STEP = 1
+
+class STEP(Enum):
+    SEMI_SUPERVISED = 0
+    UNSUPERVISED = 1
+    EXTRACTION = 3
+    ALGO_VERSION_1 = 4
+    DEBUG = 5
+    METRICS = 6
+
+
+EXECUTE_STEP = STEP.SEMI_SUPERVISED
 
 
 class ObjectFeatures(object):
@@ -1965,7 +1975,7 @@ def preprocess_data_one_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_th
                                        'l2_distance_hungarian_fn_list': l2_distance_hungarian_fn_list,
                                        'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
                                        'accumulated_features': accumulated_features}
-                if save_every_n_batch_itr is not None:
+                if save_every_n_batch_itr is not None and frame_number != 0:
                     save_dict = {'frame_number': frame_number,
                                  'part_idx': part_idx,
                                  'second_last_frame': second_last_frame,
@@ -3152,11 +3162,7 @@ if __name__ == '__main__':
     features_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/'
     Path(video_save_path).mkdir(parents=True, exist_ok=True)
     Path(features_save_path).mkdir(parents=True, exist_ok=True)
-    if not eval_mode and EXECUTE_STEP == 1:
-        # feats = preprocess_data(var_threshold=None, plot=False, radius=100, save_per_part_path=None, video_mode=False,
-        #                         video_save_path=video_save_path + 'extraction.avi', desired_fps=2, overlap_percent=0.4,
-        #                         plot_save_path=plot_save_path, min_points_in_cluster=16, begin_track_mode=True,
-        #                         use_circle_to_keep_track_alive=False)
+    if not eval_mode and EXECUTE_STEP == STEP.UNSUPERVISED:
         feats = preprocess_data_zero_shot(var_threshold=None, plot=False, radius=60, save_per_part_path=None,
                                           video_mode=True, video_save_path=video_save_path + 'extraction.avi',
                                           desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
@@ -3165,11 +3171,7 @@ if __name__ == '__main__':
                                           extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True,
                                           save_every_n_batch_itr=50, drop_last_batch=True, detect_shadows=False)
         torch.save(feats, features_save_path + 'features.pt')
-    elif not eval_mode and EXECUTE_STEP == 4:
-        # feats = preprocess_data(var_threshold=None, plot=False, radius=100, save_per_part_path=None, video_mode=False,
-        #                         video_save_path=video_save_path + 'extraction.avi', desired_fps=2, overlap_percent=0.4,
-        #                         plot_save_path=plot_save_path, min_points_in_cluster=16, begin_track_mode=True,
-        #                         use_circle_to_keep_track_alive=False)
+    elif not eval_mode and EXECUTE_STEP == STEP.SEMI_SUPERVISED:
         video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/one_shot/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
         feats = preprocess_data_one_shot(var_threshold=None, plot=False, radius=60, save_per_part_path=None,
@@ -3179,7 +3181,7 @@ if __name__ == '__main__':
                                          use_circle_to_keep_track_alive=False, custom_video_shape=False,
                                          extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True,
                                          save_every_n_batch_itr=50, drop_last_batch=True, detect_shadows=False)
-    elif not eval_mode and EXECUTE_STEP == 2:
+    elif not eval_mode and EXECUTE_STEP == STEP.DEBUG:
         extracted_features_path = '../Plots/baseline_v2/v0/quad1/features.pt'
         extracted_features: Dict[int, FrameFeatures] = torch.load(extracted_features_path)
         # Scrapped ###################################################################################################
@@ -3202,7 +3204,7 @@ if __name__ == '__main__':
         ##############################################################################################################
         # out = process_complex_features_rnn(extracted_features, time_steps=5)
         print()
-    elif not eval_mode and EXECUTE_STEP == 3:
+    elif not eval_mode and EXECUTE_STEP == STEP.EXTRACTION:
         feats = preprocess_data_zero_shot_12_frames_apart(
             var_threshold=None, plot=False, radius=60, save_per_part_path=None,
             video_mode=True, video_save_path=video_save_path + 'extraction.avi',
