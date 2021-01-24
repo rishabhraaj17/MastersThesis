@@ -1,7 +1,8 @@
+import copy
 from enum import Enum
 from itertools import cycle
 from pathlib import Path
-from typing import Sequence, Dict
+from typing import Sequence, Dict, List
 
 import cv2 as cv
 import numpy as np
@@ -60,11 +61,12 @@ class STEP(Enum):
     METRICS = 6
 
 
-EXECUTE_STEP = STEP.SEMI_SUPERVISED
+EXECUTE_STEP = STEP.UNSUPERVISED
 
 
 class ObjectFeatures(object):
-    def __init__(self, idx, xy, past_xy, final_xy, flow, past_flow, past_bbox, final_bbox, is_track_live=True):
+    def __init__(self, idx, xy, past_xy, final_xy, flow, past_flow, past_bbox, final_bbox, frame_number,
+                 is_track_live=True):
         super(ObjectFeatures, self).__init__()
         self.idx = idx
         self.xy = xy
@@ -75,6 +77,11 @@ class ObjectFeatures(object):
         self.final_xy = final_xy
         self.past_xy = past_xy
         self.is_track_live = is_track_live
+        self.frame_number = frame_number
+        self.gt_box = None
+        self.past_gt_box = None
+        self.gt_track_idx = None
+        self.gt_past_current_distance = None
 
     def __eq__(self, other):
         return self.idx == other.idx
@@ -85,6 +92,16 @@ class FrameFeatures(object):
         super(FrameFeatures, self).__init__()
         self.frame_number = frame_number
         self.object_features = object_features
+
+
+class TrackFeatures(object):
+    def __init__(self, track_id: int):
+        super(TrackFeatures, self).__init__()
+        self.track_id = track_id
+        self.object_features: List[ObjectFeatures] = []
+
+    def __eq__(self, other):
+        return self.track_id == other.track_id
 
 
 class Track(object):
@@ -108,18 +125,40 @@ def plot_image_simple(im, bbox=None):
     plt.show()
 
 
-def plot_image_set_of_boxes(im, bbox1=None, bbox2=None):
-    fig, axs = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
-    axs.imshow(im, cmap='gray')
-    if bbox1 is not None or bbox2 is not None:
-        add_box_to_axes(axs, bbox1, 'r')
-        add_box_to_axes(axs, bbox2, 'aqua')
+def plot_image_set_of_boxes(im, bbox1=None, bbox2=None, overlay=True, annotate=None):
+    if overlay:
+        fig, axs = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+        axs.imshow(im, cmap='gray')
+        if bbox1 is not None or bbox2 is not None:
+            if annotate is None:
+                add_box_to_axes(axs, bbox1, 'r')
+                add_box_to_axes(axs, bbox2, 'aqua')
+            else:
+                add_box_to_axes_with_annotation(axs, bbox1, annotate[0], 'r')
+                add_box_to_axes_with_annotation(axs, bbox2, annotate[1], 'aqua')
 
-        legends_dict = {'r': 'GT Bounding Box',
-                        'aqua': 'Generated Bounding Box'}
+            legends_dict = {'r': 'GT Bounding Box',
+                            'aqua': 'Generated Bounding Box'}
 
-        legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
-        fig.legend(handles=legend_patches, loc=2)
+            legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+            fig.legend(handles=legend_patches, loc=2)
+    else:
+        fig, axs = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(12, 10))
+        axs[0].imshow(im, cmap='gray')
+        axs[1].imshow(im, cmap='gray')
+        if bbox1 is not None or bbox2 is not None:
+            if annotate is None:
+                add_box_to_axes(axs[0], bbox1, 'r')
+                add_box_to_axes(axs[1], bbox2, 'aqua')
+            else:
+                add_box_to_axes_with_annotation(axs[0], bbox1, annotate[0], 'r')
+                add_box_to_axes_with_annotation(axs[1], bbox2, annotate[1], 'aqua')
+
+            legends_dict = {'r': 'GT Bounding Box',
+                            'aqua': 'Generated Bounding Box'}
+
+            legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+            fig.legend(handles=legend_patches, loc=2)
     plt.show()
 
 
@@ -685,6 +724,22 @@ def add_box_to_axes(ax, boxes, edge_color='r'):
         ax.add_patch(rect)
 
 
+def add_box_to_axes_with_annotation(ax, boxes, annotation, edge_color='r'):
+    for a, box in zip(annotation, boxes):
+        if box is None:
+            continue
+        rect = patches.Rectangle(xy=(box[0], box[1]), width=box[2] - box[0], height=box[3] - box[1],
+                                 edgecolor=edge_color, fill=False,
+                                 linewidth=None)
+        ax.add_patch(rect)
+
+        rx, ry = rect.get_xy()
+        cx = rx + rect.get_width() / 2.0
+        cy = ry + rect.get_height() / 2.0
+
+        ax.annotate(a, (cx, cy), color='w', weight='bold', fontsize=6, ha='center', va='center')
+
+
 def plot_processing_steps(xy_cloud, shifted_xy_cloud, xy_box, shifted_xy_box,
                           final_cloud, xy_cloud_current_frame, frame_number, track_id,
                           selected_past, selected_current,
@@ -867,6 +922,14 @@ def corner_width_height_to_min_max(bbox, bottom_left=True):
         x_min = x_max - width
         y_min = y_max - height
     return [x_min, y_min, x_max, y_max]
+
+
+def remove_entries_from_dict(entries, the_dict):
+    return_dict = copy.deepcopy(the_dict)
+    for key in entries:
+        if key in return_dict:
+            del return_dict[key]
+    return return_dict
 
 
 def calculate_flexible_bounding_box(cluster_center_idx, cluster_center_x, cluster_center_y, mean_shift):
@@ -1168,7 +1231,8 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                                                                   past_flow=past_xy_displacement,
                                                                   past_bbox=box,
                                                                   final_bbox=np.array(shifted_box),
-                                                                  is_track_live=False))
+                                                                  is_track_live=False,
+                                                                  frame_number=frame_number))
                             continue
 
                     running_tracks.append(Track(bbox=shifted_box, idx=current_track_idx))
@@ -1196,7 +1260,8 @@ def preprocess_data(save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=N
                                                           flow=xy_displacement,
                                                           past_flow=past_xy_displacement,
                                                           past_bbox=box,
-                                                          final_bbox=np.array(shifted_box)))
+                                                          final_bbox=np.array(shifted_box),
+                                                          frame_number=frame_number))
                     if current_track_idx not in track_ids_used:
                         track_ids_used.append(current_track_idx)
 
@@ -1455,6 +1520,8 @@ def preprocess_data_one_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_th
     center_inside_tp_list, center_inside_fp_list, center_inside_fn_list = [], [], []
     selected_track_distances = []
     accumulated_features = {}
+    track_based_accumulated_features: Dict[int, TrackFeatures] = {}
+    last_frame_gt_tracks = {}
 
     out = None
     frames_shape = sdd_simple.original_shape
@@ -1566,15 +1633,20 @@ def preprocess_data_one_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_th
                                 #                         radius=radius, mask=fg_mask, box=shifted_box, m_size=1,
                                 #                         current_boxes=annotations[:, :-1])
                                 # STEP 4e: b>Kill the track if corresponding features are not detected in the next time-step
-                                object_features.append(ObjectFeatures(idx=current_track_idx,
-                                                                      xy=xy_current_frame,
-                                                                      past_xy=xy,
-                                                                      final_xy=xy_current_frame,
-                                                                      flow=xy_displacement,
-                                                                      past_flow=past_xy_displacement,
-                                                                      past_bbox=box,
-                                                                      final_bbox=np.array(shifted_box),
-                                                                      is_track_live=False))
+                                current_track_obj_features = ObjectFeatures(idx=current_track_idx,
+                                                                            xy=xy_current_frame,
+                                                                            past_xy=xy,
+                                                                            final_xy=xy_current_frame,
+                                                                            flow=xy_displacement,
+                                                                            past_flow=past_xy_displacement,
+                                                                            past_bbox=box,
+                                                                            final_bbox=np.array(shifted_box),
+                                                                            is_track_live=False,
+                                                                            frame_number=frame_number.item())
+                                object_features.append(current_track_obj_features)
+                                if current_track_idx in track_based_accumulated_features:
+                                    track_based_accumulated_features[current_track_idx].object_features.append(
+                                        current_track_obj_features)
                                 continue
 
                         running_tracks.append(Track(bbox=shifted_box, idx=current_track_idx))
@@ -1596,14 +1668,24 @@ def preprocess_data_one_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_th
                                                   track_id=current_track_idx, selected_past=closest_n_shifted_xy_pair,
                                                   selected_current=closest_n_xy_current_frame_pair)
                         # STEP 4g: save the information gathered
-                        object_features.append(ObjectFeatures(idx=current_track_idx,
-                                                              xy=xy_current_frame,
-                                                              past_xy=xy,
-                                                              final_xy=final_features_xy,
-                                                              flow=xy_displacement,
-                                                              past_flow=past_xy_displacement,
-                                                              past_bbox=box,
-                                                              final_bbox=np.array(shifted_box)))
+                        current_track_obj_features = ObjectFeatures(idx=current_track_idx,
+                                                                    xy=xy_current_frame,
+                                                                    past_xy=xy,
+                                                                    final_xy=final_features_xy,
+                                                                    flow=xy_displacement,
+                                                                    past_flow=past_xy_displacement,
+                                                                    past_bbox=box,
+                                                                    final_bbox=np.array(shifted_box),
+                                                                    frame_number=frame_number.item())
+                        object_features.append(current_track_obj_features)
+                        if current_track_idx not in track_based_accumulated_features:
+                            track_feats = TrackFeatures(current_track_idx)
+                            track_feats.object_features.append(current_track_obj_features)
+                            track_based_accumulated_features.update(
+                                {current_track_idx: track_feats})
+                        else:
+                            track_based_accumulated_features[current_track_idx].object_features.append(
+                                current_track_obj_features)
                         if current_track_idx not in track_ids_used:
                             track_ids_used.append(current_track_idx)
 
@@ -1617,6 +1699,7 @@ def preprocess_data_one_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_th
 
                     r_boxes = torch.tensor(r_boxes, dtype=torch.int)
                     a_boxes = torch.from_numpy(annotations[:, :-1])
+                    a_boxes_idx = torch.from_numpy(annotations[:, -1])
                     try:
                         iou_boxes = torchvision.ops.box_iou(a_boxes, r_boxes).numpy()
                     except IndexError:
@@ -1649,11 +1732,36 @@ def preprocess_data_one_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_th
                         actually_matched_mask = l2_distance_boxes_score_matrix[match_rows, match_cols] < 10
                         match_rows = match_rows[actually_matched_mask]
                         match_cols = match_cols[actually_matched_mask]
+                        match_rows_tracks_idx = [a_boxes_idx[m].item() for m in match_rows]
+                        match_cols_tracks_idx = [r_boxes_idx[m] for m in match_cols]
+
+                        gt_track_box_mapping = {a[-1]: a[:-1] for a in annotations}
+                        for m_c_idx, matched_c in enumerate(match_cols_tracks_idx):
+                            gt_t_idx = match_rows_tracks_idx[m_c_idx]
+                            # gt_box_idx = np.argwhere(a_boxes_idx == gt_t_idx)
+                            track_based_accumulated_features[matched_c].object_features[-1].gt_track_idx = gt_t_idx
+                            track_based_accumulated_features[matched_c].object_features[-1].gt_box = \
+                                gt_track_box_mapping[gt_t_idx]
+                            try:
+                                track_based_accumulated_features[matched_c].object_features[-1].past_gt_box = \
+                                    last_frame_gt_tracks[gt_t_idx]
+                                gt_distance = np.linalg.norm(
+                                    (get_bbox_center(gt_track_box_mapping[gt_t_idx]) -
+                                     get_bbox_center(last_frame_gt_tracks[gt_t_idx])), 2, axis=0)
+                                track_based_accumulated_features[matched_c].object_features[-1].\
+                                    gt_past_current_distance = gt_distance
+                            except KeyError:
+                                track_based_accumulated_features[matched_c].object_features[-1].past_gt_box = None
+                                track_based_accumulated_features[matched_c].object_features[-1]. \
+                                    gt_past_current_distance = [0, 0]
+
+                        last_frame_gt_tracks = copy.deepcopy(gt_track_box_mapping)
 
                         matched_distance_array = [(i, j, l2_distance_boxes_score_matrix[i, j])
                                                   for i, j in zip(match_rows, match_cols)]
                     else:
                         match_rows, match_cols = np.array([]), np.array([])
+                        match_rows_tracks_idx, match_cols_tracks_idx = np.array([]), np.array([])
 
                     iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold)
                     iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold.T).T
@@ -2000,6 +2108,7 @@ def preprocess_data_one_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_th
                                  'l2_distance_hungarian_fp_list': l2_distance_hungarian_fp_list,
                                  'l2_distance_hungarian_fn_list': l2_distance_hungarian_fn_list,
                                  'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
+                                 'track_based_accumulated_features': track_based_accumulated_features,
                                  'accumulated_features': accumulated_features}
                     if part_idx % save_every_n_batch_itr == 0 and part_idx != 0:
                         Path(video_save_path + 'parts/').mkdir(parents=True, exist_ok=True)
@@ -2007,6 +2116,9 @@ def preprocess_data_one_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_th
                         torch.save(save_dict, video_save_path + 'parts/' + f_n)
 
                         accumulated_features = {}
+                        live_track_ids = [live_track.idx for live_track in last_frame_live_tracks]
+                        track_based_accumulated_features = remove_entries_from_dict(live_track_ids,
+                                                                                    track_based_accumulated_features)
                     # gt_associated_frame = associate_frame_with_ground_truth(frames, frame_numbers)
                 if save_per_part_path is not None:
                     Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
@@ -2043,6 +2155,7 @@ def preprocess_data_one_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_th
                                    'l2_distance_hungarian_fp_list': l2_distance_hungarian_fp_list,
                                    'l2_distance_hungarian_fn_list': l2_distance_hungarian_fn_list,
                                    'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
+                                   'track_based_accumulated_features': track_based_accumulated_features,
                                    'accumulated_features': accumulated_features}
             Path(features_save_path).mkdir(parents=True, exist_ok=True)
             f_n = f'premature_kill_features_dict.pt'
@@ -2114,6 +2227,7 @@ def preprocess_data_one_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_th
                                'l2_distance_hungarian_fp_list': l2_distance_hungarian_fp_list,
                                'l2_distance_hungarian_fn_list': l2_distance_hungarian_fn_list,
                                'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
+                               'track_based_accumulated_features': track_based_accumulated_features,
                                'accumulated_features': accumulated_features}
 
         Path(features_save_path).mkdir(parents=True, exist_ok=True)
@@ -2174,6 +2288,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
     center_inside_tp_list, center_inside_fp_list, center_inside_fn_list = [], [], []
     selected_track_distances = []
     accumulated_features = {}
+    track_based_accumulated_features: Dict[int, TrackFeatures] = {}
+    last_frame_gt_tracks = {}
 
     out = None
     frames_shape = sdd_simple.original_shape
@@ -2323,6 +2439,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                     second_last_frame = last_frame.copy()
                     last_frame_live_tracks = running_tracks
                     last_frame_mask = first_frame_mask.copy()
+                    last_frame_gt_tracks = {a[-1]: a[:-1] for a in validation_annotations}
                 else:
                     running_tracks, object_features = [], []
                     # STEP 2: Get the OF for both ((t-1), t) and ((t), (t+1))
@@ -2350,7 +2467,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         # STEP 4a: Get features inside the bounding box
                         xy = extract_features_per_bounding_box(box, last_frame_mask)
 
-                        if xy.size == 0:
+                        if xy.size == 0:  # Check! This should always be false, since track started coz feats was there
                             continue
 
                         # STEP 4b: calculate flow for the features
@@ -2389,15 +2506,21 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                 #                         radius=radius, mask=fg_mask, box=shifted_box, m_size=1,
                                 #                         current_boxes=annotations[:, :-1])
                                 # STEP 4e: b>Kill the track if corresponding features are not detected in the next time-step
-                                object_features.append(ObjectFeatures(idx=current_track_idx,
-                                                                      xy=xy_current_frame,
-                                                                      past_xy=xy,
-                                                                      final_xy=xy_current_frame,
-                                                                      flow=xy_displacement,
-                                                                      past_flow=past_xy_displacement,
-                                                                      past_bbox=box,
-                                                                      final_bbox=np.array(shifted_box),
-                                                                      is_track_live=False))
+                                current_track_obj_features = ObjectFeatures(idx=current_track_idx,
+                                                                            xy=xy_current_frame,
+                                                                            past_xy=xy,
+                                                                            final_xy=xy_current_frame,
+                                                                            flow=xy_displacement,
+                                                                            past_flow=past_xy_displacement,
+                                                                            past_bbox=box,
+                                                                            final_bbox=np.array(shifted_box),
+                                                                            is_track_live=False,
+                                                                            frame_number=frame_number.item())
+                                object_features.append(current_track_obj_features)
+                                if current_track_idx in track_based_accumulated_features:
+                                    track_based_accumulated_features[current_track_idx].object_features.append(
+                                        current_track_obj_features)
+
                                 continue
 
                         running_tracks.append(Track(bbox=shifted_box, idx=current_track_idx))
@@ -2410,6 +2533,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                         filtered_shifted_xy = filter_features(shifted_xy, closest_n_shifted_xy_pair)
                         final_features_xy = append_features(filtered_shifted_xy, closest_n_xy_current_frame_pair)
+                        # TODO: shift box again?
 
                         if plot:
                             plot_processing_steps(xy_cloud=xy, shifted_xy_cloud=shifted_xy, xy_box=box,
@@ -2419,14 +2543,24 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                                   track_id=current_track_idx, selected_past=closest_n_shifted_xy_pair,
                                                   selected_current=closest_n_xy_current_frame_pair)
                         # STEP 4g: save the information gathered
-                        object_features.append(ObjectFeatures(idx=current_track_idx,
-                                                              xy=xy_current_frame,
-                                                              past_xy=xy,
-                                                              final_xy=final_features_xy,
-                                                              flow=xy_displacement,
-                                                              past_flow=past_xy_displacement,
-                                                              past_bbox=box,
-                                                              final_bbox=np.array(shifted_box)))
+                        current_track_obj_features = ObjectFeatures(idx=current_track_idx,
+                                                                    xy=xy_current_frame,
+                                                                    past_xy=xy,
+                                                                    final_xy=final_features_xy,
+                                                                    flow=xy_displacement,
+                                                                    past_flow=past_xy_displacement,
+                                                                    past_bbox=box,
+                                                                    final_bbox=np.array(shifted_box),
+                                                                    frame_number=frame_number.item())
+                        object_features.append(current_track_obj_features)
+                        if current_track_idx not in track_based_accumulated_features:
+                            track_feats = TrackFeatures(current_track_idx)
+                            track_feats.object_features.append(current_track_obj_features)
+                            track_based_accumulated_features.update(
+                                {current_track_idx: track_feats})
+                        else:
+                            track_based_accumulated_features[current_track_idx].object_features.append(
+                                current_track_obj_features)
                         if current_track_idx not in track_ids_used:
                             track_ids_used.append(current_track_idx)
 
@@ -2440,6 +2574,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                     r_boxes = torch.tensor(r_boxes, dtype=torch.int)
                     a_boxes = torch.from_numpy(annotations[:, :-1])
+                    a_boxes_idx = torch.from_numpy(annotations[:, -1])
                     try:
                         iou_boxes = torchvision.ops.box_iou(a_boxes, r_boxes).numpy()
                     except IndexError:
@@ -2472,12 +2607,60 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         actually_matched_mask = l2_distance_boxes_score_matrix[match_rows, match_cols] < 10
                         match_rows = match_rows[actually_matched_mask]
                         match_cols = match_cols[actually_matched_mask]
+                        match_rows_tracks_idx = [a_boxes_idx[m].item() for m in match_rows]
+                        match_cols_tracks_idx = [r_boxes_idx[m] for m in match_cols]
+
+                        gt_track_box_mapping = {a[-1]: a[:-1] for a in annotations}
+                        for m_c_idx, matched_c in enumerate(match_cols_tracks_idx):
+                            gt_t_idx = match_rows_tracks_idx[m_c_idx]
+                            # gt_box_idx = np.argwhere(a_boxes_idx == gt_t_idx)
+                            track_based_accumulated_features[matched_c].object_features[-1].gt_track_idx = gt_t_idx
+                            track_based_accumulated_features[matched_c].object_features[-1].gt_box = \
+                                gt_track_box_mapping[gt_t_idx]
+                            try:
+                                track_based_accumulated_features[matched_c].object_features[-1].past_gt_box = \
+                                    last_frame_gt_tracks[gt_t_idx]
+                                gt_distance = np.linalg.norm(
+                                    (get_bbox_center(gt_track_box_mapping[gt_t_idx]) -
+                                     get_bbox_center(last_frame_gt_tracks[gt_t_idx])), 2, axis=0)
+                                track_based_accumulated_features[matched_c].object_features[-1].\
+                                    gt_past_current_distance = gt_distance
+                            except KeyError:
+                                track_based_accumulated_features[matched_c].object_features[-1].past_gt_box = None
+                                track_based_accumulated_features[matched_c].object_features[-1]. \
+                                    gt_past_current_distance = [0, 0]
+
+                        last_frame_gt_tracks = copy.deepcopy(gt_track_box_mapping)
 
                         matched_distance_array = [(i, j, l2_distance_boxes_score_matrix[i, j])
                                                   for i, j in zip(match_rows, match_cols)]
                     else:
                         match_rows, match_cols = np.array([]), np.array([])
+                        match_rows_tracks_idx, match_cols_tracks_idx = np.array([]), np.array([])
 
+                    # generated_to_gt_track_association check ###################################################
+                    # filter_nones = True
+                    # plot_gt_ids = []
+                    # plot_gt_boxes = []
+                    # plot_generated_ids = []
+                    # plot_generated_boxes = []
+                    #
+                    # for k, v in track_based_accumulated_features.items():
+                    #     plot_feats = v.object_features[-1]
+                    #     if filter_nones and plot_feats.gt_box is not None:
+                    #         plot_gt_ids.append(plot_feats.gt_track_idx)
+                    #         plot_gt_boxes.append(plot_feats.gt_box)
+                    #         plot_generated_ids.append(plot_feats.idx)
+                    #         plot_generated_boxes.append(plot_feats.final_bbox)
+                    #     if not filter_nones:
+                    #         plot_gt_ids.append(plot_feats.gt_track_idx)
+                    #         plot_gt_boxes.append(plot_feats.gt_box)
+                    #         plot_generated_ids.append(plot_feats.idx)
+                    #         plot_generated_boxes.append(plot_feats.final_bbox)
+                    #
+                    # plot_image_set_of_boxes(frame, plot_gt_boxes, plot_generated_boxes,
+                    #                         annotate=[plot_gt_ids, plot_generated_ids])
+                    #############################################################################################
                     iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold)
                     iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold.T).T
                     match_idx = np.where(iou_boxes)
@@ -2813,6 +2996,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                              'l2_distance_hungarian_fp_list': l2_distance_hungarian_fp_list,
                              'l2_distance_hungarian_fn_list': l2_distance_hungarian_fn_list,
                              'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
+                             'track_based_accumulated_features': track_based_accumulated_features,
                              'accumulated_features': accumulated_features}
                 if part_idx % save_every_n_batch_itr == 0 and part_idx != 0:
                     Path(video_save_path + 'parts/').mkdir(parents=True, exist_ok=True)
@@ -2820,6 +3004,9 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                     torch.save(save_dict, video_save_path + 'parts/' + f_n)
 
                     accumulated_features = {}
+                    live_track_ids = [live_track.idx for live_track in last_frame_live_tracks]
+                    track_based_accumulated_features = remove_entries_from_dict(live_track_ids,
+                                                                                track_based_accumulated_features)
             # gt_associated_frame = associate_frame_with_ground_truth(frames, frame_numbers)
             if save_per_part_path is not None:
                 Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
@@ -2856,6 +3043,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                    'l2_distance_hungarian_fp_list': l2_distance_hungarian_fp_list,
                                    'l2_distance_hungarian_fn_list': l2_distance_hungarian_fn_list,
                                    'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
+                                   'track_based_accumulated_features': track_based_accumulated_features,
                                    'accumulated_features': accumulated_features}
             Path(features_save_path).mkdir(parents=True, exist_ok=True)
             f_n = f'premature_kill_features_dict.pt'
@@ -2927,6 +3115,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                'l2_distance_hungarian_fp_list': l2_distance_hungarian_fp_list,
                                'l2_distance_hungarian_fn_list': l2_distance_hungarian_fn_list,
                                'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
+                               'track_based_accumulated_features': track_based_accumulated_features,
                                'accumulated_features': accumulated_features}
 
         Path(features_save_path).mkdir(parents=True, exist_ok=True)
