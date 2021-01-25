@@ -2,7 +2,7 @@ import copy
 from enum import Enum
 from itertools import cycle
 from pathlib import Path
-from typing import Sequence, Dict, List
+from typing import Sequence, Dict, List, Any
 
 import cv2 as cv
 import numpy as np
@@ -88,7 +88,7 @@ class ObjectFeatures(object):
 
 
 class FrameFeatures(object):
-    def __init__(self, frame_number: int, object_features: Sequence[ObjectFeatures]):
+    def __init__(self, frame_number: int, object_features: List[ObjectFeatures]):
         super(FrameFeatures, self).__init__()
         self.frame_number = frame_number
         self.object_features = object_features
@@ -1088,6 +1088,203 @@ def get_mog2_foreground_mask(frames, interest_frame_idx, time_gap_within_frames,
     return mask
 
 
+def filter_low_length_tracks(track_based_features, frame_based_features, threshold):
+    f_per_track_features = copy.deepcopy(track_based_features)
+    f_per_frame_features = copy.deepcopy(frame_based_features)
+    for track_id, track_features in track_based_features.items():
+        dict_track_id = track_features.track_id
+        dict_track_object_features = track_features.object_features
+        if len(dict_track_object_features) < threshold:
+            for track_obj_feature in dict_track_object_features:
+                frame_containing_current_track = track_obj_feature.frame_number
+                current_track_frame_features = f_per_frame_features[frame_containing_current_track]
+                assert frame_containing_current_track == current_track_frame_features.frame_number
+                current_track_frame_features_list = copy.deepcopy(current_track_frame_features.object_features)
+
+                frame_for_track_idx = 0
+                frame_for_track_idx_debug_count = 0
+                for c_frame_idx, current_track_frame_feature in enumerate(current_track_frame_features_list):
+                    if current_track_frame_feature.idx == dict_track_id:
+                        frame_for_track_idx = c_frame_idx
+                        frame_for_track_idx_debug_count += 1
+
+                if frame_for_track_idx_debug_count > 1:
+                    logger.info(f'Count: {frame_for_track_idx_debug_count}')
+                current_track_frame_features.object_features = \
+                    current_track_frame_features_list[0:frame_for_track_idx]
+                current_track_frame_features.object_features.extend(
+                    current_track_frame_features_list[frame_for_track_idx + 1:])
+                logger.info(f'Removed index {frame_for_track_idx} from frame number '
+                            f'{current_track_frame_features.frame_number}')
+
+            del f_per_track_features[dict_track_id]
+            logger.info(f'Deleted key {dict_track_id} from dict')
+
+    return f_per_track_features, f_per_frame_features
+
+
+def evaluate_extracted_features(track_based_features, frame_based_features, batch_size=32, do_filter=False,
+                                drop_last_batch=True, plot_scale_factor=1, desired_fps=5, custom_video_shape=False,
+                                video_mode=True, video_save_location=None, min_track_length_threshold=5):
+    if do_filter:
+        track_based_features, frame_based_features = filter_low_length_tracks(
+            track_based_features=track_based_features,
+            frame_based_features=frame_based_features,
+            threshold=min_track_length_threshold)
+
+    frame_based_features_length = len(frame_based_features)
+
+    sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
+                                  num_videos=1, video_number_to_use=VIDEO_NUMBER,
+                                  step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
+                                  single_track_mode=False, track_id=5, multiple_videos=False)
+    data_loader = DataLoader(sdd_simple, batch_size, drop_last=drop_last_batch)
+    df = sdd_simple.annotations_df
+
+    l2_distance_hungarian_tp_list, l2_distance_hungarian_fp_list, l2_distance_hungarian_fn_list = [], [], []
+
+    out = None
+    frames_shape = sdd_simple.original_shape
+    video_shape = (1200, 1000) if custom_video_shape else frames_shape
+    original_dims = None
+    if video_mode:
+        if frames_shape[0] < frames_shape[1]:
+            original_dims = (
+                frames_shape[1] / 100 * plot_scale_factor, frames_shape[0] / 100 * plot_scale_factor)
+            out = cv.VideoWriter(video_save_location, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                                 (video_shape[1], video_shape[0]))
+            video_shape[0], video_shape[1] = video_shape[1], video_shape[0]
+        else:
+            original_dims = (
+                frames_shape[0] / 100 * plot_scale_factor, frames_shape[1] / 100 * plot_scale_factor)
+            out = cv.VideoWriter(video_save_location, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                                 (video_shape[0], video_shape[1]))
+
+    _, meta_info = DATASET_META.get_meta(META_LABEL, VIDEO_NUMBER)
+    ratio = float(meta_info.flatten()[-1])
+
+    for part_idx, data in enumerate(tqdm(data_loader)):
+        frames, frame_numbers = data
+        frames = frames.squeeze()
+        frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
+        frames_count = frames.shape[0]
+        original_shape = new_shape = [frames.shape[1], frames.shape[2]]
+
+        for frame_idx, (frame, frame_number) in tqdm(enumerate(zip(frames, frame_numbers)), total=len(frame_numbers)):
+            frame_number = frame_number.item()
+            frame_annotation = get_frame_annotations_and_skip_lost(df, frame_number)
+            annotations, bbox_centers = scale_annotations(frame_annotation,
+                                                          original_scale=original_shape,
+                                                          new_scale=new_shape, return_track_id=False,
+                                                          tracks_with_annotations=True)
+            gt_boxes = annotations[:, :-1]
+            gt_boxes_idx = annotations[:, -1]
+
+            if frame_number < frame_based_features_length:
+                next_frame_features = frame_based_features[frame_number + 1]
+            else:
+                continue
+
+            assert (frame_number + 1) == next_frame_features.frame_number
+            next_frame_object_features = next_frame_features.object_features
+            generated_boxes = np.array([f.past_bbox for f in next_frame_object_features])
+            generated_boxes_idx = np.array([f.idx for f in next_frame_object_features])
+
+            a_boxes_np, r_boxes_np = gt_boxes, generated_boxes
+            l2_distance_boxes_score_matrix = np.zeros(shape=(len(a_boxes_np), len(r_boxes_np)))
+            if r_boxes_np.size != 0:
+                for a_i, a_box in enumerate(a_boxes_np):
+                    for r_i, r_box in enumerate(r_boxes_np):
+                        dist = np.linalg.norm((get_bbox_center(a_box).flatten() -
+                                               get_bbox_center(r_box).flatten()), 2) * ratio
+                        l2_distance_boxes_score_matrix[a_i, r_i] = dist
+
+                l2_distance_boxes_score_matrix = 2 - l2_distance_boxes_score_matrix
+                l2_distance_boxes_score_matrix[l2_distance_boxes_score_matrix < 0] = 10
+                # Hungarian
+                match_rows, match_cols = scipy.optimize.linear_sum_assignment(l2_distance_boxes_score_matrix)
+                actually_matched_mask = l2_distance_boxes_score_matrix[match_rows, match_cols] < 10
+                match_rows = match_rows[actually_matched_mask]
+                match_cols = match_cols[actually_matched_mask]
+            else:
+                match_rows, match_cols = np.array([]), np.array([])
+
+            if len(match_rows) != 0:
+                if len(match_rows) != len(match_cols):
+                    logger.info('Matching arrays length not same!')
+                l2_distance_hungarian_tp = len(match_rows)
+                l2_distance_hungarian_fp = len(r_boxes_np) - len(match_rows)
+                l2_distance_hungarian_fn = len(a_boxes_np) - len(match_rows)
+
+                l2_distance_hungarian_precision = \
+                    l2_distance_hungarian_tp / (l2_distance_hungarian_tp + l2_distance_hungarian_fp)
+                l2_distance_hungarian_recall = \
+                    l2_distance_hungarian_tp / (l2_distance_hungarian_tp + l2_distance_hungarian_fn)
+            else:
+                l2_distance_hungarian_tp = 0
+                l2_distance_hungarian_fp = 0
+                l2_distance_hungarian_fn = len(a_boxes_np)
+
+                l2_distance_hungarian_precision = 0
+                l2_distance_hungarian_recall = 0
+
+            l2_distance_hungarian_tp_list.append(l2_distance_hungarian_tp)
+            l2_distance_hungarian_fp_list.append(l2_distance_hungarian_fp)
+            l2_distance_hungarian_fn_list.append(l2_distance_hungarian_fn)
+
+            if video_mode:
+                fig = plot_for_video_current_frame(
+                    gt_rgb=frame, current_frame_rgb=frame,
+                    gt_annotations=annotations[:, :-1],
+                    current_frame_annotation=generated_boxes,
+                    new_track_annotation=[],
+                    frame_number=frame_number,
+                    additional_text=
+                    f'Distance based - Precision: {l2_distance_hungarian_precision} | '
+                    f'Recall: {l2_distance_hungarian_recall}\n',
+                    video_mode=video_mode, original_dims=original_dims, zero_shot=True)
+
+                canvas = FigureCanvas(fig)
+                canvas.draw()
+
+                buf = canvas.buffer_rgba()
+                out_frame = np.asarray(buf, dtype=np.uint8)[:, :, :-1]
+                if out_frame.shape[0] != video_shape[1] or out_frame.shape[1] != video_shape[0]:
+                    out_frame = skimage.transform.resize(out_frame, (video_shape[1], video_shape[0]))
+                    out_frame = (out_frame * 255).astype(np.uint8)
+
+                out.write(out_frame)
+            else:
+                fig = plot_for_video_current_frame(
+                    gt_rgb=frame, current_frame_rgb=frame,
+                    gt_annotations=annotations[:, :-1],
+                    current_frame_annotation=generated_boxes,
+                    new_track_annotation=[],
+                    frame_number=frame_number,
+                    additional_text=
+                    f'Distance based - Precision: {l2_distance_hungarian_precision} | '
+                    f'Recall: {l2_distance_hungarian_recall}\n',
+                    video_mode=False, original_dims=original_dims, zero_shot=True,
+                    save_path=f'{plot_save_path}zero_shot/plots_filtered/')
+
+            batch_tp_sum, batch_fp_sum, batch_fn_sum = \
+                np.array(l2_distance_hungarian_tp_list).sum(), np.array(l2_distance_hungarian_fp_list).sum(), \
+                np.array(l2_distance_hungarian_fn_list).sum()
+            batch_precision = batch_tp_sum / (batch_tp_sum + batch_fp_sum)
+            batch_recall = batch_tp_sum / (batch_tp_sum + batch_fn_sum)
+            logger.info(f'Batch: {part_idx}, '
+                        f'L2 Distance Based - Precision: {batch_precision} | Recall: {batch_recall}')
+
+    out.release()
+    tp_sum, fp_sum, fn_sum = \
+        np.array(l2_distance_hungarian_tp_list).sum(), np.array(l2_distance_hungarian_fp_list).sum(), \
+        np.array(l2_distance_hungarian_fn_list).sum()
+    precision = tp_sum / (tp_sum + fp_sum)
+    recall = tp_sum / (tp_sum + fn_sum)
+    logger.info('Final')
+    logger.info(f'L2 Distance Based - Precision: {precision} | Recall: {recall}')
+
+
 def associate_frame_with_ground_truth(frames, frame_numbers):
     return 0
 
@@ -1748,7 +1945,7 @@ def preprocess_data_one_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_th
                                 gt_distance = np.linalg.norm(
                                     (get_bbox_center(gt_track_box_mapping[gt_t_idx]) -
                                      get_bbox_center(last_frame_gt_tracks[gt_t_idx])), 2, axis=0)
-                                track_based_accumulated_features[matched_c].object_features[-1].\
+                                track_based_accumulated_features[matched_c].object_features[-1]. \
                                     gt_past_current_distance = gt_distance
                             except KeyError:
                                 track_based_accumulated_features[matched_c].object_features[-1].past_gt_box = None
@@ -2623,7 +2820,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                 gt_distance = np.linalg.norm(
                                     (get_bbox_center(gt_track_box_mapping[gt_t_idx]) -
                                      get_bbox_center(last_frame_gt_tracks[gt_t_idx])), 2, axis=0)
-                                track_based_accumulated_features[matched_c].object_features[-1].\
+                                track_based_accumulated_features[matched_c].object_features[-1]. \
                                     gt_past_current_distance = gt_distance
                             except KeyError:
                                 track_based_accumulated_features[matched_c].object_features[-1].past_gt_box = None
@@ -3359,7 +3556,7 @@ if __name__ == '__main__':
                                           use_circle_to_keep_track_alive=False, custom_video_shape=False,
                                           extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True,
                                           save_every_n_batch_itr=50, drop_last_batch=True, detect_shadows=False)
-        torch.save(feats, features_save_path + 'features.pt')
+        # torch.save(feats, features_save_path + 'features.pt')
     elif not eval_mode and EXECUTE_STEP == STEP.SEMI_SUPERVISED:
         video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/one_shot/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
@@ -3371,8 +3568,28 @@ if __name__ == '__main__':
                                          extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True,
                                          save_every_n_batch_itr=50, drop_last_batch=True, detect_shadows=False)
     elif not eval_mode and EXECUTE_STEP == STEP.DEBUG:
-        extracted_features_path = '../Plots/baseline_v2/v0/quad1/features.pt'
-        extracted_features: Dict[int, FrameFeatures] = torch.load(extracted_features_path)
+        # extracted_features_path = '../Plots/baseline_v2/v0/hyang7/features.pt'
+        # extracted_features: Dict[int, FrameFeatures] = torch.load(extracted_features_path)
+        track_length_threshold = 5
+
+        accumulated_features_path = '../Plots/baseline_v2/v0/hyang7/accumulated_features_from_finally.pt'
+        accumulated_features: Dict[int, Any] = torch.load(accumulated_features_path)
+        per_track_features: Dict[int, TrackFeatures] = accumulated_features['track_based_accumulated_features']
+        per_frame_features: Dict[int, FrameFeatures] = accumulated_features['accumulated_features']
+
+        # final_per_track_features, final_per_frame_features = filter_low_length_tracks(
+        #     track_based_features=per_track_features,
+        #     frame_based_features=per_frame_features,
+        #     threshold=track_length_threshold)
+
+        video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/processed_features/'
+        Path(video_save_path).mkdir(parents=True, exist_ok=True)
+        evaluate_extracted_features(track_based_features=per_track_features, frame_based_features=per_frame_features,
+                                    video_save_location=video_save_path + 'extraction_filter.avi', do_filter=True,
+                                    min_track_length_threshold=15)
+
+        print()
+
         # Scrapped ###################################################################################################
         # time_step_between_frames = 12
         # for frame_number, frame_features in tqdm(extracted_features.items()):
