@@ -59,6 +59,7 @@ class STEP(Enum):
     ALGO_VERSION_1 = 4
     DEBUG = 5
     METRICS = 6
+    FILTER_FEATURES = 7
 
 
 EXECUTE_STEP = STEP.UNSUPERVISED
@@ -88,10 +89,12 @@ class ObjectFeatures(object):
 
 
 class FrameFeatures(object):
-    def __init__(self, frame_number: int, object_features: List[ObjectFeatures]):
+    def __init__(self, frame_number: int, object_features: List[ObjectFeatures], flow=None, past_flow=None):
         super(FrameFeatures, self).__init__()
         self.frame_number = frame_number
         self.object_features = object_features
+        self.flow = flow
+        self.past_flow = past_flow
 
 
 class TrackFeatures(object):
@@ -979,6 +982,11 @@ def extract_features_per_bounding_box(box, mask):
     data_x, data_y = rolled[1], rolled[0]
     xy = np.stack([data_x, data_y]).T
     return xy
+
+
+def extract_flow_inside_box(box, flow):
+    extracted_flow = flow[box[1]:box[3], box[0]:box[2]]
+    return extracted_flow
 
 
 def extract_mask_features(mask):
@@ -2280,7 +2288,9 @@ def preprocess_data_one_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_th
 
                     # STEP 4i: save stuff and reiterate
                     accumulated_features.update({frame_number.item(): FrameFeatures(frame_number=frame_number.item(),
-                                                                                    object_features=object_features)})
+                                                                                    object_features=object_features,
+                                                                                    flow=flow,
+                                                                                    past_flow=past_flow)})
 
                     second_last_frame = last_frame.copy()
                     last_frame = frame.copy()
@@ -3168,7 +3178,9 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                     # STEP 4i: save stuff and reiterate
                     accumulated_features.update({frame_number.item(): FrameFeatures(frame_number=frame_number.item(),
-                                                                                    object_features=object_features)})
+                                                                                    object_features=object_features,
+                                                                                    flow=flow,
+                                                                                    past_flow=past_flow)})
 
                     second_last_frame = last_frame.copy()
                     last_frame = frame.copy()
