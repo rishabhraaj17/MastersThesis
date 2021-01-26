@@ -3157,24 +3157,39 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         # out_frame = out_frame.reshape(1200, 1000, 3)
                         out.write(out_frame)
                     else:
-                        fig = plot_for_video(
-                            gt_rgb=frame, gt_mask=fg_mask, last_frame_rgb=last_frame,
-                            last_frame_mask=last_frame_mask, current_frame_rgb=frame,
-                            current_frame_mask=fg_mask, gt_annotations=annotations[:, :-1],
-                            last_frame_annotation=[t.bbox for t in last_frame_live_tracks],
+                        fig = plot_for_video_current_frame(
+                            gt_rgb=frame, current_frame_rgb=frame,
+                            gt_annotations=annotations[:, :-1],
                             current_frame_annotation=[t.bbox for t in running_tracks],
                             new_track_annotation=new_track_boxes,
                             frame_number=frame_number,
                             additional_text=
-                            f'Precision: {precision} | Recall: {recall}\n'
                             f'Distance based - Precision: {l2_distance_hungarian_precision} | '
                             f'Recall: {l2_distance_hungarian_recall}\n'
                             f'Center Inside based - Precision: {center_precision} | Recall: {center_recall}\n'
+                            f'Precision: {precision} | Recall: {recall}\n'
                             f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
                             f'Track Ids Killed: '
                             f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
-                            video_mode=False,
-                            save_path=f'{plot_save_path}zero_shot/plots{min_points_in_cluster}/')
+                            video_mode=False, original_dims=original_dims, zero_shot=True)
+                        # fig = plot_for_video(
+                        #     gt_rgb=frame, gt_mask=fg_mask, last_frame_rgb=last_frame,
+                        #     last_frame_mask=last_frame_mask, current_frame_rgb=frame,
+                        #     current_frame_mask=fg_mask, gt_annotations=annotations[:, :-1],
+                        #     last_frame_annotation=[t.bbox for t in last_frame_live_tracks],
+                        #     current_frame_annotation=[t.bbox for t in running_tracks],
+                        #     new_track_annotation=new_track_boxes,
+                        #     frame_number=frame_number,
+                        #     additional_text=
+                        #     f'Precision: {precision} | Recall: {recall}\n'
+                        #     f'Distance based - Precision: {l2_distance_hungarian_precision} | '
+                        #     f'Recall: {l2_distance_hungarian_recall}\n'
+                        #     f'Center Inside based - Precision: {center_precision} | Recall: {center_recall}\n'
+                        #     f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
+                        #     f'Track Ids Killed: '
+                        #     f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
+                        #     video_mode=False,
+                        #     save_path=f'{plot_save_path}zero_shot/plots{min_points_in_cluster}/')
 
                     # STEP 4i: save stuff and reiterate
                     accumulated_features.update({frame_number.item(): FrameFeatures(frame_number=frame_number.item(),
