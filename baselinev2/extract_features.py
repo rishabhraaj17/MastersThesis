@@ -630,15 +630,20 @@ def plot_for_video(gt_rgb, gt_mask, last_frame_rgb, last_frame_mask, current_fra
 
 def plot_for_video_current_frame(gt_rgb, current_frame_rgb, gt_annotations, current_frame_annotation,
                                  new_track_annotation, frame_number, additional_text=None, video_mode=False,
-                                 original_dims=None, save_path=None, zero_shot=False):
+                                 original_dims=None, save_path=None, zero_shot=False, box_annotation=None):
     fig, ax = plt.subplots(1, 2, sharex='none', sharey='none', figsize=original_dims or (12, 10))
     ax_gt_rgb, ax_current_frame_rgb = ax[0], ax[1]
     ax_gt_rgb.imshow(gt_rgb)
     ax_current_frame_rgb.imshow(current_frame_rgb)
 
-    add_box_to_axes(ax_gt_rgb, gt_annotations)
-    add_box_to_axes(ax_current_frame_rgb, current_frame_annotation)
-    add_box_to_axes(ax_current_frame_rgb, new_track_annotation, 'green')
+    if box_annotation is None:
+        add_box_to_axes(ax_gt_rgb, gt_annotations)
+        add_box_to_axes(ax_current_frame_rgb, current_frame_annotation)
+        add_box_to_axes(ax_current_frame_rgb, new_track_annotation, 'green')
+    else:
+        add_box_to_axes_with_annotation(ax_gt_rgb, gt_annotations, box_annotation[0])
+        add_box_to_axes_with_annotation(ax_current_frame_rgb, current_frame_annotation, box_annotation[1])
+        add_box_to_axes_with_annotation(ax_current_frame_rgb, new_track_annotation, [], 'green')
 
     ax_gt_rgb.set_title('GT')
     ax_current_frame_rgb.set_title('Our Method')
@@ -1089,11 +1094,14 @@ def get_mog2_foreground_mask(frames, interest_frame_idx, time_gap_within_frames,
 
 
 def filter_low_length_tracks(track_based_features, frame_based_features, threshold):
+    # copy to alter the data
     f_per_track_features = copy.deepcopy(track_based_features)
     f_per_frame_features = copy.deepcopy(frame_based_features)
+
     for track_id, track_features in track_based_features.items():
         dict_track_id = track_features.track_id
         dict_track_object_features = track_features.object_features
+
         if len(dict_track_object_features) < threshold:
             for track_obj_feature in dict_track_object_features:
                 frame_containing_current_track = track_obj_feature.frame_number
@@ -1183,6 +1191,7 @@ def evaluate_extracted_features(track_based_features, frame_based_features, batc
             if frame_number < frame_based_features_length:
                 next_frame_features = frame_based_features[frame_number + 1]
             else:
+                logger.info('Frames remaining, features exhausted!')
                 continue
 
             assert (frame_number + 1) == next_frame_features.frame_number
@@ -1242,7 +1251,8 @@ def evaluate_extracted_features(track_based_features, frame_based_features, batc
                     additional_text=
                     f'Distance based - Precision: {l2_distance_hungarian_precision} | '
                     f'Recall: {l2_distance_hungarian_recall}\n',
-                    video_mode=video_mode, original_dims=original_dims, zero_shot=True)
+                    video_mode=video_mode, original_dims=original_dims, zero_shot=True,
+                    box_annotation=[gt_boxes_idx, generated_boxes_idx])
 
                 canvas = FigureCanvas(fig)
                 canvas.draw()
@@ -3586,7 +3596,7 @@ if __name__ == '__main__':
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
         evaluate_extracted_features(track_based_features=per_track_features, frame_based_features=per_frame_features,
                                     video_save_location=video_save_path + 'extraction_filter.avi', do_filter=True,
-                                    min_track_length_threshold=15)
+                                    min_track_length_threshold=240, desired_fps=1)
 
         print()
 
