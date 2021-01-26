@@ -1094,6 +1094,7 @@ def get_mog2_foreground_mask(frames, interest_frame_idx, time_gap_within_frames,
 
 
 def filter_low_length_tracks(track_based_features, frame_based_features, threshold):
+    logger.info('Level 1 filtering\n')
     # copy to alter the data
     f_per_track_features = copy.deepcopy(track_based_features)
     f_per_frame_features = copy.deepcopy(frame_based_features)
@@ -1131,14 +1132,42 @@ def filter_low_length_tracks(track_based_features, frame_based_features, thresho
     return f_per_track_features, f_per_frame_features
 
 
+def filter_low_length_tracks_lvl2(track_based_features, frame_based_features):
+    logger.info('\nLevel 2 filtering\n')
+    allowed_tracks = list(track_based_features.keys())
+    f_per_frame_features = copy.deepcopy(frame_based_features)
+
+    for frame_number, frame_features in frame_based_features.items():
+        assert frame_number == frame_features.frame_number
+        frame_object_features = frame_features.object_features
+
+        for list_idx, object_feature in enumerate(frame_object_features):
+            if object_feature.idx in allowed_tracks:
+                continue
+            else:
+                editable_list_dict_value = f_per_frame_features[frame_number]
+                editable_list_dict_value_object_features = editable_list_dict_value.object_features
+
+                logger.info(f'The track id {object_feature.idx} in frame {frame_number}'
+                            f' was not in allowed track. Hence removed!')
+
+                editable_list_dict_value_object_features.remove(object_feature)
+
+    return f_per_frame_features
+
+
 def evaluate_extracted_features(track_based_features, frame_based_features, batch_size=32, do_filter=False,
                                 drop_last_batch=True, plot_scale_factor=1, desired_fps=5, custom_video_shape=False,
                                 video_mode=True, video_save_location=None, min_track_length_threshold=5):
+    # frame_track_distribution_pre_filter = {k: len(v.object_features) for k, v in frame_based_features.items()}
     if do_filter:
         track_based_features, frame_based_features = filter_low_length_tracks(
             track_based_features=track_based_features,
             frame_based_features=frame_based_features,
             threshold=min_track_length_threshold)
+
+        frame_based_features = filter_low_length_tracks_lvl2(track_based_features, frame_based_features)
+    # frame_track_distribution_post_filter = {k: len(v.object_features) for k, v in frame_based_features.items()}
 
     frame_based_features_length = len(frame_based_features)
 
@@ -1212,6 +1241,8 @@ def evaluate_extracted_features(track_based_features, frame_based_features, batc
                 l2_distance_boxes_score_matrix[l2_distance_boxes_score_matrix < 0] = 10
                 # Hungarian
                 match_rows, match_cols = scipy.optimize.linear_sum_assignment(l2_distance_boxes_score_matrix)
+                matching_distribution = [[i, j, l2_distance_boxes_score_matrix[i, j]] for i, j in zip(
+                    match_rows, match_cols)]
                 actually_matched_mask = l2_distance_boxes_score_matrix[match_rows, match_cols] < 10
                 match_rows = match_rows[actually_matched_mask]
                 match_cols = match_cols[actually_matched_mask]
@@ -3577,29 +3608,22 @@ if __name__ == '__main__':
                                          use_circle_to_keep_track_alive=False, custom_video_shape=False,
                                          extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True,
                                          save_every_n_batch_itr=50, drop_last_batch=True, detect_shadows=False)
-    elif not eval_mode and EXECUTE_STEP == STEP.DEBUG:
-        # extracted_features_path = '../Plots/baseline_v2/v0/hyang7/features.pt'
-        # extracted_features: Dict[int, FrameFeatures] = torch.load(extracted_features_path)
+    elif not eval_mode and EXECUTE_STEP == STEP.FILTER_FEATURES:
         track_length_threshold = 5
 
-        accumulated_features_path = '../Plots/baseline_v2/v0/hyang7/accumulated_features_from_finally.pt'
+        accumulated_features_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+                                    f'/accumulated_features_from_finally.pt'
         accumulated_features: Dict[int, Any] = torch.load(accumulated_features_path)
         per_track_features: Dict[int, TrackFeatures] = accumulated_features['track_based_accumulated_features']
         per_frame_features: Dict[int, FrameFeatures] = accumulated_features['accumulated_features']
 
-        # final_per_track_features, final_per_frame_features = filter_low_length_tracks(
-        #     track_based_features=per_track_features,
-        #     frame_based_features=per_frame_features,
-        #     threshold=track_length_threshold)
-
-        video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/processed_features/'
+        video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/processed_features' \
+                          f'/{track_length_threshold}/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
         evaluate_extracted_features(track_based_features=per_track_features, frame_based_features=per_frame_features,
                                     video_save_location=video_save_path + 'extraction_filter.avi', do_filter=True,
-                                    min_track_length_threshold=240, desired_fps=1)
-
-        print()
-
+                                    min_track_length_threshold=track_length_threshold, desired_fps=1)
+    elif not eval_mode and EXECUTE_STEP == STEP.DEBUG:
         # Scrapped ###################################################################################################
         # time_step_between_frames = 12
         # for frame_number, frame_features in tqdm(extracted_features.items()):
