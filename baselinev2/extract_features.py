@@ -2288,9 +2288,7 @@ def preprocess_data_one_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_th
 
                     # STEP 4i: save stuff and reiterate
                     accumulated_features.update({frame_number.item(): FrameFeatures(frame_number=frame_number.item(),
-                                                                                    object_features=object_features,
-                                                                                    flow=flow,
-                                                                                    past_flow=past_flow)})
+                                                                                    object_features=object_features)})
 
                     second_last_frame = last_frame.copy()
                     last_frame = frame.copy()
@@ -2753,7 +2751,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                 # plot_features_with_mask(all_cloud, features_inside_circle, center=shifted_xy_center,
                                 #                         radius=radius, mask=fg_mask, box=shifted_box, m_size=1,
                                 #                         current_boxes=annotations[:, :-1])
-                                # STEP 4e: b>Kill the track if corresponding features are not detected in the next time-step
+                                # STEP 4e: b>Kill the track if corresponding features are not detected
+                                #  in the next time-step
                                 current_track_obj_features = ObjectFeatures(idx=current_track_idx,
                                                                             xy=xy_current_frame,
                                                                             past_xy=xy,
@@ -2774,8 +2773,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         running_tracks.append(Track(bbox=shifted_box, idx=current_track_idx))
 
                         # STEP 4f: compare activations to keep and throw - throw N% and keep N%
-                        closest_n_shifted_xy_pair, closest_n_xy_current_frame_pair = features_filter_append_preprocessing(
-                            overlap_percent, shifted_xy, xy_current_frame)
+                        closest_n_shifted_xy_pair, closest_n_xy_current_frame_pair = \
+                            features_filter_append_preprocessing(overlap_percent, shifted_xy, xy_current_frame)
 
                         # points_pair_stat_analysis(closest_n_shifted_xy_pair, closest_n_xy_current_frame_pair)
 
@@ -3127,7 +3126,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         #     # f'Track Ids Used: {track_ids_used}\n'
                         #     f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
                         #     f'Track Ids Killed: '
-                        #     f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
+                        #     f'{np.setdiff1d([t.idx for t in last_frame_live_tracks],
+                        #     [t.idx for t in running_tracks])}',
                         #     video_mode=video_mode)
 
                         fig = plot_for_video_current_frame(
@@ -3187,15 +3187,14 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         #     f'Center Inside based - Precision: {center_precision} | Recall: {center_recall}\n'
                         #     f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
                         #     f'Track Ids Killed: '
-                        #     f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
+                        #     f'{np.setdiff1d([t.idx for t in last_frame_live_tracks],
+                        #     [t.idx for t in running_tracks])}',
                         #     video_mode=False,
                         #     save_path=f'{plot_save_path}zero_shot/plots{min_points_in_cluster}/')
 
                     # STEP 4i: save stuff and reiterate
                     accumulated_features.update({frame_number.item(): FrameFeatures(frame_number=frame_number.item(),
-                                                                                    object_features=object_features,
-                                                                                    flow=flow,
-                                                                                    past_flow=past_flow)})
+                                                                                    object_features=object_features)})
 
                     second_last_frame = last_frame.copy()
                     last_frame = frame.copy()
