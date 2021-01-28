@@ -35,8 +35,8 @@ SAVE_BASE_PATH = "../Datasets/SDD_Features/"
 # SAVE_BASE_PATH = "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD_Features/"
 BASE_PATH = "../Datasets/SDD/"
 # BASE_PATH = "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/"
-VIDEO_LABEL = SDDVideoClasses.LITTLE
-VIDEO_NUMBER = 3
+VIDEO_LABEL = SDDVideoClasses.HYANG
+VIDEO_NUMBER = 7
 SAVE_PATH = f'{SAVE_BASE_PATH}{VIDEO_LABEL.value}/video{VIDEO_NUMBER}/baseline_v2/'
 FILE_NAME_STEP_1 = 'features_v0.pt'
 LOAD_FILE_STEP_1 = SAVE_PATH + FILE_NAME_STEP_1
@@ -49,7 +49,7 @@ WEIGHT_POINTS_INSIDE_BBOX_MORE = True
 
 META_PATH = '../Datasets/SDD/H_SDD.txt'
 DATASET_META = SDDMeta(META_PATH)
-META_LABEL = SDDVideoDatasets.LITTLE
+META_LABEL = SDDVideoDatasets.HYANG
 
 
 class STEP(Enum):
@@ -62,7 +62,7 @@ class STEP(Enum):
     FILTER_FEATURES = 7
 
 
-EXECUTE_STEP = STEP.UNSUPERVISED
+EXECUTE_STEP = STEP.EXTRACTION
 
 
 class ObjectFeatures(object):
@@ -3588,6 +3588,7 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                     activations_past_frame = extract_features_per_bounding_box(shifted_box_in_past, past_mask)
 
                     if activations_future_frame.size == 0:
+                        logger.info(f'Ending Track! No features found in future!')
                         current_track_obj_features = AgentFeatures(
                             track_idx=object_feature.idx,
                             activations_t=activations,
@@ -3601,7 +3602,7 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                             frame_number=object_feature.frame_number,
                             activations_future_frame=activations_future_frame,
                             activations_past_frame=activations_past_frame,
-                            final_features_future_activations=activations_displaced_in_future,
+                            final_features_future_activations=None,
                             is_track_live=False,
                             frame_number_t=actual_fr.item(),
                             frame_number_t_minus_one=actual_fr.item() - frame_time_gap,
@@ -3757,18 +3758,15 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
 
             future12_bg_sub_mask = {}
             future_12_frames_optical_flow = {}
-            flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))  # put sum of optimized of - using other var
-            last_frame_to_add_in_future_dict = list(last12_bg_sub_mask.keys())[-2]
-            future12_bg_sub_mask.update({
-                last_frame_to_add_in_future_dict: last12_bg_sub_mask[last_frame_to_add_in_future_dict]})
+            # flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))  # put sum of optimized of - using other var
             for of_i, actual_of_i in zip(range(interest_fr, of_interest_fr),
                                          range(actual_interest_fr, actual_of_interest_fr)):
-                future_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=of_i,
+                future_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=of_i + 1,
                                                        time_gap_within_frames=time_gap_within_frames,
                                                        total_frames=total_frames, step=step, n=n,
                                                        kernel=kernel, var_threshold=var_threshold,
                                                        detect_shadows=detect_shadows)
-                future12_bg_sub_mask.update({actual_of_i: future_mask})
+                future12_bg_sub_mask.update({actual_of_i + 1: future_mask})
 
                 previous = cv.cvtColor(frames[of_i], cv.COLOR_BGR2GRAY)
                 next_frame = cv.cvtColor(frames[of_i + 1], cv.COLOR_BGR2GRAY)
@@ -3788,88 +3786,152 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
                 extracted_feature_actual_fr = extracted_features[actual_fr.item()]
                 extracted_feature_actual_fr_object_features = extracted_feature_actual_fr.object_features
 
-                future_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=interest_fr + frame_time_gap,
-                                                       time_gap_within_frames=time_gap_within_frames,
-                                                       total_frames=total_frames, step=step, n=n,
-                                                       kernel=kernel, var_threshold=var_threshold,
-                                                       detect_shadows=detect_shadows)
+                # future_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=interest_fr + frame_time_gap,
+                #                                        time_gap_within_frames=time_gap_within_frames,
+                #                                        total_frames=total_frames, step=step, n=n,
+                #                                        kernel=kernel, var_threshold=var_threshold,
+                #                                        detect_shadows=detect_shadows)
+                #
+                # past_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=interest_fr - frame_time_gap,
+                #                                      time_gap_within_frames=time_gap_within_frames,
+                #                                      total_frames=total_frames, step=step, n=n,
+                #                                      kernel=kernel, var_threshold=var_threshold,
+                #                                      detect_shadows=detect_shadows)
 
-                past_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=interest_fr - frame_time_gap,
-                                                     time_gap_within_frames=time_gap_within_frames,
-                                                     total_frames=total_frames, step=step, n=n,
-                                                     kernel=kernel, var_threshold=var_threshold,
-                                                     detect_shadows=detect_shadows)
+                past_12_frames_optical_flow_reversed = {}
+                past_12_frames_optical_flow_keys = list(past_12_frames_optical_flow.keys())
+                past_12_frames_optical_flow_keys.reverse()
+                for k in past_12_frames_optical_flow_keys:
+                    past_12_frames_optical_flow_reversed.update({k: past_12_frames_optical_flow[k]})
+
+                last12_bg_sub_mask_reversed = {}
+                last12_bg_sub_mask_keys = list(last12_bg_sub_mask.keys())
+                last12_bg_sub_mask_keys.reverse()
+                for k in last12_bg_sub_mask_keys[1:]:
+                    last12_bg_sub_mask_reversed.update({k: last12_bg_sub_mask[k]})
 
                 for object_feature in extracted_feature_actual_fr_object_features:  # fixme: add gt
                     activations = object_feature.past_xy
                     box = object_feature.past_bbox
-                    activations_future_displacement = flow_for_future[activations[:, 1], activations[:, 0]]
-                    activations_past_displacement = past_flow_yet[activations[:, 1], activations[:, 0]]
 
-                    activations_displaced_in_future = activations + activations_future_displacement
-                    activations_displaced_in_past = activations - activations_past_displacement
+                    # activations_per_frame = object_feature.past_xy
+                    box_future_per_frame, box_past_per_frame = box, box
+                    activations_future_frame_per_frame, activations_past_frame_per_frame = None, None
+                    activations_displaced_in_future_per_frame_past, activations_displaced_in_past_per_frame_past = \
+                        object_feature.past_xy, object_feature.past_xy
+                    activations_displaced_in_future_per_frame, activations_displaced_in_past_per_frame = \
+                        None, None
+                    shifted_box_in_future_per_frame, shifted_box_in_past_per_frame = None, None
+                    activations_future_displacement_list, activations_past_displacement_list = [], []
 
-                    shifted_box_in_future, shifted_activation_center_in_future = evaluate_shifted_bounding_box(
-                        box, activations_displaced_in_future, activations)
-                    shifted_box_in_past, shifted_activation_center_in_past = evaluate_shifted_bounding_box(
-                        box, activations_displaced_in_past, activations)
+                    for running_idx, ((past_idx, past_flow), (future_idx, future_flow),
+                                      (past_mask_idx, past_mask_from_dict),
+                                      (future_mask_idx, future_mask_from_dict)) in enumerate(zip(
+                        past_12_frames_optical_flow_reversed.items(), future_12_frames_optical_flow.items(),
+                        last12_bg_sub_mask_reversed.items(), future12_bg_sub_mask.items())):
 
-                    activations_future_frame = extract_features_per_bounding_box(shifted_box_in_future, future_mask)
-                    activations_past_frame = extract_features_per_bounding_box(shifted_box_in_past, past_mask)
+                        activations_future_displacement_per_frame = future_flow[
+                            activations_displaced_in_future_per_frame_past[:, 1],
+                            activations_displaced_in_future_per_frame_past[:, 0]]
+                        activations_past_displacement_per_frame = past_flow[
+                            activations_displaced_in_past_per_frame_past[:, 1],
+                            activations_displaced_in_past_per_frame_past[:, 0]]
 
-                    if activations_future_frame.size == 0:
-                        current_track_obj_features = AgentFeatures(
-                            track_idx=object_feature.idx,
-                            activations_t=activations,
-                            activations_t_minus_one=activations_displaced_in_past,
-                            activations_t_plus_one=activations_displaced_in_future,
-                            future_flow=activations_future_displacement,
-                            past_flow=activations_past_displacement,
-                            bbox_t=box,
-                            bbox_t_minus_one=shifted_box_in_past,
-                            bbox_t_plus_one=shifted_box_in_future,
-                            frame_number=object_feature.frame_number,
-                            activations_future_frame=activations_future_frame,
-                            activations_past_frame=activations_past_frame,
-                            final_features_future_activations=activations_displaced_in_future,
-                            is_track_live=False,
-                            frame_number_t=actual_fr.item(),
-                            frame_number_t_minus_one=actual_fr.item() - frame_time_gap,
-                            frame_number_t_plus_one=actual_fr.item() + frame_time_gap,
-                            past_frames_used_in_of_estimation=list(past_12_frames_optical_flow.keys()),
-                            future_frames_used_in_of_estimation=list(future_12_frames_optical_flow.keys()),
-                            frame_by_frame_estimation=True
-                        )
-                        object_features.append(current_track_obj_features)
-                        if object_feature.idx in track_based_accumulated_features:
-                            track_based_accumulated_features[object_feature.idx].object_features.append(
-                                current_track_obj_features)
+                        activations_future_displacement_list.append(activations_future_displacement_per_frame)
+                        activations_past_displacement_list.append(activations_past_displacement_per_frame)
 
-                        continue
+                        activations_displaced_in_future_per_frame = \
+                            activations_displaced_in_future_per_frame_past + activations_future_displacement_per_frame
+                        activations_displaced_in_past_per_frame = \
+                            activations_displaced_in_past_per_frame_past - activations_past_displacement_per_frame
 
-                    closest_n_shifted_xy_pair, closest_n_xy_current_frame_pair = \
-                        features_filter_append_preprocessing(
-                            overlap_percent, activations_displaced_in_future, activations_future_frame)
+                        shifted_box_in_future_per_frame, shifted_activation_center_in_future_per_frame = \
+                            evaluate_shifted_bounding_box(
+                                box_future_per_frame, activations_displaced_in_future_per_frame,
+                                activations_displaced_in_future_per_frame_past)
+                        shifted_box_in_past_per_frame, shifted_activation_center_in_past_per_frame = \
+                            evaluate_shifted_bounding_box(
+                                box_past_per_frame, activations_displaced_in_past_per_frame,
+                                activations_displaced_in_past_per_frame_past)
 
-                    filtered_shifted_future_activations = filter_features(
-                        activations_displaced_in_future, closest_n_shifted_xy_pair)
-                    final_features_future_activations = append_features(
-                        filtered_shifted_future_activations, closest_n_xy_current_frame_pair)
+                        activations_future_frame_per_frame = extract_features_per_bounding_box(
+                            shifted_box_in_future_per_frame, future_mask_from_dict)
+                        activations_past_frame_per_frame = extract_features_per_bounding_box(
+                            shifted_box_in_past_per_frame, past_mask_from_dict)
+
+                        if activations_future_frame_per_frame.size == 0 or activations_past_frame_per_frame.size == 0:
+                            logger.info(f'Ending Track! No features found in '
+                                        f'{"past" if activations_past_frame_per_frame.size == 0 else "future"} '
+                                        f'at {running_idx} frames apart from frame {actual_fr.item()}')
+                            current_track_obj_features = AgentFeatures(
+                                track_idx=object_feature.idx,
+                                activations_t=activations,
+                                activations_t_minus_one=activations_displaced_in_past_per_frame,
+                                activations_t_plus_one=activations_displaced_in_future_per_frame,
+                                future_flow=activations_future_displacement_per_frame,
+                                past_flow=activations_past_displacement_per_frame,
+                                bbox_t=box,
+                                bbox_t_minus_one=shifted_box_in_past_per_frame,
+                                bbox_t_plus_one=shifted_box_in_future_per_frame,
+                                frame_number=object_feature.frame_number,
+                                activations_future_frame=activations_future_frame_per_frame,
+                                activations_past_frame=activations_past_frame_per_frame,
+                                final_features_future_activations=None,
+                                is_track_live=False,
+                                frame_number_t=actual_fr.item(),
+                                frame_number_t_minus_one=past_mask_idx,
+                                frame_number_t_plus_one=future_mask_idx,
+                                past_frames_used_in_of_estimation=running_idx,
+                                future_frames_used_in_of_estimation=running_idx,
+                                frame_by_frame_estimation=True
+                            )
+                            object_features.append(current_track_obj_features)
+                            if object_feature.idx in track_based_accumulated_features:
+                                track_based_accumulated_features[object_feature.idx].object_features.append(
+                                    current_track_obj_features)
+
+                            continue
+
+                        closest_n_shifted_xy_pair_future_per_frame, closest_n_xy_current_future_frame_pair_per_frame = \
+                            features_filter_append_preprocessing(
+                                overlap_percent, activations_displaced_in_future_per_frame,
+                                activations_future_frame_per_frame)
+
+                        filtered_shifted_future_activations_per_frame = filter_features(
+                            activations_displaced_in_future_per_frame, closest_n_shifted_xy_pair_future_per_frame)
+                        activations_displaced_in_future_per_frame = append_features(
+                            filtered_shifted_future_activations_per_frame,
+                            closest_n_xy_current_future_frame_pair_per_frame)
+
+                        closest_n_shifted_xy_pair_past_per_frame, closest_n_xy_current_past_frame_pair_per_frame = \
+                            features_filter_append_preprocessing(
+                                overlap_percent, activations_displaced_in_past_per_frame,
+                                activations_past_frame_per_frame)
+
+                        filtered_shifted_past_activations_per_frame = filter_features(
+                            activations_displaced_in_past_per_frame, closest_n_shifted_xy_pair_past_per_frame)
+                        activations_displaced_in_past_per_frame = append_features(
+                            filtered_shifted_past_activations_per_frame, closest_n_xy_current_past_frame_pair_per_frame)
+
+                        activations_displaced_in_future_per_frame_past = np.round(
+                            activations_displaced_in_future_per_frame).astype(np.int)
+                        activations_displaced_in_past_per_frame_past = np.round(
+                            activations_displaced_in_past_per_frame).astype(np.int)
 
                     current_track_obj_features = AgentFeatures(
                         track_idx=object_feature.idx,
                         activations_t=activations,
-                        activations_t_minus_one=activations_displaced_in_past,
-                        activations_t_plus_one=activations_displaced_in_future,
-                        future_flow=activations_future_displacement,
-                        past_flow=activations_past_displacement,
+                        activations_t_minus_one=activations_displaced_in_past_per_frame,
+                        activations_t_plus_one=activations_displaced_in_future_per_frame,
+                        future_flow=activations_future_displacement_list,
+                        past_flow=activations_past_displacement_list,
                         bbox_t=box,
-                        bbox_t_minus_one=shifted_box_in_past,
-                        bbox_t_plus_one=shifted_box_in_future,
+                        bbox_t_minus_one=shifted_box_in_past_per_frame,
+                        bbox_t_plus_one=shifted_box_in_future_per_frame,
                         frame_number=object_feature.frame_number,
-                        activations_future_frame=activations_future_frame,
-                        activations_past_frame=activations_past_frame,
-                        final_features_future_activations=final_features_future_activations,
+                        activations_future_frame=activations_future_frame_per_frame,
+                        activations_past_frame=activations_past_frame_per_frame,
+                        final_features_future_activations=activations_displaced_in_future_per_frame,
                         frame_number_t=actual_fr.item(),
                         frame_number_t_minus_one=actual_fr.item() - frame_time_gap,
                         frame_number_t_plus_one=actual_fr.item() + frame_time_gap,
@@ -3886,6 +3948,90 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
                     else:
                         track_based_accumulated_features[object_feature.idx].object_features.append(
                             current_track_obj_features)
+
+                    # activations_future_displacement = flow_for_future[activations[:, 1], activations[:, 0]]
+                    # activations_past_displacement = past_flow_yet[activations[:, 1], activations[:, 0]]
+                    #
+                    # activations_displaced_in_future = activations + activations_future_displacement
+                    # activations_displaced_in_past = activations - activations_past_displacement
+                    #
+                    # shifted_box_in_future, shifted_activation_center_in_future = evaluate_shifted_bounding_box(
+                    #     box, activations_displaced_in_future, activations)
+                    # shifted_box_in_past, shifted_activation_center_in_past = evaluate_shifted_bounding_box(
+                    #     box, activations_displaced_in_past, activations)
+                    #
+                    # activations_future_frame = extract_features_per_bounding_box(shifted_box_in_future, future_mask)
+                    # activations_past_frame = extract_features_per_bounding_box(shifted_box_in_past, past_mask)
+                    #
+                    # if activations_future_frame.size == 0:
+                    #     current_track_obj_features = AgentFeatures(
+                    #         track_idx=object_feature.idx,
+                    #         activations_t=activations,
+                    #         activations_t_minus_one=activations_displaced_in_past,
+                    #         activations_t_plus_one=activations_displaced_in_future,
+                    #         future_flow=activations_future_displacement,
+                    #         past_flow=activations_past_displacement,
+                    #         bbox_t=box,
+                    #         bbox_t_minus_one=shifted_box_in_past,
+                    #         bbox_t_plus_one=shifted_box_in_future,
+                    #         frame_number=object_feature.frame_number,
+                    #         activations_future_frame=activations_future_frame,
+                    #         activations_past_frame=activations_past_frame,
+                    #         final_features_future_activations=None,
+                    #         is_track_live=False,
+                    #         frame_number_t=actual_fr.item(),
+                    #         frame_number_t_minus_one=actual_fr.item() - frame_time_gap,
+                    #         frame_number_t_plus_one=actual_fr.item() + frame_time_gap,
+                    #         past_frames_used_in_of_estimation=list(past_12_frames_optical_flow.keys()),
+                    #         future_frames_used_in_of_estimation=list(future_12_frames_optical_flow.keys()),
+                    #         frame_by_frame_estimation=True
+                    #     )
+                    #     object_features.append(current_track_obj_features)
+                    #     if object_feature.idx in track_based_accumulated_features:
+                    #         track_based_accumulated_features[object_feature.idx].object_features.append(
+                    #             current_track_obj_features)
+                    #
+                    #     continue
+                    #
+                    # closest_n_shifted_xy_pair, closest_n_xy_current_frame_pair = \
+                    #     features_filter_append_preprocessing(
+                    #         overlap_percent, activations_displaced_in_future, activations_future_frame)
+                    #
+                    # filtered_shifted_future_activations = filter_features(
+                    #     activations_displaced_in_future, closest_n_shifted_xy_pair)
+                    # final_features_future_activations = append_features(
+                    #     filtered_shifted_future_activations, closest_n_xy_current_frame_pair)
+                    #
+                    # current_track_obj_features = AgentFeatures(
+                    #     track_idx=object_feature.idx,
+                    #     activations_t=activations,
+                    #     activations_t_minus_one=activations_displaced_in_past,
+                    #     activations_t_plus_one=activations_displaced_in_future,
+                    #     future_flow=activations_future_displacement,
+                    #     past_flow=activations_past_displacement,
+                    #     bbox_t=box,
+                    #     bbox_t_minus_one=shifted_box_in_past,
+                    #     bbox_t_plus_one=shifted_box_in_future,
+                    #     frame_number=object_feature.frame_number,
+                    #     activations_future_frame=activations_future_frame,
+                    #     activations_past_frame=activations_past_frame,
+                    #     final_features_future_activations=final_features_future_activations,
+                    #     frame_number_t=actual_fr.item(),
+                    #     frame_number_t_minus_one=actual_fr.item() - frame_time_gap,
+                    #     frame_number_t_plus_one=actual_fr.item() + frame_time_gap,
+                    #     past_frames_used_in_of_estimation=list(past_12_frames_optical_flow.keys()),
+                    #     future_frames_used_in_of_estimation=list(future_12_frames_optical_flow.keys()),
+                    #     frame_by_frame_estimation=True
+                    # )
+                    # object_features.append(current_track_obj_features)
+                    # if object_feature.idx not in track_based_accumulated_features:
+                    #     track_feats = TrackFeatures(object_feature.idx)
+                    #     track_feats.object_features.append(current_track_obj_features)
+                    #     track_based_accumulated_features.update(
+                    #         {object_feature.idx: track_feats})
+                    # else:
+                    #     track_based_accumulated_features[object_feature.idx].object_features.append(
+                    #         current_track_obj_features)
 
                 data_all_frames.update({actual_fr.item(): FrameFeatures(frame_number=actual_fr.item(),
                                                                         object_features=object_features)})
@@ -4079,7 +4225,7 @@ if __name__ == '__main__':
         eval_metrics(feat_file_path)
     # TODO:
     #  -> Add gt info - associate gt (iou) + check 12 frames later that gt was actually the gt we had
-    #  -> Frame_by_frame estimation for 12 frames
+    #  -> Frame_by_frame estimation for 12 frames, check the dict fix for other function
     #  -> plot to verify -> track-based+frame_based
     #  -> box switch stuff - can reduce the track ids count a lot
     # NOTE:
