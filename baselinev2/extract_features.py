@@ -246,6 +246,54 @@ def plot_features_with_mask_simple(features, mask, bbox=None):
     plt.show()
 
 
+def plot_tracks_with_features(frame_t, frame_t_minus_one, frame_t_plus_one, features_t, features_t_minus_one, file_idx,
+                              features_t_plus_one, box_t, box_t_minus_one, box_t_plus_one, frame_number, marker_size=8,
+                              annotations=None, additional_text='', video_mode=False, save_path=None, track_id=None):
+    fig, axs = plt.subplots(1, 3, sharex='none', sharey='none', figsize=(12, 10))
+    axs[0].imshow(frame_t_minus_one, cmap='gray')
+    axs[1].imshow(frame_t, cmap='gray')
+    axs[2].imshow(frame_t_plus_one, cmap='gray')
+
+    axs[0].plot(features_t_minus_one[:, 0], features_t_minus_one[:, 1], 'o',
+                markerfacecolor='blue', markeredgecolor='k', markersize=marker_size)
+    axs[1].plot(features_t[:, 0], features_t[:, 1], 'o',
+                markerfacecolor='blue', markeredgecolor='k', markersize=marker_size)
+    axs[2].plot(features_t_plus_one[:, 0], features_t_plus_one[:, 1], 'o',
+                markerfacecolor='blue', markeredgecolor='k', markersize=marker_size)
+
+    if annotations is not None:
+        add_box_to_axes_with_annotation(axs[0], box_t_minus_one, annotations[0])
+        add_box_to_axes_with_annotation(axs[1], box_t, annotations[1])
+        add_box_to_axes_with_annotation(axs[2], box_t_plus_one, annotations[2])
+    else:
+        add_box_to_axes(axs[0], box_t_minus_one)
+        add_box_to_axes(axs[1], box_t)
+        add_box_to_axes(axs[2], box_t_plus_one)
+
+    axs[0].set_title('T-1')
+    axs[1].set_title('T')
+    axs[2].set_title('T+1')
+
+    fig.suptitle(f'Track - Past|Present|Future\nFrame: {frame_number}\n{additional_text}')
+
+    legends_dict = {'r': 'Bounding Box',
+                    'blue': 'Features'}
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
+    if video_mode:
+        plt.close()
+    else:
+        if save_path is not None:
+            save_path = save_path + f'{track_id if track_id is not None else "all"}/'
+            Path(save_path).mkdir(parents=True, exist_ok=True)
+            fig.savefig(save_path + f"{file_idx}_track_plot_frame_{frame_number}.png")
+            plt.close()
+        else:
+            plt.show()
+
+
 def plot_mask_matching_bbox(mask, bboxes, frame_num, save_path=None):
     fig, axs = plt.subplots(3, 1, sharex='none', sharey='none', figsize=(12, 10))
     axs[0].imshow(mask, cmap='gray')
@@ -3468,7 +3516,8 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                                                remaining_frames_idx=None, past_12_frames_optical_flow=None,
                                                last_frame_from_last_used_batch=None, last12_bg_sub_mask=None,
                                                resume_mode=False, detect_shadows=True, overlap_percent=0.4,
-                                               track_based_accumulated_features=None, frame_time_gap=12):
+                                               track_based_accumulated_features=None, frame_time_gap=12,
+                                               save_path_for_plot=None):
     interest_fr = None
     actual_interest_fr = None
 
@@ -3570,7 +3619,7 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                                                      kernel=kernel, var_threshold=var_threshold,
                                                      detect_shadows=detect_shadows)
 
-                for object_feature in extracted_feature_actual_fr_object_features:  # fixme: add gt
+                for running_idx, object_feature in enumerate(extracted_feature_actual_fr_object_features):  # fixme: add gt
                     activations = object_feature.past_xy
                     box = object_feature.past_bbox
                     activations_future_displacement = flow_for_future[activations[:, 1], activations[:, 0]]
@@ -3657,6 +3706,26 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                     else:
                         track_based_accumulated_features[object_feature.idx].object_features.append(
                             current_track_obj_features)
+                    #
+                    # plot_tracks_with_features(frame_t=frames[fr],
+                    #                           frame_t_minus_one=frames[fr - frame_time_gap],
+                    #                           frame_t_plus_one=frames[fr + frame_time_gap],
+                    #                           features_t=activations,
+                    #                           features_t_minus_one=activations_displaced_in_past,
+                    #                           features_t_plus_one=activations_displaced_in_future,
+                    #                           box_t=[box],
+                    #                           box_t_minus_one=[shifted_box_in_past],
+                    #                           box_t_plus_one=[shifted_box_in_future],
+                    #                           frame_number=actual_fr.item(),
+                    #                           marker_size=1,
+                    #                           track_id=object_feature.idx,
+                    #                           file_idx=running_idx,
+                    #                           save_path=save_path_for_plot,
+                    #                           annotations=[[object_feature.idx], [object_feature.idx],
+                    #                                        [object_feature.idx]],
+                    #                           additional_text=f'Past: {actual_fr.item() - frame_time_gap} |'
+                    #                                           f' Present: {actual_fr.item()} | '
+                    #                                           f'Future: {actual_fr.item() + frame_time_gap}')
 
                 data_all_frames.update({actual_fr.item(): FrameFeatures(frame_number=actual_fr.item(),
                                                                         object_features=object_features)})
@@ -3673,7 +3742,7 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
         remaining_frames=None, remaining_frames_idx=None, past_12_frames_optical_flow=None,
         last_frame_from_last_used_batch=None, last12_bg_sub_mask=None,
         resume_mode=False, detect_shadows=True, overlap_percent=0.4,
-        track_based_accumulated_features=None, frame_time_gap=12):
+        track_based_accumulated_features=None, frame_time_gap=12, save_path_for_plot=None):
     interest_fr = None
     actual_interest_fr = None
 
@@ -3810,7 +3879,7 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
                 for k in last12_bg_sub_mask_keys[1:]:
                     last12_bg_sub_mask_reversed.update({k: last12_bg_sub_mask[k]})
 
-                for object_feature in extracted_feature_actual_fr_object_features:  # fixme: add gt
+                for r_idx, object_feature in enumerate(extracted_feature_actual_fr_object_features):  # fixme: add gt
                     activations = object_feature.past_xy
                     box = object_feature.past_bbox
 
@@ -3860,7 +3929,7 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
                             shifted_box_in_past_per_frame, past_mask_from_dict)
 
                         if activations_future_frame_per_frame.size == 0 or activations_past_frame_per_frame.size == 0:
-                            logger.info(f'Ending Track! No features found in '
+                            logger.info(f'Ending Track {object_feature.idx}! No features found in '
                                         f'{"past" if activations_past_frame_per_frame.size == 0 else "future"} '
                                         f'at {running_idx} frames apart from frame {actual_fr.item()}')
                             current_track_obj_features = AgentFeatures(
@@ -3917,6 +3986,25 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
                             activations_displaced_in_future_per_frame).astype(np.int)
                         activations_displaced_in_past_per_frame_past = np.round(
                             activations_displaced_in_past_per_frame).astype(np.int)
+
+                        # plot_tracks_with_features(frame_t=frames[fr],
+                        #                           frame_t_minus_one=frames[fr - running_idx - 1],
+                        #                           frame_t_plus_one=frames[fr + running_idx + 1],
+                        #                           features_t=activations,
+                        #                           features_t_minus_one=activations_displaced_in_past_per_frame,
+                        #                           features_t_plus_one=activations_displaced_in_future_per_frame,
+                        #                           box_t=[box],
+                        #                           box_t_minus_one=[shifted_box_in_past_per_frame],
+                        #                           box_t_plus_one=[shifted_box_in_future_per_frame],
+                        #                           frame_number=actual_fr.item(),
+                        #                           marker_size=1,
+                        #                           track_id=object_feature.idx,
+                        #                           file_idx=running_idx,
+                        #                           save_path=save_path_for_plot,
+                        #                           annotations=[[object_feature.idx], [object_feature.idx],
+                        #                                        [object_feature.idx]],
+                        #                           additional_text=f'Past: {fr - running_idx - 1} | Present: {fr} | '
+                        #                                           f'Future: {fr + running_idx + 1}')
 
                     current_track_obj_features = AgentFeatures(
                         track_idx=object_feature.idx,
@@ -4033,6 +4121,26 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
                     #     track_based_accumulated_features[object_feature.idx].object_features.append(
                     #         current_track_obj_features)
 
+                    # plot_tracks_with_features(frame_t=frames[fr],
+                    #                           frame_t_minus_one=frames[fr - frame_time_gap],
+                    #                           frame_t_plus_one=frames[fr + frame_time_gap],
+                    #                           features_t=activations,
+                    #                           features_t_minus_one=activations_displaced_in_past,
+                    #                           features_t_plus_one=activations_displaced_in_future,
+                    #                           box_t=[box],
+                    #                           box_t_minus_one=[shifted_box_in_past],
+                    #                           box_t_plus_one=[shifted_box_in_future],
+                    #                           frame_number=actual_fr.item(),
+                    #                           marker_size=1,
+                    #                           track_id=object_feature.idx,
+                    #                           file_idx=r_idx,
+                    #                           save_path=save_path_for_plot + 'frame12apart',
+                    #                           annotations=[[object_feature.idx], [object_feature.idx],
+                    #                                        [object_feature.idx]],
+                    #                           additional_text=f'Past: {actual_fr.item() - frame_time_gap} |'
+                    #                                           f' Present: {actual_fr.item()} | '
+                    #                                           f'Future: {actual_fr.item() + frame_time_gap}')
+
                 data_all_frames.update({actual_fr.item(): FrameFeatures(frame_number=actual_fr.item(),
                                                                         object_features=object_features)})
 
@@ -4045,8 +4153,8 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
 def preprocess_data_zero_shot_12_frames_apart(
         extracted_features, save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=None,
         overlap_percent=0.1, radius=50, min_points_in_cluster=5, video_mode=False,
-        video_save_path=None, plot_scale_factor=1, desired_fps=5, plot=False,
-        custom_video_shape=True, plot_save_path=None, save_checkpoint=False,
+        save_path_for_video=None, plot_scale_factor=1, desired_fps=5, plot=False,
+        custom_video_shape=True, save_path_for_plot=None, save_checkpoint=False,
         begin_track_mode=True, generic_box_wh=100, distance_threshold=2,
         use_circle_to_keep_track_alive=True, iou_threshold=0.5, extra_radius=50,
         use_is_box_overlapping_live_boxes=True, premature_kill_save=False,
@@ -4123,12 +4231,14 @@ def preprocess_data_zero_shot_12_frames_apart(
                     last_frame_from_last_used_batch,
                     last12_bg_sub_mask=last12_bg_sub_mask,
                     track_based_accumulated_features=track_based_accumulated_features,
+                    save_path_for_plot=save_path_for_plot,
                     resume_mode=False)  # fixme: remove??
             total_accumulated_features = {**total_accumulated_features, **features_}
     except KeyboardInterrupt:
         print()
 
-    out.release()
+    if video_mode:
+        out.release()
     return total_accumulated_features
 
 
@@ -4210,23 +4320,25 @@ if __name__ == '__main__':
             per_track_features, per_frame_features, track_length_threshold
         )
 
+        plot_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/track_based/'
+        Path(plot_save_path).mkdir(parents=True, exist_ok=True)
         feats = preprocess_data_zero_shot_12_frames_apart(
             extracted_features=filtered_frame_based_features,
             var_threshold=None, plot=False, radius=60, save_per_part_path=None,
-            video_mode=False, video_save_path=video_save_path + 'extraction.avi',
-            desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
+            video_mode=False, save_path_for_video=video_save_path + 'extraction.avi',
+            desired_fps=5, overlap_percent=0.4, save_path_for_plot=plot_save_path,
             min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
             use_circle_to_keep_track_alive=False, custom_video_shape=False,
             extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True,
-            save_every_n_batch_itr=50)
+            save_every_n_batch_itr=50, frame_by_frame_estimation=False)
     else:
         feat_file_path = '../Plots/baseline_v2/v0/deathCircle4/' \
                          'use_is_box_overlapping_live_boxes/premature_kill_features_dict.pt'
         eval_metrics(feat_file_path)
     # TODO:
     #  -> Add gt info - associate gt (iou) + check 12 frames later that gt was actually the gt we had
-    #  -> Frame_by_frame estimation for 12 frames, check the dict fix for other function
-    #  -> plot to verify -> track-based+frame_based
+    #  -> Frame_by_frame estimation for 12 frames, check the dict fix for other function - Done
+    #  -> plot to verify -> track-based+frame_based - Done - 12 frames apart better!
     #  -> box switch stuff - can reduce the track ids count a lot
     # NOTE:
     #  -> setting use_circle_to_keep_track_alive=False to avoid noisy new tracks to pick up true live tracks
