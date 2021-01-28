@@ -1215,7 +1215,8 @@ def filter_tracks_through_all_steps(track_based_features, frame_based_features, 
 
 def evaluate_extracted_features(track_based_features, frame_based_features, batch_size=32, do_filter=False,
                                 drop_last_batch=True, plot_scale_factor=1, desired_fps=5, custom_video_shape=False,
-                                video_mode=True, video_save_location=None, min_track_length_threshold=5):
+                                video_mode=True, video_save_location=None, min_track_length_threshold=5,
+                                skip_plot_save=False):
     # frame_track_distribution_pre_filter = {k: len(v.object_features) for k, v in frame_based_features.items()}
     if do_filter:
         track_based_features, frame_based_features = filter_low_length_tracks(
@@ -1353,17 +1354,18 @@ def evaluate_extracted_features(track_based_features, frame_based_features, batc
 
                 out.write(out_frame)
             else:
-                fig = plot_for_video_current_frame(
-                    gt_rgb=frame, current_frame_rgb=frame,
-                    gt_annotations=annotations[:, :-1],
-                    current_frame_annotation=generated_boxes,
-                    new_track_annotation=[],
-                    frame_number=frame_number,
-                    additional_text=
-                    f'Distance based - Precision: {l2_distance_hungarian_precision} | '
-                    f'Recall: {l2_distance_hungarian_recall}\n',
-                    video_mode=False, original_dims=original_dims, zero_shot=True,
-                    save_path=f'{plot_save_path}zero_shot/plots_filtered/')
+                if not skip_plot_save:
+                    fig = plot_for_video_current_frame(
+                        gt_rgb=frame, current_frame_rgb=frame,
+                        gt_annotations=annotations[:, :-1],
+                        current_frame_annotation=generated_boxes,
+                        new_track_annotation=[],
+                        frame_number=frame_number,
+                        additional_text=
+                        f'Distance based - Precision: {l2_distance_hungarian_precision} | '
+                        f'Recall: {l2_distance_hungarian_recall}\n',
+                        video_mode=False, original_dims=original_dims, zero_shot=True,
+                        save_path=f'{plot_save_path}zero_shot/plots_filtered/')
 
             batch_tp_sum, batch_fp_sum, batch_fn_sum = \
                 np.array(l2_distance_hungarian_tp_list).sum(), np.array(l2_distance_hungarian_fp_list).sum(), \
@@ -1373,7 +1375,8 @@ def evaluate_extracted_features(track_based_features, frame_based_features, batc
             logger.info(f'Batch: {part_idx}, '
                         f'L2 Distance Based - Precision: {batch_precision} | Recall: {batch_recall}')
 
-    out.release()
+    if video_mode:
+        out.release()
     tp_sum, fp_sum, fn_sum = \
         np.array(l2_distance_hungarian_tp_list).sum(), np.array(l2_distance_hungarian_fp_list).sum(), \
         np.array(l2_distance_hungarian_fn_list).sum()
@@ -4025,7 +4028,8 @@ if __name__ == '__main__':
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
         evaluate_extracted_features(track_based_features=per_track_features, frame_based_features=per_frame_features,
                                     video_save_location=video_save_path + 'extraction_filter.avi', do_filter=True,
-                                    min_track_length_threshold=track_length_threshold, desired_fps=1)
+                                    min_track_length_threshold=track_length_threshold, desired_fps=1, video_mode=False,
+                                    skip_plot_save=True)
     elif not eval_mode and EXECUTE_STEP == STEP.DEBUG:
         # Scrapped ###################################################################################################
         # time_step_between_frames = 12
@@ -4077,6 +4081,7 @@ if __name__ == '__main__':
     #  -> Add gt info - associate gt (iou) + check 12 frames later that gt was actually the gt we had
     #  -> Frame_by_frame estimation for 12 frames
     #  -> plot to verify -> track-based+frame_based
+    #  -> box switch stuff - can reduce the track ids count a lot
     # NOTE:
     #  -> setting use_circle_to_keep_track_alive=False to avoid noisy new tracks to pick up true live tracks
     #  -> Crowded - Death Circle [ smaller one 4]
