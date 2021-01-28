@@ -93,13 +93,14 @@ class AgentFeatures(object):
                  past_flow, bbox_t, bbox_t_plus_one, bbox_t_minus_one, frame_number, activations_future_frame,
                  activations_past_frame, final_features_future_activations, is_track_live=True, gt_box=None,
                  past_gt_box=None, gt_track_idx=None, gt_past_current_distance=None, frame_number_t=None,
-                 frame_number_t_minus_one=None, frame_number_t_plus_one=None, frames_used_in_of_estimation=None,
-                 frame_by_frame_estimation=False):
+                 frame_number_t_minus_one=None, frame_number_t_plus_one=None, past_frames_used_in_of_estimation=None,
+                 frame_by_frame_estimation=False, future_frames_used_in_of_estimation=None):
         super(AgentFeatures, self).__init__()
         self.frame_number_t = frame_number_t
         self.frame_number_t_minus_one = frame_number_t_minus_one
         self.frame_number_t_plus_one = frame_number_t_plus_one
-        self.frames_used_in_of_estimation = frames_used_in_of_estimation
+        self.past_frames_used_in_of_estimation = past_frames_used_in_of_estimation
+        self.future_frames_used_in_of_estimation = future_frames_used_in_of_estimation
         self.frame_by_frame_estimation = frame_by_frame_estimation
         self.track_idx = track_idx
         self.activations_t = activations_t
@@ -3464,7 +3465,7 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                                                remaining_frames_idx=None, past_12_frames_optical_flow=None,
                                                last_frame_from_last_used_batch=None, last12_bg_sub_mask=None,
                                                resume_mode=False, detect_shadows=True, overlap_percent=0.4,
-                                               track_based_accumulated_features=None, frame_by_frame_estimation=False):
+                                               track_based_accumulated_features=None, frame_time_gap=12):
     interest_fr = None
     actual_interest_fr = None
 
@@ -3490,17 +3491,9 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
         of_interest_fr = (fr + frames_to_build_model) % total_frames
         actual_of_interest_fr = (actual_fr + frames_to_build_model)
 
-        # mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=fr,
-        #                                 time_gap_within_frames=time_gap_within_frames,
-        #                                 total_frames=total_frames, step=step, n=n,
-        #                                 kernel=kernel, var_threshold=var_threshold,
-        #                                 detect_shadows=detect_shadows)
-
         # do not go in circle for flow estimation
         if of_interest_fr < interest_fr:
             break
-
-        # last12_bg_sub_mask.update({actual_interest_fr.item(): mask})
 
         # start at 12th frame and then only consider last 12 frames for velocity estimation
         if actual_interest_fr != 0:
@@ -3526,49 +3519,30 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                 past_12_frames_optical_flow.update(
                     {f'{actual_interest_fr.item() - 1}-{actual_interest_fr.item()}': past_flow_per_frame})
 
-        if len(past_12_frames_optical_flow) > 12:
+        if len(past_12_frames_optical_flow) > frame_time_gap:
             temp_past_12_frames_optical_flow = {}
-            for i in list(past_12_frames_optical_flow)[-12:]:
+            for i in list(past_12_frames_optical_flow)[-frame_time_gap:]:
                 temp_past_12_frames_optical_flow.update({i: past_12_frames_optical_flow[i]})
             past_12_frames_optical_flow = temp_past_12_frames_optical_flow
             temp_past_12_frames_optical_flow = None
 
-        if len(last12_bg_sub_mask) > 13:  # we need one more for of?
-            temp_last12_bg_sub_mask = {}
-            for i in list(last12_bg_sub_mask)[-13:]:
-                temp_last12_bg_sub_mask.update({i: last12_bg_sub_mask[i]})
-            last12_bg_sub_mask = temp_last12_bg_sub_mask
-            temp_last12_bg_sub_mask = None
-
-        if actual_interest_fr < 12:
+        if actual_interest_fr < frame_time_gap:
             continue
 
         if not resume_mode:
             # flow between consecutive frames
             frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))
 
-            # future12_bg_sub_mask = {}
             future_12_frames_optical_flow = {}
-            flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))  # put sum of optimized of - using other var
-            # last_frame_to_add_in_future_dict = list(last12_bg_sub_mask.keys())[-2]
-            # future12_bg_sub_mask.update({
-            #     last_frame_to_add_in_future_dict: last12_bg_sub_mask[last_frame_to_add_in_future_dict]})
+            # flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))
             for of_i, actual_of_i in zip(range(interest_fr, of_interest_fr),
                                          range(actual_interest_fr, actual_of_interest_fr)):
-                # future_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=of_i,
-                #                                        time_gap_within_frames=time_gap_within_frames,
-                #                                        total_frames=total_frames, step=step, n=n,
-                #                                        kernel=kernel, var_threshold=var_threshold,
-                #                                        detect_shadows=detect_shadows)
-                # future12_bg_sub_mask.update({actual_of_i: future_mask})
-
                 previous = cv.cvtColor(frames[of_i], cv.COLOR_BGR2GRAY)
                 next_frame = cv.cvtColor(frames[of_i + 1], cv.COLOR_BGR2GRAY)
 
                 flow_per_frame, rgb, mag, ang = FeatureExtractor.get_optical_flow(previous_frame=previous,
                                                                                   next_frame=next_frame,
                                                                                   all_results_out=True)
-                # future_12_frames_optical_flow.update({f'{actual_of_i - 1}-{actual_of_i}': flow_per_frame})
                 future_12_frames_optical_flow.update({f'{actual_of_i}-{actual_of_i + 1}': flow_per_frame})
 
             if actual_fr.item() > 11:
@@ -3581,13 +3555,13 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                 extracted_feature_actual_fr = extracted_features[actual_fr.item()]
                 extracted_feature_actual_fr_object_features = extracted_feature_actual_fr.object_features
 
-                future_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=interest_fr + 12,
+                future_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=interest_fr + frame_time_gap,
                                                        time_gap_within_frames=time_gap_within_frames,
                                                        total_frames=total_frames, step=step, n=n,
                                                        kernel=kernel, var_threshold=var_threshold,
                                                        detect_shadows=detect_shadows)
 
-                past_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=interest_fr - 12,
+                past_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=interest_fr - frame_time_gap,
                                                      time_gap_within_frames=time_gap_within_frames,
                                                      total_frames=total_frames, step=step, n=n,
                                                      kernel=kernel, var_threshold=var_threshold,
@@ -3625,7 +3599,13 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                             activations_future_frame=activations_future_frame,
                             activations_past_frame=activations_past_frame,
                             final_features_future_activations=activations_displaced_in_future,
-                            is_track_live=False
+                            is_track_live=False,
+                            frame_number_t=actual_fr.item(),
+                            frame_number_t_minus_one=actual_fr.item() - frame_time_gap,
+                            frame_number_t_plus_one=actual_fr.item() + frame_time_gap,
+                            past_frames_used_in_of_estimation=list(past_12_frames_optical_flow.keys()),
+                            future_frames_used_in_of_estimation=list(future_12_frames_optical_flow.keys()),
+                            frame_by_frame_estimation=False
                         )
                         object_features.append(current_track_obj_features)
                         if object_feature.idx in track_based_accumulated_features:
@@ -3656,7 +3636,243 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                         frame_number=object_feature.frame_number,
                         activations_future_frame=activations_future_frame,
                         activations_past_frame=activations_past_frame,
-                        final_features_future_activations=final_features_future_activations
+                        final_features_future_activations=final_features_future_activations,
+                        frame_number_t=actual_fr.item(),
+                        frame_number_t_minus_one=actual_fr.item() - frame_time_gap,
+                        frame_number_t_plus_one=actual_fr.item() + frame_time_gap,
+                        past_frames_used_in_of_estimation=list(past_12_frames_optical_flow.keys()),
+                        future_frames_used_in_of_estimation=list(future_12_frames_optical_flow.keys()),
+                        frame_by_frame_estimation=False
+                    )
+                    object_features.append(current_track_obj_features)
+                    if object_feature.idx not in track_based_accumulated_features:
+                        track_feats = TrackFeatures(object_feature.idx)
+                        track_feats.object_features.append(current_track_obj_features)
+                        track_based_accumulated_features.update(
+                            {object_feature.idx: track_feats})
+                    else:
+                        track_based_accumulated_features[object_feature.idx].object_features.append(
+                            current_track_obj_features)
+
+                data_all_frames.update({actual_fr.item(): FrameFeatures(frame_number=actual_fr.item(),
+                                                                        object_features=object_features)})
+
+    return data_all_frames, frames[interest_fr:, ...], \
+           torch.arange(interest_fr + frame_numbers[0], frame_numbers[-1] + 1), \
+           last_frame_from_last_used_batch, past_12_frames_optical_flow, last12_bg_sub_mask, \
+           track_based_accumulated_features
+
+
+def twelve_frame_by_frame_feature_extraction_zero_shot(
+        frames, n, frames_to_build_model, extracted_features,
+        var_threshold=None, time_gap_within_frames=3, frame_numbers=None,
+        remaining_frames=None, remaining_frames_idx=None, past_12_frames_optical_flow=None,
+        last_frame_from_last_used_batch=None, last12_bg_sub_mask=None,
+        resume_mode=False, detect_shadows=True, overlap_percent=0.4,
+        track_based_accumulated_features=None, frame_time_gap=12):
+    interest_fr = None
+    actual_interest_fr = None
+
+    # cat old frames
+    if remaining_frames is not None:
+        frames = np.concatenate((remaining_frames, frames), axis=0)
+        frame_numbers = torch.cat((remaining_frames_idx, frame_numbers))
+
+    kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
+    step = 0
+    if n is not None:
+        step = n // 2
+    else:
+        n = frames_to_build_model
+    total_frames = frames.shape[0]
+
+    data_all_frames = {}
+
+    for fr, actual_fr in tqdm(zip(range(frames.shape[0]), frame_numbers), total=frames.shape[0]):
+        interest_fr = fr % total_frames
+        actual_interest_fr = actual_fr
+
+        of_interest_fr = (fr + frames_to_build_model) % total_frames
+        actual_of_interest_fr = (actual_fr + frames_to_build_model)
+
+        mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=fr,
+                                        time_gap_within_frames=time_gap_within_frames,
+                                        total_frames=total_frames, step=step, n=n,
+                                        kernel=kernel, var_threshold=var_threshold,
+                                        detect_shadows=detect_shadows)
+
+        # do not go in circle for flow estimation
+        if of_interest_fr < interest_fr:
+            break
+
+        last12_bg_sub_mask.update({actual_interest_fr.item(): mask})
+
+        # start at 12th frame and then only consider last 12 frames for velocity estimation
+        if actual_interest_fr != 0:
+            if interest_fr == 0:
+                previous = cv.cvtColor(last_frame_from_last_used_batch.astype(np.uint8), cv.COLOR_BGR2GRAY)
+                next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+
+                past_flow_per_frame, past_rgb, past_mag, past_ang = FeatureExtractor.get_optical_flow(
+                    previous_frame=previous,
+                    next_frame=next_frame,
+                    all_results_out=True)
+                past_12_frames_optical_flow.update(
+                    {f'{actual_interest_fr.item() - 1}-{actual_interest_fr.item()}': past_flow_per_frame})
+            else:
+                previous = cv.cvtColor(frames[interest_fr - 1], cv.COLOR_BGR2GRAY)
+                next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+
+                past_flow_per_frame, past_rgb, past_mag, past_ang = FeatureExtractor.get_optical_flow(
+                    previous_frame=previous,
+                    next_frame=next_frame,
+                    all_results_out=True)
+                last_frame_from_last_used_batch = frames[interest_fr]
+                past_12_frames_optical_flow.update(
+                    {f'{actual_interest_fr.item() - 1}-{actual_interest_fr.item()}': past_flow_per_frame})
+
+        if len(past_12_frames_optical_flow) > frame_time_gap:
+            temp_past_12_frames_optical_flow = {}
+            for i in list(past_12_frames_optical_flow)[-frame_time_gap:]:
+                temp_past_12_frames_optical_flow.update({i: past_12_frames_optical_flow[i]})
+            past_12_frames_optical_flow = temp_past_12_frames_optical_flow
+            temp_past_12_frames_optical_flow = None
+
+        if len(last12_bg_sub_mask) > 13:  # we need one more for of
+            temp_last12_bg_sub_mask = {}
+            for i in list(last12_bg_sub_mask)[-13:]:
+                temp_last12_bg_sub_mask.update({i: last12_bg_sub_mask[i]})
+            last12_bg_sub_mask = temp_last12_bg_sub_mask
+            temp_last12_bg_sub_mask = None
+
+        if actual_interest_fr < frame_time_gap:
+            continue
+
+        if not resume_mode:
+            # flow between consecutive frames
+            frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))
+
+            future12_bg_sub_mask = {}
+            future_12_frames_optical_flow = {}
+            flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))  # put sum of optimized of - using other var
+            last_frame_to_add_in_future_dict = list(last12_bg_sub_mask.keys())[-2]
+            future12_bg_sub_mask.update({
+                last_frame_to_add_in_future_dict: last12_bg_sub_mask[last_frame_to_add_in_future_dict]})
+            for of_i, actual_of_i in zip(range(interest_fr, of_interest_fr),
+                                         range(actual_interest_fr, actual_of_interest_fr)):
+                future_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=of_i,
+                                                       time_gap_within_frames=time_gap_within_frames,
+                                                       total_frames=total_frames, step=step, n=n,
+                                                       kernel=kernel, var_threshold=var_threshold,
+                                                       detect_shadows=detect_shadows)
+                future12_bg_sub_mask.update({actual_of_i: future_mask})
+
+                previous = cv.cvtColor(frames[of_i], cv.COLOR_BGR2GRAY)
+                next_frame = cv.cvtColor(frames[of_i + 1], cv.COLOR_BGR2GRAY)
+
+                flow_per_frame, rgb, mag, ang = FeatureExtractor.get_optical_flow(previous_frame=previous,
+                                                                                  next_frame=next_frame,
+                                                                                  all_results_out=True)
+                future_12_frames_optical_flow.update({f'{actual_of_i}-{actual_of_i + 1}': flow_per_frame})
+
+            if actual_fr.item() > 11:
+
+                object_features = []
+                past_flow_yet = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))
+                flow_for_future = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))
+                past_flow_yet += np.array(list(past_12_frames_optical_flow.values())).sum(0)
+                flow_for_future += np.array(list(future_12_frames_optical_flow.values())).sum(0)
+                extracted_feature_actual_fr = extracted_features[actual_fr.item()]
+                extracted_feature_actual_fr_object_features = extracted_feature_actual_fr.object_features
+
+                future_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=interest_fr + frame_time_gap,
+                                                       time_gap_within_frames=time_gap_within_frames,
+                                                       total_frames=total_frames, step=step, n=n,
+                                                       kernel=kernel, var_threshold=var_threshold,
+                                                       detect_shadows=detect_shadows)
+
+                past_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=interest_fr - frame_time_gap,
+                                                     time_gap_within_frames=time_gap_within_frames,
+                                                     total_frames=total_frames, step=step, n=n,
+                                                     kernel=kernel, var_threshold=var_threshold,
+                                                     detect_shadows=detect_shadows)
+
+                for object_feature in extracted_feature_actual_fr_object_features:  # fixme: add gt
+                    activations = object_feature.past_xy
+                    box = object_feature.past_bbox
+                    activations_future_displacement = flow_for_future[activations[:, 1], activations[:, 0]]
+                    activations_past_displacement = past_flow_yet[activations[:, 1], activations[:, 0]]
+
+                    activations_displaced_in_future = activations + activations_future_displacement
+                    activations_displaced_in_past = activations - activations_past_displacement
+
+                    shifted_box_in_future, shifted_activation_center_in_future = evaluate_shifted_bounding_box(
+                        box, activations_displaced_in_future, activations)
+                    shifted_box_in_past, shifted_activation_center_in_past = evaluate_shifted_bounding_box(
+                        box, activations_displaced_in_past, activations)
+
+                    activations_future_frame = extract_features_per_bounding_box(shifted_box_in_future, future_mask)
+                    activations_past_frame = extract_features_per_bounding_box(shifted_box_in_past, past_mask)
+
+                    if activations_future_frame.size == 0:
+                        current_track_obj_features = AgentFeatures(
+                            track_idx=object_feature.idx,
+                            activations_t=activations,
+                            activations_t_minus_one=activations_displaced_in_past,
+                            activations_t_plus_one=activations_displaced_in_future,
+                            future_flow=activations_future_displacement,
+                            past_flow=activations_past_displacement,
+                            bbox_t=box,
+                            bbox_t_minus_one=shifted_box_in_past,
+                            bbox_t_plus_one=shifted_box_in_future,
+                            frame_number=object_feature.frame_number,
+                            activations_future_frame=activations_future_frame,
+                            activations_past_frame=activations_past_frame,
+                            final_features_future_activations=activations_displaced_in_future,
+                            is_track_live=False,
+                            frame_number_t=actual_fr.item(),
+                            frame_number_t_minus_one=actual_fr.item() - frame_time_gap,
+                            frame_number_t_plus_one=actual_fr.item() + frame_time_gap,
+                            past_frames_used_in_of_estimation=list(past_12_frames_optical_flow.keys()),
+                            future_frames_used_in_of_estimation=list(future_12_frames_optical_flow.keys()),
+                            frame_by_frame_estimation=True
+                        )
+                        object_features.append(current_track_obj_features)
+                        if object_feature.idx in track_based_accumulated_features:
+                            track_based_accumulated_features[object_feature.idx].object_features.append(
+                                current_track_obj_features)
+
+                        continue
+
+                    closest_n_shifted_xy_pair, closest_n_xy_current_frame_pair = \
+                        features_filter_append_preprocessing(
+                            overlap_percent, activations_displaced_in_future, activations_future_frame)
+
+                    filtered_shifted_future_activations = filter_features(
+                        activations_displaced_in_future, closest_n_shifted_xy_pair)
+                    final_features_future_activations = append_features(
+                        filtered_shifted_future_activations, closest_n_xy_current_frame_pair)
+
+                    current_track_obj_features = AgentFeatures(
+                        track_idx=object_feature.idx,
+                        activations_t=activations,
+                        activations_t_minus_one=activations_displaced_in_past,
+                        activations_t_plus_one=activations_displaced_in_future,
+                        future_flow=activations_future_displacement,
+                        past_flow=activations_past_displacement,
+                        bbox_t=box,
+                        bbox_t_minus_one=shifted_box_in_past,
+                        bbox_t_plus_one=shifted_box_in_future,
+                        frame_number=object_feature.frame_number,
+                        activations_future_frame=activations_future_frame,
+                        activations_past_frame=activations_past_frame,
+                        final_features_future_activations=final_features_future_activations,
+                        frame_number_t=actual_fr.item(),
+                        frame_number_t_minus_one=actual_fr.item() - frame_time_gap,
+                        frame_number_t_plus_one=actual_fr.item() + frame_time_gap,
+                        past_frames_used_in_of_estimation=list(past_12_frames_optical_flow.keys()),
+                        future_frames_used_in_of_estimation=list(future_12_frames_optical_flow.keys()),
+                        frame_by_frame_estimation=True
                     )
                     object_features.append(current_track_obj_features)
                     if object_feature.idx not in track_based_accumulated_features:
@@ -3685,7 +3901,12 @@ def preprocess_data_zero_shot_12_frames_apart(
         begin_track_mode=True, generic_box_wh=100, distance_threshold=2,
         use_circle_to_keep_track_alive=True, iou_threshold=0.5, extra_radius=50,
         use_is_box_overlapping_live_boxes=True, premature_kill_save=False,
-        save_every_n_batch_itr=None, num_frames_to_build_bg_sub_model=12, drop_last_batch=True):
+        save_every_n_batch_itr=None, num_frames_to_build_bg_sub_model=12, drop_last_batch=True,
+        frame_by_frame_estimation=False):
+    if frame_by_frame_estimation:
+        extraction_method = twelve_frame_by_frame_feature_extraction_zero_shot
+    else:
+        extraction_method = twelve_frames_feature_extraction_zero_shot
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
                                   step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
@@ -3741,7 +3962,7 @@ def preprocess_data_zero_shot_12_frames_apart(
 
             features_, remaining_frames, remaining_frames_idx, last_frame_from_last_used_batch, \
             past_12_frames_optical_flow, last12_bg_sub_mask, track_based_accumulated_features = \
-                twelve_frames_feature_extraction_zero_shot(
+                extraction_method(
                     extracted_features=extracted_features,
                     frames=frames, n=30,
                     frames_to_build_model=num_frames_to_build_bg_sub_model,
@@ -3853,8 +4074,9 @@ if __name__ == '__main__':
                          'use_is_box_overlapping_live_boxes/premature_kill_features_dict.pt'
         eval_metrics(feat_file_path)
     # TODO:
-    #  -> Add gt info
+    #  -> Add gt info - associate gt (iou) + check 12 frames later that gt was actually the gt we had
     #  -> Frame_by_frame estimation for 12 frames
+    #  -> plot to verify -> track-based+frame_based
     # NOTE:
     #  -> setting use_circle_to_keep_track_alive=False to avoid noisy new tracks to pick up true live tracks
     #  -> Crowded - Death Circle [ smaller one 4]
