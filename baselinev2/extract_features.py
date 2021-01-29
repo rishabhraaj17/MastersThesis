@@ -3517,7 +3517,7 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                                                last_frame_from_last_used_batch=None, last12_bg_sub_mask=None,
                                                resume_mode=False, detect_shadows=True, overlap_percent=0.4,
                                                track_based_accumulated_features=None, frame_time_gap=12,
-                                               save_path_for_plot=None):
+                                               save_path_for_plot=None, df=None):
     interest_fr = None
     actual_interest_fr = None
 
@@ -3737,7 +3737,7 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
 
 
 def twelve_frame_by_frame_feature_extraction_zero_shot(
-        frames, n, frames_to_build_model, extracted_features,
+        frames, n, frames_to_build_model, extracted_features, df,
         var_threshold=None, time_gap_within_frames=3, frame_numbers=None,
         remaining_frames=None, remaining_frames_idx=None, past_12_frames_optical_flow=None,
         last_frame_from_last_used_batch=None, last12_bg_sub_mask=None,
@@ -4232,6 +4232,7 @@ def preprocess_data_zero_shot_12_frames_apart(
                     last12_bg_sub_mask=last12_bg_sub_mask,
                     track_based_accumulated_features=track_based_accumulated_features,
                     save_path_for_plot=save_path_for_plot,
+                    df=df,
                     resume_mode=False)  # fixme: remove??
             total_accumulated_features = {**total_accumulated_features, **features_}
     except KeyboardInterrupt:
@@ -4338,8 +4339,8 @@ if __name__ == '__main__':
     # TODO:
     #  -> Add gt info - associate gt (iou) + check 12 frames later that gt was actually the gt we had
     #  -> Frame_by_frame estimation for 12 frames, check the dict fix for other function - Done
-    #  -> plot to verify -> track-based+frame_based - Done - 12 frames apart better!
-    #  -> box switch stuff - can reduce the track ids count a lot
+    #  -> plot to verify -> track-based+frame_based - Done - 12 frames apart and frame-by-frame both works, later slow
+    #  -> box switch stuff - can reduce the track ids count a lot - Important to fix
     # NOTE:
     #  -> setting use_circle_to_keep_track_alive=False to avoid noisy new tracks to pick up true live tracks
     #  -> Crowded - Death Circle [ smaller one 4]
@@ -4350,3 +4351,9 @@ if __name__ == '__main__':
     #  -> Interesting: gates[2,3,8, 4--], hyang[0,3,4,7s, 8,9], nexus[3?,4?,], quad[1,], deatCircle[2, 4]
     #  -> Extraction time: gates3 - 1day
     #  -> What about stationary objects? Decreasing Recall
+    #  -> side by side walking - consider them as one?
+    #  -> combines objects into one
+    #  -> shadow activations into grass! invalid area
+    #  -> some plots for past goes negative idx and pcks up wrong image?
+    #  -> track 3 & 8, identity switch
+    #  -> shadows mimic the motion - so not so bad
