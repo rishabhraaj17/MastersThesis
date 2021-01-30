@@ -62,12 +62,12 @@ class STEP(Enum):
     FILTER_FEATURES = 7
 
 
-EXECUTE_STEP = STEP.EXTRACTION
+EXECUTE_STEP = STEP.UNSUPERVISED
 
 
 class ObjectFeatures(object):
-    def __init__(self, idx, xy, past_xy, final_xy, flow, past_flow, past_bbox, final_bbox, frame_number,
-                 is_track_live=True):
+    def __init__(self, idx, xy, past_xy, final_xy, flow, past_flow, past_bbox, final_bbox, frame_number, history=None,
+                 is_track_live=True, gt_history=None):
         super(ObjectFeatures, self).__init__()
         self.idx = idx
         self.xy = xy
@@ -83,6 +83,8 @@ class ObjectFeatures(object):
         self.past_gt_box = None
         self.gt_track_idx = None
         self.gt_past_current_distance = None
+        self.gt_history = gt_history
+        self.track_history = history
 
     def __eq__(self, other):
         return self.idx == other.idx
@@ -154,7 +156,7 @@ class TrackFeatures(object):
 
 
 class Track(object):
-    def __init__(self, bbox, idx, history=[], gt_track_idx=None):
+    def __init__(self, bbox, idx, history=None, gt_track_idx=None):
         super(Track, self).__init__()
         self.idx = idx
         self.bbox = bbox
@@ -646,6 +648,29 @@ def features_included_in_live_tracks(annotations, fg_mask, radius, running_track
     return all_cloud, feature_idx_covered, features_covered
 
 
+def get_track_history(track_id, track_features):
+    if len(track_features) == 0 or track_id not in track_features.keys():
+        return []
+    else:
+        track_feature = track_features[track_id]
+        assert track_id == track_feature.track_id
+        track_object_features = track_feature.object_features
+        history = [get_bbox_center(obj_feature.final_bbox).flatten() for obj_feature in track_object_features]
+        return history
+
+
+def get_gt_track_history(track_id, track_features):
+    if len(track_features) == 0 or track_id not in track_features.keys():
+        return []
+    else:
+        track_feature = track_features[track_id]
+        assert track_id == track_feature.track_id
+        track_object_features = track_feature.object_features
+        history = [get_bbox_center(obj_feature.gt_box).flatten() for obj_feature in track_object_features
+                   if obj_feature.gt_box is not None]
+        return history
+
+
 def plot_one_with_bounding_boxes(img, boxes):
     fig, axs = plt.subplots(1, 1, sharex='none', sharey='none',
                             figsize=(12, 10))
@@ -739,9 +764,15 @@ def plot_for_video(gt_rgb, gt_mask, last_frame_rgb, last_frame_mask, current_fra
     return fig
 
 
+def add_features_to_axis(ax, features, marker_size=8, marker_shape='o', marker_color='blue'):
+    ax.plot(features[:, 0], features[:, 1], marker_shape, markerfacecolor=marker_color, markeredgecolor='k',
+            markersize=marker_size)
+
+
 def plot_for_video_current_frame(gt_rgb, current_frame_rgb, gt_annotations, current_frame_annotation,
                                  new_track_annotation, frame_number, additional_text=None, video_mode=False,
-                                 original_dims=None, save_path=None, zero_shot=False, box_annotation=None):
+                                 original_dims=None, save_path=None, zero_shot=False, box_annotation=None,
+                                 generated_track_histories=None, gt_track_histories=None, track_marker_size=1):
     fig, ax = plt.subplots(1, 2, sharex='none', sharey='none', figsize=original_dims or (12, 10))
     ax_gt_rgb, ax_current_frame_rgb = ax[0], ax[1]
     ax_gt_rgb.imshow(gt_rgb)
@@ -755,6 +786,13 @@ def plot_for_video_current_frame(gt_rgb, current_frame_rgb, gt_annotations, curr
         add_box_to_axes_with_annotation(ax_gt_rgb, gt_annotations, box_annotation[0])
         add_box_to_axes_with_annotation(ax_current_frame_rgb, current_frame_annotation, box_annotation[1])
         add_box_to_axes_with_annotation(ax_current_frame_rgb, new_track_annotation, [], 'green')
+
+    if gt_track_histories is not None:
+        add_features_to_axis(ax_gt_rgb, gt_track_histories, marker_size=track_marker_size, marker_color='g')
+
+    if generated_track_histories is not None:
+        add_features_to_axis(ax_current_frame_rgb, generated_track_histories, marker_size=track_marker_size,
+                             marker_color='g')
 
     ax_gt_rgb.set_title('GT')
     ax_current_frame_rgb.set_title('Our Method')
@@ -3565,6 +3603,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
     accumulated_features = {}
     track_based_accumulated_features: Dict[int, TrackFeatures] = {}
     last_frame_gt_tracks = {}
+    ground_truth_track_histories = []
 
     out = None
     frames_shape = sdd_simple.original_shape
@@ -3771,7 +3810,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         # STEP 4c: shift the features and bounding box by the average flow for localization
                         shifted_xy = xy + xy_displacement
                         shifted_box, shifted_xy_center = evaluate_shifted_bounding_box(box, shifted_xy, xy)
-                        # Switch boxes: Idea 1 - Only keep points inside box
+                        # STEP 4c: 1> Switch boxes: Idea 1 - Only keep points inside box
                         shifted_xy = find_points_inside_box(shifted_xy, shifted_box)
                         shifted_box, shifted_xy_center = evaluate_shifted_bounding_box(box, shifted_xy, xy)
                         # box_center_diff = calculate_difference_between_centers(box, shifted_box)
@@ -3804,7 +3843,14 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                 #                         current_boxes=annotations[:, :-1])
                                 # STEP 4e: b>Kill the track if corresponding features are not detected
                                 #  in the next time-step
+                                current_track_history = get_track_history(current_track_idx,
+                                                                          track_based_accumulated_features)
+                                # just use gt
+                                current_gt_track_history = get_gt_track_history(current_track_idx,
+                                                                                track_based_accumulated_features)
                                 current_track_obj_features = ObjectFeatures(idx=current_track_idx,
+                                                                            history=current_track_history,
+                                                                            gt_history=current_gt_track_history,
                                                                             xy=xy_current_frame,
                                                                             past_xy=xy,
                                                                             final_xy=xy_current_frame,
@@ -3821,8 +3867,6 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                                 continue
 
-                        running_tracks.append(Track(bbox=shifted_box, idx=current_track_idx))
-
                         # STEP 4f: compare activations to keep and throw - throw N% and keep N%
                         closest_n_shifted_xy_pair, closest_n_xy_current_frame_pair = \
                             features_filter_append_preprocessing(overlap_percent, shifted_xy, xy_current_frame)
@@ -3835,6 +3879,9 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         final_shifted_box, final_shifted_xy_center = evaluate_shifted_bounding_box(shifted_box,
                                                                                                    final_features_xy,
                                                                                                    shifted_xy)
+
+                        running_tracks.append(Track(bbox=final_shifted_box, idx=current_track_idx))
+
                         # if not (final_shifted_box == shifted_box).all():
                         #     logger.warn('Final Shifted Box differs from Shifted Box!')
 
@@ -3845,8 +3892,15 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                                   frame_number=frame_number.item(),
                                                   track_id=current_track_idx, selected_past=closest_n_shifted_xy_pair,
                                                   selected_current=closest_n_xy_current_frame_pair)
+
+                        current_track_history = get_track_history(current_track_idx,
+                                                                  track_based_accumulated_features)
+                        current_gt_track_history = get_gt_track_history(current_track_idx,
+                                                                        track_based_accumulated_features)
                         # STEP 4g: save the information gathered
                         current_track_obj_features = ObjectFeatures(idx=current_track_idx,
+                                                                    history=current_track_history,
+                                                                    gt_history=current_gt_track_history,
                                                                     xy=xy_current_frame,
                                                                     past_xy=xy,
                                                                     final_xy=final_features_xy,
@@ -4170,6 +4224,10 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                     new_track_boxes = np.stack(new_track_boxes) if len(new_track_boxes) > 0 else np.empty(shape=(0,))
 
+                    # STEP 4i: save stuff and reiterate
+                    accumulated_features.update({frame_number.item(): FrameFeatures(frame_number=frame_number.item(),
+                                                                                    object_features=object_features)})
+
                     if video_mode:
                         # fig = plot_for_video(
                         #     gt_rgb=frame, gt_mask=fg_mask, last_frame_rgb=last_frame,
@@ -4187,6 +4245,23 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         #     [t.idx for t in running_tracks])}',
                         #     video_mode=video_mode)
 
+                        frame_feats = accumulated_features[frame_number.item()]
+                        tracks_histories = []
+                        tracks_gt_histories = []
+                        for obj_feature in frame_feats.object_features:
+                            tracks_histories.extend(obj_feature.track_history)
+                            tracks_gt_histories.extend(obj_feature.gt_history)
+                        tracks_histories = np.array(tracks_histories)
+                        tracks_gt_histories = np.array(tracks_gt_histories)
+                        if tracks_histories.size == 0:
+                            tracks_histories = np.zeros(shape=(0, 2))
+                        if tracks_gt_histories.size == 0:
+                            tracks_gt_histories = np.zeros(shape=(0, 2))
+
+                        # for gt_annotation_box in annotations[:, :-1]:
+                        #     ground_truth_track_histories.append(get_bbox_center(gt_annotation_box).flatten())
+                        # ground_truth_track_histories = np.array(ground_truth_track_histories)
+
                         fig = plot_for_video_current_frame(
                             gt_rgb=frame, current_frame_rgb=frame,
                             gt_annotations=annotations[:, :-1],
@@ -4194,6 +4269,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                             new_track_annotation=new_track_boxes,
                             frame_number=frame_number,
                             box_annotation=[a_boxes_idx.tolist(), r_boxes_idx],
+                            generated_track_histories=tracks_histories,
+                            gt_track_histories=tracks_gt_histories,
                             additional_text=
                             f'Distance based - Precision: {l2_distance_hungarian_precision} | '
                             f'Recall: {l2_distance_hungarian_recall}\n'
@@ -4250,9 +4327,9 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         #     video_mode=False,
                         #     save_path=f'{plot_save_path}zero_shot/plots{min_points_in_cluster}/')
 
-                    # STEP 4i: save stuff and reiterate
-                    accumulated_features.update({frame_number.item(): FrameFeatures(frame_number=frame_number.item(),
-                                                                                    object_features=object_features)})
+                    # : save stuff and reiterate - moved up
+                    # accumulated_features.update({frame_number.item(): FrameFeatures(frame_number=frame_number.item(),
+                    #                                                                 object_features=object_features)})
 
                     second_last_frame = last_frame.copy()
                     last_frame = frame.copy()
