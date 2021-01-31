@@ -3618,7 +3618,9 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                               use_circle_to_keep_track_alive=True, iou_threshold=0.5, extra_radius=50,
                               use_is_box_overlapping_live_boxes=True, premature_kill_save=False,
                               distance_threshold=2, save_every_n_batch_itr=None, drop_last_batch=True,
-                              detect_shadows=True, allow_only_for_first_frame_use_is_box_overlapping_live_boxes=True):
+                              detect_shadows=True, allow_only_for_first_frame_use_is_box_overlapping_live_boxes=True,
+                              filter_switch_boxes_based_on_angle_and_recent_history=True,
+                              compute_histories_for_plot=True):
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
                                   step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
@@ -3861,7 +3863,8 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         # get activations
                         xy_current_frame = extract_features_per_bounding_box(shifted_box, fg_mask)
 
-                        if xy_current_frame.size == 0 or (not isinstance(current_track_features, list)
+                        if xy_current_frame.size == 0 or (filter_switch_boxes_based_on_angle_and_recent_history 
+                                                          and not isinstance(current_track_features, list)
                                                           and current_track_features.velocity_direction.size != 0
                                                           and current_track_features.velocity_direction[-1] > 120 and
                                                           not np.isnan(current_track_features.velocity_direction[-1])):
@@ -3889,39 +3892,44 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                 #                         current_boxes=annotations[:, :-1])
                                 # STEP 4e: b>Kill the track if corresponding features are not detected
                                 #  in the next time-step
-                                current_track_history = get_track_history(current_track_idx,
-                                                                          track_based_accumulated_features)
-                                current_track_velocity_history = get_track_velocity_history(
-                                    current_track_idx, track_based_accumulated_features)
-                                current_track_velocity_history = np.array(current_track_velocity_history)
-                                current_direction = []
-                                for track_history_idx in range(len(current_track_history) - 1):
-                                    current_direction.append((angle_between(
-                                        v1=current_track_history[track_history_idx],
-                                        v2=current_track_history[track_history_idx + 1]
-                                    )))
-                                # current direction can be removed
-                                current_direction = np.array(current_direction)
-
-                                current_velocity_direction = []
-                                for track_history_idx in range(len(current_track_velocity_history) - 1):
-                                    current_velocity_direction.append(math.degrees(angle_between(
-                                        v1=current_track_velocity_history[track_history_idx],
-                                        v2=current_track_velocity_history[track_history_idx + 1]
-                                    )))
-                                current_velocity_direction = np.array(current_velocity_direction)
-
-                                # track_sign = []
-                                # for t in range(
-                                #         len(track_based_accumulated_features[8].object_features[-1].track_history)
-                                #         - 1):
-                                #     track_sign.append(np.sign(
-                                #         track_based_accumulated_features[8].object_features[-1].track_history[t + 1] -
-                                #         track_based_accumulated_features[8].object_features[-1].track_history[t]))
-
-                                # just use gt
-                                current_gt_track_history = get_gt_track_history(current_track_idx,
-                                                                                track_based_accumulated_features)
+                                if filter_switch_boxes_based_on_angle_and_recent_history or compute_histories_for_plot:
+                                    current_track_history = get_track_history(current_track_idx,
+                                                                              track_based_accumulated_features)
+                                    current_track_velocity_history = get_track_velocity_history(
+                                        current_track_idx, track_based_accumulated_features)
+                                    current_track_velocity_history = np.array(current_track_velocity_history)
+                                    current_direction = []
+                                    for track_history_idx in range(len(current_track_history) - 1):
+                                        current_direction.append((angle_between(
+                                            v1=current_track_history[track_history_idx],
+                                            v2=current_track_history[track_history_idx + 1]
+                                        )))
+                                    # current direction can be removed
+                                    current_direction = np.array(current_direction)
+    
+                                    current_velocity_direction = []
+                                    for track_history_idx in range(len(current_track_velocity_history) - 1):
+                                        current_velocity_direction.append(math.degrees(angle_between(
+                                            v1=current_track_velocity_history[track_history_idx],
+                                            v2=current_track_velocity_history[track_history_idx + 1]
+                                        )))
+                                    current_velocity_direction = np.array(current_velocity_direction)
+    
+                                    # track_sign = []
+                                    # for t in range(
+                                    #         len(track_based_accumulated_features[8].object_features[-1].track_history)
+                                    #         - 1):
+                                    #     track_sign.append(np.sign(
+                                    #         track_based_accumulated_features[8].object_features[-1].track_history[t + 1] -
+                                    #         track_based_accumulated_features[8].object_features[-1].track_history[t]))
+    
+                                    # just use gt
+                                    current_gt_track_history = get_gt_track_history(current_track_idx,
+                                                                                    track_based_accumulated_features)
+                                else:
+                                    current_track_history, current_gt_track_history = None, None
+                                    current_direction, current_velocity_direction = None, None
+                                    current_track_velocity_history = None
                                 current_track_obj_features = ObjectFeatures(idx=current_track_idx,
                                                                             history=current_track_history,
                                                                             gt_history=current_gt_track_history,
@@ -3972,30 +3980,35 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                                   track_id=current_track_idx, selected_past=closest_n_shifted_xy_pair,
                                                   selected_current=closest_n_xy_current_frame_pair)
 
-                        current_track_history = get_track_history(current_track_idx,
-                                                                  track_based_accumulated_features)
-                        current_track_velocity_history = get_track_velocity_history(
-                            current_track_idx, track_based_accumulated_features)
-                        current_track_velocity_history = np.array(current_track_velocity_history)
-                        current_direction = []
-                        for track_history_idx in range(len(current_track_history) - 1):
-                            current_direction.append((angle_between(
-                                v1=current_track_history[track_history_idx],
-                                v2=current_track_history[track_history_idx + 1]
-                            )))
-                        # current direction can be removed
-                        current_direction = np.array(current_direction)
+                        if filter_switch_boxes_based_on_angle_and_recent_history or compute_histories_for_plot:
+                            current_track_history = get_track_history(current_track_idx,
+                                                                      track_based_accumulated_features)
+                            current_track_velocity_history = get_track_velocity_history(
+                                current_track_idx, track_based_accumulated_features)
+                            current_track_velocity_history = np.array(current_track_velocity_history)
+                            current_direction = []
+                            for track_history_idx in range(len(current_track_history) - 1):
+                                current_direction.append((angle_between(
+                                    v1=current_track_history[track_history_idx],
+                                    v2=current_track_history[track_history_idx + 1]
+                                )))
+                            # current direction can be removed
+                            current_direction = np.array(current_direction)
 
-                        current_velocity_direction = []
-                        for track_history_idx in range(len(current_track_velocity_history) - 1):
-                            current_velocity_direction.append(math.degrees(angle_between(
-                                v1=current_track_velocity_history[track_history_idx],
-                                v2=current_track_velocity_history[track_history_idx + 1]
-                            )))
-                        current_velocity_direction = np.array(current_velocity_direction)
+                            current_velocity_direction = []
+                            for track_history_idx in range(len(current_track_velocity_history) - 1):
+                                current_velocity_direction.append(math.degrees(angle_between(
+                                    v1=current_track_velocity_history[track_history_idx],
+                                    v2=current_track_velocity_history[track_history_idx + 1]
+                                )))
+                            current_velocity_direction = np.array(current_velocity_direction)
 
-                        current_gt_track_history = get_gt_track_history(current_track_idx,
-                                                                        track_based_accumulated_features)
+                            current_gt_track_history = get_gt_track_history(current_track_idx,
+                                                                            track_based_accumulated_features)
+                        else:
+                            current_track_history, current_gt_track_history = None, None
+                            current_direction, current_velocity_direction = None, None
+                            current_track_velocity_history = None
                         # STEP 4g: save the information gathered
                         current_track_obj_features = ObjectFeatures(idx=current_track_idx,
                                                                     history=current_track_history,
@@ -4347,17 +4360,21 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         #     [t.idx for t in running_tracks])}',
                         #     video_mode=video_mode)
 
-                        frame_feats = accumulated_features[frame_number.item()]
-                        tracks_histories = []
-                        tracks_gt_histories = []
-                        for obj_feature in frame_feats.object_features:
-                            tracks_histories.extend(obj_feature.track_history)
-                            tracks_gt_histories.extend(obj_feature.gt_history)
-                        tracks_histories = np.array(tracks_histories)
-                        tracks_gt_histories = np.array(tracks_gt_histories)
-                        if tracks_histories.size == 0:
+                        if filter_switch_boxes_based_on_angle_and_recent_history or compute_histories_for_plot:
+                            frame_feats = accumulated_features[frame_number.item()]
+                            tracks_histories = []
+                            tracks_gt_histories = []
+                            for obj_feature in frame_feats.object_features:
+                                tracks_histories.extend(obj_feature.track_history)
+                                tracks_gt_histories.extend(obj_feature.gt_history)
+                            tracks_histories = np.array(tracks_histories)
+                            tracks_gt_histories = np.array(tracks_gt_histories)
+                            if tracks_histories.size == 0:
+                                tracks_histories = np.zeros(shape=(0, 2))
+                            if tracks_gt_histories.size == 0:
+                                tracks_gt_histories = np.zeros(shape=(0, 2))
+                        else:
                             tracks_histories = np.zeros(shape=(0, 2))
-                        if tracks_gt_histories.size == 0:
                             tracks_gt_histories = np.zeros(shape=(0, 2))
 
                         # for gt_annotation_box in annotations[:, :-1]:
@@ -5630,7 +5647,9 @@ if __name__ == '__main__':
                                           extra_radius=param['extra_radius'], generic_box_wh=param['generic_box_wh'],
                                           use_is_box_overlapping_live_boxes=True, save_per_part_path=None,
                                           save_every_n_batch_itr=50, drop_last_batch=True,
-                                          detect_shadows=param['detect_shadows'])
+                                          detect_shadows=param['detect_shadows'],
+                                          filter_switch_boxes_based_on_angle_and_recent_history=True,
+                                          compute_histories_for_plot=True)
         # torch.save(feats, features_save_path + 'features.pt')
     elif not eval_mode and EXECUTE_STEP == STEP.SEMI_SUPERVISED:
         video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/one_shot/'
@@ -5711,7 +5730,10 @@ if __name__ == '__main__':
     #  -> Add gt info - associate gt (iou) + check 12 frames later that gt was actually the gt we had - Done - test-viz!
     #  -> Frame_by_frame estimation for 12 frames, check the dict fix for other function - Done
     #  -> plot to verify -> track-based+frame_based - Done - 12 frames apart and frame-by-frame both works, later slow
-    #  -> box switch stuff - can reduce the track ids count a lot - Important to fix
+    #  -> box switch stuff - can reduce the track ids count a lot - Important to fix - Done
+    #  -> viz via plot angle behaviour - momentum?
+    #  -> make it configurable to switch on/off - Done
+    #  -> extract ans set up NN
     # NOTE:
     #  -> setting use_circle_to_keep_track_alive=False to avoid noisy new tracks to pick up true live tracks
     #  -> Crowded - Death Circle [ smaller one 4]
