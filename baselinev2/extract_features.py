@@ -1,5 +1,6 @@
 import copy
 from enum import Enum
+import math
 from itertools import cycle
 from pathlib import Path
 from typing import Sequence, Dict, List, Any, Union
@@ -67,7 +68,8 @@ EXECUTE_STEP = STEP.UNSUPERVISED
 
 class ObjectFeatures(object):
     def __init__(self, idx, xy, past_xy, final_xy, flow, past_flow, past_bbox, final_bbox, frame_number, history=None,
-                 is_track_live=True, gt_history=None):
+                 is_track_live=True, gt_history=None, track_direction=None, velocity_history=None,
+                 velocity_direction=None):
         super(ObjectFeatures, self).__init__()
         self.idx = idx
         self.xy = xy
@@ -85,6 +87,9 @@ class ObjectFeatures(object):
         self.gt_past_current_distance = None
         self.gt_history = gt_history
         self.track_history = history
+        self.track_direction = track_direction
+        self.velocity_history = velocity_history
+        self.velocity_direction = velocity_direction
 
     def __eq__(self, other):
         return self.idx == other.idx
@@ -669,6 +674,40 @@ def get_gt_track_history(track_id, track_features):
         history = [get_bbox_center(obj_feature.gt_box).flatten() for obj_feature in track_object_features
                    if obj_feature.gt_box is not None]
         return history
+
+
+def get_track_velocity_history(track_id, track_features, past_flow=False):
+    if len(track_features) == 0 or track_id not in track_features.keys():
+        return []
+    else:
+        track_feature = track_features[track_id]
+        assert track_id == track_feature.track_id
+        track_object_features = track_feature.object_features
+        if past_flow:
+            history = [obj_feature.past_flow.mean(0) for obj_feature in track_object_features]
+        else:
+            history = [obj_feature.flow.mean(0) for obj_feature in track_object_features]
+        return history
+
+
+def unit_vector(vector):
+    """ Returns the unit vector of the vector.  """
+    return vector / np.linalg.norm(vector)
+
+
+def angle_between(v1, v2):
+    """ Returns the angle in radians between vectors 'v1' and 'v2'::
+
+            >>> angle_between((1, 0, 0), (0, 1, 0))
+            1.5707963267948966
+            >>> angle_between((1, 0, 0), (1, 0, 0))
+            0.0
+            >>> angle_between((1, 0, 0), (-1, 0, 0))
+            3.141592653589793
+    """
+    v1_u = unit_vector(v1)
+    v2_u = unit_vector(v2)
+    return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
 
 
 def plot_one_with_bounding_boxes(img, boxes):
@@ -3794,6 +3833,9 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                     # STEP 4: For each live track
                     for b_idx, track in enumerate(last_frame_live_tracks):
                         current_track_idx, box = track.idx, track.bbox
+                        current_track_features = track_based_accumulated_features[
+                            current_track_idx].object_features[-1] \
+                            if current_track_idx in track_based_accumulated_features.keys() else []
                         # STEP 4a: Get features inside the bounding box
                         xy = extract_features_per_bounding_box(box, last_frame_mask)
 
@@ -3819,7 +3861,11 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         # get activations
                         xy_current_frame = extract_features_per_bounding_box(shifted_box, fg_mask)
 
-                        if xy_current_frame.size == 0:
+                        if xy_current_frame.size == 0 or (not isinstance(current_track_features, list)
+                                                          and current_track_features.velocity_direction.size != 0
+                                                          and current_track_features.velocity_direction[-1] > 120 and
+                                                          not np.isnan(current_track_features.velocity_direction[-1])):
+
                             # STEP 4e: a> if no feature detected inside bounding box
                             #  -> put a circle of radius N pixels around the center of the shifted bounding box
                             #  -> if features detected inside this circle
@@ -3845,12 +3891,45 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                 #  in the next time-step
                                 current_track_history = get_track_history(current_track_idx,
                                                                           track_based_accumulated_features)
+                                current_track_velocity_history = get_track_velocity_history(
+                                    current_track_idx, track_based_accumulated_features)
+                                current_track_velocity_history = np.array(current_track_velocity_history)
+                                current_direction = []
+                                for track_history_idx in range(len(current_track_history) - 1):
+                                    current_direction.append((angle_between(
+                                        v1=current_track_history[track_history_idx],
+                                        v2=current_track_history[track_history_idx + 1]
+                                    )))
+                                # current direction can be removed
+                                current_direction = np.array(current_direction)
+
+                                current_velocity_direction = []
+                                for track_history_idx in range(len(current_track_velocity_history) - 1):
+                                    current_velocity_direction.append(math.degrees(angle_between(
+                                        v1=current_track_velocity_history[track_history_idx],
+                                        v2=current_track_velocity_history[track_history_idx + 1]
+                                    )))
+                                current_velocity_direction = np.array(current_velocity_direction)
+
+                                # track_sign = []
+                                # for t in range(
+                                #         len(track_based_accumulated_features[8].object_features[-1].track_history)
+                                #         - 1):
+                                #     track_sign.append(np.sign(
+                                #         track_based_accumulated_features[8].object_features[-1].track_history[t + 1] -
+                                #         track_based_accumulated_features[8].object_features[-1].track_history[t]))
+
                                 # just use gt
                                 current_gt_track_history = get_gt_track_history(current_track_idx,
                                                                                 track_based_accumulated_features)
                                 current_track_obj_features = ObjectFeatures(idx=current_track_idx,
                                                                             history=current_track_history,
                                                                             gt_history=current_gt_track_history,
+                                                                            track_direction=current_direction,
+                                                                            velocity_direction=
+                                                                            current_velocity_direction,
+                                                                            velocity_history=
+                                                                            current_track_velocity_history,
                                                                             xy=xy_current_frame,
                                                                             past_xy=xy,
                                                                             final_xy=xy_current_frame,
@@ -3895,12 +3974,35 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                         current_track_history = get_track_history(current_track_idx,
                                                                   track_based_accumulated_features)
+                        current_track_velocity_history = get_track_velocity_history(
+                            current_track_idx, track_based_accumulated_features)
+                        current_track_velocity_history = np.array(current_track_velocity_history)
+                        current_direction = []
+                        for track_history_idx in range(len(current_track_history) - 1):
+                            current_direction.append((angle_between(
+                                v1=current_track_history[track_history_idx],
+                                v2=current_track_history[track_history_idx + 1]
+                            )))
+                        # current direction can be removed
+                        current_direction = np.array(current_direction)
+
+                        current_velocity_direction = []
+                        for track_history_idx in range(len(current_track_velocity_history) - 1):
+                            current_velocity_direction.append(math.degrees(angle_between(
+                                v1=current_track_velocity_history[track_history_idx],
+                                v2=current_track_velocity_history[track_history_idx + 1]
+                            )))
+                        current_velocity_direction = np.array(current_velocity_direction)
+
                         current_gt_track_history = get_gt_track_history(current_track_idx,
                                                                         track_based_accumulated_features)
                         # STEP 4g: save the information gathered
                         current_track_obj_features = ObjectFeatures(idx=current_track_idx,
                                                                     history=current_track_history,
                                                                     gt_history=current_gt_track_history,
+                                                                    track_direction=current_direction,
+                                                                    velocity_direction=current_velocity_direction,
+                                                                    velocity_history=current_track_velocity_history,
                                                                     xy=xy_current_frame,
                                                                     past_xy=xy,
                                                                     final_xy=final_features_xy,
