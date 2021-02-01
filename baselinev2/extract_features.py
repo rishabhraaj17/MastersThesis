@@ -4577,13 +4577,17 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         out.write(out_frame)
 
                         # process_plot_per_track_angle_and_history(frame, frame_number, plot_save_path,
-                        #                                          track_based_accumulated_features, track_id_to_plot=36)
+                        #                                          track_based_accumulated_features,
+                        #                                          track_id_to_plot=36)
                         # process_plot_per_track_angle_and_history(frame, frame_number, plot_save_path,
-                        #                                          track_based_accumulated_features, track_id_to_plot=27)
+                        #                                          track_based_accumulated_features,
+                        #                                          track_id_to_plot=201)
                         # process_plot_per_track_angle_and_history(frame, frame_number, plot_save_path,
-                        #                                          track_based_accumulated_features, track_id_to_plot=17)
+                        #                                          track_based_accumulated_features,
+                        #                                          track_id_to_plot=212)
                         # process_plot_per_track_angle_and_history(frame, frame_number, plot_save_path,
-                        #                                          track_based_accumulated_features, track_id_to_plot=3)
+                        #                                          track_based_accumulated_features,
+                        #                                          track_id_to_plot=3)
                     else:
                         fig = plot_for_video_current_frame(
                             gt_rgb=frame, current_frame_rgb=frame,
@@ -5804,15 +5808,15 @@ if __name__ == '__main__':
             'detect_shadows': True
         }
         relaxed_parameters = {
-            'radius': 60,
-            'extra_radius': 0,
-            'generic_box_wh': 50,
+            'radius': 90,
+            'extra_radius': 50,
+            'generic_box_wh': 100,
             'detect_shadows': True
         }
         if use_tight_parameters:
             param = tight_parameters
         else:
-            param = tight_parameters
+            param = relaxed_parameters
         feats = preprocess_data_zero_shot(var_threshold=None, plot=False, radius=param['radius'],
                                           video_mode=True, video_save_path=video_save_path + 'extraction.avi',
                                           desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
@@ -5901,12 +5905,14 @@ if __name__ == '__main__':
                          'use_is_box_overlapping_live_boxes/premature_kill_features_dict.pt'
         eval_metrics(feat_file_path)
     # TODO:
-    #  -> Add gt info - associate gt (iou) + check 12 frames later that gt was actually the gt we had - Done - test-viz!
-    #  -> Frame_by_frame estimation for 12 frames, check the dict fix for other function - Done
-    #  -> plot to verify -> track-based+frame_based - Done - 12 frames apart and frame-by-frame both works, later slow
-    #  -> box switch stuff - can reduce the track ids count a lot - Important to fix - Done
-    #  -> viz via plot angle behaviour - momentum?
-    #  -> make it configurable to switch on/off - Done
+    #  -> Add gt info - associate gt (iou) + check 12 frames later that gt was actually the gt we had - !!Done!!
+    #  - test-viz!
+    #  -> Frame_by_frame estimation for 12 frames, check the dict fix for other function - !!Done!!
+    #  -> plot to verify -> track-based+frame_based - !!Done!! - 12 frames apart and frame-by-frame both works,
+    #  later slow
+    #  -> box switch stuff - can reduce the track ids count a lot - Important to fix - !!Done!!
+    #  -> viz via plot angle behaviour - momentum - !!!ON HOLD!!!
+    #  -> make it configurable to switch on/off - !!Done!!
     #  -> extract ans set up NN
     # NOTE:
     #  -> setting use_circle_to_keep_track_alive=False to avoid noisy new tracks to pick up true live tracks
