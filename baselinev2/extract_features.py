@@ -761,8 +761,19 @@ def get_track_history(track_id, track_features):
     else:
         track_feature = track_features[track_id]
         assert track_id == track_feature.track_id
-        track_object_features = track_feature.object_features
+        track_object_features: List[ObjectFeatures] = track_feature.object_features
         history = [get_bbox_center(obj_feature.final_bbox).flatten() for obj_feature in track_object_features]
+        return history
+
+
+def get_agent_track_history(track_id, track_features):
+    if len(track_features) == 0 or track_id not in track_features.keys():
+        return []
+    else:
+        track_feature = track_features[track_id]
+        assert track_id == track_feature.track_id
+        track_object_features: List[AgentFeatures] = track_feature.object_features
+        history = [get_bbox_center(obj_feature.bbox_t_plus_one).flatten() for obj_feature in track_object_features]
         return history
 
 
@@ -772,7 +783,7 @@ def get_gt_track_history(track_id, track_features):
     else:
         track_feature = track_features[track_id]
         assert track_id == track_feature.track_id
-        track_object_features = track_feature.object_features
+        track_object_features: Union[List[AgentFeatures], List[ObjectFeatures]] = track_feature.object_features
         history = [get_bbox_center(obj_feature.gt_box).flatten() for obj_feature in track_object_features
                    if obj_feature.gt_box is not None]
         return history
@@ -789,6 +800,20 @@ def get_track_velocity_history(track_id, track_features, past_flow=False):
             history = [obj_feature.past_flow.mean(0) for obj_feature in track_object_features]
         else:
             history = [obj_feature.flow.mean(0) for obj_feature in track_object_features]
+        return history
+
+
+def get_agent_track_velocity_history(track_id, track_features, past_flow=False):
+    if len(track_features) == 0 or track_id not in track_features.keys():
+        return []
+    else:
+        track_feature = track_features[track_id]
+        assert track_id == track_feature.track_id
+        track_object_features: List[AgentFeatures] = track_feature.object_features
+        if past_flow:
+            history = [obj_feature.past_flow.mean(0) for obj_feature in track_object_features]
+        else:
+            history = [obj_feature.future_flow.mean(0) for obj_feature in track_object_features]
         return history
 
 
@@ -913,7 +938,8 @@ def add_features_to_axis(ax, features, marker_size=8, marker_shape='o', marker_c
 def plot_for_video_current_frame(gt_rgb, current_frame_rgb, gt_annotations, current_frame_annotation,
                                  new_track_annotation, frame_number, additional_text=None, video_mode=False,
                                  original_dims=None, save_path=None, zero_shot=False, box_annotation=None,
-                                 generated_track_histories=None, gt_track_histories=None, track_marker_size=1):
+                                 generated_track_histories=None, gt_track_histories=None, track_marker_size=1,
+                                 return_figure_only=False):
     fig, ax = plt.subplots(1, 2, sharex='none', sharey='none', figsize=original_dims or (12, 10))
     ax_gt_rgb, ax_current_frame_rgb = ax[0], ax[1]
     ax_gt_rgb.imshow(gt_rgb)
@@ -945,6 +971,10 @@ def plot_for_video_current_frame(gt_rgb, current_frame_rgb, gt_annotations, curr
 
     legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
     fig.legend(handles=legend_patches, loc=2)
+
+    if return_figure_only:
+        plt.close()
+        return fig
 
     if video_mode:
         plt.close()
@@ -5709,10 +5739,11 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                                                track_based_accumulated_features=None, frame_time_gap=12,
                                                save_path_for_plot=None, df=None, ratio=None,
                                                filter_switch_boxes_based_on_angle_and_recent_history=True,
-                                               compute_histories_for_plot=True,
-                                               min_track_length_to_filter_switch_box=20,
-                                               angle_threshold_to_filter=120
+                                               compute_histories_for_plot=True, video_mode=False,
+                                               min_track_length_to_filter_switch_box=20, save_path_for_video=None,
+                                               angle_threshold_to_filter=120, original_dims=None
                                                ):
+    current_batch_figures, frame_track_ids = [], []
     interest_fr = None
     actual_interest_fr = None
 
@@ -5795,6 +5826,14 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
             if actual_fr.item() > 11:
 
                 original_shape = new_shape = [frames.shape[1], frames.shape[2]]
+
+                frame_annotation_current = get_frame_annotations_and_skip_lost(df, actual_fr.item())
+                current_annotations, _ = scale_annotations(frame_annotation_current,
+                                                           original_scale=original_shape,
+                                                           new_scale=new_shape, return_track_id=False,
+                                                           tracks_with_annotations=True)
+                current_gt_boxes = current_annotations[:, :-1]
+                current_gt_boxes_idx = current_annotations[:, -1]
 
                 frame_annotation_future = get_frame_annotations_and_skip_lost(df, actual_fr.item() + frame_time_gap)
                 future_annotations, _ = scale_annotations(frame_annotation_future,
@@ -5908,11 +5947,13 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                     match_rows_tracks_idx_past = [past_gt_boxes_idx[m].item() for m in match_rows_past]
                     match_cols_tracks_idx_past = [generated_box_idx_past[m] for m in match_cols_past]
 
-                    if object_feature.gt_track_idx != match_rows_tracks_idx_future[0]:
-                        logger.info(f'GT track id mismatch! Per Frame:{object_feature.gt_track_idx} vs 12 frames apart'
+                    if len(match_rows_tracks_idx_future) != 0 and \
+                            object_feature.gt_track_idx != match_rows_tracks_idx_future[0]:
+                        logger.warn(f'GT track id mismatch! Per Frame:{object_feature.gt_track_idx} vs 12 frames apart'
                                     f' {match_rows_tracks_idx_future[0]}')
-                    if object_feature.gt_track_idx != match_rows_tracks_idx_past[0]:
-                        logger.info(f'GT track id mismatch! Per Frame:{object_feature.gt_track_idx} vs 12 frames apart'
+                    if len(match_rows_tracks_idx_past) != 0 and \
+                            object_feature.gt_track_idx != match_rows_tracks_idx_past[0]:
+                        logger.warn(f'GT track id mismatch! Per Frame:{object_feature.gt_track_idx} vs 12 frames apart'
                                     f' {match_rows_tracks_idx_past[0]}')
                     ###################################################################################################
 
@@ -5931,9 +5972,9 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                         logger.info(f'Ending Track! No features found in future!')
 
                         if filter_switch_boxes_based_on_angle_and_recent_history or compute_histories_for_plot:
-                            current_track_history = get_track_history(object_feature.idx,
-                                                                      track_based_accumulated_features)
-                            current_track_velocity_history = get_track_velocity_history(
+                            current_track_history = get_agent_track_history(object_feature.idx,
+                                                                            track_based_accumulated_features)
+                            current_track_velocity_history = get_agent_track_velocity_history(
                                 object_feature.idx, track_based_accumulated_features)
                             current_track_velocity_history = np.array(current_track_velocity_history)
                             current_direction = []
@@ -5984,15 +6025,23 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                             gt_box=object_feature.gt_box,
                             gt_track_idx=object_feature.gt_track_idx,
                             gt_past_current_distance=l2_distance_boxes_score_matrix_past[match_rows_past[0],
-                                                                                         match_cols_past[0]],
-                            past_gt_box=past_gt_track_box_mapping[match_rows_tracks_idx_past[0]],
-                            future_gt_box=future_gt_track_box_mapping[match_rows_tracks_idx_future[0]],
+                                                                                         match_cols_past[0]]
+                            if len(match_rows_past) != 0 and len(match_cols_past) != 0 else None,
+                            past_gt_box=past_gt_track_box_mapping[match_rows_tracks_idx_past[0]]
+                            if len(match_rows_tracks_idx_past) != 0 else None,
+                            future_gt_box=future_gt_track_box_mapping[match_rows_tracks_idx_future[0]]
+                            if len(match_rows_tracks_idx_future) != 0 else None,
                             gt_current_future_distance=l2_distance_boxes_score_matrix_future[match_rows_future[0],
-                                                                                             match_cols_future[0]],
-                            past_gt_track_idx=match_rows_tracks_idx_past[0],
-                            future_gt_track_idx=match_rows_tracks_idx_future[0],
-                            future_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_future[0],
-                            past_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_past[0],
+                                                                                             match_cols_future[0]]
+                            if len(match_rows_future) != 0 and len(match_cols_future) != 0 else None,
+                            past_gt_track_idx=match_rows_tracks_idx_past[0]
+                            if len(match_rows_tracks_idx_past) != 0 else None,
+                            future_gt_track_idx=match_rows_tracks_idx_future[0]
+                            if len(match_rows_tracks_idx_future) != 0 else None,
+                            future_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_future[0]
+                            if len(match_rows_tracks_idx_future) != 0 else None,
+                            past_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_past[0]
+                            if len(match_rows_tracks_idx_past) != 0 else None,
                             frame_by_frame_estimation=False,
                             gt_history=current_gt_track_history, history=current_track_history,
                             track_direction=current_direction, velocity_history=current_track_velocity_history,
@@ -6015,9 +6064,9 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                         filtered_shifted_future_activations, closest_n_xy_current_frame_pair)
 
                     if filter_switch_boxes_based_on_angle_and_recent_history or compute_histories_for_plot:
-                        current_track_history = get_track_history(object_feature.idx,
-                                                                  track_based_accumulated_features)
-                        current_track_velocity_history = get_track_velocity_history(
+                        current_track_history = get_agent_track_history(object_feature.idx,
+                                                                        track_based_accumulated_features)
+                        current_track_velocity_history = get_agent_track_velocity_history(
                             object_feature.idx, track_based_accumulated_features)
                         current_track_velocity_history = np.array(current_track_velocity_history)
                         current_direction = []
@@ -6066,15 +6115,23 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                         gt_box=object_feature.gt_box,
                         gt_track_idx=object_feature.gt_track_idx,
                         gt_past_current_distance=l2_distance_boxes_score_matrix_past[match_rows_past[0],
-                                                                                     match_cols_past[0]],
-                        past_gt_box=past_gt_track_box_mapping[match_rows_tracks_idx_past[0]],
-                        future_gt_box=future_gt_track_box_mapping[match_rows_tracks_idx_future[0]],
+                                                                                     match_cols_past[0]]
+                        if len(match_rows_past) != 0 and len(match_cols_past) != 0 else None,
+                        past_gt_box=past_gt_track_box_mapping[match_rows_tracks_idx_past[0]]
+                        if len(match_rows_tracks_idx_past) != 0 else None,
+                        future_gt_box=future_gt_track_box_mapping[match_rows_tracks_idx_future[0]]
+                        if len(match_rows_tracks_idx_future) != 0 else None,
                         gt_current_future_distance=l2_distance_boxes_score_matrix_future[match_rows_future[0],
-                                                                                         match_cols_future[0]],
-                        past_gt_track_idx=match_rows_tracks_idx_past[0],
-                        future_gt_track_idx=match_rows_tracks_idx_future[0],
-                        future_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_future[0],
-                        past_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_past[0],
+                                                                                         match_cols_future[0]]
+                        if len(match_rows_future) != 0 and len(match_cols_future) != 0 else None,
+                        past_gt_track_idx=match_rows_tracks_idx_past[0]
+                        if len(match_rows_tracks_idx_past) != 0 else None,
+                        future_gt_track_idx=match_rows_tracks_idx_future[0]
+                        if len(match_rows_tracks_idx_future) != 0 else None,
+                        future_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_future[0]
+                        if len(match_rows_tracks_idx_future) != 0 else None,
+                        past_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_past[0]
+                        if len(match_rows_tracks_idx_past) != 0 else None,
                         frame_by_frame_estimation=False,
                         gt_history=current_gt_track_history, history=current_track_history,
                         track_direction=current_direction, velocity_history=current_track_velocity_history,
@@ -6114,10 +6171,61 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
                 data_all_frames.update({actual_fr.item(): FrameFeatures(frame_number=actual_fr.item(),
                                                                         object_features=object_features)})
 
+                frame_feats = data_all_frames[actual_fr.item()]
+                frame_boxes = []
+                frame_track_ids = []
+
+                for obj_feature in frame_feats.object_features:
+                    frame_boxes.append(obj_feature.bbox_t)
+                    frame_track_ids.append(obj_feature.track_idx)
+
+                if filter_switch_boxes_based_on_angle_and_recent_history or compute_histories_for_plot:
+                    tracks_histories = []
+                    tracks_gt_histories = []
+
+                    for obj_feature in frame_feats.object_features:
+                        tracks_histories.extend(obj_feature.track_history)
+                        tracks_gt_histories.extend(obj_feature.gt_history)
+
+                    tracks_histories = np.array(tracks_histories)
+                    tracks_gt_histories = np.array(tracks_gt_histories)
+
+                    if tracks_histories.size == 0:
+                        tracks_histories = np.zeros(shape=(0, 2))
+                    if tracks_gt_histories.size == 0:
+                        tracks_gt_histories = np.zeros(shape=(0, 2))
+                else:
+                    tracks_histories = np.zeros(shape=(0, 2))
+                    tracks_gt_histories = np.zeros(shape=(0, 2))
+
+                fig = plot_for_video_current_frame(
+                    gt_rgb=frames[fr], current_frame_rgb=frames[fr],
+                    gt_annotations=current_gt_boxes,
+                    current_frame_annotation=frame_boxes,
+                    new_track_annotation=[],
+                    frame_number=actual_fr.item(),
+                    box_annotation=[current_gt_boxes_idx.tolist(), frame_track_ids],
+                    generated_track_histories=tracks_histories,
+                    gt_track_histories=tracks_gt_histories,
+                    additional_text='',
+                    # f'Distance based - Precision: {l2_distance_hungarian_precision} | '
+                    # f'Recall: {l2_distance_hungarian_recall}\n'
+                    # f'Center Inside based - Precision: {center_precision} | Recall: {center_recall}\n'
+                    # f'Precision: {precision} | Recall: {recall}\n'
+                    # f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
+                    # f'Track Ids Killed: '
+                    # f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
+                    video_mode=False, original_dims=original_dims, zero_shot=True, return_figure_only=True)
+
+                current_batch_figures.append(fig)
+
+                # data_all_frames.update({actual_fr.item(): FrameFeatures(frame_number=actual_fr.item(),
+                #                                                         object_features=object_features)})
+
     return data_all_frames, frames[interest_fr:, ...], \
            torch.arange(interest_fr + frame_numbers[0], frame_numbers[-1] + 1), \
            last_frame_from_last_used_batch, past_12_frames_optical_flow, last12_bg_sub_mask, \
-           track_based_accumulated_features
+           track_based_accumulated_features, current_batch_figures, frame_track_ids
 
 
 def twelve_frame_by_frame_feature_extraction_zero_shot(
@@ -6128,9 +6236,10 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
         resume_mode=False, detect_shadows=True, overlap_percent=0.4, ratio=None,
         track_based_accumulated_features=None, frame_time_gap=12, save_path_for_plot=None,
         filter_switch_boxes_based_on_angle_and_recent_history=True,
-        compute_histories_for_plot=True,
-        min_track_length_to_filter_switch_box=20,
+        compute_histories_for_plot=True, video_mode=False, original_dims=None,
+        min_track_length_to_filter_switch_box=20, save_path_for_video=None,
         angle_threshold_to_filter=120):
+    current_batch_figures, frame_track_ids = [], []
     interest_fr = None
     actual_interest_fr = None
 
@@ -6236,6 +6345,14 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
             if actual_fr.item() > 11:
 
                 original_shape = new_shape = [frames.shape[1], frames.shape[2]]
+
+                frame_annotation_current = get_frame_annotations_and_skip_lost(df, actual_fr.item())
+                current_annotations, _ = scale_annotations(frame_annotation_current,
+                                                           original_scale=original_shape,
+                                                           new_scale=new_shape, return_track_id=False,
+                                                           tracks_with_annotations=True)
+                current_gt_boxes = current_annotations[:, :-1]
+                current_gt_boxes_idx = current_annotations[:, -1]
 
                 frame_annotation_future = get_frame_annotations_and_skip_lost(df, actual_fr.item() + frame_time_gap)
                 future_annotations, _ = scale_annotations(frame_annotation_future,
@@ -6399,12 +6516,23 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
                         match_rows_tracks_idx_past = [past_gt_boxes_idx[m].item() for m in match_rows_past]
                         match_cols_tracks_idx_past = [generated_box_idx_past[m] for m in match_cols_past]
 
-                        if object_feature.gt_track_idx != match_rows_tracks_idx_future[0]:
-                            logger.info(
+                        # if object_feature.gt_track_idx != match_rows_tracks_idx_future[0]:
+                        #     logger.info(
+                        #         f'GT track id mismatch! Per Frame:{object_feature.gt_track_idx} vs 12 frames apart'
+                        #         f' {match_rows_tracks_idx_future[0]}')
+                        # if object_feature.gt_track_idx != match_rows_tracks_idx_past[0]:
+                        #     logger.info(
+                        #         f'GT track id mismatch! Per Frame:{object_feature.gt_track_idx} vs 12 frames apart'
+                        #         f' {match_rows_tracks_idx_past[0]}')
+
+                        if len(match_rows_tracks_idx_future) != 0 and \
+                                object_feature.gt_track_idx != match_rows_tracks_idx_future[0]:
+                            logger.warn(
                                 f'GT track id mismatch! Per Frame:{object_feature.gt_track_idx} vs 12 frames apart'
                                 f' {match_rows_tracks_idx_future[0]}')
-                        if object_feature.gt_track_idx != match_rows_tracks_idx_past[0]:
-                            logger.info(
+                        if len(match_rows_tracks_idx_past) != 0 and \
+                                object_feature.gt_track_idx != match_rows_tracks_idx_past[0]:
+                            logger.warn(
                                 f'GT track id mismatch! Per Frame:{object_feature.gt_track_idx} vs 12 frames apart'
                                 f' {match_rows_tracks_idx_past[0]}')
                         ##############################################################################################
@@ -6427,9 +6555,9 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
                                         f'at {running_idx} frames apart from frame {actual_fr.item()}')
 
                             if filter_switch_boxes_based_on_angle_and_recent_history or compute_histories_for_plot:
-                                current_track_history = get_track_history(object_feature.idx,
-                                                                          track_based_accumulated_features)
-                                current_track_velocity_history = get_track_velocity_history(
+                                current_track_history = get_agent_track_history(object_feature.idx,
+                                                                                track_based_accumulated_features)
+                                current_track_velocity_history = get_agent_track_velocity_history(
                                     object_feature.idx, track_based_accumulated_features)
                                 current_track_velocity_history = np.array(current_track_velocity_history)
                                 current_direction = []
@@ -6479,16 +6607,36 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
                                 future_frames_used_in_of_estimation=running_idx,
                                 gt_box=object_feature.gt_box,
                                 gt_track_idx=object_feature.gt_track_idx,
+                                # gt_past_current_distance=l2_distance_boxes_score_matrix_past[match_rows_past[0],
+                                #                                                              match_cols_past[0]],
+                                # past_gt_box=past_gt_track_box_mapping[match_rows_tracks_idx_past[0]],
+                                # future_gt_box=future_gt_track_box_mapping[match_rows_tracks_idx_future[0]],
+                                # gt_current_future_distance=l2_distance_boxes_score_matrix_future[match_rows_future[0],
+                                #                                                                  match_cols_future[0]],
+                                # past_gt_track_idx=match_rows_tracks_idx_past[0],
+                                # future_gt_track_idx=match_rows_tracks_idx_future[0],
+                                # future_box_inconsistent=
+                                # object_feature.gt_track_idx == match_rows_tracks_idx_future[0],
+                                # past_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_past[0],
+                                # frame_by_frame_estimation=True,
                                 gt_past_current_distance=l2_distance_boxes_score_matrix_past[match_rows_past[0],
-                                                                                             match_cols_past[0]],
-                                past_gt_box=past_gt_track_box_mapping[match_rows_tracks_idx_past[0]],
-                                future_gt_box=future_gt_track_box_mapping[match_rows_tracks_idx_future[0]],
+                                                                                             match_cols_past[0]]
+                                if len(match_rows_past) != 0 and len(match_cols_past) != 0 else None,
+                                past_gt_box=past_gt_track_box_mapping[match_rows_tracks_idx_past[0]]
+                                if len(match_rows_tracks_idx_past) != 0 else None,
+                                future_gt_box=future_gt_track_box_mapping[match_rows_tracks_idx_future[0]]
+                                if len(match_rows_tracks_idx_future) != 0 else None,
                                 gt_current_future_distance=l2_distance_boxes_score_matrix_future[match_rows_future[0],
-                                                                                                 match_cols_future[0]],
-                                past_gt_track_idx=match_rows_tracks_idx_past[0],
-                                future_gt_track_idx=match_rows_tracks_idx_future[0],
-                                future_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_future[0],
-                                past_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_past[0],
+                                                                                                 match_cols_future[0]]
+                                if len(match_rows_future) != 0 and len(match_cols_future) != 0 else None,
+                                past_gt_track_idx=match_rows_tracks_idx_past[0]
+                                if len(match_rows_tracks_idx_past) != 0 else None,
+                                future_gt_track_idx=match_rows_tracks_idx_future[0]
+                                if len(match_rows_tracks_idx_future) != 0 else None,
+                                future_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_future[0]
+                                if len(match_rows_tracks_idx_future) != 0 else None,
+                                past_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_past[0]
+                                if len(match_rows_tracks_idx_past) != 0 else None,
                                 frame_by_frame_estimation=True,
                                 gt_history=current_gt_track_history, history=current_track_history,
                                 track_direction=current_direction, velocity_history=current_track_velocity_history,
@@ -6547,9 +6695,9 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
                         #                                           f'Future: {fr + running_idx + 1}')
 
                     if filter_switch_boxes_based_on_angle_and_recent_history or compute_histories_for_plot:
-                        current_track_history = get_track_history(object_feature.idx,
-                                                                  track_based_accumulated_features)
-                        current_track_velocity_history = get_track_velocity_history(
+                        current_track_history = get_agent_track_history(object_feature.idx,
+                                                                        track_based_accumulated_features)
+                        current_track_velocity_history = get_agent_track_velocity_history(
                             object_feature.idx, track_based_accumulated_features)
                         current_track_velocity_history = np.array(current_track_velocity_history)
                         current_direction = []
@@ -6597,16 +6745,34 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
                         future_frames_used_in_of_estimation=list(future_12_frames_optical_flow.keys()),
                         gt_box=object_feature.gt_box,
                         gt_track_idx=object_feature.gt_track_idx,
+                        # gt_past_current_distance=l2_distance_boxes_score_matrix_past[match_rows_past[0],
+                        #                                                              match_cols_past[0]],
+                        # past_gt_box=past_gt_track_box_mapping[match_rows_tracks_idx_past[0]],
+                        # future_gt_box=future_gt_track_box_mapping[match_rows_tracks_idx_future[0]],
+                        # gt_current_future_distance=l2_distance_boxes_score_matrix_future[match_rows_future[0],
+                        #                                                                  match_cols_future[0]],
+                        # past_gt_track_idx=match_rows_tracks_idx_past[0],
+                        # future_gt_track_idx=match_rows_tracks_idx_future[0],
+                        # future_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_future[0],
+                        # past_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_past[0],
                         gt_past_current_distance=l2_distance_boxes_score_matrix_past[match_rows_past[0],
-                                                                                     match_cols_past[0]],
-                        past_gt_box=past_gt_track_box_mapping[match_rows_tracks_idx_past[0]],
-                        future_gt_box=future_gt_track_box_mapping[match_rows_tracks_idx_future[0]],
+                                                                                     match_cols_past[0]]
+                        if len(match_rows_past) != 0 and len(match_cols_past) != 0 else None,
+                        past_gt_box=past_gt_track_box_mapping[match_rows_tracks_idx_past[0]]
+                        if len(match_rows_tracks_idx_past) != 0 else None,
+                        future_gt_box=future_gt_track_box_mapping[match_rows_tracks_idx_future[0]]
+                        if len(match_rows_tracks_idx_future) != 0 else None,
                         gt_current_future_distance=l2_distance_boxes_score_matrix_future[match_rows_future[0],
-                                                                                         match_cols_future[0]],
-                        past_gt_track_idx=match_rows_tracks_idx_past[0],
-                        future_gt_track_idx=match_rows_tracks_idx_future[0],
-                        future_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_future[0],
-                        past_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_past[0],
+                                                                                         match_cols_future[0]]
+                        if len(match_rows_future) != 0 and len(match_cols_future) != 0 else None,
+                        past_gt_track_idx=match_rows_tracks_idx_past[0]
+                        if len(match_rows_tracks_idx_past) != 0 else None,
+                        future_gt_track_idx=match_rows_tracks_idx_future[0]
+                        if len(match_rows_tracks_idx_future) != 0 else None,
+                        future_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_future[0]
+                        if len(match_rows_tracks_idx_future) != 0 else None,
+                        past_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_past[0]
+                        if len(match_rows_tracks_idx_past) != 0 else None,
                         frame_by_frame_estimation=True,
                         gt_history=current_gt_track_history, history=current_track_history,
                         track_direction=current_direction, velocity_history=current_track_velocity_history,
@@ -6729,10 +6895,61 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
                 data_all_frames.update({actual_fr.item(): FrameFeatures(frame_number=actual_fr.item(),
                                                                         object_features=object_features)})
 
+                frame_feats = data_all_frames[actual_fr.item()]
+                frame_boxes = []
+                frame_track_ids = []
+
+                for obj_feature in frame_feats.object_features:
+                    frame_boxes.append(obj_feature.bbox_t)
+                    frame_track_ids.append(obj_feature.track_idx)
+
+                if filter_switch_boxes_based_on_angle_and_recent_history or compute_histories_for_plot:
+                    tracks_histories = []
+                    tracks_gt_histories = []
+
+                    for obj_feature in frame_feats.object_features:
+                        tracks_histories.extend(obj_feature.track_history)
+                        tracks_gt_histories.extend(obj_feature.gt_history)
+
+                    tracks_histories = np.array(tracks_histories)
+                    tracks_gt_histories = np.array(tracks_gt_histories)
+
+                    if tracks_histories.size == 0:
+                        tracks_histories = np.zeros(shape=(0, 2))
+                    if tracks_gt_histories.size == 0:
+                        tracks_gt_histories = np.zeros(shape=(0, 2))
+                else:
+                    tracks_histories = np.zeros(shape=(0, 2))
+                    tracks_gt_histories = np.zeros(shape=(0, 2))
+
+                fig = plot_for_video_current_frame(
+                    gt_rgb=frames[fr], current_frame_rgb=frames[fr],
+                    gt_annotations=current_gt_boxes,
+                    current_frame_annotation=frame_boxes,
+                    new_track_annotation=[],
+                    frame_number=actual_fr.item(),
+                    box_annotation=[current_gt_boxes_idx.tolist(), frame_track_ids],
+                    generated_track_histories=tracks_histories,
+                    gt_track_histories=tracks_gt_histories,
+                    additional_text='',
+                    # f'Distance based - Precision: {l2_distance_hungarian_precision} | '
+                    # f'Recall: {l2_distance_hungarian_recall}\n'
+                    # f'Center Inside based - Precision: {center_precision} | Recall: {center_recall}\n'
+                    # f'Precision: {precision} | Recall: {recall}\n'
+                    # f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
+                    # f'Track Ids Killed: '
+                    # f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
+                    video_mode=False, original_dims=original_dims, zero_shot=True, return_figure_only=True)
+
+                current_batch_figures.append(fig)
+
+                # data_all_frames.update({actual_fr.item(): FrameFeatures(frame_number=actual_fr.item(),
+                #                                                         object_features=object_features)})
+
     return data_all_frames, frames[interest_fr:, ...], \
            torch.arange(interest_fr + frame_numbers[0], frame_numbers[-1] + 1), \
            last_frame_from_last_used_batch, past_12_frames_optical_flow, last12_bg_sub_mask, \
-           track_based_accumulated_features
+           track_based_accumulated_features, current_batch_figures, frame_track_ids
 
 
 def preprocess_data_zero_shot_12_frames_apart(
@@ -6744,7 +6961,8 @@ def preprocess_data_zero_shot_12_frames_apart(
         use_circle_to_keep_track_alive=True, iou_threshold=0.5, extra_radius=50,
         use_is_box_overlapping_live_boxes=True, premature_kill_save=False,
         save_every_n_batch_itr=None, num_frames_to_build_bg_sub_model=12, drop_last_batch=True,
-        frame_by_frame_estimation=False):
+        frame_by_frame_estimation=False, filter_switch_boxes_based_on_angle_and_recent_history=True,
+        compute_histories_for_plot=True, min_track_length_to_filter_switch_box=20, angle_threshold_to_filter=120):
     _, meta_info = DATASET_META.get_meta(META_LABEL, VIDEO_NUMBER)
     ratio = float(meta_info.flatten()[-1])
 
@@ -6783,19 +7001,20 @@ def preprocess_data_zero_shot_12_frames_apart(
         if frames_shape[0] < frames_shape[1]:
             original_dims = (
                 frames_shape[1] / 100 * plot_scale_factor, frames_shape[0] / 100 * plot_scale_factor)
-            out = cv.VideoWriter(video_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+            out = cv.VideoWriter(save_path_for_video, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
                                  (video_shape[1], video_shape[0]))  # (1200, 1000))  # (video_shape[0], video_shape[1]))
             # (video_shape[1], video_shape[0]))
             video_shape[0], video_shape[1] = video_shape[1], video_shape[0]
         else:
             original_dims = (
                 frames_shape[0] / 100 * plot_scale_factor, frames_shape[1] / 100 * plot_scale_factor)
-            out = cv.VideoWriter(video_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+            out = cv.VideoWriter(save_path_for_video, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
                                  (video_shape[0], video_shape[1]))  # (1200, 1000))  # (video_shape[0], video_shape[1]))
 
     remaining_frames, remaining_frames_idx, last_frame_from_last_used_batch = None, None, None
     past_12_frames_optical_flow, last_itr_past_12_frames_optical_flow, last_itr_past_12_bg_sub_mask = {}, {}, {}
     last_optical_flow_map, last12_bg_sub_mask = None, {}
+    part_idx = 0
 
     try:
         for part_idx, data in enumerate(tqdm(data_loader)):
@@ -6806,7 +7025,8 @@ def preprocess_data_zero_shot_12_frames_apart(
             original_shape = new_shape = [frames.shape[1], frames.shape[2]]
 
             features_, remaining_frames, remaining_frames_idx, last_frame_from_last_used_batch, \
-            past_12_frames_optical_flow, last12_bg_sub_mask, track_based_accumulated_features = \
+            past_12_frames_optical_flow, last12_bg_sub_mask, track_based_accumulated_features, figures, \
+            last_frame_live_tracks = \
                 extraction_method(
                     extracted_features=extracted_features,
                     frames=frames, n=30,
@@ -6820,11 +7040,58 @@ def preprocess_data_zero_shot_12_frames_apart(
                     last12_bg_sub_mask=last12_bg_sub_mask,
                     track_based_accumulated_features=track_based_accumulated_features,
                     save_path_for_plot=save_path_for_plot,
-                    df=df, ratio=ratio,
+                    df=df, ratio=ratio, original_dims=original_dims,
+                    filter_switch_boxes_based_on_angle_and_recent_history=
+                    filter_switch_boxes_based_on_angle_and_recent_history,
+                    compute_histories_for_plot=compute_histories_for_plot,
+                    min_track_length_to_filter_switch_box=min_track_length_to_filter_switch_box,
+                    angle_threshold_to_filter=angle_threshold_to_filter,
                     resume_mode=False)  # fixme: remove??
             total_accumulated_features = {**total_accumulated_features, **features_}
+            if video_mode:
+                for fig in figures:
+                    canvas = FigureCanvas(fig)
+                    canvas.draw()
+
+                    buf = canvas.buffer_rgba()
+                    out_frame = np.asarray(buf, dtype=np.uint8)[:, :, :-1]
+                    if out_frame.shape[0] != video_shape[1] or out_frame.shape[1] != video_shape[0]:
+                        out_frame = skimage.transform.resize(out_frame, (video_shape[1], video_shape[0]))
+                        out_frame = (out_frame * 255).astype(np.uint8)
+                    # out_frame = out_frame.reshape(1200, 1000, 3)
+                    out.write(out_frame)
+            if save_every_n_batch_itr is not None:
+                save_dict = {
+                    'total_accumulated_features': total_accumulated_features,
+                    'track_based_accumulated_features': track_based_accumulated_features
+                }
+                if part_idx % save_every_n_batch_itr == 0 and part_idx != 0:
+                    Path(save_path_for_video + 'parts/').mkdir(parents=True, exist_ok=True)
+                    f_n = f'features_dict_part{part_idx}.pt'
+                    torch.save(save_dict, save_path_for_video + 'parts/' + f_n)
+
+                    total_accumulated_features = {}
+                    live_track_ids = [live_track.idx for live_track in last_frame_live_tracks]
+                    track_based_accumulated_features = remove_entries_from_dict(live_track_ids,
+                                                                                track_based_accumulated_features)
     except KeyboardInterrupt:
-        print()
+        save_dict = {
+            'total_accumulated_features': total_accumulated_features,
+            'track_based_accumulated_features': track_based_accumulated_features
+        }
+        Path(save_path_for_video + 'cancelled/').mkdir(parents=True, exist_ok=True)
+        f_n = f'features_dict_part{part_idx}.pt'
+        torch.save(save_dict, save_path_for_video + 'parts/' + f_n)
+        out.release()
+    finally:
+        save_dict = {
+            'total_accumulated_features': total_accumulated_features,
+            'track_based_accumulated_features': track_based_accumulated_features
+        }
+        Path(save_path_for_video + 'cancelled/').mkdir(parents=True, exist_ok=True)
+        f_n = f'features_dict_part{part_idx}.pt'
+        torch.save(save_dict, save_path_for_video + 'parts/' + f_n)
+        out.release()
 
     if video_mode:
         out.release()
@@ -6934,15 +7201,20 @@ if __name__ == '__main__':
 
         plot_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/track_based/'
         Path(plot_save_path).mkdir(parents=True, exist_ok=True)
+        video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/frames12apart/'
+        Path(video_save_path).mkdir(parents=True, exist_ok=True)
         feats = preprocess_data_zero_shot_12_frames_apart(
             extracted_features=filtered_frame_based_features,
             var_threshold=None, plot=False, radius=60, save_per_part_path=None,
-            video_mode=False, save_path_for_video=video_save_path + 'extraction.avi',
+            video_mode=True, save_path_for_video=video_save_path + 'extraction.avi',
             desired_fps=5, overlap_percent=0.4, save_path_for_plot=plot_save_path,
             min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
             use_circle_to_keep_track_alive=False, custom_video_shape=False,
             extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True,
-            save_every_n_batch_itr=50, frame_by_frame_estimation=False)
+            save_every_n_batch_itr=50, frame_by_frame_estimation=False,
+            filter_switch_boxes_based_on_angle_and_recent_history=True,
+            compute_histories_for_plot=True, min_track_length_to_filter_switch_box=20,
+            angle_threshold_to_filter=120)
     else:
         feat_file_path = '../Plots/baseline_v2/v0/deathCircle4/' \
                          'use_is_box_overlapping_live_boxes/premature_kill_features_dict.pt'
