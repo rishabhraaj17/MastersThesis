@@ -105,7 +105,8 @@ class AgentFeatures(object):
                  frame_number_t_minus_one=None, frame_number_t_plus_one=None, past_frames_used_in_of_estimation=None,
                  frame_by_frame_estimation=False, future_frames_used_in_of_estimation=None, future_gt_box=None,
                  past_gt_track_idx=None, future_gt_track_idx=None, gt_current_future_distance=None,
-                 past_box_inconsistent=False, future_box_inconsistent=False):
+                 past_box_inconsistent=False, future_box_inconsistent=False, gt_history=None, history=None,
+                 track_direction=None, velocity_history=None, velocity_direction=None):
         super(AgentFeatures, self).__init__()
         self.frame_number_t = frame_number_t
         self.frame_number_t_minus_one = frame_number_t_minus_one
@@ -137,6 +138,11 @@ class AgentFeatures(object):
         self.gt_current_future_distance = gt_current_future_distance
         self.future_box_inconsistent = future_box_inconsistent
         self.past_box_inconsistent = past_box_inconsistent
+        self.gt_history = gt_history
+        self.track_history = history
+        self.track_direction = track_direction
+        self.velocity_history = velocity_history
+        self.velocity_direction = velocity_direction
 
     def __eq__(self, other):
         return self.track_idx == other.track_idx
@@ -4843,13 +4849,14 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
     return accumulated_features
 
 
-def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model, extracted_features, var_threshold=None,
-                                               time_gap_within_frames=3, frame_numbers=None, remaining_frames=None,
-                                               remaining_frames_idx=None, past_12_frames_optical_flow=None,
-                                               last_frame_from_last_used_batch=None, last12_bg_sub_mask=None,
-                                               resume_mode=False, detect_shadows=True, overlap_percent=0.4,
-                                               track_based_accumulated_features=None, frame_time_gap=12,
-                                               save_path_for_plot=None, df=None, ratio=None):
+def twelve_frames_feature_extraction_zero_shot_v0(frames, n, frames_to_build_model, extracted_features,
+                                                  var_threshold=None,
+                                                  time_gap_within_frames=3, frame_numbers=None, remaining_frames=None,
+                                                  remaining_frames_idx=None, past_12_frames_optical_flow=None,
+                                                  last_frame_from_last_used_batch=None, last12_bg_sub_mask=None,
+                                                  resume_mode=False, detect_shadows=True, overlap_percent=0.4,
+                                                  track_based_accumulated_features=None, frame_time_gap=12,
+                                                  save_path_for_plot=None, df=None, ratio=None):
     interest_fr = None
     actual_interest_fr = None
 
@@ -5170,7 +5177,7 @@ def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model,
            track_based_accumulated_features
 
 
-def twelve_frame_by_frame_feature_extraction_zero_shot(
+def twelve_frame_by_frame_feature_extraction_zero_shot_v0(
         frames, n, frames_to_build_model, extracted_features, df,
         var_threshold=None, time_gap_within_frames=3, frame_numbers=None,
         remaining_frames=None, remaining_frames_idx=None, past_12_frames_optical_flow=None,
@@ -5694,6 +5701,1040 @@ def twelve_frame_by_frame_feature_extraction_zero_shot(
            track_based_accumulated_features
 
 
+def twelve_frames_feature_extraction_zero_shot(frames, n, frames_to_build_model, extracted_features, var_threshold=None,
+                                               time_gap_within_frames=3, frame_numbers=None, remaining_frames=None,
+                                               remaining_frames_idx=None, past_12_frames_optical_flow=None,
+                                               last_frame_from_last_used_batch=None, last12_bg_sub_mask=None,
+                                               resume_mode=False, detect_shadows=True, overlap_percent=0.4,
+                                               track_based_accumulated_features=None, frame_time_gap=12,
+                                               save_path_for_plot=None, df=None, ratio=None,
+                                               filter_switch_boxes_based_on_angle_and_recent_history=True,
+                                               compute_histories_for_plot=True,
+                                               min_track_length_to_filter_switch_box=20,
+                                               angle_threshold_to_filter=120
+                                               ):
+    interest_fr = None
+    actual_interest_fr = None
+
+    # cat old frames
+    if remaining_frames is not None:
+        frames = np.concatenate((remaining_frames, frames), axis=0)
+        frame_numbers = torch.cat((remaining_frames_idx, frame_numbers))
+
+    kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
+    step = 0
+    if n is not None:
+        step = n // 2
+    else:
+        n = frames_to_build_model
+    total_frames = frames.shape[0]
+
+    data_all_frames = {}
+
+    for fr, actual_fr in tqdm(zip(range(frames.shape[0]), frame_numbers), total=frames.shape[0]):
+        interest_fr = fr % total_frames
+        actual_interest_fr = actual_fr
+
+        of_interest_fr = (fr + frames_to_build_model) % total_frames
+        actual_of_interest_fr = (actual_fr + frames_to_build_model)
+
+        # do not go in circle for flow estimation
+        if of_interest_fr < interest_fr:
+            break
+
+        # start at 12th frame and then only consider last 12 frames for velocity estimation
+        if actual_interest_fr != 0:
+            if interest_fr == 0:
+                previous = cv.cvtColor(last_frame_from_last_used_batch.astype(np.uint8), cv.COLOR_BGR2GRAY)
+                next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+
+                past_flow_per_frame, past_rgb, past_mag, past_ang = FeatureExtractor.get_optical_flow(
+                    previous_frame=previous,
+                    next_frame=next_frame,
+                    all_results_out=True)
+                past_12_frames_optical_flow.update(
+                    {f'{actual_interest_fr.item() - 1}-{actual_interest_fr.item()}': past_flow_per_frame})
+            else:
+                previous = cv.cvtColor(frames[interest_fr - 1], cv.COLOR_BGR2GRAY)
+                next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+
+                past_flow_per_frame, past_rgb, past_mag, past_ang = FeatureExtractor.get_optical_flow(
+                    previous_frame=previous,
+                    next_frame=next_frame,
+                    all_results_out=True)
+                last_frame_from_last_used_batch = frames[interest_fr]
+                past_12_frames_optical_flow.update(
+                    {f'{actual_interest_fr.item() - 1}-{actual_interest_fr.item()}': past_flow_per_frame})
+
+        if len(past_12_frames_optical_flow) > frame_time_gap:
+            temp_past_12_frames_optical_flow = {}
+            for i in list(past_12_frames_optical_flow)[-frame_time_gap:]:
+                temp_past_12_frames_optical_flow.update({i: past_12_frames_optical_flow[i]})
+            past_12_frames_optical_flow = temp_past_12_frames_optical_flow
+            temp_past_12_frames_optical_flow = None
+
+        if actual_interest_fr < frame_time_gap:
+            continue
+
+        if not resume_mode:
+            # flow between consecutive frames
+            frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))
+
+            future_12_frames_optical_flow = {}
+            # flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))
+            for of_i, actual_of_i in zip(range(interest_fr, of_interest_fr),
+                                         range(actual_interest_fr, actual_of_interest_fr)):
+                previous = cv.cvtColor(frames[of_i], cv.COLOR_BGR2GRAY)
+                next_frame = cv.cvtColor(frames[of_i + 1], cv.COLOR_BGR2GRAY)
+
+                flow_per_frame, rgb, mag, ang = FeatureExtractor.get_optical_flow(previous_frame=previous,
+                                                                                  next_frame=next_frame,
+                                                                                  all_results_out=True)
+                future_12_frames_optical_flow.update({f'{actual_of_i}-{actual_of_i + 1}': flow_per_frame})
+
+            if actual_fr.item() > 11:
+
+                original_shape = new_shape = [frames.shape[1], frames.shape[2]]
+
+                frame_annotation_future = get_frame_annotations_and_skip_lost(df, actual_fr.item() + frame_time_gap)
+                future_annotations, _ = scale_annotations(frame_annotation_future,
+                                                          original_scale=original_shape,
+                                                          new_scale=new_shape, return_track_id=False,
+                                                          tracks_with_annotations=True)
+                future_gt_boxes = future_annotations[:, :-1]
+                future_gt_boxes_idx = future_annotations[:, -1]
+
+                frame_annotation_past = get_frame_annotations_and_skip_lost(df, actual_fr.item() - frame_time_gap)
+                past_annotations, _ = scale_annotations(frame_annotation_past,
+                                                        original_scale=original_shape,
+                                                        new_scale=new_shape, return_track_id=False,
+                                                        tracks_with_annotations=True)
+                past_gt_boxes = past_annotations[:, :-1]
+                past_gt_boxes_idx = past_annotations[:, -1]
+
+                object_features = []
+                past_flow_yet = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))
+                flow_for_future = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))
+                past_flow_yet += np.array(list(past_12_frames_optical_flow.values())).sum(0)
+                flow_for_future += np.array(list(future_12_frames_optical_flow.values())).sum(0)
+                extracted_feature_actual_fr = extracted_features[actual_fr.item()]
+                extracted_feature_actual_fr_object_features = extracted_feature_actual_fr.object_features
+
+                future_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=interest_fr + frame_time_gap,
+                                                       time_gap_within_frames=time_gap_within_frames,
+                                                       total_frames=total_frames, step=step, n=n,
+                                                       kernel=kernel, var_threshold=var_threshold,
+                                                       detect_shadows=detect_shadows)
+
+                past_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=interest_fr - frame_time_gap,
+                                                     time_gap_within_frames=time_gap_within_frames,
+                                                     total_frames=total_frames, step=step, n=n,
+                                                     kernel=kernel, var_threshold=var_threshold,
+                                                     detect_shadows=detect_shadows)
+
+                for running_idx, object_feature in enumerate(
+                        extracted_feature_actual_fr_object_features):  # fixme: add gt
+
+                    current_track_features = track_based_accumulated_features[
+                        object_feature.idx].object_features[-1] \
+                        if object_feature.idx in track_based_accumulated_features.keys() else []
+
+                    activations = object_feature.past_xy
+                    box = object_feature.past_bbox
+                    activations_future_displacement = flow_for_future[activations[:, 1], activations[:, 0]]
+                    activations_past_displacement = past_flow_yet[activations[:, 1], activations[:, 0]]
+
+                    activations_displaced_in_future = activations + activations_future_displacement
+                    activations_displaced_in_past = activations - activations_past_displacement
+
+                    shifted_box_in_future, shifted_activation_center_in_future = evaluate_shifted_bounding_box(
+                        box, activations_displaced_in_future, activations)
+                    shifted_box_in_past, shifted_activation_center_in_past = evaluate_shifted_bounding_box(
+                        box, activations_displaced_in_past, activations)
+
+                    activations_future_frame = extract_features_per_bounding_box(shifted_box_in_future, future_mask)
+                    activations_past_frame = extract_features_per_bounding_box(shifted_box_in_past, past_mask)
+
+                    # ground-truth association ######################################################################
+                    future_gt_track_box_mapping = {a[-1]: a[:-1] for a in future_annotations}
+                    past_gt_track_box_mapping = {a[-1]: a[:-1] for a in past_annotations}
+
+                    generated_box_future = np.array([shifted_box_in_future])
+                    generated_box_idx_future = [object_feature.idx]
+                    generated_box_past = np.array([shifted_box_in_past])
+                    generated_box_idx_past = [object_feature.idx]
+
+                    l2_distance_boxes_score_matrix_future = np.zeros(shape=(len(future_gt_boxes),
+                                                                            len(generated_box_future)))
+                    l2_distance_boxes_score_matrix_past = np.zeros(shape=(len(past_gt_boxes), len(generated_box_past)))
+
+                    for a_i, a_box in enumerate(future_gt_boxes):
+                        for r_i, r_box_future in enumerate(generated_box_future):
+                            dist_future = np.linalg.norm((get_bbox_center(a_box).flatten() -
+                                                          get_bbox_center(r_box_future).flatten()), 2) * ratio
+                            l2_distance_boxes_score_matrix_future[a_i, r_i] = dist_future
+
+                    for a_i, a_box in enumerate(past_gt_boxes):
+                        for r_i, r_box_past in enumerate(generated_box_past):
+                            dist_past = np.linalg.norm((get_bbox_center(a_box).flatten() -
+                                                        get_bbox_center(r_box_past).flatten()), 2) * ratio
+                            l2_distance_boxes_score_matrix_past[a_i, r_i] = dist_past
+
+                    l2_distance_boxes_score_matrix_future = 2 - l2_distance_boxes_score_matrix_future
+                    l2_distance_boxes_score_matrix_future[l2_distance_boxes_score_matrix_future < 0] = 10
+
+                    l2_distance_boxes_score_matrix_past = 2 - l2_distance_boxes_score_matrix_past
+                    l2_distance_boxes_score_matrix_past[l2_distance_boxes_score_matrix_past < 0] = 10
+                    # Hungarian
+                    match_rows_future, match_cols_future = scipy.optimize.linear_sum_assignment(
+                        l2_distance_boxes_score_matrix_future)
+                    matching_distribution_future = [[i, j, l2_distance_boxes_score_matrix_future[i, j]] for i, j in zip(
+                        match_rows_future, match_cols_future)]
+                    actually_matched_mask_future = l2_distance_boxes_score_matrix_future[match_rows_future,
+                                                                                         match_cols_future] < 10
+                    match_rows_future = match_rows_future[actually_matched_mask_future]
+                    match_cols_future = match_cols_future[actually_matched_mask_future]
+                    match_rows_tracks_idx_future = [future_gt_boxes_idx[m].item() for m in match_rows_future]
+                    match_cols_tracks_idx_future = [generated_box_idx_future[m] for m in match_cols_future]
+
+                    match_rows_past, match_cols_past = scipy.optimize.linear_sum_assignment(
+                        l2_distance_boxes_score_matrix_past)
+                    matching_distribution_past = [[i, j, l2_distance_boxes_score_matrix_past[i, j]] for i, j in zip(
+                        match_rows_past, match_cols_past)]
+                    actually_matched_mask_past = l2_distance_boxes_score_matrix_past[match_rows_past,
+                                                                                     match_cols_past] < 10
+                    match_rows_past = match_rows_past[actually_matched_mask_past]
+                    match_cols_past = match_cols_past[actually_matched_mask_past]
+                    match_rows_tracks_idx_past = [past_gt_boxes_idx[m].item() for m in match_rows_past]
+                    match_cols_tracks_idx_past = [generated_box_idx_past[m] for m in match_cols_past]
+
+                    if object_feature.gt_track_idx != match_rows_tracks_idx_future[0]:
+                        logger.info(f'GT track id mismatch! Per Frame:{object_feature.gt_track_idx} vs 12 frames apart'
+                                    f' {match_rows_tracks_idx_future[0]}')
+                    if object_feature.gt_track_idx != match_rows_tracks_idx_past[0]:
+                        logger.info(f'GT track id mismatch! Per Frame:{object_feature.gt_track_idx} vs 12 frames apart'
+                                    f' {match_rows_tracks_idx_past[0]}')
+                    ###################################################################################################
+
+                    if activations_future_frame.size == 0 or (filter_switch_boxes_based_on_angle_and_recent_history
+                                                              and not isinstance(current_track_features, list)
+                                                              and current_track_features.velocity_direction.size != 0
+                                                              and len(current_track_features.velocity_direction) >
+                                                              min_track_length_to_filter_switch_box
+                                                              and first_violation_till_now(
+                                current_track_features.velocity_direction, angle_threshold_to_filter)
+                                                              and current_track_features.velocity_direction[-1] >
+                                                              angle_threshold_to_filter
+                                                              and not np.isnan(
+                                current_track_features.velocity_direction[-1])):
+
+                        logger.info(f'Ending Track! No features found in future!')
+
+                        if filter_switch_boxes_based_on_angle_and_recent_history or compute_histories_for_plot:
+                            current_track_history = get_track_history(object_feature.idx,
+                                                                      track_based_accumulated_features)
+                            current_track_velocity_history = get_track_velocity_history(
+                                object_feature.idx, track_based_accumulated_features)
+                            current_track_velocity_history = np.array(current_track_velocity_history)
+                            current_direction = []
+                            for track_history_idx in range(len(current_track_history) - 1):
+                                current_direction.append((angle_between(
+                                    v1=current_track_history[track_history_idx],
+                                    v2=current_track_history[track_history_idx + 1]
+                                )))
+                            # current direction can be removed
+                            current_direction = np.array(current_direction)
+
+                            current_velocity_direction = []
+                            for track_history_idx in range(len(current_track_velocity_history) - 1):
+                                current_velocity_direction.append(math.degrees(angle_between(
+                                    v1=current_track_velocity_history[track_history_idx],
+                                    v2=current_track_velocity_history[track_history_idx + 1]
+                                )))
+                            current_velocity_direction = np.array(current_velocity_direction)
+
+                            # just use gt
+                            current_gt_track_history = get_gt_track_history(object_feature.idx,
+                                                                            track_based_accumulated_features)
+                        else:
+                            current_track_history, current_gt_track_history = None, None
+                            current_direction, current_velocity_direction = None, None
+                            current_track_velocity_history = None
+
+                        current_track_obj_features = AgentFeatures(
+                            track_idx=object_feature.idx,
+                            activations_t=activations,
+                            activations_t_minus_one=activations_displaced_in_past,
+                            activations_t_plus_one=activations_displaced_in_future,
+                            future_flow=activations_future_displacement,
+                            past_flow=activations_past_displacement,
+                            bbox_t=box,
+                            bbox_t_minus_one=shifted_box_in_past,
+                            bbox_t_plus_one=shifted_box_in_future,
+                            frame_number=object_feature.frame_number,
+                            activations_future_frame=activations_future_frame,
+                            activations_past_frame=activations_past_frame,
+                            final_features_future_activations=None,
+                            is_track_live=False,
+                            frame_number_t=actual_fr.item(),
+                            frame_number_t_minus_one=actual_fr.item() - frame_time_gap,
+                            frame_number_t_plus_one=actual_fr.item() + frame_time_gap,
+                            past_frames_used_in_of_estimation=list(past_12_frames_optical_flow.keys()),
+                            future_frames_used_in_of_estimation=list(future_12_frames_optical_flow.keys()),
+                            gt_box=object_feature.gt_box,
+                            gt_track_idx=object_feature.gt_track_idx,
+                            gt_past_current_distance=l2_distance_boxes_score_matrix_past[match_rows_past[0],
+                                                                                         match_cols_past[0]],
+                            past_gt_box=past_gt_track_box_mapping[match_rows_tracks_idx_past[0]],
+                            future_gt_box=future_gt_track_box_mapping[match_rows_tracks_idx_future[0]],
+                            gt_current_future_distance=l2_distance_boxes_score_matrix_future[match_rows_future[0],
+                                                                                             match_cols_future[0]],
+                            past_gt_track_idx=match_rows_tracks_idx_past[0],
+                            future_gt_track_idx=match_rows_tracks_idx_future[0],
+                            future_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_future[0],
+                            past_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_past[0],
+                            frame_by_frame_estimation=False,
+                            gt_history=current_gt_track_history, history=current_track_history,
+                            track_direction=current_direction, velocity_history=current_track_velocity_history,
+                            velocity_direction=current_velocity_direction
+                        )
+                        object_features.append(current_track_obj_features)
+                        if object_feature.idx in track_based_accumulated_features:
+                            track_based_accumulated_features[object_feature.idx].object_features.append(
+                                current_track_obj_features)
+
+                        continue
+
+                    closest_n_shifted_xy_pair, closest_n_xy_current_frame_pair = \
+                        features_filter_append_preprocessing(
+                            overlap_percent, activations_displaced_in_future, activations_future_frame)
+
+                    filtered_shifted_future_activations = filter_features(
+                        activations_displaced_in_future, closest_n_shifted_xy_pair)
+                    final_features_future_activations = append_features(
+                        filtered_shifted_future_activations, closest_n_xy_current_frame_pair)
+
+                    if filter_switch_boxes_based_on_angle_and_recent_history or compute_histories_for_plot:
+                        current_track_history = get_track_history(object_feature.idx,
+                                                                  track_based_accumulated_features)
+                        current_track_velocity_history = get_track_velocity_history(
+                            object_feature.idx, track_based_accumulated_features)
+                        current_track_velocity_history = np.array(current_track_velocity_history)
+                        current_direction = []
+                        for track_history_idx in range(len(current_track_history) - 1):
+                            current_direction.append((angle_between(
+                                v1=current_track_history[track_history_idx],
+                                v2=current_track_history[track_history_idx + 1]
+                            )))
+                        # current direction can be removed
+                        current_direction = np.array(current_direction)
+
+                        current_velocity_direction = []
+                        for track_history_idx in range(len(current_track_velocity_history) - 1):
+                            current_velocity_direction.append(math.degrees(angle_between(
+                                v1=current_track_velocity_history[track_history_idx],
+                                v2=current_track_velocity_history[track_history_idx + 1]
+                            )))
+                        current_velocity_direction = np.array(current_velocity_direction)
+
+                        current_gt_track_history = get_gt_track_history(object_feature.idx,
+                                                                        track_based_accumulated_features)
+                    else:
+                        current_track_history, current_gt_track_history = None, None
+                        current_direction, current_velocity_direction = None, None
+                        current_track_velocity_history = None
+
+                    current_track_obj_features = AgentFeatures(
+                        track_idx=object_feature.idx,
+                        activations_t=activations,
+                        activations_t_minus_one=activations_displaced_in_past,
+                        activations_t_plus_one=activations_displaced_in_future,
+                        future_flow=activations_future_displacement,
+                        past_flow=activations_past_displacement,
+                        bbox_t=box,
+                        bbox_t_minus_one=shifted_box_in_past,
+                        bbox_t_plus_one=shifted_box_in_future,
+                        frame_number=object_feature.frame_number,
+                        activations_future_frame=activations_future_frame,
+                        activations_past_frame=activations_past_frame,
+                        final_features_future_activations=final_features_future_activations,
+                        frame_number_t=actual_fr.item(),
+                        frame_number_t_minus_one=actual_fr.item() - frame_time_gap,
+                        frame_number_t_plus_one=actual_fr.item() + frame_time_gap,
+                        past_frames_used_in_of_estimation=list(past_12_frames_optical_flow.keys()),
+                        future_frames_used_in_of_estimation=list(future_12_frames_optical_flow.keys()),
+                        gt_box=object_feature.gt_box,
+                        gt_track_idx=object_feature.gt_track_idx,
+                        gt_past_current_distance=l2_distance_boxes_score_matrix_past[match_rows_past[0],
+                                                                                     match_cols_past[0]],
+                        past_gt_box=past_gt_track_box_mapping[match_rows_tracks_idx_past[0]],
+                        future_gt_box=future_gt_track_box_mapping[match_rows_tracks_idx_future[0]],
+                        gt_current_future_distance=l2_distance_boxes_score_matrix_future[match_rows_future[0],
+                                                                                         match_cols_future[0]],
+                        past_gt_track_idx=match_rows_tracks_idx_past[0],
+                        future_gt_track_idx=match_rows_tracks_idx_future[0],
+                        future_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_future[0],
+                        past_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_past[0],
+                        frame_by_frame_estimation=False,
+                        gt_history=current_gt_track_history, history=current_track_history,
+                        track_direction=current_direction, velocity_history=current_track_velocity_history,
+                        velocity_direction=current_velocity_direction
+                    )
+
+                    object_features.append(current_track_obj_features)
+                    if object_feature.idx not in track_based_accumulated_features:
+                        track_feats = TrackFeatures(object_feature.idx)
+                        track_feats.object_features.append(current_track_obj_features)
+                        track_based_accumulated_features.update(
+                            {object_feature.idx: track_feats})
+                    else:
+                        track_based_accumulated_features[object_feature.idx].object_features.append(
+                            current_track_obj_features)
+                    #
+                    # plot_tracks_with_features(frame_t=frames[fr],
+                    #                           frame_t_minus_one=frames[fr - frame_time_gap],
+                    #                           frame_t_plus_one=frames[fr + frame_time_gap],
+                    #                           features_t=activations,
+                    #                           features_t_minus_one=activations_displaced_in_past,
+                    #                           features_t_plus_one=activations_displaced_in_future,
+                    #                           box_t=[box],
+                    #                           box_t_minus_one=[shifted_box_in_past],
+                    #                           box_t_plus_one=[shifted_box_in_future],
+                    #                           frame_number=actual_fr.item(),
+                    #                           marker_size=1,
+                    #                           track_id=object_feature.idx,
+                    #                           file_idx=running_idx,
+                    #                           save_path=save_path_for_plot,
+                    #                           annotations=[[object_feature.idx], [object_feature.idx],
+                    #                                        [object_feature.idx]],
+                    #                           additional_text=f'Past: {actual_fr.item() - frame_time_gap} |'
+                    #                                           f' Present: {actual_fr.item()} | '
+                    #                                           f'Future: {actual_fr.item() + frame_time_gap}')
+
+                data_all_frames.update({actual_fr.item(): FrameFeatures(frame_number=actual_fr.item(),
+                                                                        object_features=object_features)})
+
+    return data_all_frames, frames[interest_fr:, ...], \
+           torch.arange(interest_fr + frame_numbers[0], frame_numbers[-1] + 1), \
+           last_frame_from_last_used_batch, past_12_frames_optical_flow, last12_bg_sub_mask, \
+           track_based_accumulated_features
+
+
+def twelve_frame_by_frame_feature_extraction_zero_shot(
+        frames, n, frames_to_build_model, extracted_features, df,
+        var_threshold=None, time_gap_within_frames=3, frame_numbers=None,
+        remaining_frames=None, remaining_frames_idx=None, past_12_frames_optical_flow=None,
+        last_frame_from_last_used_batch=None, last12_bg_sub_mask=None,
+        resume_mode=False, detect_shadows=True, overlap_percent=0.4, ratio=None,
+        track_based_accumulated_features=None, frame_time_gap=12, save_path_for_plot=None,
+        filter_switch_boxes_based_on_angle_and_recent_history=True,
+        compute_histories_for_plot=True,
+        min_track_length_to_filter_switch_box=20,
+        angle_threshold_to_filter=120):
+    interest_fr = None
+    actual_interest_fr = None
+
+    # cat old frames
+    if remaining_frames is not None:
+        frames = np.concatenate((remaining_frames, frames), axis=0)
+        frame_numbers = torch.cat((remaining_frames_idx, frame_numbers))
+
+    kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
+    step = 0
+    if n is not None:
+        step = n // 2
+    else:
+        n = frames_to_build_model
+    total_frames = frames.shape[0]
+
+    data_all_frames = {}
+
+    for fr, actual_fr in tqdm(zip(range(frames.shape[0]), frame_numbers), total=frames.shape[0]):
+        interest_fr = fr % total_frames
+        actual_interest_fr = actual_fr
+
+        of_interest_fr = (fr + frames_to_build_model) % total_frames
+        actual_of_interest_fr = (actual_fr + frames_to_build_model)
+
+        mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=fr,
+                                        time_gap_within_frames=time_gap_within_frames,
+                                        total_frames=total_frames, step=step, n=n,
+                                        kernel=kernel, var_threshold=var_threshold,
+                                        detect_shadows=detect_shadows)
+
+        # do not go in circle for flow estimation
+        if of_interest_fr < interest_fr:
+            break
+
+        last12_bg_sub_mask.update({actual_interest_fr.item(): mask})
+
+        # start at 12th frame and then only consider last 12 frames for velocity estimation
+        if actual_interest_fr != 0:
+            if interest_fr == 0:
+                previous = cv.cvtColor(last_frame_from_last_used_batch.astype(np.uint8), cv.COLOR_BGR2GRAY)
+                next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+
+                past_flow_per_frame, past_rgb, past_mag, past_ang = FeatureExtractor.get_optical_flow(
+                    previous_frame=previous,
+                    next_frame=next_frame,
+                    all_results_out=True)
+                past_12_frames_optical_flow.update(
+                    {f'{actual_interest_fr.item() - 1}-{actual_interest_fr.item()}': past_flow_per_frame})
+            else:
+                previous = cv.cvtColor(frames[interest_fr - 1], cv.COLOR_BGR2GRAY)
+                next_frame = cv.cvtColor(frames[interest_fr], cv.COLOR_BGR2GRAY)
+
+                past_flow_per_frame, past_rgb, past_mag, past_ang = FeatureExtractor.get_optical_flow(
+                    previous_frame=previous,
+                    next_frame=next_frame,
+                    all_results_out=True)
+                last_frame_from_last_used_batch = frames[interest_fr]
+                past_12_frames_optical_flow.update(
+                    {f'{actual_interest_fr.item() - 1}-{actual_interest_fr.item()}': past_flow_per_frame})
+
+        if len(past_12_frames_optical_flow) > frame_time_gap:
+            temp_past_12_frames_optical_flow = {}
+            for i in list(past_12_frames_optical_flow)[-frame_time_gap:]:
+                temp_past_12_frames_optical_flow.update({i: past_12_frames_optical_flow[i]})
+            past_12_frames_optical_flow = temp_past_12_frames_optical_flow
+            temp_past_12_frames_optical_flow = None
+
+        if len(last12_bg_sub_mask) > 13:  # we need one more for of
+            temp_last12_bg_sub_mask = {}
+            for i in list(last12_bg_sub_mask)[-13:]:
+                temp_last12_bg_sub_mask.update({i: last12_bg_sub_mask[i]})
+            last12_bg_sub_mask = temp_last12_bg_sub_mask
+            temp_last12_bg_sub_mask = None
+
+        if actual_interest_fr < frame_time_gap:
+            continue
+
+        if not resume_mode:
+            # flow between consecutive frames
+            frames_used_in_of_estimation = list(range(actual_interest_fr, actual_of_interest_fr + 1))
+
+            future12_bg_sub_mask = {}
+            future_12_frames_optical_flow = {}
+            # flow = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))  # put sum of optimized of - using other var
+            for of_i, actual_of_i in zip(range(interest_fr, of_interest_fr),
+                                         range(actual_interest_fr, actual_of_interest_fr)):
+                future_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=of_i + 1,
+                                                       time_gap_within_frames=time_gap_within_frames,
+                                                       total_frames=total_frames, step=step, n=n,
+                                                       kernel=kernel, var_threshold=var_threshold,
+                                                       detect_shadows=detect_shadows)
+                future12_bg_sub_mask.update({actual_of_i + 1: future_mask})
+
+                previous = cv.cvtColor(frames[of_i], cv.COLOR_BGR2GRAY)
+                next_frame = cv.cvtColor(frames[of_i + 1], cv.COLOR_BGR2GRAY)
+
+                flow_per_frame, rgb, mag, ang = FeatureExtractor.get_optical_flow(previous_frame=previous,
+                                                                                  next_frame=next_frame,
+                                                                                  all_results_out=True)
+                future_12_frames_optical_flow.update({f'{actual_of_i}-{actual_of_i + 1}': flow_per_frame})
+
+            if actual_fr.item() > 11:
+
+                original_shape = new_shape = [frames.shape[1], frames.shape[2]]
+
+                frame_annotation_future = get_frame_annotations_and_skip_lost(df, actual_fr.item() + frame_time_gap)
+                future_annotations, _ = scale_annotations(frame_annotation_future,
+                                                          original_scale=original_shape,
+                                                          new_scale=new_shape, return_track_id=False,
+                                                          tracks_with_annotations=True)
+                future_gt_boxes = future_annotations[:, :-1]
+                future_gt_boxes_idx = future_annotations[:, -1]
+
+                frame_annotation_past = get_frame_annotations_and_skip_lost(df, actual_fr.item() - frame_time_gap)
+                past_annotations, _ = scale_annotations(frame_annotation_past,
+                                                        original_scale=original_shape,
+                                                        new_scale=new_shape, return_track_id=False,
+                                                        tracks_with_annotations=True)
+                past_gt_boxes = past_annotations[:, :-1]
+                past_gt_boxes_idx = past_annotations[:, -1]
+
+                l2_distance_boxes_score_matrix_past, l2_distance_boxes_score_matrix_future = None, None
+                match_rows_future, match_cols_future, match_rows_past, match_cols_past = None, None, None, None
+                past_gt_track_box_mapping, future_gt_track_box_mapping = None, None
+                match_rows_tracks_idx_past, match_rows_tracks_idx_future = None, None
+
+                object_features = []
+                past_flow_yet = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))
+                flow_for_future = np.zeros(shape=(frames.shape[1], frames.shape[2], 2))
+                past_flow_yet += np.array(list(past_12_frames_optical_flow.values())).sum(0)
+                flow_for_future += np.array(list(future_12_frames_optical_flow.values())).sum(0)
+                extracted_feature_actual_fr = extracted_features[actual_fr.item()]
+                extracted_feature_actual_fr_object_features = extracted_feature_actual_fr.object_features
+
+                # future_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=interest_fr + frame_time_gap,
+                #                                        time_gap_within_frames=time_gap_within_frames,
+                #                                        total_frames=total_frames, step=step, n=n,
+                #                                        kernel=kernel, var_threshold=var_threshold,
+                #                                        detect_shadows=detect_shadows)
+                #
+                # past_mask = get_mog2_foreground_mask(frames=frames, interest_frame_idx=interest_fr - frame_time_gap,
+                #                                      time_gap_within_frames=time_gap_within_frames,
+                #                                      total_frames=total_frames, step=step, n=n,
+                #                                      kernel=kernel, var_threshold=var_threshold,
+                #                                      detect_shadows=detect_shadows)
+
+                past_12_frames_optical_flow_reversed = {}
+                past_12_frames_optical_flow_keys = list(past_12_frames_optical_flow.keys())
+                past_12_frames_optical_flow_keys.reverse()
+                for k in past_12_frames_optical_flow_keys:
+                    past_12_frames_optical_flow_reversed.update({k: past_12_frames_optical_flow[k]})
+
+                last12_bg_sub_mask_reversed = {}
+                last12_bg_sub_mask_keys = list(last12_bg_sub_mask.keys())
+                last12_bg_sub_mask_keys.reverse()
+                for k in last12_bg_sub_mask_keys[1:]:
+                    last12_bg_sub_mask_reversed.update({k: last12_bg_sub_mask[k]})
+
+                for r_idx, object_feature in enumerate(extracted_feature_actual_fr_object_features):  # fixme: add gt
+
+                    current_track_features = track_based_accumulated_features[
+                        object_feature.idx].object_features[-1] \
+                        if object_feature.idx in track_based_accumulated_features.keys() else []
+
+                    activations = object_feature.past_xy
+                    box = object_feature.past_bbox
+
+                    # activations_per_frame = object_feature.past_xy
+                    box_future_per_frame, box_past_per_frame = box, box
+                    activations_future_frame_per_frame, activations_past_frame_per_frame = None, None
+                    activations_displaced_in_future_per_frame_past, activations_displaced_in_past_per_frame_past = \
+                        object_feature.past_xy, object_feature.past_xy
+                    activations_displaced_in_future_per_frame, activations_displaced_in_past_per_frame = \
+                        None, None
+                    shifted_box_in_future_per_frame, shifted_box_in_past_per_frame = None, None
+                    activations_future_displacement_list, activations_past_displacement_list = [], []
+
+                    for running_idx, ((past_idx, past_flow), (future_idx, future_flow),
+                                      (past_mask_idx, past_mask_from_dict),
+                                      (future_mask_idx, future_mask_from_dict)) in enumerate(zip(
+                        past_12_frames_optical_flow_reversed.items(), future_12_frames_optical_flow.items(),
+                        last12_bg_sub_mask_reversed.items(), future12_bg_sub_mask.items())):
+
+                        activations_future_displacement_per_frame = future_flow[
+                            activations_displaced_in_future_per_frame_past[:, 1],
+                            activations_displaced_in_future_per_frame_past[:, 0]]
+                        activations_past_displacement_per_frame = past_flow[
+                            activations_displaced_in_past_per_frame_past[:, 1],
+                            activations_displaced_in_past_per_frame_past[:, 0]]
+
+                        activations_future_displacement_list.append(activations_future_displacement_per_frame)
+                        activations_past_displacement_list.append(activations_past_displacement_per_frame)
+
+                        activations_displaced_in_future_per_frame = \
+                            activations_displaced_in_future_per_frame_past + activations_future_displacement_per_frame
+                        activations_displaced_in_past_per_frame = \
+                            activations_displaced_in_past_per_frame_past - activations_past_displacement_per_frame
+
+                        shifted_box_in_future_per_frame, shifted_activation_center_in_future_per_frame = \
+                            evaluate_shifted_bounding_box(
+                                box_future_per_frame, activations_displaced_in_future_per_frame,
+                                activations_displaced_in_future_per_frame_past)
+                        shifted_box_in_past_per_frame, shifted_activation_center_in_past_per_frame = \
+                            evaluate_shifted_bounding_box(
+                                box_past_per_frame, activations_displaced_in_past_per_frame,
+                                activations_displaced_in_past_per_frame_past)
+
+                        activations_future_frame_per_frame = extract_features_per_bounding_box(
+                            shifted_box_in_future_per_frame, future_mask_from_dict)
+                        activations_past_frame_per_frame = extract_features_per_bounding_box(
+                            shifted_box_in_past_per_frame, past_mask_from_dict)
+
+                        # ground-truth association ####################################################################
+                        future_gt_track_box_mapping = {a[-1]: a[:-1] for a in future_annotations}
+                        past_gt_track_box_mapping = {a[-1]: a[:-1] for a in past_annotations}
+
+                        generated_box_future = np.array([shifted_box_in_future_per_frame])
+                        generated_box_idx_future = [object_feature.idx]
+                        generated_box_past = np.array([shifted_box_in_past_per_frame])
+                        generated_box_idx_past = [object_feature.idx]
+
+                        l2_distance_boxes_score_matrix_future = np.zeros(shape=(len(future_gt_boxes),
+                                                                                len(generated_box_future)))
+                        l2_distance_boxes_score_matrix_past = np.zeros(
+                            shape=(len(past_gt_boxes), len(generated_box_past)))
+
+                        for a_i, a_box in enumerate(future_gt_boxes):
+                            for r_i, r_box_future in enumerate(generated_box_future):
+                                dist_future = np.linalg.norm((get_bbox_center(a_box).flatten() -
+                                                              get_bbox_center(r_box_future).flatten()), 2) * ratio
+                                l2_distance_boxes_score_matrix_future[a_i, r_i] = dist_future
+
+                        for a_i, a_box in enumerate(past_gt_boxes):
+                            for r_i, r_box_past in enumerate(generated_box_past):
+                                dist_past = np.linalg.norm((get_bbox_center(a_box).flatten() -
+                                                            get_bbox_center(r_box_past).flatten()), 2) * ratio
+                                l2_distance_boxes_score_matrix_past[a_i, r_i] = dist_past
+
+                        l2_distance_boxes_score_matrix_future = 2 - l2_distance_boxes_score_matrix_future
+                        l2_distance_boxes_score_matrix_future[l2_distance_boxes_score_matrix_future < 0] = 10
+
+                        l2_distance_boxes_score_matrix_past = 2 - l2_distance_boxes_score_matrix_past
+                        l2_distance_boxes_score_matrix_past[l2_distance_boxes_score_matrix_past < 0] = 10
+                        # Hungarian
+                        match_rows_future, match_cols_future = scipy.optimize.linear_sum_assignment(
+                            l2_distance_boxes_score_matrix_future)
+                        matching_distribution_future = [[i, j, l2_distance_boxes_score_matrix_future[i, j]] for i, j in
+                                                        zip(
+                                                            match_rows_future, match_cols_future)]
+                        actually_matched_mask_future = l2_distance_boxes_score_matrix_future[match_rows_future,
+                                                                                             match_cols_future] < 10
+                        match_rows_future = match_rows_future[actually_matched_mask_future]
+                        match_cols_future = match_cols_future[actually_matched_mask_future]
+                        match_rows_tracks_idx_future = [future_gt_boxes_idx[m].item() for m in match_rows_future]
+                        match_cols_tracks_idx_future = [generated_box_idx_future[m] for m in match_cols_future]
+
+                        match_rows_past, match_cols_past = scipy.optimize.linear_sum_assignment(
+                            l2_distance_boxes_score_matrix_past)
+                        matching_distribution_past = [[i, j, l2_distance_boxes_score_matrix_past[i, j]] for i, j in zip(
+                            match_rows_past, match_cols_past)]
+                        actually_matched_mask_past = l2_distance_boxes_score_matrix_past[match_rows_past,
+                                                                                         match_cols_past] < 10
+                        match_rows_past = match_rows_past[actually_matched_mask_past]
+                        match_cols_past = match_cols_past[actually_matched_mask_past]
+                        match_rows_tracks_idx_past = [past_gt_boxes_idx[m].item() for m in match_rows_past]
+                        match_cols_tracks_idx_past = [generated_box_idx_past[m] for m in match_cols_past]
+
+                        if object_feature.gt_track_idx != match_rows_tracks_idx_future[0]:
+                            logger.info(
+                                f'GT track id mismatch! Per Frame:{object_feature.gt_track_idx} vs 12 frames apart'
+                                f' {match_rows_tracks_idx_future[0]}')
+                        if object_feature.gt_track_idx != match_rows_tracks_idx_past[0]:
+                            logger.info(
+                                f'GT track id mismatch! Per Frame:{object_feature.gt_track_idx} vs 12 frames apart'
+                                f' {match_rows_tracks_idx_past[0]}')
+                        ##############################################################################################
+
+                        if activations_future_frame_per_frame.size == 0 \
+                                or activations_past_frame_per_frame.size == 0 or \
+                                (filter_switch_boxes_based_on_angle_and_recent_history
+                                 and not isinstance(current_track_features, list)
+                                 and current_track_features.velocity_direction.size != 0
+                                 and len(current_track_features.velocity_direction) >
+                                 min_track_length_to_filter_switch_box
+                                 and first_violation_till_now(
+                                            current_track_features.velocity_direction, angle_threshold_to_filter)
+                                 and current_track_features.velocity_direction[-1] >
+                                 angle_threshold_to_filter
+                                 and not np.isnan(current_track_features.velocity_direction[-1])):
+
+                            logger.info(f'Ending Track {object_feature.idx}! No features found in '
+                                        f'{"past" if activations_past_frame_per_frame.size == 0 else "future"} '
+                                        f'at {running_idx} frames apart from frame {actual_fr.item()}')
+
+                            if filter_switch_boxes_based_on_angle_and_recent_history or compute_histories_for_plot:
+                                current_track_history = get_track_history(object_feature.idx,
+                                                                          track_based_accumulated_features)
+                                current_track_velocity_history = get_track_velocity_history(
+                                    object_feature.idx, track_based_accumulated_features)
+                                current_track_velocity_history = np.array(current_track_velocity_history)
+                                current_direction = []
+                                for track_history_idx in range(len(current_track_history) - 1):
+                                    current_direction.append((angle_between(
+                                        v1=current_track_history[track_history_idx],
+                                        v2=current_track_history[track_history_idx + 1]
+                                    )))
+                                # current direction can be removed
+                                current_direction = np.array(current_direction)
+
+                                current_velocity_direction = []
+                                for track_history_idx in range(len(current_track_velocity_history) - 1):
+                                    current_velocity_direction.append(math.degrees(angle_between(
+                                        v1=current_track_velocity_history[track_history_idx],
+                                        v2=current_track_velocity_history[track_history_idx + 1]
+                                    )))
+                                current_velocity_direction = np.array(current_velocity_direction)
+
+                                # just use gt
+                                current_gt_track_history = get_gt_track_history(object_feature.idx,
+                                                                                track_based_accumulated_features)
+                            else:
+                                current_track_history, current_gt_track_history = None, None
+                                current_direction, current_velocity_direction = None, None
+                                current_track_velocity_history = None
+
+                            current_track_obj_features = AgentFeatures(
+                                track_idx=object_feature.idx,
+                                activations_t=activations,
+                                activations_t_minus_one=activations_displaced_in_past_per_frame,
+                                activations_t_plus_one=activations_displaced_in_future_per_frame,
+                                future_flow=activations_future_displacement_per_frame,
+                                past_flow=activations_past_displacement_per_frame,
+                                bbox_t=box,
+                                bbox_t_minus_one=shifted_box_in_past_per_frame,
+                                bbox_t_plus_one=shifted_box_in_future_per_frame,
+                                frame_number=object_feature.frame_number,
+                                activations_future_frame=activations_future_frame_per_frame,
+                                activations_past_frame=activations_past_frame_per_frame,
+                                final_features_future_activations=None,
+                                is_track_live=False,
+                                frame_number_t=actual_fr.item(),
+                                frame_number_t_minus_one=past_mask_idx,
+                                frame_number_t_plus_one=future_mask_idx,
+                                past_frames_used_in_of_estimation=running_idx,
+                                future_frames_used_in_of_estimation=running_idx,
+                                gt_box=object_feature.gt_box,
+                                gt_track_idx=object_feature.gt_track_idx,
+                                gt_past_current_distance=l2_distance_boxes_score_matrix_past[match_rows_past[0],
+                                                                                             match_cols_past[0]],
+                                past_gt_box=past_gt_track_box_mapping[match_rows_tracks_idx_past[0]],
+                                future_gt_box=future_gt_track_box_mapping[match_rows_tracks_idx_future[0]],
+                                gt_current_future_distance=l2_distance_boxes_score_matrix_future[match_rows_future[0],
+                                                                                                 match_cols_future[0]],
+                                past_gt_track_idx=match_rows_tracks_idx_past[0],
+                                future_gt_track_idx=match_rows_tracks_idx_future[0],
+                                future_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_future[0],
+                                past_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_past[0],
+                                frame_by_frame_estimation=True,
+                                gt_history=current_gt_track_history, history=current_track_history,
+                                track_direction=current_direction, velocity_history=current_track_velocity_history,
+                                velocity_direction=current_velocity_direction
+                            )
+                            object_features.append(current_track_obj_features)
+                            if object_feature.idx in track_based_accumulated_features:
+                                track_based_accumulated_features[object_feature.idx].object_features.append(
+                                    current_track_obj_features)
+
+                            continue
+
+                        closest_n_shifted_xy_pair_future_per_frame, closest_n_xy_current_future_frame_pair_per_frame = \
+                            features_filter_append_preprocessing(
+                                overlap_percent, activations_displaced_in_future_per_frame,
+                                activations_future_frame_per_frame)
+
+                        filtered_shifted_future_activations_per_frame = filter_features(
+                            activations_displaced_in_future_per_frame, closest_n_shifted_xy_pair_future_per_frame)
+                        activations_displaced_in_future_per_frame = append_features(
+                            filtered_shifted_future_activations_per_frame,
+                            closest_n_xy_current_future_frame_pair_per_frame)
+
+                        closest_n_shifted_xy_pair_past_per_frame, closest_n_xy_current_past_frame_pair_per_frame = \
+                            features_filter_append_preprocessing(
+                                overlap_percent, activations_displaced_in_past_per_frame,
+                                activations_past_frame_per_frame)
+
+                        filtered_shifted_past_activations_per_frame = filter_features(
+                            activations_displaced_in_past_per_frame, closest_n_shifted_xy_pair_past_per_frame)
+                        activations_displaced_in_past_per_frame = append_features(
+                            filtered_shifted_past_activations_per_frame, closest_n_xy_current_past_frame_pair_per_frame)
+
+                        activations_displaced_in_future_per_frame_past = np.round(
+                            activations_displaced_in_future_per_frame).astype(np.int)
+                        activations_displaced_in_past_per_frame_past = np.round(
+                            activations_displaced_in_past_per_frame).astype(np.int)
+
+                        # plot_tracks_with_features(frame_t=frames[fr],
+                        #                           frame_t_minus_one=frames[fr - running_idx - 1],
+                        #                           frame_t_plus_one=frames[fr + running_idx + 1],
+                        #                           features_t=activations,
+                        #                           features_t_minus_one=activations_displaced_in_past_per_frame,
+                        #                           features_t_plus_one=activations_displaced_in_future_per_frame,
+                        #                           box_t=[box],
+                        #                           box_t_minus_one=[shifted_box_in_past_per_frame],
+                        #                           box_t_plus_one=[shifted_box_in_future_per_frame],
+                        #                           frame_number=actual_fr.item(),
+                        #                           marker_size=1,
+                        #                           track_id=object_feature.idx,
+                        #                           file_idx=running_idx,
+                        #                           save_path=save_path_for_plot,
+                        #                           annotations=[[object_feature.idx], [object_feature.idx],
+                        #                                        [object_feature.idx]],
+                        #                           additional_text=f'Past: {fr - running_idx - 1} | Present: {fr} | '
+                        #                                           f'Future: {fr + running_idx + 1}')
+
+                    if filter_switch_boxes_based_on_angle_and_recent_history or compute_histories_for_plot:
+                        current_track_history = get_track_history(object_feature.idx,
+                                                                  track_based_accumulated_features)
+                        current_track_velocity_history = get_track_velocity_history(
+                            object_feature.idx, track_based_accumulated_features)
+                        current_track_velocity_history = np.array(current_track_velocity_history)
+                        current_direction = []
+                        for track_history_idx in range(len(current_track_history) - 1):
+                            current_direction.append((angle_between(
+                                v1=current_track_history[track_history_idx],
+                                v2=current_track_history[track_history_idx + 1]
+                            )))
+                        # current direction can be removed
+                        current_direction = np.array(current_direction)
+
+                        current_velocity_direction = []
+                        for track_history_idx in range(len(current_track_velocity_history) - 1):
+                            current_velocity_direction.append(math.degrees(angle_between(
+                                v1=current_track_velocity_history[track_history_idx],
+                                v2=current_track_velocity_history[track_history_idx + 1]
+                            )))
+                        current_velocity_direction = np.array(current_velocity_direction)
+
+                        current_gt_track_history = get_gt_track_history(object_feature.idx,
+                                                                        track_based_accumulated_features)
+                    else:
+                        current_track_history, current_gt_track_history = None, None
+                        current_direction, current_velocity_direction = None, None
+                        current_track_velocity_history = None
+
+                    current_track_obj_features = AgentFeatures(
+                        track_idx=object_feature.idx,
+                        activations_t=activations,
+                        activations_t_minus_one=activations_displaced_in_past_per_frame,
+                        activations_t_plus_one=activations_displaced_in_future_per_frame,
+                        future_flow=activations_future_displacement_list,
+                        past_flow=activations_past_displacement_list,
+                        bbox_t=box,
+                        bbox_t_minus_one=shifted_box_in_past_per_frame,
+                        bbox_t_plus_one=shifted_box_in_future_per_frame,
+                        frame_number=object_feature.frame_number,
+                        activations_future_frame=activations_future_frame_per_frame,
+                        activations_past_frame=activations_past_frame_per_frame,
+                        final_features_future_activations=activations_displaced_in_future_per_frame,
+                        frame_number_t=actual_fr.item(),
+                        frame_number_t_minus_one=actual_fr.item() - frame_time_gap,
+                        frame_number_t_plus_one=actual_fr.item() + frame_time_gap,
+                        past_frames_used_in_of_estimation=list(past_12_frames_optical_flow.keys()),
+                        future_frames_used_in_of_estimation=list(future_12_frames_optical_flow.keys()),
+                        gt_box=object_feature.gt_box,
+                        gt_track_idx=object_feature.gt_track_idx,
+                        gt_past_current_distance=l2_distance_boxes_score_matrix_past[match_rows_past[0],
+                                                                                     match_cols_past[0]],
+                        past_gt_box=past_gt_track_box_mapping[match_rows_tracks_idx_past[0]],
+                        future_gt_box=future_gt_track_box_mapping[match_rows_tracks_idx_future[0]],
+                        gt_current_future_distance=l2_distance_boxes_score_matrix_future[match_rows_future[0],
+                                                                                         match_cols_future[0]],
+                        past_gt_track_idx=match_rows_tracks_idx_past[0],
+                        future_gt_track_idx=match_rows_tracks_idx_future[0],
+                        future_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_future[0],
+                        past_box_inconsistent=object_feature.gt_track_idx == match_rows_tracks_idx_past[0],
+                        frame_by_frame_estimation=True,
+                        gt_history=current_gt_track_history, history=current_track_history,
+                        track_direction=current_direction, velocity_history=current_track_velocity_history,
+                        velocity_direction=current_velocity_direction
+                    )
+                    object_features.append(current_track_obj_features)
+                    if object_feature.idx not in track_based_accumulated_features:
+                        track_feats = TrackFeatures(object_feature.idx)
+                        track_feats.object_features.append(current_track_obj_features)
+                        track_based_accumulated_features.update(
+                            {object_feature.idx: track_feats})
+                    else:
+                        track_based_accumulated_features[object_feature.idx].object_features.append(
+                            current_track_obj_features)
+
+                    # activations_future_displacement = flow_for_future[activations[:, 1], activations[:, 0]]
+                    # activations_past_displacement = past_flow_yet[activations[:, 1], activations[:, 0]]
+                    #
+                    # activations_displaced_in_future = activations + activations_future_displacement
+                    # activations_displaced_in_past = activations - activations_past_displacement
+                    #
+                    # shifted_box_in_future, shifted_activation_center_in_future = evaluate_shifted_bounding_box(
+                    #     box, activations_displaced_in_future, activations)
+                    # shifted_box_in_past, shifted_activation_center_in_past = evaluate_shifted_bounding_box(
+                    #     box, activations_displaced_in_past, activations)
+                    #
+                    # activations_future_frame = extract_features_per_bounding_box(shifted_box_in_future, future_mask)
+                    # activations_past_frame = extract_features_per_bounding_box(shifted_box_in_past, past_mask)
+                    #
+                    # if activations_future_frame.size == 0:
+                    #     current_track_obj_features = AgentFeatures(
+                    #         track_idx=object_feature.idx,
+                    #         activations_t=activations,
+                    #         activations_t_minus_one=activations_displaced_in_past,
+                    #         activations_t_plus_one=activations_displaced_in_future,
+                    #         future_flow=activations_future_displacement,
+                    #         past_flow=activations_past_displacement,
+                    #         bbox_t=box,
+                    #         bbox_t_minus_one=shifted_box_in_past,
+                    #         bbox_t_plus_one=shifted_box_in_future,
+                    #         frame_number=object_feature.frame_number,
+                    #         activations_future_frame=activations_future_frame,
+                    #         activations_past_frame=activations_past_frame,
+                    #         final_features_future_activations=None,
+                    #         is_track_live=False,
+                    #         frame_number_t=actual_fr.item(),
+                    #         frame_number_t_minus_one=actual_fr.item() - frame_time_gap,
+                    #         frame_number_t_plus_one=actual_fr.item() + frame_time_gap,
+                    #         past_frames_used_in_of_estimation=list(past_12_frames_optical_flow.keys()),
+                    #         future_frames_used_in_of_estimation=list(future_12_frames_optical_flow.keys()),
+                    #         frame_by_frame_estimation=True
+                    #     )
+                    #     object_features.append(current_track_obj_features)
+                    #     if object_feature.idx in track_based_accumulated_features:
+                    #         track_based_accumulated_features[object_feature.idx].object_features.append(
+                    #             current_track_obj_features)
+                    #
+                    #     continue
+                    #
+                    # closest_n_shifted_xy_pair, closest_n_xy_current_frame_pair = \
+                    #     features_filter_append_preprocessing(
+                    #         overlap_percent, activations_displaced_in_future, activations_future_frame)
+                    #
+                    # filtered_shifted_future_activations = filter_features(
+                    #     activations_displaced_in_future, closest_n_shifted_xy_pair)
+                    # final_features_future_activations = append_features(
+                    #     filtered_shifted_future_activations, closest_n_xy_current_frame_pair)
+                    #
+                    # current_track_obj_features = AgentFeatures(
+                    #     track_idx=object_feature.idx,
+                    #     activations_t=activations,
+                    #     activations_t_minus_one=activations_displaced_in_past,
+                    #     activations_t_plus_one=activations_displaced_in_future,
+                    #     future_flow=activations_future_displacement,
+                    #     past_flow=activations_past_displacement,
+                    #     bbox_t=box,
+                    #     bbox_t_minus_one=shifted_box_in_past,
+                    #     bbox_t_plus_one=shifted_box_in_future,
+                    #     frame_number=object_feature.frame_number,
+                    #     activations_future_frame=activations_future_frame,
+                    #     activations_past_frame=activations_past_frame,
+                    #     final_features_future_activations=final_features_future_activations,
+                    #     frame_number_t=actual_fr.item(),
+                    #     frame_number_t_minus_one=actual_fr.item() - frame_time_gap,
+                    #     frame_number_t_plus_one=actual_fr.item() + frame_time_gap,
+                    #     past_frames_used_in_of_estimation=list(past_12_frames_optical_flow.keys()),
+                    #     future_frames_used_in_of_estimation=list(future_12_frames_optical_flow.keys()),
+                    #     frame_by_frame_estimation=True
+                    # )
+                    # object_features.append(current_track_obj_features)
+                    # if object_feature.idx not in track_based_accumulated_features:
+                    #     track_feats = TrackFeatures(object_feature.idx)
+                    #     track_feats.object_features.append(current_track_obj_features)
+                    #     track_based_accumulated_features.update(
+                    #         {object_feature.idx: track_feats})
+                    # else:
+                    #     track_based_accumulated_features[object_feature.idx].object_features.append(
+                    #         current_track_obj_features)
+
+                    # plot_tracks_with_features(frame_t=frames[fr],
+                    #                           frame_t_minus_one=frames[fr - frame_time_gap],
+                    #                           frame_t_plus_one=frames[fr + frame_time_gap],
+                    #                           features_t=activations,
+                    #                           features_t_minus_one=activations_displaced_in_past,
+                    #                           features_t_plus_one=activations_displaced_in_future,
+                    #                           box_t=[box],
+                    #                           box_t_minus_one=[shifted_box_in_past],
+                    #                           box_t_plus_one=[shifted_box_in_future],
+                    #                           frame_number=actual_fr.item(),
+                    #                           marker_size=1,
+                    #                           track_id=object_feature.idx,
+                    #                           file_idx=r_idx,
+                    #                           save_path=save_path_for_plot + 'frame12apart',
+                    #                           annotations=[[object_feature.idx], [object_feature.idx],
+                    #                                        [object_feature.idx]],
+                    #                           additional_text=f'Past: {actual_fr.item() - frame_time_gap} |'
+                    #                                           f' Present: {actual_fr.item()} | '
+                    #                                           f'Future: {actual_fr.item() + frame_time_gap}')
+
+                data_all_frames.update({actual_fr.item(): FrameFeatures(frame_number=actual_fr.item(),
+                                                                        object_features=object_features)})
+
+    return data_all_frames, frames[interest_fr:, ...], \
+           torch.arange(interest_fr + frame_numbers[0], frame_numbers[-1] + 1), \
+           last_frame_from_last_used_batch, past_12_frames_optical_flow, last12_bg_sub_mask, \
+           track_based_accumulated_features
+
+
 def preprocess_data_zero_shot_12_frames_apart(
         extracted_features, save_per_part_path=SAVE_PATH, batch_size=32, var_threshold=None,
         overlap_percent=0.1, radius=50, min_points_in_cluster=5, video_mode=False,
@@ -5877,10 +6918,12 @@ if __name__ == '__main__':
         # out = process_complex_features_rnn(extracted_features, time_steps=5)
         print()
     elif not eval_mode and EXECUTE_STEP == STEP.EXTRACTION:
+        # accumulated_features_path_filename = 'accumulated_features_from_finally.pt'
+        accumulated_features_path_filename = 'accumulated_features_from_finally_filtered.pt'
         track_length_threshold = 60
 
         accumulated_features_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
-                                    f'/accumulated_features_from_finally.pt'
+                                    f'/{accumulated_features_path_filename}'
         accumulated_features: Dict[int, Any] = torch.load(accumulated_features_path)
         per_track_features: Dict[int, TrackFeatures] = accumulated_features['track_based_accumulated_features']
         per_frame_features: Dict[int, FrameFeatures] = accumulated_features['accumulated_features']
