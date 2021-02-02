@@ -7088,9 +7088,9 @@ def preprocess_data_zero_shot_12_frames_apart(
             'total_accumulated_features': total_accumulated_features,
             'track_based_accumulated_features': track_based_accumulated_features
         }
-        Path(save_path_for_video + 'cancelled/').mkdir(parents=True, exist_ok=True)
+        Path(save_path_for_video).mkdir(parents=True, exist_ok=True)
         f_n = f'features_dict_part{part_idx}.pt'
-        torch.save(save_dict, save_path_for_video + 'parts/' + f_n)
+        torch.save(save_dict, save_path_for_video + f_n)
         out.release()
 
     if video_mode:
@@ -7148,10 +7148,12 @@ if __name__ == '__main__':
                                          extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True,
                                          save_every_n_batch_itr=50, drop_last_batch=True, detect_shadows=False)
     elif not eval_mode and EXECUTE_STEP == STEP.FILTER_FEATURES:
-        track_length_threshold = 240
+        accumulated_features_path_filename = 'accumulated_features_from_finally.pt'
+        # accumulated_features_path_filename = 'accumulated_features_from_finally_filtered.pt'
+        track_length_threshold = 120
 
         accumulated_features_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
-                                    f'/accumulated_features_from_finally.pt'
+                                    f'/{accumulated_features_path_filename}'
         accumulated_features: Dict[int, Any] = torch.load(accumulated_features_path)
         per_track_features: Dict[int, TrackFeatures] = accumulated_features['track_based_accumulated_features']
         per_frame_features: Dict[int, FrameFeatures] = accumulated_features['accumulated_features']
@@ -7202,6 +7204,7 @@ if __name__ == '__main__':
         plot_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/track_based/'
         Path(plot_save_path).mkdir(parents=True, exist_ok=True)
         video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/frames12apart/'
+        # + 'cancelled/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
         feats = preprocess_data_zero_shot_12_frames_apart(
             extracted_features=filtered_frame_based_features,
