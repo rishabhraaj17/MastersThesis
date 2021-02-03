@@ -455,7 +455,7 @@ class SimpleVideoDatasetBase(VisionDataset):
         out = self.v_frames[index]
         if self.transform is not None:
             out = self.transform(out)
-        return out
+        return out, index
 
 
 if __name__ == '__main__':
