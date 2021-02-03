@@ -6959,7 +6959,7 @@ def preprocess_data_zero_shot_12_frames_apart(
         custom_video_shape=True, save_path_for_plot=None, save_checkpoint=False,
         begin_track_mode=True, generic_box_wh=100, distance_threshold=2,
         use_circle_to_keep_track_alive=True, iou_threshold=0.5, extra_radius=50,
-        use_is_box_overlapping_live_boxes=True, premature_kill_save=False,
+        use_is_box_overlapping_live_boxes=True, premature_kill_save=False, save_path_for_features=None,
         save_every_n_batch_itr=None, num_frames_to_build_bg_sub_model=12, drop_last_batch=True,
         frame_by_frame_estimation=False, filter_switch_boxes_based_on_angle_and_recent_history=True,
         compute_histories_for_plot=True, min_track_length_to_filter_switch_box=20, angle_threshold_to_filter=120):
@@ -7066,9 +7066,9 @@ def preprocess_data_zero_shot_12_frames_apart(
                     'track_based_accumulated_features': track_based_accumulated_features
                 }
                 if part_idx % save_every_n_batch_itr == 0 and part_idx != 0:
-                    Path(save_path_for_video + 'parts/').mkdir(parents=True, exist_ok=True)
+                    Path(save_path_for_features + 'parts/').mkdir(parents=True, exist_ok=True)
                     f_n = f'features_dict_part{part_idx}.pt'
-                    torch.save(save_dict, save_path_for_video + 'parts/' + f_n)
+                    torch.save(save_dict, save_path_for_features + 'parts/' + f_n)
 
                     total_accumulated_features = {}
                     live_track_ids = [live_track.idx for live_track in last_frame_live_tracks]
@@ -7079,18 +7079,18 @@ def preprocess_data_zero_shot_12_frames_apart(
             'total_accumulated_features': total_accumulated_features,
             'track_based_accumulated_features': track_based_accumulated_features
         }
-        Path(save_path_for_video + 'cancelled/').mkdir(parents=True, exist_ok=True)
-        f_n = f'features_dict_part{part_idx}.pt'
-        torch.save(save_dict, save_path_for_video + 'parts/' + f_n)
+        Path(save_path_for_features).mkdir(parents=True, exist_ok=True)
+        f_n = f'features_dict_part{part_idx}_cancelled.pt'
+        torch.save(save_dict, save_path_for_features + 'parts/' + f_n)
         out.release()
     finally:
         save_dict = {
             'total_accumulated_features': total_accumulated_features,
             'track_based_accumulated_features': track_based_accumulated_features
         }
-        Path(save_path_for_video).mkdir(parents=True, exist_ok=True)
-        f_n = f'features_dict_part{part_idx}.pt'
-        torch.save(save_dict, save_path_for_video + f_n)
+        Path(save_path_for_features).mkdir(parents=True, exist_ok=True)
+        f_n = f'features_dict_from_finally.pt'
+        torch.save(save_dict, save_path_for_features + f_n)
         out.release()
 
     if video_mode:
@@ -7150,7 +7150,7 @@ if __name__ == '__main__':
     elif not eval_mode and EXECUTE_STEP == STEP.FILTER_FEATURES:
         accumulated_features_path_filename = 'accumulated_features_from_finally.pt'
         # accumulated_features_path_filename = 'accumulated_features_from_finally_filtered.pt'
-        track_length_threshold = 120
+        track_length_threshold = 5
 
         accumulated_features_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
                                     f'/{accumulated_features_path_filename}'
@@ -7165,6 +7165,7 @@ if __name__ == '__main__':
                                     video_save_location=video_save_path + 'extraction_filter.avi', do_filter=True,
                                     min_track_length_threshold=track_length_threshold, desired_fps=1, video_mode=False,
                                     skip_plot_save=True)
+        logger.info(f'Track length threshold: {track_length_threshold}')
     elif not eval_mode and EXECUTE_STEP == STEP.DEBUG:
         # Scrapped ###################################################################################################
         # time_step_between_frames = 12
@@ -7206,6 +7207,9 @@ if __name__ == '__main__':
         video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/frames12apart/'
         # + 'cancelled/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
+        features_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/' \
+                             f'zero_shot/frames12apart/features/'
+        Path(features_save_path).mkdir(parents=True, exist_ok=True)
         feats = preprocess_data_zero_shot_12_frames_apart(
             extracted_features=filtered_frame_based_features,
             var_threshold=None, plot=False, radius=60, save_per_part_path=None,
@@ -7217,7 +7221,7 @@ if __name__ == '__main__':
             save_every_n_batch_itr=50, frame_by_frame_estimation=False,
             filter_switch_boxes_based_on_angle_and_recent_history=True,
             compute_histories_for_plot=True, min_track_length_to_filter_switch_box=20,
-            angle_threshold_to_filter=120)
+            angle_threshold_to_filter=120, save_path_for_features=features_save_path)
     else:
         feat_file_path = '../Plots/baseline_v2/v0/deathCircle4/' \
                          'use_is_box_overlapping_live_boxes/premature_kill_features_dict.pt'
