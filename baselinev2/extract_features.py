@@ -14,6 +14,7 @@ import matplotlib.lines as mlines
 import pytorch_lightning.metrics as plm
 import scipy
 import skimage
+import pandas as pd
 import torch
 import torchvision
 from torch.utils.data import DataLoader
@@ -63,6 +64,7 @@ class STEP(Enum):
     FILTER_FEATURES = 7
     NN_EXTRACTION = 8
     CUSTOM_VIDEO = 9
+    MINIMAL = 10
 
 
 class ObjectDetectionParameters(Enum):
@@ -86,7 +88,7 @@ class ObjectDetectionParameters(Enum):
     }
 
 
-EXECUTE_STEP = STEP.UNSUPERVISED
+EXECUTE_STEP = STEP.MINIMAL
 
 
 class ObjectFeatures(object):
@@ -121,9 +123,8 @@ class ObjectFeatures(object):
 
 
 class MinimalObjectFeatures(object):
-    def __init__(self, idx, xy, past_xy, final_xy, flow, past_flow, past_bbox, final_bbox, frame_number, history=None,
-                 is_track_live=True, gt_history=None, track_direction=None, velocity_history=None,
-                 velocity_direction=None, running_velocity=None, per_step_distance=None):
+    def __init__(self, idx, past_bbox, final_bbox, frame_number, flow, past_flow, is_track_live=True, gt_history=None,
+                 track_direction=None, velocity_history=None, velocity_direction=None, history=None):
         super(MinimalObjectFeatures, self).__init__()
         self.idx = idx
         self.past_bbox = past_bbox
@@ -133,6 +134,13 @@ class MinimalObjectFeatures(object):
         self.gt_box = None
         self.past_gt_box = None
         self.gt_track_idx = None
+        self.gt_history = gt_history
+        self.track_history = history
+        self.track_direction = track_direction
+        self.velocity_history = velocity_history
+        self.velocity_direction = velocity_direction
+        self.flow = flow
+        self.past_flow = past_flow
 
     def __eq__(self, other):
         return self.idx == other.idx
@@ -190,7 +198,8 @@ class AgentFeatures(object):
 
 
 class FrameFeatures(object):
-    def __init__(self, frame_number: int, object_features: Union[List[ObjectFeatures], List[AgentFeatures]]
+    def __init__(self, frame_number: int, object_features: Union[List[ObjectFeatures], List[AgentFeatures],
+                                                                 List[MinimalObjectFeatures]]
                  , flow=None, past_flow=None):
         super(FrameFeatures, self).__init__()
         self.frame_number = frame_number
@@ -1762,6 +1771,44 @@ def evaluate_extracted_features(track_based_features, frame_based_features, batc
     recall = tp_sum / (tp_sum + fn_sum)
     logger.info('Final')
     logger.info(f'L2 Distance Based - Precision: {precision} | Recall: {recall}')
+
+
+def extracted_features_in_csv(track_based_features, frame_based_features, do_filter=False,
+                              min_track_length_threshold=5, csv_save_path=None):
+    # frame_track_distribution_pre_filter = {k: len(v.object_features) for k, v in frame_based_features.items()}
+    if do_filter:
+        track_based_features, frame_based_features = filter_low_length_tracks(
+            track_based_features=track_based_features,
+            frame_based_features=frame_based_features,
+            threshold=min_track_length_threshold)
+
+        frame_based_features = filter_low_length_tracks_lvl2(track_based_features, frame_based_features)
+    # frame_track_distribution_post_filter = {k: len(v.object_features) for k, v in frame_based_features.items()}
+
+    # frame_based_features_length = len(frame_based_features)
+
+    csv_data = []
+    for frame_number, frame_feature in tqdm(frame_based_features.items()):
+        for object_feature in frame_feature.object_features:
+            x_min, y_min, x_max, y_max = object_feature.past_bbox
+            center_x, center_y = get_bbox_center(object_feature.past_bbox).flatten()
+
+            if object_feature.past_gt_box is not None:
+                gt_x_min, gt_y_min, gt_x_max, gt_y_max = object_feature.past_gt_box
+                gt_center_x, gt_center_y = get_bbox_center(object_feature.past_gt_box).flatten()
+            else:
+                gt_x_min, gt_y_min, gt_x_max, gt_y_max = None, None, None, None
+                gt_center_x, gt_center_y = None, None
+
+            csv_data.append([object_feature.idx, x_min, y_min, x_max, y_max, object_feature.frame_number - 1, 'object',
+                             center_x, center_y, gt_x_min, gt_y_min, gt_x_max, gt_y_max, gt_center_x, gt_center_y])
+
+    df = pd.DataFrame(data=csv_data, columns=['track_id', 'x_min', 'y_min', 'x_max', 'y_max', 'frame_number', 'label',
+                                              'center_x', 'center_y', 'gt_x_min', 'gt_y_min', 'gt_x_max', 'gt_y_max',
+                                              'gt_center_x', 'gt_center_y'])
+    if csv_save_path is not None:
+        df.to_csv(csv_save_path + 'generated_annotations.csv', index=False)
+        logger.info('CSV saved!')
 
 
 def associate_frame_with_ground_truth(frames, frame_numbers):
@@ -5024,14 +5071,14 @@ def preprocess_data_zero_shot_minimal(
             original_dims = (
                 frames_shape[1] / 100 * plot_scale_factor, frames_shape[0] / 100 * plot_scale_factor)
             out = cv.VideoWriter(video_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
-                                 (video_shape[1], video_shape[0]))  # (1200, 1000))  # (video_shape[0], video_shape[1]))
-            # (video_shape[1], video_shape[0]))
+                                 (video_shape[1], video_shape[0]))
+
             video_shape[0], video_shape[1] = video_shape[1], video_shape[0]
         else:
             original_dims = (
                 frames_shape[0] / 100 * plot_scale_factor, frames_shape[1] / 100 * plot_scale_factor)
             out = cv.VideoWriter(video_save_path, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
-                                 (video_shape[0], video_shape[1]))  # (1200, 1000))  # (video_shape[0], video_shape[1]))
+                                 (video_shape[0], video_shape[1]))
 
     try:
         for part_idx, data in enumerate(tqdm(data_loader)):
@@ -5291,25 +5338,25 @@ def preprocess_data_zero_shot_minimal(
                                     current_velocity_direction = np.array(current_velocity_direction)
 
                                     # not really required ############################################################
-                                    if len(current_track_history) != 0:
-                                        current_running_velocity = np.linalg.norm(
-                                            np.expand_dims(current_track_history[-1], axis=0) -
-                                            np.expand_dims(current_track_history[0], axis=0),
-                                            2, axis=0
-                                        ) / len(current_track_history) / 30
-                                    else:
-                                        current_running_velocity = None
-
-                                    current_per_step_distance = []
-                                    for track_history_idx in range(len(current_track_history) - 1):
-                                        d = np.linalg.norm(
-                                            np.expand_dims(current_track_history[track_history_idx + 1], axis=0) -
-                                            np.expand_dims(current_track_history[track_history_idx], axis=0),
-                                            2, axis=0
-                                        )
-                                        current_per_step_distance.append(d)
-
-                                    current_per_step_distance = np.array(current_per_step_distance)
+                                    # if len(current_track_history) != 0:
+                                    #     current_running_velocity = np.linalg.norm(
+                                    #         np.expand_dims(current_track_history[-1], axis=0) -
+                                    #         np.expand_dims(current_track_history[0], axis=0),
+                                    #         2, axis=0
+                                    #     ) / len(current_track_history) / 30
+                                    # else:
+                                    #     current_running_velocity = None
+                                    #
+                                    # current_per_step_distance = []
+                                    # for track_history_idx in range(len(current_track_history) - 1):
+                                    #     d = np.linalg.norm(
+                                    #         np.expand_dims(current_track_history[track_history_idx + 1], axis=0) -
+                                    #         np.expand_dims(current_track_history[track_history_idx], axis=0),
+                                    #         2, axis=0
+                                    #     )
+                                    #     current_per_step_distance.append(d)
+                                    #
+                                    # current_per_step_distance = np.array(current_per_step_distance)
                                     ###################################################################################
 
                                     # track_sign = []
@@ -5331,25 +5378,21 @@ def preprocess_data_zero_shot_minimal(
                                     current_per_step_distance = None
                                     current_running_velocity = None
                                     ###################################################################################
-                                current_track_obj_features = ObjectFeatures(idx=current_track_idx,
-                                                                            history=current_track_history,
-                                                                            gt_history=current_gt_track_history,
-                                                                            track_direction=current_direction,
-                                                                            velocity_direction=
-                                                                            current_velocity_direction,
-                                                                            velocity_history=
-                                                                            current_track_velocity_history,
-                                                                            xy=xy_current_frame,
-                                                                            past_xy=xy,
-                                                                            final_xy=xy_current_frame,
-                                                                            flow=xy_displacement,
-                                                                            past_flow=past_xy_displacement,
-                                                                            past_bbox=box,
-                                                                            final_bbox=np.array(shifted_box),
-                                                                            is_track_live=False,
-                                                                            per_step_distance=current_per_step_distance,
-                                                                            running_velocity=current_running_velocity,
-                                                                            frame_number=frame_number.item())
+                                current_track_obj_features = MinimalObjectFeatures(
+                                    idx=current_track_idx,
+                                    history=current_track_history,
+                                    gt_history=current_gt_track_history,
+                                    track_direction=current_direction,
+                                    velocity_direction=
+                                    current_velocity_direction,
+                                    velocity_history=
+                                    current_track_velocity_history,
+                                    flow=xy_displacement,
+                                    past_flow=past_xy_displacement,
+                                    past_bbox=box,
+                                    final_bbox=np.array(shifted_box),
+                                    is_track_live=False,
+                                    frame_number=frame_number.item())
                                 object_features.append(current_track_obj_features)
                                 if current_track_idx in track_based_accumulated_features:
                                     track_based_accumulated_features[current_track_idx].object_features.append(
@@ -5410,25 +5453,25 @@ def preprocess_data_zero_shot_minimal(
                                                                             track_based_accumulated_features)
 
                             # not really required ############################################################
-                            if len(current_track_history) != 0:
-                                current_running_velocity = np.linalg.norm(
-                                    np.expand_dims(current_track_history[-1], axis=0) -
-                                    np.expand_dims(current_track_history[0], axis=0),
-                                    2, axis=0
-                                ) / len(current_track_history) / 30
-                            else:
-                                current_running_velocity = None
-
-                            current_per_step_distance = []
-                            for track_history_idx in range(len(current_track_history) - 1):
-                                d = np.linalg.norm(
-                                    np.expand_dims(current_track_history[track_history_idx + 1], axis=0) -
-                                    np.expand_dims(current_track_history[track_history_idx], axis=0),
-                                    2, axis=0
-                                )
-                                current_per_step_distance.append(d)
-
-                            current_per_step_distance = np.array(current_per_step_distance)
+                            # if len(current_track_history) != 0:
+                            #     current_running_velocity = np.linalg.norm(
+                            #         np.expand_dims(current_track_history[-1], axis=0) -
+                            #         np.expand_dims(current_track_history[0], axis=0),
+                            #         2, axis=0
+                            #     ) / len(current_track_history) / 30
+                            # else:
+                            #     current_running_velocity = None
+                            #
+                            # current_per_step_distance = []
+                            # for track_history_idx in range(len(current_track_history) - 1):
+                            #     d = np.linalg.norm(
+                            #         np.expand_dims(current_track_history[track_history_idx + 1], axis=0) -
+                            #         np.expand_dims(current_track_history[track_history_idx], axis=0),
+                            #         2, axis=0
+                            #     )
+                            #     current_per_step_distance.append(d)
+                            #
+                            # current_per_step_distance = np.array(current_per_step_distance)
                             ###################################################################################
                         else:
                             current_track_history, current_gt_track_history = None, None
@@ -5439,23 +5482,18 @@ def preprocess_data_zero_shot_minimal(
                             current_running_velocity = None
                             ###################################################################################
                         # STEP 4g: save the information gathered
-                        current_track_obj_features = ObjectFeatures(idx=current_track_idx,
-                                                                    history=current_track_history,
-                                                                    gt_history=current_gt_track_history,
-                                                                    track_direction=current_direction,
-                                                                    velocity_direction=current_velocity_direction,
-                                                                    velocity_history=current_track_velocity_history,
-                                                                    xy=xy_current_frame,
-                                                                    past_xy=xy,
-                                                                    final_xy=final_features_xy,
-                                                                    flow=xy_displacement,
-                                                                    past_flow=past_xy_displacement,
-                                                                    past_bbox=box,
-                                                                    # final_bbox=np.array(shifted_box),
-                                                                    final_bbox=np.array(final_shifted_box),
-                                                                    per_step_distance=current_per_step_distance,
-                                                                    running_velocity=current_running_velocity,
-                                                                    frame_number=frame_number.item())
+                        current_track_obj_features = MinimalObjectFeatures(
+                            idx=current_track_idx,
+                            history=current_track_history,
+                            gt_history=current_gt_track_history,
+                            track_direction=current_direction,
+                            velocity_direction=current_velocity_direction,
+                            velocity_history=current_track_velocity_history,
+                            flow=xy_displacement,
+                            past_flow=past_xy_displacement,
+                            past_bbox=box,
+                            final_bbox=np.array(final_shifted_box),
+                            frame_number=frame_number.item())
                         object_features.append(current_track_obj_features)
                         if current_track_idx not in track_based_accumulated_features:
                             track_feats = TrackFeatures(current_track_idx)
@@ -5775,22 +5813,6 @@ def preprocess_data_zero_shot_minimal(
                                                                                     object_features=object_features)})
 
                     if video_mode:
-                        # fig = plot_for_video(
-                        #     gt_rgb=frame, gt_mask=fg_mask, last_frame_rgb=last_frame,
-                        #     last_frame_mask=last_frame_mask, current_frame_rgb=frame,
-                        #     current_frame_mask=fg_mask, gt_annotations=annotations[:, :-1],
-                        #     last_frame_annotation=[t.bbox for t in last_frame_live_tracks],
-                        #     current_frame_annotation=[t.bbox for t in running_tracks],
-                        #     new_track_annotation=new_track_boxes,
-                        #     frame_number=frame_number,
-                        #     additional_text=
-                        #     # f'Track Ids Used: {track_ids_used}\n'
-                        #     f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
-                        #     f'Track Ids Killed: '
-                        #     f'{np.setdiff1d([t.idx for t in last_frame_live_tracks],
-                        #     [t.idx for t in running_tracks])}',
-                        #     video_mode=video_mode)
-
                         if filter_switch_boxes_based_on_angle_and_recent_history or compute_histories_for_plot:
                             frame_feats = accumulated_features[frame_number.item()]
                             tracks_histories = []
@@ -5876,25 +5898,6 @@ def preprocess_data_zero_shot_minimal(
                             f'Track Ids Killed: '
                             f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
                             video_mode=False, original_dims=original_dims, zero_shot=True)
-                        # fig = plot_for_video(
-                        #     gt_rgb=frame, gt_mask=fg_mask, last_frame_rgb=last_frame,
-                        #     last_frame_mask=last_frame_mask, current_frame_rgb=frame,
-                        #     current_frame_mask=fg_mask, gt_annotations=annotations[:, :-1],
-                        #     last_frame_annotation=[t.bbox for t in last_frame_live_tracks],
-                        #     current_frame_annotation=[t.bbox for t in running_tracks],
-                        #     new_track_annotation=new_track_boxes,
-                        #     frame_number=frame_number,
-                        #     additional_text=
-                        #     f'Precision: {precision} | Recall: {recall}\n'
-                        #     f'Distance based - Precision: {l2_distance_hungarian_precision} | '
-                        #     f'Recall: {l2_distance_hungarian_recall}\n'
-                        #     f'Center Inside based - Precision: {center_precision} | Recall: {center_recall}\n'
-                        #     f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
-                        #     f'Track Ids Killed: '
-                        #     f'{np.setdiff1d([t.idx for t in last_frame_live_tracks],
-                        #     [t.idx for t in running_tracks])}',
-                        #     video_mode=False,
-                        #     save_path=f'{plot_save_path}zero_shot/plots{min_points_in_cluster}/')
 
                     # : save stuff and reiterate - moved up
                     # accumulated_features.update({frame_number.item(): FrameFeatures(frame_number=frame_number.item(),
@@ -9495,6 +9498,52 @@ if __name__ == '__main__':
             filter_switch_boxes_based_on_angle_and_recent_history=True,
             compute_histories_for_plot=True)
         # torch.save(feats, features_save_path + 'features.pt')
+    elif not eval_mode and EXECUTE_STEP == STEP.MINIMAL:
+        csv_mode = False
+        logger.info('MINIMAL MODE')
+        video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/minimal_zero_shot/'
+        plot_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/minimal_zero_shot/'
+        features_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/minimal_zero_shot/'
+        Path(video_save_path).mkdir(parents=True, exist_ok=True)
+        Path(features_save_path).mkdir(parents=True, exist_ok=True)
+
+        param = ObjectDetectionParameters.BEV_TIGHT.value
+
+        if csv_mode:
+            logger.info('MINIMAL - CSV MODE')
+            accumulated_features_path_filename = 'accumulated_features_from_finally.pt'
+            # accumulated_features_path_filename = 'accumulated_features_from_finally_tight.pt'
+            track_length_threshold = 5
+
+            accumulated_features_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+                                        f'/minimal_zero_shot/{accumulated_features_path_filename}'
+            # accumulated_features_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+            #                             f'/{accumulated_features_path_filename}'
+            accumulated_features: Dict[int, Any] = torch.load(accumulated_features_path)
+            per_track_features: Dict[int, TrackFeatures] = accumulated_features['track_based_accumulated_features']
+            per_frame_features: Dict[int, FrameFeatures] = accumulated_features['accumulated_features']
+
+            video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/processed_features' \
+                              f'/{track_length_threshold}/'
+            Path(video_save_path).mkdir(parents=True, exist_ok=True)
+            extracted_features_in_csv(track_based_features=per_track_features,
+                                      frame_based_features=per_frame_features,
+                                      do_filter=True,
+                                      min_track_length_threshold=track_length_threshold,
+                                      csv_save_path=features_save_path)
+        else:
+            feats = preprocess_data_zero_shot_minimal(
+                var_threshold=None, plot=False, radius=param['radius'],
+                video_mode=True, video_save_path=video_save_path + 'extraction.avi',
+                desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
+                min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
+                use_circle_to_keep_track_alive=False, custom_video_shape=False,
+                extra_radius=param['extra_radius'], generic_box_wh=param['generic_box_wh'],
+                use_is_box_overlapping_live_boxes=True, save_per_part_path=None,
+                save_every_n_batch_itr=50, drop_last_batch=True,
+                detect_shadows=param['detect_shadows'],
+                filter_switch_boxes_based_on_angle_and_recent_history=True,
+                compute_histories_for_plot=True)
     elif not eval_mode and EXECUTE_STEP == STEP.CUSTOM_VIDEO:
         param = ObjectDetectionParameters.SLANTED.value
 
