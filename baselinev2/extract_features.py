@@ -62,6 +62,7 @@ class STEP(Enum):
     METRICS = 6
     FILTER_FEATURES = 7
     NN_EXTRACTION = 8
+    CUSTOM_VIDEO = 9
 
 
 class ObjectDetectionParameters(Enum):
@@ -8324,60 +8325,53 @@ if __name__ == '__main__':
     Path(video_save_path).mkdir(parents=True, exist_ok=True)
     Path(features_save_path).mkdir(parents=True, exist_ok=True)
     if not eval_mode and EXECUTE_STEP == STEP.UNSUPERVISED:
-        # use_tight_parameters = True
-        # tight_parameters = {
-        #     'radius': 60,
-        #     'extra_radius': 0,
-        #     'generic_box_wh': 50,
-        #     'detect_shadows': True
-        # }
-        # relaxed_parameters = {
-        #     'radius': 90,
-        #     'extra_radius': 50,
-        #     'generic_box_wh': 100,
-        #     'detect_shadows': True
-        # }
-        # if use_tight_parameters:
-        #     param = tight_parameters
-        # else:
-        #     param = relaxed_parameters
+        param = ObjectDetectionParameters.BEV_TIGHT.value
 
+        feats = preprocess_data_zero_shot(
+            var_threshold=None, plot=False, radius=param['radius'],
+            video_mode=True, video_save_path=video_save_path + 'extraction.avi',
+            desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
+            min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
+            use_circle_to_keep_track_alive=False, custom_video_shape=False,
+            extra_radius=param['extra_radius'], generic_box_wh=param['generic_box_wh'],
+            use_is_box_overlapping_live_boxes=True, save_per_part_path=None,
+            save_every_n_batch_itr=50, drop_last_batch=True,
+            detect_shadows=param['detect_shadows'],
+            filter_switch_boxes_based_on_angle_and_recent_history=True,
+            compute_histories_for_plot=True)
+        # torch.save(feats, features_save_path + 'features.pt')
+    elif not eval_mode and EXECUTE_STEP == STEP.CUSTOM_VIDEO:
         param = ObjectDetectionParameters.SLANTED.value
 
         video_class = 'Oxford'  # 'Virat'
-        video_name = 'TownCentreXVID'
+        video_name = 'input_video_s2_l1_08'
         custom_video_dict = {
             'dataset': SimpleVideoDatasetBase,
             # 'video_path': f'../Datasets/Virat/VIRAT_S_000201_00_000018_000380.mp4',
             'video_path': f'../Datasets/{video_class}/{video_name}.mp4',
             'start': 0,
-            'end': 30,
+            'end': 10,
             'pts_unit': 'sec'
         }
-        custom_video_mode = True
-        if custom_video_mode:
-            unsupervised_method = preprocess_data_zero_shot_custom_video
 
-            video_save_path = f'../Plots/baseline_v2/v{version}/custom/{video_class}/{video_name}/zero_shot/'
-            Path(video_save_path).mkdir(parents=True, exist_ok=True)
+        video_save_path = f'../Plots/baseline_v2/v{version}/custom/{video_class}/{video_name}/zero_shot/'
+        Path(video_save_path).mkdir(parents=True, exist_ok=True)
 
-            features_save_path = f'../Plots/baseline_v2/v{version}/custom/{video_class}/{video_name}/zero_shot/'
-            Path(features_save_path).mkdir(parents=True, exist_ok=True)
-        else:
-            unsupervised_method = preprocess_data_zero_shot
-            custom_video_dict = None
-        feats = unsupervised_method(var_threshold=None, plot=False, radius=param['radius'],
-                                    video_mode=True, video_save_path=video_save_path + 'extraction.avi',
-                                    desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
-                                    min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
-                                    use_circle_to_keep_track_alive=False, custom_video_shape=False,
-                                    extra_radius=param['extra_radius'], generic_box_wh=param['generic_box_wh'],
-                                    use_is_box_overlapping_live_boxes=True, save_per_part_path=None,
-                                    save_every_n_batch_itr=50, drop_last_batch=True,
-                                    detect_shadows=param['detect_shadows'],
-                                    filter_switch_boxes_based_on_angle_and_recent_history=True,
-                                    compute_histories_for_plot=True, custom_video=custom_video_dict)
-        # torch.save(feats, features_save_path + 'features.pt')
+        features_save_path = f'../Plots/baseline_v2/v{version}/custom/{video_class}/{video_name}/zero_shot/'
+        Path(features_save_path).mkdir(parents=True, exist_ok=True)
+
+        feats = preprocess_data_zero_shot_custom_video(
+            var_threshold=None, plot=False, radius=param['radius'],
+            video_mode=True, video_save_path=video_save_path + 'extraction.avi',
+            desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
+            min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
+            use_circle_to_keep_track_alive=False, custom_video_shape=False,
+            extra_radius=param['extra_radius'], generic_box_wh=param['generic_box_wh'],
+            use_is_box_overlapping_live_boxes=True, save_per_part_path=None,
+            save_every_n_batch_itr=50, drop_last_batch=True,
+            detect_shadows=param['detect_shadows'],
+            filter_switch_boxes_based_on_angle_and_recent_history=True,
+            compute_histories_for_plot=True, custom_video=custom_video_dict)
     elif not eval_mode and EXECUTE_STEP == STEP.SEMI_SUPERVISED:
         video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/one_shot/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
@@ -8409,15 +8403,16 @@ if __name__ == '__main__':
                                     skip_plot_save=True)
         logger.info(f'Track length threshold: {track_length_threshold}')
     elif not eval_mode and EXECUTE_STEP == STEP.NN_EXTRACTION:
-        accumulated_features_path_filename = 'accumulated_features_from_finally.pt'
+        # accumulated_features_path_filename = 'accumulated_features_from_finally.pt'
+        accumulated_features_path_filename = 'features_dict_from_finally.pt'
         # accumulated_features_path_filename = 'accumulated_features_from_finally_filtered.pt'
 
         accumulated_features_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
-                                    f'/{accumulated_features_path_filename}'
+                                    f'/zero_shot/frames12apart/features/{accumulated_features_path_filename}'
 
         accumulated_features: Dict[int, Any] = torch.load(accumulated_features_path)
         per_track_features: Dict[int, TrackFeatures] = accumulated_features['track_based_accumulated_features']
-        per_frame_features: Dict[int, FrameFeatures] = accumulated_features['accumulated_features']
+        per_frame_features: Dict[int, FrameFeatures] = accumulated_features['total_accumulated_features']
 
         print()
     elif not eval_mode and EXECUTE_STEP == STEP.DEBUG:
