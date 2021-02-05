@@ -4891,8 +4891,9 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
 
                     accumulated_features = {}
                     live_track_ids = [live_track.idx for live_track in last_frame_live_tracks]
-                    track_based_accumulated_features = remove_entries_from_dict(live_track_ids,
-                                                                                track_based_accumulated_features)
+                    track_based_accumulated_features = remove_from_dict_except_entries(live_track_ids,
+                                                                                       track_based_accumulated_features)
+                    logger.info(f'Saved part {part_idx} at frame {frame_number}')
             # gt_associated_frame = associate_frame_with_ground_truth(frames, frame_numbers)
             if save_per_part_path is not None:
                 Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
