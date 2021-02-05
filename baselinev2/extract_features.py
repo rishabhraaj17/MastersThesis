@@ -11667,8 +11667,101 @@ def combine_features_generate_annotations_v2(files_base_path, files_list, csv_sa
         logger.info('CSV saved!')
 
 
+def get_generated_frame_annotations(df: pd.DataFrame, frame_number: int):
+    idx: pd.DataFrame = df.loc[df["frame_number"] == frame_number]
+    return idx.to_numpy()
+
+
+def visualize_annotations(annotations_df, batch_size=32, drop_last_batch=True, custom_video_shape=False,
+                          plot_scale_factor=1, video_mode=True, save_path_for_video=None, desired_fps=5):
+    sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
+                                  num_videos=1, video_number_to_use=VIDEO_NUMBER,
+                                  step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
+                                  single_track_mode=False, track_id=5, multiple_videos=False)
+    data_loader = DataLoader(sdd_simple, batch_size, drop_last=drop_last_batch)
+    df = sdd_simple.annotations_df
+
+    out = None
+    frames_shape = sdd_simple.original_shape
+    video_shape = (1200, 1000) if custom_video_shape else frames_shape
+    original_dims = None
+    if video_mode:
+        if frames_shape[0] < frames_shape[1]:
+            original_dims = (
+                frames_shape[1] / 100 * plot_scale_factor, frames_shape[0] / 100 * plot_scale_factor)
+            out = cv.VideoWriter(save_path_for_video, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                                 (video_shape[1], video_shape[0]))
+            video_shape[0], video_shape[1] = video_shape[1], video_shape[0]
+        else:
+            original_dims = (
+                frames_shape[0] / 100 * plot_scale_factor, frames_shape[1] / 100 * plot_scale_factor)
+            out = cv.VideoWriter(save_path_for_video, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                                 (video_shape[0], video_shape[1]))
+
+    try:
+        for p_idx, data in enumerate(tqdm(data_loader)):
+            frames, frame_numbers = data
+            frames = frames.squeeze()
+            frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
+            frames_count = frames.shape[0]
+            original_shape = new_shape = [frames.shape[1], frames.shape[2]]
+
+            for frame_idx, (frame, frame_number) in tqdm(enumerate(zip(frames, frame_numbers)),
+                                                         total=len(frame_numbers)):
+                gt_frame_annotation = get_frame_annotations_and_skip_lost(df, frame_number.item())
+                gt_annotations, gt_bbox_centers = scale_annotations(gt_frame_annotation,
+                                                                    original_scale=original_shape,
+                                                                    new_scale=new_shape, return_track_id=False,
+                                                                    tracks_with_annotations=True)
+                gt_boxes = gt_annotations[:, :-1]
+                gt_track_idx = gt_annotations[:, -1]
+
+                generated_frame_annotation = get_generated_frame_annotations(annotations_df, frame_number.item())
+                generated_boxes = generated_frame_annotation[:, 1:5]
+                generated_track_idx = generated_frame_annotation[:, 0]
+
+                if video_mode:
+                    fig = plot_for_video_current_frame(
+                        gt_rgb=frame, current_frame_rgb=frame,
+                        gt_annotations=gt_boxes,
+                        current_frame_annotation=generated_boxes,
+                        new_track_annotation=[],
+                        frame_number=frame_number,
+                        box_annotation=[gt_track_idx, generated_track_idx],
+                        generated_track_histories=None,
+                        gt_track_histories=None,
+                        additional_text='',
+                        video_mode=video_mode, original_dims=original_dims, zero_shot=True)
+
+                    canvas = FigureCanvas(fig)
+                    canvas.draw()
+
+                    buf = canvas.buffer_rgba()
+                    out_frame = np.asarray(buf, dtype=np.uint8)[:, :, :-1]
+                    if out_frame.shape[0] != video_shape[1] or out_frame.shape[1] != video_shape[0]:
+                        out_frame = skimage.transform.resize(out_frame, (video_shape[1], video_shape[0]))
+                        out_frame = (out_frame * 255).astype(np.uint8)
+                    out.write(out_frame)
+                else:
+                    fig = plot_for_video_current_frame(
+                        gt_rgb=frame, current_frame_rgb=frame,
+                        gt_annotations=gt_boxes,
+                        current_frame_annotation=generated_boxes,
+                        new_track_annotation=[],
+                        frame_number=frame_number,
+                        additional_text='',
+                        video_mode=False, original_dims=original_dims, zero_shot=True)
+    except KeyboardInterrupt:
+        if video_mode:
+            logger.info('Saving video before exiting!')
+            out.release()
+    finally:
+        if video_mode:
+            out.release()
+    logger.info('Finished writing video!')
+
+
 if __name__ == '__main__':
-    # feats = preprocess_data(var_threshold=150, plot=False)
     eval_mode = False
     version = 0
     video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/'
@@ -11693,7 +11786,17 @@ if __name__ == '__main__':
             compute_histories_for_plot=True)
         # torch.save(feats, features_save_path + 'features.pt')
     elif not eval_mode and EXECUTE_STEP == STEP.VERIFY_ANNOTATIONS:
-        annotation_path = None
+        video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+                          f'/video_annotation_generated/'
+        Path(video_save_path).mkdir(parents=True, exist_ok=True)
+
+        annotation_base_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/csv_annotation/'
+        annotation_filename = 'generated_annotations.csv'
+        annotation_path = annotation_base_path + annotation_filename
+
+        visualize_annotations(
+            pd.read_csv(annotation_path), batch_size=32, drop_last_batch=True, custom_video_shape=False,
+            plot_scale_factor=1, video_mode=True, save_path_for_video=video_save_path + 'gen_video.avi', desired_fps=5)
     elif not eval_mode and EXECUTE_STEP == STEP.GENERATE_ANNOTATIONS:
         use_v2 = True
         track_length_threshold = 5
