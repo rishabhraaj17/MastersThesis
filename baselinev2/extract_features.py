@@ -1365,6 +1365,14 @@ def remove_entries_from_dict(entries, the_dict):
     return return_dict
 
 
+def remove_from_dict_except_entries(entries, the_dict):
+    return_dict = {}
+    for key in entries:
+        if key in the_dict.keys():
+            return_dict.update({key: the_dict[key]})
+    return return_dict
+
+
 def calculate_flexible_bounding_box(cluster_center_idx, cluster_center_x, cluster_center_y, mean_shift):
     points_in_current_cluster_idx = np.argwhere(mean_shift.labels == cluster_center_idx)
     points_in_current_cluster = mean_shift.data[points_in_current_cluster_idx].squeeze()
@@ -5177,6 +5185,7 @@ def preprocess_data_zero_shot_minimal(
 
                     r_boxes = torch.tensor(r_boxes, dtype=torch.int)
                     a_boxes = torch.from_numpy(validation_annotations[:, :-1])
+                    # Fixme: If no boxes in first frame!!
                     iou_boxes = torchvision.ops.box_iou(a_boxes, r_boxes).numpy()
                     iou_boxes_threshold = iou_boxes.copy()
                     iou_boxes_threshold[iou_boxes_threshold < iou_threshold] = 0
@@ -5747,6 +5756,7 @@ def preprocess_data_zero_shot_minimal(
 
                     # STEP 4h: begin tracks
                     new_track_boxes = []
+                    new_track_ids = []
                     if begin_track_mode:
                         # STEP 4h: a> Get the features already covered and not covered in live tracks
                         all_cloud, feature_idx_covered, features_covered = features_included_in_live_tracks(
@@ -5790,12 +5800,14 @@ def preprocess_data_zero_shot_minimal(
                                             running_tracks.append(Track(bbox=t_box, idx=t_id))
                                             track_ids_used.append(t_id)
                                             new_track_boxes.append(t_box)
+                                            new_track_ids.append(t_id)
                                     else:
                                         if not (np.sign(t_box) < 0).any():
                                             t_id = max(track_ids_used) + 1
                                             running_tracks.append(Track(bbox=t_box, idx=t_id))
                                             track_ids_used.append(t_id)
                                             new_track_boxes.append(t_box)
+                                            new_track_ids.append(t_id)
 
                                 # plot_features_with_circles(
                                 #     all_cloud, features_covered, features_skipped, fg_mask, marker_size=8,
@@ -5807,6 +5819,7 @@ def preprocess_data_zero_shot_minimal(
                                 #     f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
 
                     new_track_boxes = np.stack(new_track_boxes) if len(new_track_boxes) > 0 else np.empty(shape=(0,))
+                    new_track_ids = np.stack(new_track_ids) if len(new_track_ids) > 0 else np.empty(shape=(0,))
 
                     # STEP 4i: save stuff and reiterate
                     accumulated_features.update({frame_number.item(): FrameFeatures(frame_number=frame_number.item(),
@@ -5970,14 +5983,15 @@ def preprocess_data_zero_shot_minimal(
                              'track_based_accumulated_features': track_based_accumulated_features,
                              'accumulated_features': accumulated_features}
                 if part_idx % save_every_n_batch_itr == 0 and part_idx != 0:
-                    Path(video_save_path + 'parts/').mkdir(parents=True, exist_ok=True)
+                    Path(features_save_path + 'parts/').mkdir(parents=True, exist_ok=True)
                     f_n = f'features_dict_part{part_idx}.pt'
-                    torch.save(save_dict, video_save_path + 'parts/' + f_n)
+                    torch.save(save_dict, features_save_path + 'parts/' + f_n)
 
                     accumulated_features = {}
                     live_track_ids = [live_track.idx for live_track in last_frame_live_tracks]
-                    track_based_accumulated_features = remove_entries_from_dict(live_track_ids,
-                                                                                track_based_accumulated_features)
+                    track_based_accumulated_features = remove_from_dict_except_entries(live_track_ids,
+                                                                                       track_based_accumulated_features)
+                    logger.info(f'Saved part {part_idx} at frame {frame_number}')
             # gt_associated_frame = associate_frame_with_ground_truth(frames, frame_numbers)
             if save_per_part_path is not None:
                 Path(save_per_part_path).mkdir(parents=True, exist_ok=True)
