@@ -67,6 +67,7 @@ class STEP(Enum):
     CUSTOM_VIDEO = 9
     MINIMAL = 10
     GENERATE_ANNOTATIONS = 11
+    VERIFY_ANNOTATIONS = 12
 
 
 class ObjectDetectionParameters(Enum):
@@ -6969,7 +6970,7 @@ def preprocess_data_zero_shot_minimal_resumable(
                                        'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
                                        'accumulated_features': accumulated_features}
             if save_every_n_batch_itr is not None:
-                if part_idx % save_every_n_batch_itr == 0 and part_idx != 0:
+                if part_idx % save_every_n_batch_itr == 0 and part_idx != 0 and part_idx > part_idx_yet:
                     save_dict = {'frame_number': frame_number,
                                  'part_idx': part_idx,
                                  'current_track_idx': current_track_idx,
@@ -7969,7 +7970,7 @@ def preprocess_data_zero_shot_resumable(
                                        'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
                                        'accumulated_features': accumulated_features}
             if save_every_n_batch_itr is not None:
-                if part_idx % save_every_n_batch_itr == 0 and part_idx != 0:
+                if part_idx % save_every_n_batch_itr == 0 and part_idx != 0 and part_idx > part_idx_yet:
                     save_dict = {'frame_number': frame_number,
                                  'part_idx': part_idx,
                                  'current_track_idx': current_track_idx,
@@ -11572,8 +11573,9 @@ if __name__ == '__main__':
             filter_switch_boxes_based_on_angle_and_recent_history=True,
             compute_histories_for_plot=True)
         # torch.save(feats, features_save_path + 'features.pt')
+    elif not eval_mode and EXECUTE_STEP == STEP.VERIFY_ANNOTATIONS:
+        annotation_path=None
     elif not eval_mode and EXECUTE_STEP == STEP.GENERATE_ANNOTATIONS:
-        # TODO: make resume function and evaluate last part
         track_length_threshold = 5
         features_base_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
                              f'/minimal_zero_shot/parts/'
