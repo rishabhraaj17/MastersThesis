@@ -2,6 +2,7 @@ import copy
 from enum import Enum
 import math
 from itertools import cycle
+import os
 from pathlib import Path
 from typing import Sequence, Dict, List, Any, Union
 
@@ -65,6 +66,7 @@ class STEP(Enum):
     NN_EXTRACTION = 8
     CUSTOM_VIDEO = 9
     MINIMAL = 10
+    GENERATE_ANNOTATIONS = 11
 
 
 class ObjectDetectionParameters(Enum):
@@ -88,7 +90,7 @@ class ObjectDetectionParameters(Enum):
     }
 
 
-EXECUTE_STEP = STEP.MINIMAL
+EXECUTE_STEP = STEP.DEBUG
 
 
 class ObjectFeatures(object):
@@ -1534,11 +1536,17 @@ def get_mog2_foreground_mask(frames, interest_frame_idx, time_gap_within_frames,
     return mask
 
 
-def filter_low_length_tracks(track_based_features, frame_based_features, threshold):
+def filter_low_length_tracks(track_based_features, frame_based_features, threshold, low_memory_mode=False):
     logger.info('Level 1 filtering\n')
-    # copy to alter the data
-    f_per_track_features = copy.deepcopy(track_based_features)
-    f_per_frame_features = copy.deepcopy(frame_based_features)
+    if low_memory_mode:
+        # f_per_track_features = track_based_features  # RuntimeError: dictionary changed size during iteration
+        f_per_track_features = copy.deepcopy(track_based_features)
+        f_per_frame_features = frame_based_features
+    else:
+        # copy to alter the data
+        logger.info('copy to alter the data')
+        f_per_track_features = copy.deepcopy(track_based_features)
+        f_per_frame_features = copy.deepcopy(frame_based_features)
 
     for track_id, track_features in track_based_features.items():
         dict_track_id = track_features.track_id
@@ -1573,10 +1581,13 @@ def filter_low_length_tracks(track_based_features, frame_based_features, thresho
     return f_per_track_features, f_per_frame_features
 
 
-def filter_low_length_tracks_lvl2(track_based_features, frame_based_features):
+def filter_low_length_tracks_lvl2(track_based_features, frame_based_features, low_memory_mode=False):
     logger.info('\nLevel 2 filtering\n')
     allowed_tracks = list(track_based_features.keys())
-    f_per_frame_features = copy.deepcopy(frame_based_features)
+    if low_memory_mode:
+        f_per_frame_features = frame_based_features
+    else:
+        f_per_frame_features = copy.deepcopy(frame_based_features)
 
     for frame_number, frame_features in frame_based_features.items():
         assert frame_number == frame_features.frame_number
@@ -1597,13 +1608,16 @@ def filter_low_length_tracks_lvl2(track_based_features, frame_based_features):
     return f_per_frame_features
 
 
-def filter_tracks_through_all_steps(track_based_features, frame_based_features, min_track_length_threshold):
+def filter_tracks_through_all_steps(track_based_features, frame_based_features, min_track_length_threshold,
+                                    low_memory_mode=False):
     track_based_features, frame_based_features = filter_low_length_tracks(
         track_based_features=track_based_features,
         frame_based_features=frame_based_features,
-        threshold=min_track_length_threshold)
+        threshold=min_track_length_threshold,
+        low_memory_mode=low_memory_mode)
 
-    frame_based_features = filter_low_length_tracks_lvl2(track_based_features, frame_based_features)
+    frame_based_features = filter_low_length_tracks_lvl2(track_based_features, frame_based_features,
+                                                         low_memory_mode=low_memory_mode)
 
     return track_based_features, frame_based_features
 
@@ -1611,15 +1625,17 @@ def filter_tracks_through_all_steps(track_based_features, frame_based_features, 
 def evaluate_extracted_features(track_based_features, frame_based_features, batch_size=32, do_filter=False,
                                 drop_last_batch=True, plot_scale_factor=1, desired_fps=5, custom_video_shape=False,
                                 video_mode=True, video_save_location=None, min_track_length_threshold=5,
-                                skip_plot_save=False):
+                                skip_plot_save=False, low_memory_mode=False):
     # frame_track_distribution_pre_filter = {k: len(v.object_features) for k, v in frame_based_features.items()}
     if do_filter:
         track_based_features, frame_based_features = filter_low_length_tracks(
             track_based_features=track_based_features,
             frame_based_features=frame_based_features,
-            threshold=min_track_length_threshold)
+            threshold=min_track_length_threshold,
+            low_memory_mode=low_memory_mode)
 
-        frame_based_features = filter_low_length_tracks_lvl2(track_based_features, frame_based_features)
+        frame_based_features = filter_low_length_tracks_lvl2(track_based_features, frame_based_features,
+                                                             low_memory_mode=low_memory_mode)
     # frame_track_distribution_post_filter = {k: len(v.object_features) for k, v in frame_based_features.items()}
 
     frame_based_features_length = len(frame_based_features)
@@ -1782,15 +1798,17 @@ def evaluate_extracted_features(track_based_features, frame_based_features, batc
 
 
 def extracted_features_in_csv(track_based_features, frame_based_features, do_filter=False,
-                              min_track_length_threshold=5, csv_save_path=None):
+                              min_track_length_threshold=5, csv_save_path=None, low_memory_mode=False):
     # frame_track_distribution_pre_filter = {k: len(v.object_features) for k, v in frame_based_features.items()}
     if do_filter:
         track_based_features, frame_based_features = filter_low_length_tracks(
             track_based_features=track_based_features,
             frame_based_features=frame_based_features,
-            threshold=min_track_length_threshold)
+            threshold=min_track_length_threshold,
+            low_memory_mode=low_memory_mode)
 
-        frame_based_features = filter_low_length_tracks_lvl2(track_based_features, frame_based_features)
+        frame_based_features = filter_low_length_tracks_lvl2(track_based_features, frame_based_features,
+                                                             low_memory_mode=low_memory_mode)
     # frame_track_distribution_post_filter = {k: len(v.object_features) for k, v in frame_based_features.items()}
 
     # frame_based_features_length = len(frame_based_features)
@@ -4858,35 +4876,35 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                                        'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
                                        'accumulated_features': accumulated_features}
             if save_every_n_batch_itr is not None:
-                save_dict = {'frame_number': frame_number,
-                             'part_idx': part_idx,
-                             'second_last_frame': second_last_frame,
-                             'last_frame': last_frame,
-                             'last_frame_mask': last_frame_mask,
-                             'last_frame_live_tracks': last_frame_live_tracks,
-                             'running_tracks': running_tracks,
-                             'track_ids_used': track_ids_used,
-                             'new_track_boxes': new_track_boxes,
-                             'precision': precision_list,
-                             'recall': recall_list,
-                             'tp_list': tp_list,
-                             'fp_list': fp_list,
-                             'fn_list': fn_list,
-                             'meter_tp_list': meter_tp_list,
-                             'meter_fp_list': meter_fp_list,
-                             'meter_fn_list': meter_fn_list,
-                             'center_inside_tp_list': center_inside_tp_list,
-                             'center_inside_fp_list': center_inside_fp_list,
-                             'center_inside_fn_list': center_inside_fn_list,
-                             'l2_distance_hungarian_tp_list': l2_distance_hungarian_tp_list,
-                             'l2_distance_hungarian_fp_list': l2_distance_hungarian_fp_list,
-                             'l2_distance_hungarian_fn_list': l2_distance_hungarian_fn_list,
-                             'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
-                             'track_based_accumulated_features': track_based_accumulated_features,
-                             'accumulated_features': accumulated_features}
                 if part_idx % save_every_n_batch_itr == 0 and part_idx != 0:
+                    save_dict = {'frame_number': frame_number,
+                                 'part_idx': part_idx,
+                                 'second_last_frame': second_last_frame,
+                                 'last_frame': last_frame,
+                                 'last_frame_mask': last_frame_mask,
+                                 'last_frame_live_tracks': last_frame_live_tracks,
+                                 'running_tracks': running_tracks,
+                                 'track_ids_used': track_ids_used,
+                                 'new_track_boxes': new_track_boxes,
+                                 'precision': precision_list,
+                                 'recall': recall_list,
+                                 'tp_list': tp_list,
+                                 'fp_list': fp_list,
+                                 'fn_list': fn_list,
+                                 'meter_tp_list': meter_tp_list,
+                                 'meter_fp_list': meter_fp_list,
+                                 'meter_fn_list': meter_fn_list,
+                                 'center_inside_tp_list': center_inside_tp_list,
+                                 'center_inside_fp_list': center_inside_fp_list,
+                                 'center_inside_fn_list': center_inside_fn_list,
+                                 'l2_distance_hungarian_tp_list': l2_distance_hungarian_tp_list,
+                                 'l2_distance_hungarian_fp_list': l2_distance_hungarian_fp_list,
+                                 'l2_distance_hungarian_fn_list': l2_distance_hungarian_fn_list,
+                                 'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
+                                 'track_based_accumulated_features': track_based_accumulated_features,
+                                 'accumulated_features': accumulated_features}
                     Path(video_save_path + 'parts/').mkdir(parents=True, exist_ok=True)
-                    f_n = f'features_dict_part{part_idx}.pt'
+                    f_n = f'features_dict_part_{part_idx}.pt'
                     torch.save(save_dict, video_save_path + 'parts/' + f_n)
 
                     accumulated_features = {}
@@ -5957,35 +5975,35 @@ def preprocess_data_zero_shot_minimal(
                                        'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
                                        'accumulated_features': accumulated_features}
             if save_every_n_batch_itr is not None:
-                save_dict = {'frame_number': frame_number,
-                             'part_idx': part_idx,
-                             'second_last_frame': second_last_frame,
-                             'last_frame': last_frame,
-                             'last_frame_mask': last_frame_mask,
-                             'last_frame_live_tracks': last_frame_live_tracks,
-                             'running_tracks': running_tracks,
-                             'track_ids_used': track_ids_used,
-                             'new_track_boxes': new_track_boxes,
-                             'precision': precision_list,
-                             'recall': recall_list,
-                             'tp_list': tp_list,
-                             'fp_list': fp_list,
-                             'fn_list': fn_list,
-                             'meter_tp_list': meter_tp_list,
-                             'meter_fp_list': meter_fp_list,
-                             'meter_fn_list': meter_fn_list,
-                             'center_inside_tp_list': center_inside_tp_list,
-                             'center_inside_fp_list': center_inside_fp_list,
-                             'center_inside_fn_list': center_inside_fn_list,
-                             'l2_distance_hungarian_tp_list': l2_distance_hungarian_tp_list,
-                             'l2_distance_hungarian_fp_list': l2_distance_hungarian_fp_list,
-                             'l2_distance_hungarian_fn_list': l2_distance_hungarian_fn_list,
-                             'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
-                             'track_based_accumulated_features': track_based_accumulated_features,
-                             'accumulated_features': accumulated_features}
                 if part_idx % save_every_n_batch_itr == 0 and part_idx != 0:
+                    save_dict = {'frame_number': frame_number,
+                                 'part_idx': part_idx,
+                                 'second_last_frame': second_last_frame,
+                                 'last_frame': last_frame,
+                                 'last_frame_mask': last_frame_mask,
+                                 'last_frame_live_tracks': last_frame_live_tracks,
+                                 'running_tracks': running_tracks,
+                                 'track_ids_used': track_ids_used,
+                                 'new_track_boxes': new_track_boxes,
+                                 'precision': precision_list,
+                                 'recall': recall_list,
+                                 'tp_list': tp_list,
+                                 'fp_list': fp_list,
+                                 'fn_list': fn_list,
+                                 'meter_tp_list': meter_tp_list,
+                                 'meter_fp_list': meter_fp_list,
+                                 'meter_fn_list': meter_fn_list,
+                                 'center_inside_tp_list': center_inside_tp_list,
+                                 'center_inside_fp_list': center_inside_fp_list,
+                                 'center_inside_fn_list': center_inside_fn_list,
+                                 'l2_distance_hungarian_tp_list': l2_distance_hungarian_tp_list,
+                                 'l2_distance_hungarian_fp_list': l2_distance_hungarian_fp_list,
+                                 'l2_distance_hungarian_fn_list': l2_distance_hungarian_fn_list,
+                                 'matching_boxes_with_iou_list': matching_boxes_with_iou_list,
+                                 'track_based_accumulated_features': track_based_accumulated_features,
+                                 'accumulated_features': accumulated_features}
                     Path(features_save_path + 'parts/').mkdir(parents=True, exist_ok=True)
-                    f_n = f'features_dict_part{part_idx}.pt'
+                    f_n = f'features_dict_part_{part_idx}.pt'
                     torch.save(save_dict, features_save_path + 'parts/' + f_n)
 
                     accumulated_features = {}
@@ -9488,6 +9506,50 @@ def preprocess_data_zero_shot_12_frames_apart(
     return total_accumulated_features
 
 
+def combine_features_generate_annotations(files_base_path, files_list, csv_save_path, min_track_length_threshold=5,
+                                          do_filter=True, low_memory_mode=False):
+    part_features: Dict[Any, Any] = torch.load(files_base_path + files_list[0])
+    track_based_accumulated_features: Dict[int, TrackFeatures] = \
+        part_features['track_based_accumulated_features']
+    frame_based_accumulated_features: Dict[int, FrameFeatures] = \
+        part_features['accumulated_features']
+
+    logger.info('Combining Features')
+    for p_idx in tqdm(range(1, len(files_list))):
+        part_features_temp: Dict[Any, Any] = torch.load(files_base_path + files_list[p_idx])
+        track_based_accumulated_features_temp: Dict[int, TrackFeatures] = \
+            part_features_temp['track_based_accumulated_features']
+        frame_based_accumulated_features_temp: Dict[int, FrameFeatures] = \
+            part_features_temp['accumulated_features']
+
+        frame_based_accumulated_features = {**frame_based_accumulated_features,
+                                            **frame_based_accumulated_features_temp}
+
+        same_keys = np.intersect1d(list(track_based_accumulated_features.keys()),
+                                   list(track_based_accumulated_features_temp.keys())).tolist()
+        for s_key in same_keys:
+            len_0 = len(track_based_accumulated_features[s_key].object_features)
+            len_1 = len(track_based_accumulated_features_temp[s_key].object_features)
+
+            track_based_accumulated_features[s_key].object_features.extend(
+                track_based_accumulated_features_temp[s_key].object_features)
+
+            del track_based_accumulated_features_temp[s_key]
+            assert s_key not in track_based_accumulated_features_temp.keys() \
+                   and s_key in track_based_accumulated_features.keys()
+            assert len(track_based_accumulated_features[s_key].object_features) == len_0 + len_1
+
+        track_based_accumulated_features = {**track_based_accumulated_features, **track_based_accumulated_features_temp}
+    logger.info('All features combined! Next Step Filtering')
+    extracted_features_in_csv(track_based_features=track_based_accumulated_features,
+                              frame_based_features=frame_based_accumulated_features,
+                              do_filter=do_filter,
+                              min_track_length_threshold=min_track_length_threshold,
+                              csv_save_path=csv_save_path,
+                              low_memory_mode=low_memory_mode)
+    logger.info('Annotation extraction completed!')
+
+
 if __name__ == '__main__':
     # feats = preprocess_data(var_threshold=150, plot=False)
     eval_mode = False
@@ -9513,6 +9575,26 @@ if __name__ == '__main__':
             filter_switch_boxes_based_on_angle_and_recent_history=True,
             compute_histories_for_plot=True)
         # torch.save(feats, features_save_path + 'features.pt')
+    elif not eval_mode and EXECUTE_STEP == STEP.GENERATE_ANNOTATIONS:
+        # TODO: make resume function and evaluate last part
+        track_length_threshold = 5
+        features_base_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+                             f'/minimal_zero_shot/parts/'
+
+        csv_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/csv_annotation/'
+        Path(csv_path).mkdir(parents=True, exist_ok=True)
+
+        accumulated_features_filename = 'accumulated_features_from_finally.pt'
+
+        # accumulated_features_path = f'{features_base_path}{accumulated_features_filename}'
+
+        every_part_file = np.array(os.listdir(features_base_path))
+        part_idx = np.array([int(s[:-3].split('_')[-1]) for s in every_part_file]).argsort()
+        every_part_file = every_part_file[part_idx]
+
+        combine_features_generate_annotations(files_base_path=features_base_path, files_list=every_part_file,
+                                              min_track_length_threshold=track_length_threshold, csv_save_path=csv_path,
+                                              do_filter=True, low_memory_mode=False)
     elif not eval_mode and EXECUTE_STEP == STEP.MINIMAL:
         csv_mode = False
         logger.info('MINIMAL MODE')
@@ -9654,6 +9736,12 @@ if __name__ == '__main__':
         #                 print()
         ##############################################################################################################
         # out = process_complex_features_rnn(extracted_features, time_steps=5)
+        # csv1 = pd.read_csv('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/baseline_v2/v0/hyang2/'
+        #                    'csv_annotation/generated_annotations.csv')
+        # csv2 = pd.read_csv('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/baseline_v2/v0/hyang2/'
+        #                    'csv_annotationgenerated_annotations.csv')
+        # eqls = csv1.equals(csv2)
+        # pd.testing.assert_frame_equal(csv1, csv2)
         print()
     elif not eval_mode and EXECUTE_STEP == STEP.EXTRACTION:
         # accumulated_features_path_filename = 'accumulated_features_from_finally.pt'
