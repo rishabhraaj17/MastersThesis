@@ -61,7 +61,7 @@ DATASET_META = SDDMeta(META_PATH)
 META_LABEL = SDDVideoDatasets.HYANG
 
 BATCH_CHECKPOINT = 50
-RESUME_MODE = False
+RESUME_MODE = True
 CSV_MODE = False
 
 
@@ -11879,7 +11879,7 @@ if __name__ == '__main__':
         plot_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
                          f'/minimal_zero_shot/'
         features_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
-        f'/minimal_zero_shot/'
+                             f'/minimal_zero_shot/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
         Path(features_save_path).mkdir(parents=True, exist_ok=True)
 
@@ -11899,8 +11899,8 @@ if __name__ == '__main__':
             per_track_features: Dict[int, TrackFeatures] = accumulated_features['track_based_accumulated_features']
             per_frame_features: Dict[int, FrameFeatures] = accumulated_features['accumulated_features']
 
-            video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/processed_features' \
-                              f'/{track_length_threshold}/'
+            video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+                              f'/processed_features/{track_length_threshold}/'
             Path(video_save_path).mkdir(parents=True, exist_ok=True)
             extracted_features_in_csv(track_based_features=per_track_features,
                                       frame_based_features=per_frame_features,
