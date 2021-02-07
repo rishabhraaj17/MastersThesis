@@ -4907,7 +4907,7 @@ def preprocess_data_zero_shot(save_per_part_path=SAVE_PATH, batch_size=32, var_t
                         np.array(l2_distance_hungarian_fn_list).sum()
                     batch_precision = batch_tp_sum / (batch_tp_sum + batch_fp_sum)
                     batch_recall = batch_tp_sum / (batch_tp_sum + batch_fn_sum)
-                    logger.info(f'Batch: {part_idx}, '
+                    logger.info(f'Video: {VIDEO_LABEL.value} - {VIDEO_NUMBER} | Batch: {part_idx} | '
                                 f'L2 Distance Based - Precision: {batch_precision} | Recall: {batch_recall}')
 
                     if save_checkpoint:
@@ -6009,7 +6009,7 @@ def preprocess_data_zero_shot_minimal(
                         np.array(l2_distance_hungarian_fn_list).sum()
                     batch_precision = batch_tp_sum / (batch_tp_sum + batch_fp_sum)
                     batch_recall = batch_tp_sum / (batch_tp_sum + batch_fn_sum)
-                    logger.info(f'Batch: {part_idx}, '
+                    logger.info(f'Video: {VIDEO_LABEL.value} - {VIDEO_NUMBER} | Batch: {part_idx} | '
                                 f'L2 Distance Based - Precision: {batch_precision} | Recall: {batch_recall}')
 
                     if save_checkpoint:
@@ -7000,7 +7000,7 @@ def preprocess_data_zero_shot_minimal_resumable(
                         np.array(l2_distance_hungarian_fn_list).sum()
                     batch_precision = batch_tp_sum / (batch_tp_sum + batch_fp_sum)
                     batch_recall = batch_tp_sum / (batch_tp_sum + batch_fn_sum)
-                    logger.info(f'Batch: {part_idx}, '
+                    logger.info(f'Video: {VIDEO_LABEL.value} - {VIDEO_NUMBER} | Batch: {part_idx} | '
                                 f'L2 Distance Based - Precision: {batch_precision} | Recall: {batch_recall}')
 
                     if save_checkpoint:
@@ -8002,7 +8002,7 @@ def preprocess_data_zero_shot_resumable(
                         np.array(l2_distance_hungarian_fn_list).sum()
                     batch_precision = batch_tp_sum / (batch_tp_sum + batch_fp_sum)
                     batch_recall = batch_tp_sum / (batch_tp_sum + batch_fn_sum)
-                    logger.info(f'Batch: {part_idx}, '
+                    logger.info(f'Video: {VIDEO_LABEL.value} - {VIDEO_NUMBER} | Batch: {part_idx} | '
                                 f'L2 Distance Based - Precision: {batch_precision} | Recall: {batch_recall}')
 
                     if save_checkpoint:
