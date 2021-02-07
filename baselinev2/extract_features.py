@@ -11769,6 +11769,14 @@ def visualize_annotations(annotations_df, batch_size=32, drop_last_batch=True, c
 if __name__ == '__main__':
     eval_mode = False
     version = 0
+
+    # video_save_path = f'/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Plots/' \
+    #                   f'baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/'
+    # plot_save_path = f'/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Plots/' \
+    #                  f'baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/'
+    # features_save_path = f'/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Plots/' \
+    #                      f'baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/'
+
     video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/'
     plot_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/'
     features_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/'
@@ -11890,6 +11898,9 @@ if __name__ == '__main__':
         elif resume_mode:
             # features_base_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
             #                      f'/minimal_zero_shot/parts/'
+            # features_base_path = f'/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/' \
+            #                      f'Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+            #                      f'/parts/'
             features_base_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
                                  f'/parts/'
             every_part_file = np.array(os.listdir(features_base_path))
