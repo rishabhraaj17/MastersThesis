@@ -11626,7 +11626,7 @@ def combine_features_generate_annotations_v2(files_base_path, files_list, csv_sa
     annotation_data = []
     part_features_0: Dict[Any, Any] = torch.load(files_base_path + files_list[0])
     track_based_accumulated_features_0: Dict[int, TrackFeatures] = \
-        part_features_0['track_based_accumulated_features_0']
+        part_features_0['track_based_accumulated_features']
     frame_based_accumulated_features_0: Dict[int, FrameFeatures] = \
         part_features_0['accumulated_features']
 
@@ -11634,7 +11634,7 @@ def combine_features_generate_annotations_v2(files_base_path, files_list, csv_sa
     for p_idx in tqdm(range(1, len(files_list))):
         part_features_temp_1: Dict[Any, Any] = torch.load(files_base_path + files_list[p_idx])
         track_based_accumulated_features_1: Dict[int, TrackFeatures] = \
-            part_features_temp_1['track_based_accumulated_features_0']
+            part_features_temp_1['track_based_accumulated_features']
         frame_based_accumulated_features_1: Dict[int, FrameFeatures] = \
             part_features_temp_1['accumulated_features']
 
@@ -11651,12 +11651,15 @@ def combine_features_generate_annotations_v2(files_base_path, files_list, csv_sa
                 keys_to_skip_during_filtering.append(s_key)
 
             # if track length is longer than threshold, it should be longer in next batch
-            temp_list_0 = track_based_accumulated_features_0[s_key].object_features
-            temp_list_1 = track_based_accumulated_features_1[s_key].object_features
-            track_based_accumulated_features_1[s_key].object_features = temp_list_0.extend(temp_list_1)
+            # since we keep the live tracks during save, remove the one already seen
+            # temp_list_0 = track_based_accumulated_features_0[s_key].object_features
+            # temp_list_1 = track_based_accumulated_features_1[s_key].object_features
+
+            track_based_accumulated_features_1[s_key].object_features = \
+                track_based_accumulated_features_1[s_key].object_features[len_0:]
 
             # if track length is smaller in both dicts, filter it out
-            assert len(track_based_accumulated_features_1[s_key].object_features) == len_0 + len_1
+            assert len(track_based_accumulated_features_1[s_key].object_features) == len_1 - len_0
 
         annotation_data.extend(extracted_features_in_csv(track_based_features=track_based_accumulated_features_0,
                                                          frame_based_features=frame_based_accumulated_features_0,
@@ -11840,13 +11843,15 @@ if __name__ == '__main__':
     elif not eval_mode and EXECUTE_STEP == STEP.GENERATE_ANNOTATIONS:
         use_v2 = True
         track_length_threshold = 5
+        # features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+        #                      f'/minimal_zero_shot/parts/'
         features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
-                             f'/minimal_zero_shot/parts/'
+                             f'/parts/'
 
         csv_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/csv_annotation/'
         Path(csv_path).mkdir(parents=True, exist_ok=True)
 
-        accumulated_features_filename = 'accumulated_features_from_finally.pt'
+        # accumulated_features_filename = 'accumulated_features_from_finally.pt'
 
         # accumulated_features_path = f'{features_base_path}{accumulated_features_filename}'
 
