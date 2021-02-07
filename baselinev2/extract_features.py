@@ -34,10 +34,16 @@ from unsupervised_tp_0.dataset import SDDSimpleDataset, resize_frames, SimpleVid
 initialize_logging()
 logger = get_logger(__name__)
 
-SAVE_BASE_PATH = "../Datasets/SDD_Features/"
-# SAVE_BASE_PATH = "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD_Features/"
-BASE_PATH = "../Datasets/SDD/"
-# BASE_PATH = "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/"
+SEVER_MODE = False
+
+if SEVER_MODE:
+    ROOT_PATH = "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/"
+else:
+    ROOT_PATH = "../"
+
+SAVE_BASE_PATH = f"{ROOT_PATH}Datasets/SDD_Features/"
+BASE_PATH = f"{ROOT_PATH}Datasets/SDD/"
+
 VIDEO_LABEL = SDDVideoClasses.HYANG
 VIDEO_NUMBER = 0
 SAVE_PATH = f'{SAVE_BASE_PATH}{VIDEO_LABEL.value}/video{VIDEO_NUMBER}/baseline_v2/'
@@ -50,10 +56,13 @@ ALPHA = 1
 TOP_K = 1
 WEIGHT_POINTS_INSIDE_BBOX_MORE = True
 
-META_PATH = '../Datasets/SDD/H_SDD.txt'
-# META_PATH = '/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/H_SDD.txt'
+META_PATH = f'{ROOT_PATH}Datasets/SDD/H_SDD.txt'
 DATASET_META = SDDMeta(META_PATH)
 META_LABEL = SDDVideoDatasets.HYANG
+
+BATCH_CHECKPOINT = 50
+RESUME_MODE = False
+CSV_MODE = False
 
 
 class STEP(Enum):
@@ -11770,24 +11779,19 @@ if __name__ == '__main__':
     eval_mode = False
     version = 0
 
-    # video_save_path = f'/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Plots/' \
-    #                   f'baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/'
-    # plot_save_path = f'/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Plots/' \
-    #                  f'baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/'
-    # features_save_path = f'/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Plots/' \
-    #                      f'baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/'
-
-    video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/'
-    plot_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/'
-    features_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/'
+    video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/'
+    plot_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/'
+    features_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/'
     Path(video_save_path).mkdir(parents=True, exist_ok=True)
     Path(features_save_path).mkdir(parents=True, exist_ok=True)
+    Path(plot_save_path).mkdir(parents=True, exist_ok=True)
+
     if not eval_mode and EXECUTE_STEP == STEP.UNSUPERVISED:
-        resume = True
+        resume = RESUME_MODE
         param = ObjectDetectionParameters.BEV_TIGHT.value
 
         if resume:
-            features_base_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+            features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
                                  f'/parts/'
             every_part_file = np.array(os.listdir(features_base_path))
             part_idx = np.array([int(s[:-3].split('_')[-1]) for s in every_part_file]).argsort()
@@ -11821,13 +11825,12 @@ if __name__ == '__main__':
                 detect_shadows=param['detect_shadows'],
                 filter_switch_boxes_based_on_angle_and_recent_history=True,
                 compute_histories_for_plot=True)
-        # torch.save(feats, features_save_path + 'features.pt')
     elif not eval_mode and EXECUTE_STEP == STEP.VERIFY_ANNOTATIONS:
-        video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+        video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
                           f'/video_annotation_generated/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
 
-        annotation_base_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/csv_annotation/'
+        annotation_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/csv_annotation/'
         annotation_filename = 'generated_annotations.csv'
         annotation_path = annotation_base_path + annotation_filename
 
@@ -11837,10 +11840,10 @@ if __name__ == '__main__':
     elif not eval_mode and EXECUTE_STEP == STEP.GENERATE_ANNOTATIONS:
         use_v2 = True
         track_length_threshold = 5
-        features_base_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+        features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
                              f'/minimal_zero_shot/parts/'
 
-        csv_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/csv_annotation/'
+        csv_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/csv_annotation/'
         Path(csv_path).mkdir(parents=True, exist_ok=True)
 
         accumulated_features_filename = 'accumulated_features_from_finally.pt'
@@ -11862,20 +11865,16 @@ if __name__ == '__main__':
                                                   csv_save_path=csv_path,
                                                   do_filter=True, low_memory_mode=False)
     elif not eval_mode and EXECUTE_STEP == STEP.MINIMAL:
-        csv_mode = False
-        resume_mode = True
+        csv_mode = CSV_MODE
+        resume_mode = RESUME_MODE
         logger.info('MINIMAL MODE')
 
-        video_save_path = f'/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis' \
-                          f'/Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/minimal_zero_shot/'
-        plot_save_path = f'/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis' \
-                         f'/Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/minimal_zero_shot/'
-        features_save_path = f'/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis' \
-                             f'/Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/minimal_zero_shot/'
-
-        video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/minimal_zero_shot/'
-        plot_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/minimal_zero_shot/'
-        features_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/minimal_zero_shot/'
+        video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+                          f'/minimal_zero_shot/'
+        plot_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+                         f'/minimal_zero_shot/'
+        features_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+        f'/minimal_zero_shot/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
         Path(features_save_path).mkdir(parents=True, exist_ok=True)
 
@@ -11887,15 +11886,15 @@ if __name__ == '__main__':
             # accumulated_features_path_filename = 'accumulated_features_from_finally_tight.pt'
             track_length_threshold = 5
 
-            accumulated_features_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+            accumulated_features_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
                                         f'/minimal_zero_shot/{accumulated_features_path_filename}'
-            # accumulated_features_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+            # accumulated_features_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
             #                             f'/{accumulated_features_path_filename}'
             accumulated_features: Dict[int, Any] = torch.load(accumulated_features_path)
             per_track_features: Dict[int, TrackFeatures] = accumulated_features['track_based_accumulated_features']
             per_frame_features: Dict[int, FrameFeatures] = accumulated_features['accumulated_features']
 
-            video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/processed_features' \
+            video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/processed_features' \
                               f'/{track_length_threshold}/'
             Path(video_save_path).mkdir(parents=True, exist_ok=True)
             extracted_features_in_csv(track_based_features=per_track_features,
@@ -11904,12 +11903,9 @@ if __name__ == '__main__':
                                       min_track_length_threshold=track_length_threshold,
                                       csv_save_path=features_save_path)
         elif resume_mode:
-            # features_base_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+            # features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
             #                      f'/minimal_zero_shot/parts/'
-            # features_base_path = f'/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/' \
-            #                      f'Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
-            #                      f'/parts/'
-            features_base_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+            features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
                                  f'/parts/'
             every_part_file = np.array(os.listdir(features_base_path))
             part_idx = np.array([int(s[:-3].split('_')[-1]) for s in every_part_file]).argsort()
@@ -11951,17 +11947,17 @@ if __name__ == '__main__':
         video_name = 'input_video_s2_l1_08'
         custom_video_dict = {
             'dataset': SimpleVideoDatasetBase,
-            # 'video_path': f'../Datasets/Virat/VIRAT_S_000201_00_000018_000380.mp4',
-            'video_path': f'../Datasets/{video_class}/{video_name}.mp4',
+            # 'video_path': f'{ROOT_PATH}Datasets/Virat/VIRAT_S_000201_00_000018_000380.mp4',
+            'video_path': f'{ROOT_PATH}Datasets/{video_class}/{video_name}.mp4',
             'start': 0,
             'end': 10,
             'pts_unit': 'sec'
         }
 
-        video_save_path = f'../Plots/baseline_v2/v{version}/custom/{video_class}/{video_name}/zero_shot/'
+        video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/custom/{video_class}/{video_name}/zero_shot/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
 
-        features_save_path = f'../Plots/baseline_v2/v{version}/custom/{video_class}/{video_name}/zero_shot/'
+        features_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/custom/{video_class}/{video_name}/zero_shot/'
         Path(features_save_path).mkdir(parents=True, exist_ok=True)
 
         feats = preprocess_data_zero_shot_custom_video(
@@ -11977,7 +11973,7 @@ if __name__ == '__main__':
             filter_switch_boxes_based_on_angle_and_recent_history=True,
             compute_histories_for_plot=True, custom_video=custom_video_dict)
     elif not eval_mode and EXECUTE_STEP == STEP.SEMI_SUPERVISED:
-        video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/one_shot/'
+        video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/one_shot/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
         feats = preprocess_data_one_shot(var_threshold=None, plot=False, radius=60, save_per_part_path=None,
                                          video_mode=True, video_save_path=video_save_path + 'extraction.avi',
@@ -11992,13 +11988,13 @@ if __name__ == '__main__':
         # accumulated_features_path_filename = 'accumulated_features_from_finally_filtered.pt'
         track_length_threshold = 5
 
-        accumulated_features_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+        accumulated_features_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
                                     f'/{accumulated_features_path_filename}'
         accumulated_features: Dict[int, Any] = torch.load(accumulated_features_path)
         per_track_features: Dict[int, TrackFeatures] = accumulated_features['track_based_accumulated_features']
         per_frame_features: Dict[int, FrameFeatures] = accumulated_features['accumulated_features']
 
-        video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/processed_features' \
+        video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/processed_features' \
                           f'/{track_length_threshold}/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
         evaluate_extracted_features(track_based_features=per_track_features, frame_based_features=per_frame_features,
@@ -12011,7 +12007,7 @@ if __name__ == '__main__':
         accumulated_features_path_filename = 'features_dict_from_finally.pt'
         # accumulated_features_path_filename = 'accumulated_features_from_finally_filtered.pt'
 
-        accumulated_features_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+        accumulated_features_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
                                     f'/zero_shot/frames12apart/features/{accumulated_features_path_filename}'
 
         accumulated_features: Dict[int, Any] = torch.load(accumulated_features_path)
@@ -12051,7 +12047,7 @@ if __name__ == '__main__':
         accumulated_features_path_filename = 'accumulated_features_from_finally_filtered.pt'
         track_length_threshold = 60
 
-        accumulated_features_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+        accumulated_features_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
                                     f'/{accumulated_features_path_filename}'
         accumulated_features: Dict[int, Any] = torch.load(accumulated_features_path)
         per_track_features: Dict[int, TrackFeatures] = accumulated_features['track_based_accumulated_features']
@@ -12061,12 +12057,12 @@ if __name__ == '__main__':
             per_track_features, per_frame_features, track_length_threshold
         )
 
-        plot_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/track_based/'
+        plot_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/track_based/'
         Path(plot_save_path).mkdir(parents=True, exist_ok=True)
-        video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/frames12apart/'
+        video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/frames12apart/'
         # + 'cancelled/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
-        features_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/' \
+        features_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/' \
                              f'zero_shot/frames12apart/features/'
         Path(features_save_path).mkdir(parents=True, exist_ok=True)
         feats = preprocess_data_zero_shot_12_frames_apart(
@@ -12078,11 +12074,11 @@ if __name__ == '__main__':
             use_circle_to_keep_track_alive=False, custom_video_shape=False,
             extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True,
             save_every_n_batch_itr=50, frame_by_frame_estimation=False,
-            filter_switch_boxes_based_on_angle_and_recent_history=True,
+            filter_switch_boxes_based_on_angle_and_rfecfefnft_history=True,
             compute_histories_for_plot=True, min_track_length_to_filter_switch_box=20,
             angle_threshold_to_filter=120, save_path_for_features=features_save_path)
     else:
-        feat_file_path = '../Plots/baseline_v2/v0/deathCircle4/' \
+        feat_file_path = f'{ROOT_PATH}Plots/baseline_v2/v0/deathCircle4/' \
                          'use_is_box_overlapping_live_boxes/premature_kill_features_dict.pt'
         eval_metrics(feat_file_path)
     # TODO:
