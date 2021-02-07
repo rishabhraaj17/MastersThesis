@@ -39,7 +39,7 @@ SAVE_BASE_PATH = "../Datasets/SDD_Features/"
 BASE_PATH = "../Datasets/SDD/"
 # BASE_PATH = "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/"
 VIDEO_LABEL = SDDVideoClasses.HYANG
-VIDEO_NUMBER = 7
+VIDEO_NUMBER = 0
 SAVE_PATH = f'{SAVE_BASE_PATH}{VIDEO_LABEL.value}/video{VIDEO_NUMBER}/baseline_v2/'
 FILE_NAME_STEP_1 = 'features_v0.pt'
 LOAD_FILE_STEP_1 = SAVE_PATH + FILE_NAME_STEP_1
@@ -51,6 +51,7 @@ TOP_K = 1
 WEIGHT_POINTS_INSIDE_BBOX_MORE = True
 
 META_PATH = '../Datasets/SDD/H_SDD.txt'
+# META_PATH = '/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/H_SDD.txt'
 DATASET_META = SDDMeta(META_PATH)
 META_LABEL = SDDVideoDatasets.HYANG
 
@@ -91,7 +92,7 @@ class ObjectDetectionParameters(Enum):
     }
 
 
-EXECUTE_STEP = STEP.DEBUG
+EXECUTE_STEP = STEP.MINIMAL
 
 
 class ObjectFeatures(object):
@@ -7060,6 +7061,7 @@ def preprocess_data_zero_shot_minimal_resumable(
                     Path(features_save_path + 'parts/').mkdir(parents=True, exist_ok=True)
                     f_n = f'features_dict_part_{part_idx}.pt'
                     torch.save(save_dict, features_save_path + 'parts/' + f_n)
+                    logger.info(f"Saved at {features_save_path + 'parts/' + f_n}")
 
                     accumulated_features = {}
                     live_track_ids = [live_track.idx for live_track in last_frame_live_tracks]
@@ -7182,6 +7184,7 @@ def preprocess_data_zero_shot_minimal_resumable(
         # f_n = f'accumulated_features_from_finally.pt'
         f_n = f'features_dict_part_{part_idx}.pt'
         torch.save(premature_save_dict, features_save_path + 'parts/' + f_n)
+        logger.info(f"Saved at {features_save_path + 'parts/' + f_n}")
 
     tp_sum, fp_sum, fn_sum = np.array(tp_list).sum(), np.array(fp_list).sum(), np.array(fn_list).sum()
     precision = tp_sum / (tp_sum + fp_sum)
@@ -8060,6 +8063,7 @@ def preprocess_data_zero_shot_resumable(
                     Path(features_save_path + 'parts/').mkdir(parents=True, exist_ok=True)
                     f_n = f'features_dict_part_{part_idx}.pt'
                     torch.save(save_dict, features_save_path + 'parts/' + f_n)
+                    logger.info(f"Saved at {features_save_path + 'parts/' + f_n}")
 
                     accumulated_features = {}
                     live_track_ids = [live_track.idx for live_track in last_frame_live_tracks]
@@ -8182,6 +8186,7 @@ def preprocess_data_zero_shot_resumable(
         # f_n = f'accumulated_features_from_finally.pt'
         f_n = f'features_dict_part_{part_idx}.pt'
         torch.save(premature_save_dict, features_save_path + 'parts/' + f_n)
+        logger.info(f"Saved at {features_save_path + 'parts/' + f_n}")
 
     tp_sum, fp_sum, fn_sum = np.array(tp_list).sum(), np.array(fp_list).sum(), np.array(fn_list).sum()
     precision = tp_sum / (tp_sum + fp_sum)
@@ -11770,20 +11775,44 @@ if __name__ == '__main__':
     Path(video_save_path).mkdir(parents=True, exist_ok=True)
     Path(features_save_path).mkdir(parents=True, exist_ok=True)
     if not eval_mode and EXECUTE_STEP == STEP.UNSUPERVISED:
+        resume = True
         param = ObjectDetectionParameters.BEV_TIGHT.value
 
-        feats = preprocess_data_zero_shot(
-            var_threshold=None, plot=False, radius=param['radius'],
-            video_mode=True, video_save_path=video_save_path + 'extraction.avi',
-            desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
-            min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
-            use_circle_to_keep_track_alive=False, custom_video_shape=False,
-            extra_radius=param['extra_radius'], generic_box_wh=param['generic_box_wh'],
-            use_is_box_overlapping_live_boxes=True, save_per_part_path=None,
-            save_every_n_batch_itr=50, drop_last_batch=True,
-            detect_shadows=param['detect_shadows'],
-            filter_switch_boxes_based_on_angle_and_recent_history=True,
-            compute_histories_for_plot=True)
+        if resume:
+            features_base_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+                                 f'/parts/'
+            every_part_file = np.array(os.listdir(features_base_path))
+            part_idx = np.array([int(s[:-3].split('_')[-1]) for s in every_part_file]).argsort()
+            every_part_file = every_part_file[part_idx]
+
+            accumulated_features: Dict[Any, Any] = torch.load(features_base_path + every_part_file[-1])
+            logger.info(f'Resuming from batch {accumulated_features["part_idx"]}')
+            feats = preprocess_data_zero_shot_resumable(
+                last_saved_features_dict=accumulated_features,
+                var_threshold=None, plot=False, radius=param['radius'],
+                video_mode=True, video_save_path=video_save_path + 'extraction_resumed.avi',
+                desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
+                min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
+                use_circle_to_keep_track_alive=False, custom_video_shape=False,
+                extra_radius=param['extra_radius'], generic_box_wh=param['generic_box_wh'],
+                use_is_box_overlapping_live_boxes=True, save_per_part_path=None,
+                save_every_n_batch_itr=50, drop_last_batch=True,
+                detect_shadows=param['detect_shadows'],
+                filter_switch_boxes_based_on_angle_and_recent_history=True,
+                compute_histories_for_plot=True)
+        else:
+            feats = preprocess_data_zero_shot(
+                var_threshold=None, plot=False, radius=param['radius'],
+                video_mode=True, video_save_path=video_save_path + 'extraction.avi',
+                desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
+                min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
+                use_circle_to_keep_track_alive=False, custom_video_shape=False,
+                extra_radius=param['extra_radius'], generic_box_wh=param['generic_box_wh'],
+                use_is_box_overlapping_live_boxes=True, save_per_part_path=None,
+                save_every_n_batch_itr=50, drop_last_batch=True,
+                detect_shadows=param['detect_shadows'],
+                filter_switch_boxes_based_on_angle_and_recent_history=True,
+                compute_histories_for_plot=True)
         # torch.save(feats, features_save_path + 'features.pt')
     elif not eval_mode and EXECUTE_STEP == STEP.VERIFY_ANNOTATIONS:
         video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
@@ -11859,13 +11888,16 @@ if __name__ == '__main__':
                                       min_track_length_threshold=track_length_threshold,
                                       csv_save_path=features_save_path)
         elif resume_mode:
+            # features_base_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+            #                      f'/minimal_zero_shot/parts/'
             features_base_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
-                                 f'/minimal_zero_shot/parts/'
+                                 f'/parts/'
             every_part_file = np.array(os.listdir(features_base_path))
             part_idx = np.array([int(s[:-3].split('_')[-1]) for s in every_part_file]).argsort()
             every_part_file = every_part_file[part_idx]
 
             accumulated_features: Dict[Any, Any] = torch.load(features_base_path + every_part_file[-1])
+            logger.info(f'Resuming from batch {accumulated_features["part_idx"]}')
 
             feats = preprocess_data_zero_shot_minimal_resumable(
                 last_saved_features_dict=accumulated_features,
