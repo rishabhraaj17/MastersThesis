@@ -11865,6 +11865,14 @@ if __name__ == '__main__':
         csv_mode = False
         resume_mode = True
         logger.info('MINIMAL MODE')
+
+        video_save_path = f'/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis' \
+                          f'/Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/minimal_zero_shot/'
+        plot_save_path = f'/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis' \
+                         f'/Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/minimal_zero_shot/'
+        features_save_path = f'/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis' \
+                             f'/Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/minimal_zero_shot/'
+
         video_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/minimal_zero_shot/'
         plot_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/minimal_zero_shot/'
         features_save_path = f'../Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/minimal_zero_shot/'
