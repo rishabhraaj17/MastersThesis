@@ -508,6 +508,47 @@ def plot_for_video_current_frame(gt_rgb, current_frame_rgb, gt_annotations, curr
     return fig
 
 
+def plot_for_video_image_and_box(gt_rgb, gt_annotations, frame_number, additional_text=None, video_mode=False,
+                                 original_dims=None, save_path=None, box_annotation=None,
+                                 gt_track_histories=None, track_marker_size=1,
+                                 return_figure_only=False):
+    fig, ax = plt.subplots(1, 1, sharex='none', sharey='none', figsize=original_dims or (12, 10))
+    ax.imshow(gt_rgb)
+
+    if box_annotation is None:
+        add_box_to_axes(ax, gt_annotations)
+    else:
+        add_box_to_axes_with_annotation(ax, gt_annotations, box_annotation[0])
+
+    if gt_track_histories is not None:
+        add_features_to_axis(ax, gt_track_histories, marker_size=track_marker_size, marker_color='g')
+
+    ax.set_title('GT')
+
+    fig.suptitle(f'Frame: {frame_number}\n{additional_text}')
+
+    legends_dict = {'r': 'Bounding Box'}
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
+    if return_figure_only:
+        plt.close()
+        return fig
+
+    if video_mode:
+        plt.close()
+    else:
+        if save_path is not None:
+            Path(save_path).mkdir(parents=True, exist_ok=True)
+            fig.savefig(save_path + f"frame_{frame_number}.png")
+            plt.close()
+        else:
+            plt.show()
+
+    return fig
+
+
 def plot_for_video_current_frame_single(gt_rgb, current_frame_rgb, gt_annotations, current_frame_annotation,
                                         new_track_annotation, frame_number, additional_text=None, video_mode=False,
                                         original_dims=None, save_path=None, zero_shot=False, box_annotation=None,
