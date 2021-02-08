@@ -7798,7 +7798,8 @@ if __name__ == '__main__':
                           f'/video_annotation_generated/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
 
-        annotation_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/csv_annotation/'
+        annotation_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+                               f'/csv_annotation/'
         annotation_filename = 'generated_annotations.csv'
         annotation_path = annotation_base_path + annotation_filename
 
@@ -7951,7 +7952,8 @@ if __name__ == '__main__':
                                          min_points_in_cluster=16, begin_track_mode=True, iou_threshold=0.5,
                                          use_circle_to_keep_track_alive=False, custom_video_shape=False,
                                          extra_radius=0, generic_box_wh=50, use_is_box_overlapping_live_boxes=True,
-                                         save_every_n_batch_itr=BATCH_CHECKPOINT, drop_last_batch=True, detect_shadows=False)
+                                         save_every_n_batch_itr=BATCH_CHECKPOINT, drop_last_batch=True,
+                                         detect_shadows=False)
     elif not eval_mode and EXECUTE_STEP == STEP.FILTER_FEATURES:
         # accumulated_features_path_filename = 'accumulated_features_from_finally.pt'
         accumulated_features_path_filename = 'accumulated_features_from_finally_tight.pt'
@@ -7964,7 +7966,8 @@ if __name__ == '__main__':
         per_track_features: Dict[int, TrackFeatures] = accumulated_features['track_based_accumulated_features']
         per_frame_features: Dict[int, FrameFeatures] = accumulated_features['accumulated_features']
 
-        video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/processed_features' \
+        video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+                          f'/processed_features' \
                           f'/{track_length_threshold}/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
         evaluate_extracted_features(track_based_features=per_track_features, frame_based_features=per_frame_features,

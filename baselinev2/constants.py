@@ -35,3 +35,9 @@ class ObjectDetectionParameters(Enum):
         'generic_box_wh': (40, 100),
         'detect_shadows': True
     }
+
+
+class NetworkMode(Enum):
+    TRAIN = 'train'
+    VALIDATION = 'val'
+    TEST = 'test'
