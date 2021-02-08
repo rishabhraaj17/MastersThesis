@@ -6,8 +6,9 @@ import pandas as pd
 import skimage
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
-from average_image.bbox_utils import get_frame_annotations_and_skip_lost
-from baselinev2.config import VIDEO_PATH, ANNOTATION_CSV_PATH, VIDEO_SAVE_PATH
+from average_image.bbox_utils import get_frame_annotations_and_skip_lost, get_frame_annotations
+from average_image.constants import ANNOTATION_COLUMNS
+from baselinev2.config import VIDEO_PATH, ANNOTATION_CSV_PATH, VIDEO_SAVE_PATH, ANNOTATION_TXT_PATH
 from baselinev2.plot_utils import plot_for_video_image_and_box
 
 
@@ -46,6 +47,7 @@ def verify_annotations_processing(video_path, df, plot_scale_factor=1, desired_f
         ret, frame = cap.read()
         if ret:
             annotation = get_frame_annotations_and_skip_lost(df, frame_idx)
+            # annotation = get_frame_annotations(df, frame_idx)
             boxes = annotation[:, 1:5]
 
             fig = plot_for_video_image_and_box(gt_rgb=frame, gt_annotations=boxes, frame_number=frame_idx,
@@ -72,4 +74,7 @@ def verify_annotations_processing(video_path, df, plot_scale_factor=1, desired_f
 
 if __name__ == '__main__':
     verify_annotations_processing(video_path=VIDEO_PATH, df=sort_annotations_by_frame_numbers(ANNOTATION_CSV_PATH))
-    # verify_annotations_processing(video_path=VIDEO_PATH, df=pd.read_csv(ANNOTATION_CSV_PATH))
+    # verify_annotations_processing(video_path=VIDEO_PATH, df=pd.read_csv(ANNOTATION_CSV_PATH, index_col='Unnamed: 0'))
+    # annot = pd.read_csv(ANNOTATION_TXT_PATH, sep=' ')
+    # annot.columns = ANNOTATION_COLUMNS
+    # verify_annotations_processing(video_path=VIDEO_PATH, df=annot)
