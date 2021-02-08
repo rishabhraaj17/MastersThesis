@@ -4,11 +4,13 @@ import cv2 as cv
 import numpy as np
 import pandas as pd
 import skimage
+from sklearn.model_selection import train_test_split
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost, get_frame_annotations
 from average_image.constants import ANNOTATION_COLUMNS
-from baselinev2.config import VIDEO_PATH, ANNOTATION_CSV_PATH, VIDEO_SAVE_PATH, ANNOTATION_TXT_PATH
+from baselinev2.config import VIDEO_PATH, ANNOTATION_CSV_PATH, VIDEO_SAVE_PATH, ANNOTATION_TXT_PATH, \
+    TRAIN_SPLIT_PERCENTAGE, VALIDATION_SPLIT_PERCENTAGE, TEST_SPLIT_PERCENTAGE, SPLIT_ANNOTATION_SAVE_PATH
 from baselinev2.plot_utils import plot_for_video_image_and_box
 
 
@@ -21,7 +23,48 @@ def get_frames_count(video_path):
 
 def sort_annotations_by_frame_numbers(annotation_path):
     annotations = pd.read_csv(annotation_path, index_col='Unnamed: 0')
-    return annotations.sort_values(by=['frame'])
+    annotations = annotations.sort_values(by=['frame']).reset_index()
+    annotations = annotations.drop(columns=['index'])
+    return annotations
+
+
+def split_annotations(annotation_path):
+    annotations = sort_annotations_by_frame_numbers(annotation_path)
+    train_set, test_set = train_test_split(annotations, train_size=TRAIN_SPLIT_PERCENTAGE,
+                                           test_size=VALIDATION_SPLIT_PERCENTAGE + TEST_SPLIT_PERCENTAGE,
+                                           shuffle=False, stratify=None)
+
+    train_set, test_set = adjust_splits_for_frame(larger_set=train_set, smaller_set=test_set)
+
+    test_set, val_set = train_test_split(test_set, train_size=0.3,
+                                         test_size=0.7, shuffle=False, stratify=None)
+
+    val_set, test_set = adjust_splits_for_frame(larger_set=test_set, smaller_set=val_set)
+    return train_set, val_set, test_set
+
+
+def adjust_splits_for_frame(larger_set, smaller_set):
+    last_frame_in_larger = larger_set.iloc[-1]['frame']
+    first_frame_in_smaller = smaller_set.iloc[0]['frame']
+    same_frame_larger = larger_set[larger_set['frame'] == last_frame_in_larger]
+    same_frame_smaller = smaller_set[smaller_set['frame'] == first_frame_in_smaller]
+
+    if len(same_frame_larger) >= len(same_frame_smaller):
+        larger_set = pd.concat([larger_set, same_frame_smaller])
+        smaller_set = smaller_set.drop(same_frame_smaller.index)
+    else:
+        smaller_set = pd.concat([same_frame_larger, smaller_set])
+        larger_set = larger_set.drop(same_frame_larger.index)
+
+    return larger_set, smaller_set
+
+
+def split_annotations_and_save_as_csv(annotation_path, path_to_save):
+    train_set, val_set, test_set = split_annotations(annotation_path)
+    Path(path_to_save).mkdir(parents=True, exist_ok=True)
+    train_set.to_csv(path_to_save + 'train.csv', index=False)
+    val_set.to_csv(path_to_save + 'val.csv', index=False)
+    test_set.to_csv(path_to_save + 'test.csv', index=False)
 
 
 def verify_annotations_processing(video_path, df, plot_scale_factor=1, desired_fps=5):
@@ -73,7 +116,8 @@ def verify_annotations_processing(video_path, df, plot_scale_factor=1, desired_f
 
 
 if __name__ == '__main__':
-    verify_annotations_processing(video_path=VIDEO_PATH, df=sort_annotations_by_frame_numbers(ANNOTATION_CSV_PATH))
+    split_annotations_and_save_as_csv(annotation_path=ANNOTATION_CSV_PATH, path_to_save=SPLIT_ANNOTATION_SAVE_PATH)
+    # verify_annotations_processing(video_path=VIDEO_PATH, df=sort_annotations_by_frame_numbers(ANNOTATION_CSV_PATH))
     # verify_annotations_processing(video_path=VIDEO_PATH, df=pd.read_csv(ANNOTATION_CSV_PATH, index_col='Unnamed: 0'))
     # annot = pd.read_csv(ANNOTATION_TXT_PATH, sep=' ')
     # annot.columns = ANNOTATION_COLUMNS
