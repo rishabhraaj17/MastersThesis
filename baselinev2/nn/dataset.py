@@ -1,17 +1,32 @@
+from enum import Enum
 from pathlib import Path
+from typing import Dict, List
 
 import cv2 as cv
 import numpy as np
 import pandas as pd
 import skimage
+import torch
 from sklearn.model_selection import train_test_split
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from tqdm import tqdm
 
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost, get_frame_annotations
 from average_image.constants import ANNOTATION_COLUMNS
 from baselinev2.config import VIDEO_PATH, ANNOTATION_CSV_PATH, VIDEO_SAVE_PATH, ANNOTATION_TXT_PATH, \
     TRAIN_SPLIT_PERCENTAGE, VALIDATION_SPLIT_PERCENTAGE, TEST_SPLIT_PERCENTAGE, SPLIT_ANNOTATION_SAVE_PATH
 from baselinev2.plot_utils import plot_for_video_image_and_box
+from baselinev2.structures import TracksDataset, SingleTrack
+from log import initialize_logging, get_logger
+
+initialize_logging()
+logger = get_logger('baselinev2.nn.dataset')
+
+
+class DataSplitPath(Enum):
+    TRAIN = f'{SPLIT_ANNOTATION_SAVE_PATH}train.csv'
+    VALIDATION = f'{SPLIT_ANNOTATION_SAVE_PATH}val.csv'
+    TEST = f'{SPLIT_ANNOTATION_SAVE_PATH}test.csv'
 
 
 def get_frames_count(video_path):
@@ -46,15 +61,17 @@ def split_annotations(annotation_path):
 def adjust_splits_for_frame(larger_set, smaller_set):
     last_frame_in_larger = larger_set.iloc[-1]['frame']
     first_frame_in_smaller = smaller_set.iloc[0]['frame']
-    same_frame_larger = larger_set[larger_set['frame'] == last_frame_in_larger]
-    same_frame_smaller = smaller_set[smaller_set['frame'] == first_frame_in_smaller]
 
-    if len(same_frame_larger) >= len(same_frame_smaller):
-        larger_set = pd.concat([larger_set, same_frame_smaller])
-        smaller_set = smaller_set.drop(same_frame_smaller.index)
-    else:
-        smaller_set = pd.concat([same_frame_larger, smaller_set])
-        larger_set = larger_set.drop(same_frame_larger.index)
+    if last_frame_in_larger == first_frame_in_smaller:
+        same_frame_larger = larger_set[larger_set['frame'] == last_frame_in_larger]
+        same_frame_smaller = smaller_set[smaller_set['frame'] == first_frame_in_smaller]
+
+        if len(same_frame_larger) >= len(same_frame_smaller):
+            larger_set = pd.concat([larger_set, same_frame_smaller])
+            smaller_set = smaller_set.drop(same_frame_smaller.index)
+        else:
+            smaller_set = pd.concat([same_frame_larger, smaller_set])
+            larger_set = larger_set.drop(same_frame_larger.index)
 
     return larger_set, smaller_set
 
@@ -65,6 +82,26 @@ def split_annotations_and_save_as_csv(annotation_path, path_to_save):
     train_set.to_csv(path_to_save + 'train.csv', index=False)
     val_set.to_csv(path_to_save + 'val.csv', index=False)
     test_set.to_csv(path_to_save + 'test.csv', index=False)
+    logger.info(f'Saved Splits at {path_to_save}')
+
+
+def split_annotations_and_save_as_track_datasets(annotation_path, path_to_save):
+    train_set, val_set, test_set = split_annotations(annotation_path)
+
+    Path(path_to_save).mkdir(parents=True, exist_ok=True)
+
+    logger.info('Processing Train set')
+    train_dataset = turn_splits_into_trajectory_dataset(train_set, dataframe_mode=True)
+    logger.info('Processing Validation set')
+    val_dataset = turn_splits_into_trajectory_dataset(val_set, dataframe_mode=True)
+    logger.info('Processing Test set')
+    test_dataset = turn_splits_into_trajectory_dataset(test_set, dataframe_mode=True)
+
+    torch.save(train_dataset, path_to_save + 'train.pt')
+    torch.save(val_dataset, path_to_save + 'val.pt')
+    torch.save(test_dataset, path_to_save + 'test.pt')
+
+    logger.info(f'Saved track datasets at {path_to_save}')
 
 
 def verify_annotations_processing(video_path, df, plot_scale_factor=1, desired_fps=5):
@@ -115,8 +152,47 @@ def verify_annotations_processing(video_path, df, plot_scale_factor=1, desired_f
     cv.destroyAllWindows()
 
 
+def turn_splits_into_trajectory_dataset(split_path, num_frames_in_jump=12, time_between_frames=0.4,
+                                        dataframe_mode=False):
+    if dataframe_mode:
+        split: pd.DataFrame = split_path
+    else:
+        split: pd.DataFrame = pd.read_csv(split_path.value)
+
+    dataset: Dict[int, TracksDataset] = {}
+    unique_tracks = split.track_id.unique()
+    for t_id in tqdm(unique_tracks):
+        track_df = split[split.track_id == t_id]
+        # unique_frames_in_track = track_df.frame.unique()
+
+        tracks_list: List[SingleTrack] = []
+        # for start_frame in unique_frames_in_track:
+        #     track_df_with_jumps: pd.DataFrame = track_df.iloc[
+        #                                         track_df[track_df.frame == start_frame].index[0]::num_frames_in_jump]
+        #     # track_df_with_jumps: pd.DataFrame = track_df.iloc[start_frame::num_frames_in_jump]
+        for start_frame in range(len(track_df)):
+            track_df_with_jumps: pd.DataFrame = track_df.iloc[start_frame::num_frames_in_jump]
+            track: SingleTrack = SingleTrack(
+                data=track_df_with_jumps.to_numpy(),
+                frames=track_df_with_jumps.frame.to_numpy(),
+                valid=True if len(track_df_with_jumps) >= 20 else False
+            )
+            tracks_list.append(track)
+
+        dataset.update({t_id: TracksDataset(
+            track_id=t_id,
+            tracks=tracks_list,
+            columns=split.columns.to_numpy().tolist()
+        )})
+    return dataset
+
+
 if __name__ == '__main__':
-    split_annotations_and_save_as_csv(annotation_path=ANNOTATION_CSV_PATH, path_to_save=SPLIT_ANNOTATION_SAVE_PATH)
+    split_annotations_and_save_as_track_datasets(annotation_path=ANNOTATION_CSV_PATH,
+                                                 path_to_save=SPLIT_ANNOTATION_SAVE_PATH)
+
+    # turn_splits_into_trajectory_dataset(split_path=DataSplitPath.TRAIN)
+    # split_annotations_and_save_as_csv(annotation_path=ANNOTATION_CSV_PATH, path_to_save=SPLIT_ANNOTATION_SAVE_PATH)
     # verify_annotations_processing(video_path=VIDEO_PATH, df=sort_annotations_by_frame_numbers(ANNOTATION_CSV_PATH))
     # verify_annotations_processing(video_path=VIDEO_PATH, df=pd.read_csv(ANNOTATION_CSV_PATH, index_col='Unnamed: 0'))
     # annot = pd.read_csv(ANNOTATION_TXT_PATH, sep=' ')

@@ -135,3 +135,24 @@ class Track(object):
         self.bbox = bbox
         self.gt_track_idx = gt_track_idx
         self.history = history
+
+
+class SingleTrackV0(object):
+    def __init__(self, start_frame, end_frame, data):
+        self.start_frame = start_frame
+        self.end_frame = end_frame
+        self.data = data
+
+
+class SingleTrack(object):
+    def __init__(self, frames, data, valid):
+        self.frames = frames
+        self.data = data
+        self.valid = valid
+
+
+class TracksDataset(object):
+    def __init__(self, track_id: int, tracks: List[SingleTrack], columns: List[str]):
+        self.track_id = track_id
+        self.tracks = tracks
+        self.columns = columns
