@@ -24,9 +24,12 @@ logger = get_logger('baselinev2.nn.dataset')
 
 
 class DataSplitPath(Enum):
-    TRAIN = f'{SPLIT_ANNOTATION_SAVE_PATH}train.csv'
-    VALIDATION = f'{SPLIT_ANNOTATION_SAVE_PATH}val.csv'
-    TEST = f'{SPLIT_ANNOTATION_SAVE_PATH}test.csv'
+    TRAIN_CSV = f'{SPLIT_ANNOTATION_SAVE_PATH}train.csv'
+    VALIDATION_CSV = f'{SPLIT_ANNOTATION_SAVE_PATH}val.csv'
+    TEST_CSV = f'{SPLIT_ANNOTATION_SAVE_PATH}test.csv'
+    TRAIN = f'{SPLIT_ANNOTATION_SAVE_PATH}train.pt'
+    VALIDATION = f'{SPLIT_ANNOTATION_SAVE_PATH}val.pt'
+    TEST = f'{SPLIT_ANNOTATION_SAVE_PATH}test.pt'
 
 
 def get_frames_count(video_path):
@@ -147,6 +150,37 @@ def split_annotations_and_save_as_track_datasets(annotation_path, path_to_save, 
     logger.info(f'Saved track datasets at {path_to_save}')
 
 
+def split_annotations_and_save_as_track_datasets_by_length(annotation_path, path_to_save, length=20,
+                                                           by_track=False):
+    if by_track:
+        train_set, val_set, test_set = split_annotations_by_tracks(annotation_path)
+    else:
+        train_set, val_set, test_set = split_annotations(annotation_path)
+
+    Path(path_to_save).mkdir(parents=True, exist_ok=True)
+
+    logger.info('Processing Train set')
+    train_dataset = turn_splits_into_trajectory_dataset(train_set, dataframe_mode=True)
+    logger.info('Processing Validation set')
+    val_dataset = turn_splits_into_trajectory_dataset(val_set, dataframe_mode=True)
+    logger.info('Processing Test set')
+    test_dataset = turn_splits_into_trajectory_dataset(test_set, dataframe_mode=True)
+
+    logger.info(f'Processing datasets by length: {length}')
+    logger.info('Train')
+    train_dataset = make_trainable_trajectory_dataset_by_length(train_dataset, length=length)
+    logger.info('Validation')
+    val_dataset = make_trainable_trajectory_dataset_by_length(val_dataset, length=length)
+    logger.info('Test')
+    test_dataset = make_trainable_trajectory_dataset_by_length(test_dataset, length=length)
+
+    torch.save(train_dataset, path_to_save + 'train.pt')
+    torch.save(val_dataset, path_to_save + 'val.pt')
+    torch.save(test_dataset, path_to_save + 'test.pt')
+
+    logger.info(f'Saved track datasets at {path_to_save}')
+
+
 def verify_annotations_processing(video_path, df, plot_scale_factor=1, desired_fps=5):
     Path(VIDEO_SAVE_PATH).mkdir(parents=True, exist_ok=True)
     cap = cv.VideoCapture(video_path)
@@ -230,12 +264,52 @@ def turn_splits_into_trajectory_dataset(split_path, num_frames_in_jump=12, time_
     return dataset
 
 
-if __name__ == '__main__':
-    split_annotations_and_save_as_track_datasets(annotation_path=ANNOTATION_CSV_PATH,
-                                                 path_to_save=SPLIT_ANNOTATION_SAVE_PATH,
-                                                 by_track=False)
+def make_trainable_trajectory_dataset(dataset: Dict[int, TracksDataset]):
+    final_tracks = []
+    for track_id, track_obj in tqdm(dataset.items()):
+        for track in track_obj.tracks:
+            final_tracks.append(np.hstack((track.data[:, 0:6], track.data[:, 10:])))
 
-    # turn_splits_into_trajectory_dataset(split_path=DataSplitPath.TRAIN)
+    return final_tracks
+
+
+def make_trainable_trajectory_dataset_by_length(dataset: Dict[int, TracksDataset], length=20, save_path=None,
+                                                numpy_save=False):
+    final_tracks = []
+    for track_id, track_obj in tqdm(dataset.items()):
+        for track in track_obj.tracks:
+            if len(track.data) > length:
+                # split array into parts of max length
+                splits, remaining_part = array_split_by_length(track.data, length=length)
+                for split in splits:
+                    final_tracks.append(np.hstack((split[:, 0:6], split[:, 10:])))
+
+    if save_path is not None:
+        if numpy_save:
+            with open(save_path, 'wb') as f:
+                np.savez(f, tracks=final_tracks, allow_pickle=True)
+        else:
+            torch.save(final_tracks, save_path)
+    return np.stack(final_tracks)
+
+
+def array_split_by_length(arr, length=20):
+    chunks = len(arr) // length
+    compatible_array = arr[:chunks * length, ...]
+    remaining_array = arr[chunks * length:, ...]
+    splits = np.split(compatible_array, chunks)
+    return splits, remaining_array
+
+
+if __name__ == '__main__':
+    split_annotations_and_save_as_track_datasets_by_length(annotation_path=ANNOTATION_CSV_PATH,
+                                                           path_to_save=SPLIT_ANNOTATION_SAVE_PATH,
+                                                           by_track=False)
+    # make_trainable_trajectory_dataset_by_length(torch.load(DataSplitPath.TRAIN.value),
+    #                                             save_path=SPLIT_ANNOTATION_SAVE_PATH + 'train.npz',
+    #                                             numpy_save=False)
+
+    # turn_splits_into_trajectory_dataset(split_path=DataSplitPath.TRAIN_CSV)
     # split_annotations_and_save_as_csv(annotation_path=ANNOTATION_CSV_PATH, path_to_save=SPLIT_ANNOTATION_SAVE_PATH)
     # verify_annotations_processing(video_path=VIDEO_PATH, df=sort_annotations_by_frame_numbers(ANNOTATION_CSV_PATH))
     # verify_annotations_processing(video_path=VIDEO_PATH, df=pd.read_csv(ANNOTATION_CSV_PATH, index_col='Unnamed: 0'))
