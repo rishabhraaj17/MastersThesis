@@ -43,6 +43,13 @@ def sort_annotations_by_frame_numbers(annotation_path):
     return annotations
 
 
+def sort_annotations_by_track_ids(annotation_path):
+    annotations = pd.read_csv(annotation_path, index_col='Unnamed: 0')
+    annotations = annotations.sort_values(by=['track_id']).reset_index()
+    annotations = annotations.drop(columns=['index'])
+    return annotations
+
+
 def split_annotations(annotation_path):
     annotations = sort_annotations_by_frame_numbers(annotation_path)
     train_set, test_set = train_test_split(annotations, train_size=TRAIN_SPLIT_PERCENTAGE,
@@ -55,6 +62,21 @@ def split_annotations(annotation_path):
                                          test_size=0.7, shuffle=False, stratify=None)
 
     val_set, test_set = adjust_splits_for_frame(larger_set=test_set, smaller_set=val_set)
+    return train_set, val_set, test_set
+
+
+def split_annotations_by_tracks(annotation_path):
+    annotations = sort_annotations_by_track_ids(annotation_path)
+    train_set, test_set = train_test_split(annotations, train_size=TRAIN_SPLIT_PERCENTAGE,
+                                           test_size=VALIDATION_SPLIT_PERCENTAGE + TEST_SPLIT_PERCENTAGE,
+                                           shuffle=False, stratify=None)
+
+    train_set, test_set = adjust_splits_for_track(larger_set=train_set, smaller_set=test_set)
+
+    test_set, val_set = train_test_split(test_set, train_size=0.3,
+                                         test_size=0.7, shuffle=False, stratify=None)
+
+    val_set, test_set = adjust_splits_for_track(larger_set=test_set, smaller_set=val_set)
     return train_set, val_set, test_set
 
 
@@ -76,6 +98,24 @@ def adjust_splits_for_frame(larger_set, smaller_set):
     return larger_set, smaller_set
 
 
+def adjust_splits_for_track(larger_set, smaller_set):
+    last_frame_in_larger = larger_set.iloc[-1]['track_id']
+    first_frame_in_smaller = smaller_set.iloc[0]['track_id']
+
+    if last_frame_in_larger == first_frame_in_smaller:
+        same_frame_larger = larger_set[larger_set['track_id'] == last_frame_in_larger]
+        same_frame_smaller = smaller_set[smaller_set['track_id'] == first_frame_in_smaller]
+
+        if len(same_frame_larger) >= len(same_frame_smaller):
+            larger_set = pd.concat([larger_set, same_frame_smaller])
+            smaller_set = smaller_set.drop(same_frame_smaller.index)
+        else:
+            smaller_set = pd.concat([same_frame_larger, smaller_set])
+            larger_set = larger_set.drop(same_frame_larger.index)
+
+    return larger_set, smaller_set
+
+
 def split_annotations_and_save_as_csv(annotation_path, path_to_save):
     train_set, val_set, test_set = split_annotations(annotation_path)
     Path(path_to_save).mkdir(parents=True, exist_ok=True)
@@ -85,8 +125,11 @@ def split_annotations_and_save_as_csv(annotation_path, path_to_save):
     logger.info(f'Saved Splits at {path_to_save}')
 
 
-def split_annotations_and_save_as_track_datasets(annotation_path, path_to_save):
-    train_set, val_set, test_set = split_annotations(annotation_path)
+def split_annotations_and_save_as_track_datasets(annotation_path, path_to_save, by_track=False):
+    if by_track:
+        train_set, val_set, test_set = split_annotations_by_tracks(annotation_path)
+    else:
+        train_set, val_set, test_set = split_annotations(annotation_path)
 
     Path(path_to_save).mkdir(parents=True, exist_ok=True)
 
@@ -189,7 +232,8 @@ def turn_splits_into_trajectory_dataset(split_path, num_frames_in_jump=12, time_
 
 if __name__ == '__main__':
     split_annotations_and_save_as_track_datasets(annotation_path=ANNOTATION_CSV_PATH,
-                                                 path_to_save=SPLIT_ANNOTATION_SAVE_PATH)
+                                                 path_to_save=SPLIT_ANNOTATION_SAVE_PATH,
+                                                 by_track=False)
 
     # turn_splits_into_trajectory_dataset(split_path=DataSplitPath.TRAIN)
     # split_annotations_and_save_as_csv(annotation_path=ANNOTATION_CSV_PATH, path_to_save=SPLIT_ANNOTATION_SAVE_PATH)
