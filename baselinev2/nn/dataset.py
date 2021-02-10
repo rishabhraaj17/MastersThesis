@@ -7,16 +7,18 @@ import numpy as np
 import pandas as pd
 import skimage
 import torch
+from torch.utils.data import Dataset, ConcatDataset, ChainDataset
 from sklearn.model_selection import train_test_split
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from tqdm import tqdm
 
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost, get_frame_annotations
-from average_image.constants import ANNOTATION_COLUMNS
+from average_image.constants import ANNOTATION_COLUMNS, SDDVideoClasses
 from baselinev2.config import VIDEO_PATH, ANNOTATION_CSV_PATH, VIDEO_SAVE_PATH, ANNOTATION_TXT_PATH, \
     TRAIN_SPLIT_PERCENTAGE, VALIDATION_SPLIT_PERCENTAGE, TEST_SPLIT_PERCENTAGE, SPLIT_ANNOTATION_SAVE_PATH, \
     SDD_ANNOTATIONS_ROOT_PATH, SDD_VIDEO_CLASSES_LIST, SDD_PER_CLASS_VIDEOS_LIST, SAVE_BASE_PATH, \
     SDD_VIDEO_CLASSES_RESUME_LIST, SDD_PER_CLASS_VIDEOS_RESUME_LIST
+from baselinev2.constants import NetworkMode
 from baselinev2.plot_utils import plot_for_video_image_and_box
 from baselinev2.structures import TracksDataset, SingleTrack
 from log import initialize_logging, get_logger
@@ -328,10 +330,12 @@ def turn_splits_into_trajectory_dataset_each_track(split_path, num_frames_in_jum
             tracks_list.append(track)
 
         tracks, distances = make_trainable_trajectory_dataset_by_length_each_track(track_obj=tracks_list)
-        final_tracks_save.append(tracks)
-        relative_distances_save.append(distances)
+        if tracks.size != 0:
+            final_tracks_save.append(tracks)
+        if distances.size != 0:
+            relative_distances_save.append(distances)
 
-    return {'tracks': final_tracks_save, 'distances': relative_distances_save}
+    return {'tracks': np.concatenate(final_tracks_save), 'distances': np.concatenate(relative_distances_save)}
 
 
 def make_trainable_trajectory_dataset_by_length_each_track(track_obj, length=20, save_path=None,
@@ -407,7 +411,43 @@ def generate_annotation_for_all():
     logger.info('Finished generating all annotations!')
 
 
+class BaselineDataset(Dataset):
+    def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode, root: str = SAVE_BASE_PATH,
+                 observation_length: int = 8, prediction_length: int = 12):
+        super(BaselineDataset, self).__init__()
+        path_to_dataset = f'{root}{video_class.value}/video{video_number}/splits/{split.value}.pt'
+        dataset = torch.load(path_to_dataset)
+
+        self.tracks = dataset['tracks']
+        self.relative_distances = dataset['distances']
+
+        self.prediction_length = prediction_length
+        self.observation_length = observation_length
+
+    def __len__(self):
+        return len(self.relative_distances)
+
+    def __getitem__(self, item):
+        tracks, relative_distances = self.tracks[item], self.relative_distances[item]
+        in_xy = torch.from_numpy(tracks[..., :self.observation_length, -2:].astype(np.float32))
+        gt_xy = torch.from_numpy(tracks[..., self.observation_length:, -2:].astype(np.float32))
+        in_velocities = torch.from_numpy(relative_distances[..., :self.observation_length - 1, :].astype(np.float32))
+        gt_velocities = torch.from_numpy(relative_distances[..., self.observation_length:, :].astype(np.float32))
+        in_track_ids = torch.from_numpy(tracks[..., :self.observation_length, 0].astype(np.float32))
+        gt_track_ids = torch.from_numpy(tracks[..., self.observation_length:, 0].astype(np.float32))
+        in_frame_numbers = torch.from_numpy(tracks[..., :self.observation_length, 5].astype(np.float32))
+        gt_frame_numbers = torch.from_numpy(tracks[..., self.observation_length:, 5].astype(np.float32))
+
+        return in_xy, gt_xy, in_velocities, gt_velocities, in_track_ids, gt_track_ids, in_frame_numbers, \
+               gt_frame_numbers
+
+
 if __name__ == '__main__':
+    # d1 = BaselineDataset(SDDVideoClasses.NEXUS, 11, NetworkMode.TRAIN)
+    # d2 = BaselineDataset(SDDVideoClasses.NEXUS, 11, NetworkMode.TRAIN)
+    # d = ChainDataset([d1, d2])
+    # dd = d[0:32]
+    # print()
     generate_annotation_for_all()
     # split_annotations_and_save_as_track_datasets_by_length(annotation_path=ANNOTATION_CSV_PATH,
     #                                                        path_to_save=SPLIT_ANNOTATION_SAVE_PATH,
