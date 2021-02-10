@@ -347,7 +347,7 @@ def make_trainable_trajectory_dataset_by_length_each_track(track_obj, length=20,
             splits, remaining_part = array_split_by_length(track.data, length=length)
             for split in splits:
                 relative_distances.append(get_relative_distances(split))
-                final_tracks.append(np.hstack((split[:, 0:6], split[:, 10:])))
+                final_tracks.append(np.hstack((split[:, 0:6], split[:, 10:])).astype(np.float32))
 
     final_tracks = np.stack(final_tracks) if len(final_tracks) != 0 else np.zeros((0, 12))
     relative_distances = np.stack(relative_distances) if len(relative_distances) != 0 else np.zeros((0, 2))
@@ -426,10 +426,10 @@ def generate_annotation_for_all():
     logger.info('Finished generating all annotations!')
 
 
-class BaselineDataset(Dataset):
+class BaselineDatasetV0(Dataset):
     def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode, root: str = SAVE_BASE_PATH,
                  observation_length: int = 8, prediction_length: int = 12):
-        super(BaselineDataset, self).__init__()
+        super(BaselineDatasetV0, self).__init__()
         path_to_dataset = f'{root}{video_class.value}/video{video_number}/splits/{split.value}.pt'
         dataset = torch.load(path_to_dataset)
 
@@ -457,13 +457,48 @@ class BaselineDataset(Dataset):
                gt_frame_numbers
 
 
+class BaselineDataset(Dataset):
+    def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode, root: str = SAVE_BASE_PATH,
+                 observation_length: int = 8, prediction_length: int = 12):
+        super(BaselineDataset, self).__init__()
+        path_to_dataset = f'{root}{video_class.value}/video{video_number}/splits/'
+
+        self.tracks = np.load(f'{path_to_dataset}{split.value}_tracks.npy', allow_pickle=True, mmap_mode='r+')
+        self.relative_distances = np.load(f'{path_to_dataset}{split.value}_distances.npy', allow_pickle=True,
+                                          mmap_mode='r+')
+
+        self.prediction_length = prediction_length
+        self.observation_length = observation_length
+
+    def __len__(self):
+        return len(self.relative_distances)
+
+    def __getitem__(self, item):
+        tracks, relative_distances = torch.from_numpy(self.tracks[item]), \
+                                     torch.from_numpy(self.relative_distances[item])
+        in_xy = tracks[..., :self.observation_length, -2:]
+        gt_xy = tracks[..., self.observation_length:, -2:]
+        in_velocities = relative_distances[..., :self.observation_length - 1, :]
+        gt_velocities = relative_distances[..., self.observation_length:, :]
+        in_track_ids = tracks[..., :self.observation_length, 0]
+        gt_track_ids = tracks[..., self.observation_length:, 0]
+        in_frame_numbers = tracks[..., :self.observation_length, 5]
+        gt_frame_numbers = tracks[..., self.observation_length:, 5]
+
+        return in_xy, gt_xy, in_velocities, gt_velocities, in_track_ids, gt_track_ids, in_frame_numbers, \
+               gt_frame_numbers
+
+
 if __name__ == '__main__':
     # d1 = BaselineDataset(SDDVideoClasses.NEXUS, 11, NetworkMode.TRAIN)
     # d2 = BaselineDataset(SDDVideoClasses.NEXUS, 11, NetworkMode.TRAIN)
-    # d = ChainDataset([d1, d2])
+    # d = ConcatDataset([d1, d2])
     # dd = d[0:32]
     # print()
     generate_annotation_for_all()
+    # ff = np.load('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/'
+    #              'SDD_Features/nexus/video11/splits/train_distances.npy', allow_pickle=True, mmap_mode='r')
+    # print()
     # split_annotations_and_save_as_track_datasets_by_length(annotation_path=ANNOTATION_CSV_PATH,
     #                                                        path_to_save=SPLIT_ANNOTATION_SAVE_PATH,
     #                                                        by_track=False)
