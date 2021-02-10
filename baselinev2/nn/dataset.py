@@ -356,7 +356,7 @@ def make_trainable_trajectory_dataset_by_length_each_track(track_obj, length=20,
 
 
 def split_annotations_and_save_as_track_datasets_by_length_for_one(annotation_path, path_to_save, length=20,
-                                                                   by_track=False):
+                                                                   by_track=False, save_as_numpy=True, mem_mode=True):
     if by_track:
         train_set, val_set, test_set = split_annotations_by_tracks(annotation_path)
     else:
@@ -371,9 +371,24 @@ def split_annotations_and_save_as_track_datasets_by_length_for_one(annotation_pa
     logger.info('Processing Test set')
     test_dataset = turn_splits_into_trajectory_dataset_each_track(test_set, dataframe_mode=True)
 
-    torch.save(train_dataset, path_to_save + 'train.pt')
-    torch.save(val_dataset, path_to_save + 'val.pt')
-    torch.save(test_dataset, path_to_save + 'test.pt')
+    if save_as_numpy:
+        if mem_mode:
+            np.save(path_to_save + 'train_tracks.npy', train_dataset['tracks'])
+            np.save(path_to_save + 'train_distances.npy', train_dataset['distances'])
+
+            np.save(path_to_save + 'val_tracks.npy', val_dataset['tracks'])
+            np.save(path_to_save + 'val_distances.npy', val_dataset['distances'])
+
+            np.save(path_to_save + 'test_tracks.npy', test_dataset['tracks'])
+            np.save(path_to_save + 'test_distances.npy', test_dataset['distances'])
+        else:
+            np.savez(path_to_save + 'train.npz', tracks=train_dataset['tracks'], distances=train_dataset['distances'])
+            np.savez(path_to_save + 'val.npz', tracks=val_dataset['tracks'], distances=val_dataset['distances'])
+            np.savez(path_to_save + 'test.npz', tracks=test_dataset['tracks'], distances=test_dataset['distances'])
+    else:
+        torch.save(train_dataset, path_to_save + 'train.pt')
+        torch.save(val_dataset, path_to_save + 'val.pt')
+        torch.save(test_dataset, path_to_save + 'test.pt')
 
     logger.info(f'Saved track datasets at {path_to_save}')
 
