@@ -490,13 +490,13 @@ class BaselineDataset(Dataset):
 
 
 if __name__ == '__main__':
-    d1 = BaselineDataset(SDDVideoClasses.NEXUS, 11, NetworkMode.TRAIN)
-    d2 = BaselineDataset(SDDVideoClasses.NEXUS, 11, NetworkMode.TRAIN)
-    d = ConcatDataset([d1, d2])
-    loader = DataLoader(d, batch_size=32)
-    dd = next(iter(loader))
-    print()
-    # generate_annotation_for_all()
+    # d1 = BaselineDataset(SDDVideoClasses.NEXUS, 11, NetworkMode.TRAIN)
+    # d2 = BaselineDataset(SDDVideoClasses.NEXUS, 11, NetworkMode.TRAIN)
+    # d = ConcatDataset([d1, d2])
+    # loader = DataLoader(d, batch_size=32)
+    # dd = next(iter(loader))
+    # print()
+    generate_annotation_for_all()
     # ff = np.load('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/'
     #              'SDD_Features/nexus/video11/splits/train_distances.npy', allow_pickle=True, mmap_mode='r')
     # print()
