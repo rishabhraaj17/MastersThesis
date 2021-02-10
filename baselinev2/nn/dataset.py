@@ -14,7 +14,9 @@ from tqdm import tqdm
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost, get_frame_annotations
 from average_image.constants import ANNOTATION_COLUMNS
 from baselinev2.config import VIDEO_PATH, ANNOTATION_CSV_PATH, VIDEO_SAVE_PATH, ANNOTATION_TXT_PATH, \
-    TRAIN_SPLIT_PERCENTAGE, VALIDATION_SPLIT_PERCENTAGE, TEST_SPLIT_PERCENTAGE, SPLIT_ANNOTATION_SAVE_PATH
+    TRAIN_SPLIT_PERCENTAGE, VALIDATION_SPLIT_PERCENTAGE, TEST_SPLIT_PERCENTAGE, SPLIT_ANNOTATION_SAVE_PATH, \
+    SDD_ANNOTATIONS_ROOT_PATH, SDD_VIDEO_CLASSES_LIST, SDD_PER_CLASS_VIDEOS_LIST, SAVE_BASE_PATH, \
+    SDD_VIDEO_CLASSES_RESUME_LIST, SDD_PER_CLASS_VIDEOS_RESUME_LIST
 from baselinev2.plot_utils import plot_for_video_image_and_box
 from baselinev2.structures import TracksDataset, SingleTrack
 from log import initialize_logging, get_logger
@@ -275,22 +277,37 @@ def make_trainable_trajectory_dataset(dataset: Dict[int, TracksDataset]):
 
 def make_trainable_trajectory_dataset_by_length(dataset: Dict[int, TracksDataset], length=20, save_path=None,
                                                 numpy_save=False):
-    final_tracks = []
+    final_tracks, relative_distances = [], []
     for track_id, track_obj in tqdm(dataset.items()):
         for track in track_obj.tracks:
             if len(track.data) > length:
                 # split array into parts of max length
                 splits, remaining_part = array_split_by_length(track.data, length=length)
                 for split in splits:
+                    relative_distances.append(get_relative_distances(split))
                     final_tracks.append(np.hstack((split[:, 0:6], split[:, 10:])))
 
+    final_tracks = np.stack(final_tracks) if len(final_tracks) != 0 else np.zeros((0, 12))
+    relative_distances = np.stack(relative_distances) if len(relative_distances) != 0 else np.zeros((0, 2))
+
+    save_dict = {'tracks': final_tracks, 'distances': relative_distances}
     if save_path is not None:
         if numpy_save:
             with open(save_path, 'wb') as f:
-                np.savez(f, tracks=final_tracks, allow_pickle=True)
+                np.savez(f, tracks=final_tracks, distances=relative_distances, allow_pickle=True)
         else:
-            torch.save(final_tracks, save_path)
-    return np.stack(final_tracks)
+            torch.save(save_dict, save_path)
+    return save_dict
+
+
+def get_relative_distances(arr):
+    relative_distances = []
+    for idx in range(len(arr) - 1):
+        dist = np.linalg.norm((np.expand_dims(arr[idx + 1, -2:], axis=0).astype(np.float32) -
+                               np.expand_dims(arr[idx, -2:], axis=0).astype(np.float32)),
+                              ord=2, axis=0)
+        relative_distances.append(dist)
+    return np.array(relative_distances)
 
 
 def array_split_by_length(arr, length=20):
@@ -301,10 +318,25 @@ def array_split_by_length(arr, length=20):
     return splits, remaining_array
 
 
+def generate_annotation_for_all():
+    # for idx, video_class in enumerate(SDD_VIDEO_CLASSES_LIST):
+    #     for video_number in SDD_PER_CLASS_VIDEOS_LIST[idx]:
+    for idx, video_class in enumerate(SDD_VIDEO_CLASSES_RESUME_LIST):
+        for video_number in SDD_PER_CLASS_VIDEOS_RESUME_LIST[idx]:
+            logger.info(f'Processing for {video_class.value} - {video_number}')
+            split_annotations_and_save_as_track_datasets_by_length(
+                annotation_path=f'{SDD_ANNOTATIONS_ROOT_PATH}{video_class.value}/video{video_number}/'
+                                f'annotation_augmented.csv',
+                path_to_save=f'{SAVE_BASE_PATH}{video_class.value}/video{video_number}/splits/',
+                by_track=False)
+    logger.info('Finished generating all annotations!')
+
+
 if __name__ == '__main__':
-    split_annotations_and_save_as_track_datasets_by_length(annotation_path=ANNOTATION_CSV_PATH,
-                                                           path_to_save=SPLIT_ANNOTATION_SAVE_PATH,
-                                                           by_track=False)
+    generate_annotation_for_all()
+    # split_annotations_and_save_as_track_datasets_by_length(annotation_path=ANNOTATION_CSV_PATH,
+    #                                                        path_to_save=SPLIT_ANNOTATION_SAVE_PATH,
+    #                                                        by_track=False)
     # make_trainable_trajectory_dataset_by_length(torch.load(DataSplitPath.TRAIN.value),
     #                                             save_path=SPLIT_ANNOTATION_SAVE_PATH + 'train.npz',
     #                                             numpy_save=False)

@@ -7,7 +7,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
 from average_image.utils import compute_ade, compute_fde
-from baselinev2.config import MANUAL_SEED, LINEAR_CFG
+from baselinev2.config import MANUAL_SEED, LINEAR_CFG, DATASET_META, META_LABEL, VIDEO_NUMBER
 from log import initialize_logging, get_logger
 
 initialize_logging()
@@ -42,7 +42,23 @@ def core_linear_layers_maker(batch_norm, in_features, layers, v):
     return in_features, layers
 
 
-class BaselineBase(LightningModule):
+class BaselineEncoder(nn.Module):
+    def __init__(self):
+        super(BaselineEncoder, self).__init__()
+
+    def forward(self, x):
+        pass
+
+
+class BaselineDecoder(nn.Module):
+    def __init__(self):
+        super(BaselineDecoder, self).__init__()
+
+    def forward(self, x):
+        pass
+
+
+class BaselineRNN(LightningModule):
     """
     Watch 8 time steps, predict next 12 (learn 8 - supervised, 12 - unsupervised)
     """
@@ -50,12 +66,12 @@ class BaselineBase(LightningModule):
     def __init__(self, meta=None, original_frame_shape=None, num_frames_between_two_time_steps=12, lr=1e-5,
                  meta_video=None, meta_train_video_number=None, meta_val_video_number=None, time_steps=5,
                  train_dataset=None, val_dataset=None, batch_size=1, num_workers=0, use_batch_norm=False):
-        super(BaselineBase, self).__init__()
+        super(BaselineRNN, self).__init__()
 
         self.block_1 = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
                                    last_without_activation=False)
-        self.rnn_cell = nn.LSTMCell(input_size=16, hidden_size=32)
-        self.rnn_cell_1 = nn.LSTMCell(input_size=32, hidden_size=64)
+        self.encoder = nn.LSTMCell(input_size=16, hidden_size=32)
+        self.decoder = nn.LSTMCell(input_size=32, hidden_size=64)
         self.block_2 = make_layers(LINEAR_CFG['decoder'], batch_norm=use_batch_norm, encoder=False,
                                    last_without_activation=True)
 
@@ -78,21 +94,16 @@ class BaselineBase(LightningModule):
         self.save_hyperparameters('lr', 'time_steps', 'meta_video', 'batch_size', 'meta_train_video_number',
                                   'meta_val_video_number', 'use_batch_norm')
 
-    def forward(self, x, cx=None, hx=None, cx_1=None, hx_1=None, stacked=True):
-        if stacked:
-            block_1 = self.block_1(x)
-            hx, cx = self.rnn_cell(block_1, (hx, cx))
-            hx = F.relu(hx, inplace=True)
-            hx_1, cx_1 = self.rnn_cell_1(hx, (hx_1, cx_1))
-            hx_1 = F.relu(hx_1, inplace=True)
-            out = self.block_2(hx_1)
-        else:
-            block_1 = self.block_1(x)
-            hx, cx = self.rnn_cell(block_1, (hx, cx))
-            out = self.block_2(hx)
-        return out, cx, hx, cx_1, hx_1
+    def forward(self, x):
+        return NotImplemented
 
     def one_step(self, batch):
+        tracks, relative_distances = batch
+        # last 2 values are bounding box centers
+        agents_position = tracks[..., -2:]
+        relative_velocities = relative_distances / 0.4
+        print()
+
         return NotImplemented
 
     def init_hidden_states(self, b_size):
@@ -156,16 +167,17 @@ class BaselineBase(LightningModule):
         return [opt], schedulers
 
 
-class Baseline(BaselineBase):
-    def __init__(self, meta=None, original_frame_shape=None, num_frames_between_two_time_steps=12, lr=1e-5,
-                 meta_video=None, meta_train_video_number=None, meta_val_video_number=None, time_steps=5,
-                 train_dataset=None, val_dataset=None, batch_size=1, num_workers=0, use_batch_norm=False):
-        super(Baseline, self).__init__(
-            meta=meta, original_frame_shape=original_frame_shape, time_steps=time_steps, batch_size=batch_size,
-            num_frames_between_two_time_steps=num_frames_between_two_time_steps, lr=lr, meta_video=meta_video,
-            meta_train_video_number=meta_train_video_number, meta_val_video_number=meta_val_video_number,
-            num_workers=num_workers, use_batch_norm=use_batch_norm, train_dataset=train_dataset,
-            val_dataset=val_dataset)
-
-    def one_step(self, batch):
-        pass
+if __name__ == '__main__':
+    dummy_tracks_in = torch.randn(size=(20, 64, 12))
+    dummy_rel_distance_in = torch.randn(size=(19, 64, 2))
+    # encoder_linear = nn.Sequential(nn.Linear(2, 16),
+    #                                nn.ReLU(),
+    #                                nn.Linear(16, 32),
+    #                                nn.ReLU())
+    # encoder_lstm = nn.LSTM(input_size=32, hidden_size=64, num_layers=1, bias=True)
+    # o = encoder_linear(dummy_tracks_in[:8, :, -2:].view(-1, 2))
+    # o = encoder_lstm(o.view(8, 64, -1))
+    m = BaselineRNN(meta=DATASET_META, meta_video=META_LABEL, meta_train_video_number=VIDEO_NUMBER,
+                    meta_val_video_number=VIDEO_NUMBER)
+    o = m.one_step([dummy_tracks_in, dummy_rel_distance_in])
+    print(o.shape)
