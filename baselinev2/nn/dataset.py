@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import skimage
 import torch
-from torch.utils.data import Dataset, ConcatDataset, ChainDataset
+from torch.utils.data import Dataset, ConcatDataset, ChainDataset, DataLoader
 from sklearn.model_selection import train_test_split
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from tqdm import tqdm
@@ -480,22 +480,23 @@ class BaselineDataset(Dataset):
         gt_xy = tracks[..., self.observation_length:, -2:]
         in_velocities = relative_distances[..., :self.observation_length - 1, :]
         gt_velocities = relative_distances[..., self.observation_length:, :]
-        in_track_ids = tracks[..., :self.observation_length, 0]
-        gt_track_ids = tracks[..., self.observation_length:, 0]
-        in_frame_numbers = tracks[..., :self.observation_length, 5]
-        gt_frame_numbers = tracks[..., self.observation_length:, 5]
+        in_track_ids = tracks[..., :self.observation_length, 0].int()
+        gt_track_ids = tracks[..., self.observation_length:, 0].int()
+        in_frame_numbers = tracks[..., :self.observation_length, 5].int()
+        gt_frame_numbers = tracks[..., self.observation_length:, 5].int()
 
         return in_xy, gt_xy, in_velocities, gt_velocities, in_track_ids, gt_track_ids, in_frame_numbers, \
                gt_frame_numbers
 
 
 if __name__ == '__main__':
-    # d1 = BaselineDataset(SDDVideoClasses.NEXUS, 11, NetworkMode.TRAIN)
-    # d2 = BaselineDataset(SDDVideoClasses.NEXUS, 11, NetworkMode.TRAIN)
-    # d = ConcatDataset([d1, d2])
-    # dd = d[0:32]
-    # print()
-    generate_annotation_for_all()
+    d1 = BaselineDataset(SDDVideoClasses.NEXUS, 11, NetworkMode.TRAIN)
+    d2 = BaselineDataset(SDDVideoClasses.NEXUS, 11, NetworkMode.TRAIN)
+    d = ConcatDataset([d1, d2])
+    loader = DataLoader(d, batch_size=32)
+    dd = next(iter(loader))
+    print()
+    # generate_annotation_for_all()
     # ff = np.load('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/'
     #              'SDD_Features/nexus/video11/splits/train_distances.npy', allow_pickle=True, mmap_mode='r')
     # print()
