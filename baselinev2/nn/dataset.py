@@ -19,7 +19,7 @@ from baselinev2.config import VIDEO_PATH, ANNOTATION_CSV_PATH, VIDEO_SAVE_PATH, 
     SDD_ANNOTATIONS_ROOT_PATH, SDD_VIDEO_CLASSES_LIST, SDD_PER_CLASS_VIDEOS_LIST, SAVE_BASE_PATH, \
     SDD_VIDEO_CLASSES_RESUME_LIST, SDD_PER_CLASS_VIDEOS_RESUME_LIST, DATASET_META
 from baselinev2.constants import NetworkMode
-from baselinev2.plot_utils import plot_for_video_image_and_box
+from baselinev2.plot_utils import plot_for_video_image_and_box, plot_trajectories_with_frame
 from baselinev2.structures import TracksDataset, SingleTrack
 from log import initialize_logging, get_logger
 
@@ -41,6 +41,20 @@ def get_frames_count(video_path):
     count = int(video.get(cv.CAP_PROP_FRAME_COUNT))
     video.release()
     return count
+
+
+def extract_frame_from_video(video_path, frame_number):
+    video = cv.VideoCapture(video_path)
+    count = int(video.get(cv.CAP_PROP_FRAME_COUNT))
+    if 0 <= frame_number <= count:
+        # video.set(cv.CAP_PROP_POS_FRAMES, frame_number - 1)
+        video.set(cv.CAP_PROP_POS_FRAMES, frame_number)
+        res, frame = video.read()
+        video.release()
+        return frame if res else None
+    logger.error('Frame Number out of range!')
+    video.release()
+    return None
 
 
 def sort_annotations_by_frame_numbers(annotation_path):
@@ -469,12 +483,23 @@ class BaselineDataset(Dataset):
 
 
 if __name__ == '__main__':
-    d1 = BaselineDataset(SDDVideoClasses.LITTLE, 1, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.LITTLE)
+    d1 = BaselineDataset(SDDVideoClasses.DEATH_CIRCLE, 1, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.DEATH_CIRCLE)
     # d2 = BaselineDataset(SDDVideoClasses.COUPA, 0, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.COUPA)
     # d = ConcatDataset([d1, d2])
     d = ConcatDataset([d1])
     loader = DataLoader(d, batch_size=32)
-    dd = next(iter(loader))
+    # iterator = iter(loader)
+    for data in loader:
+        in_xy, gt_xy, _, _, in_track_ids, _, in_frame_numbers, _, _ = data  # next(iterator)
+        frame_num = in_frame_numbers[0, 0].item()
+        track_id = in_track_ids[0, 0].item()
+        obs_trajectory = np.stack(in_xy[0].cpu().numpy())
+        true_trajectory = np.stack(gt_xy[0].cpu().numpy())
+        pred_trajectory = np.stack(gt_xy[0].cpu().numpy())
+        current_frame = extract_frame_from_video(VIDEO_PATH, frame_number=frame_num)
+        plot_trajectories_with_frame(current_frame, obs_trajectory, true_trajectory, pred_trajectory,
+                                     frame_number=frame_num, track_id=track_id)
+        print()
     print()
     # generate_annotation_for_all()
     # ff = np.load('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/'

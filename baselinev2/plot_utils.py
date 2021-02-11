@@ -825,3 +825,33 @@ def plot_trajectories(obs_trajectory, gt_trajectory, pred_trajectory, frame_numb
         plt.show()
 
     return fig
+
+
+def plot_trajectories_with_frame(frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_number, track_id,
+                                 additional_text='', return_figure_only=False, save_path=None):
+    fig, ax = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+    ax.imshow(frame)
+    add_line_to_axis(ax=ax, features=obs_trajectory)
+    add_line_to_axis(ax=ax, features=gt_trajectory, marker_color='r')
+    add_line_to_axis(ax=ax, features=pred_trajectory, marker_color='g')
+    ax.set_title('Trajectories')
+
+    fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}\n{additional_text}')
+
+    legends_dict = {'b': 'Observed', 'r': 'True', 'g': 'Predicted'}
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
+    if return_figure_only:
+        plt.close()
+        return fig
+
+    if save_path is not None:
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path + f"frame_{frame_number}.png")
+        plt.close()
+    else:
+        plt.show()
+
+    return fig
