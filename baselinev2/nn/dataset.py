@@ -335,7 +335,11 @@ def turn_splits_into_trajectory_dataset_each_track(split_path, num_frames_in_jum
         if distances.size != 0:
             relative_distances_save.append(distances)
 
-    return {'tracks': np.concatenate(final_tracks_save), 'distances': np.concatenate(relative_distances_save)}
+    final_tracks_save = np.concatenate(final_tracks_save) if len(final_tracks_save) != 0 else np.zeros((0, 12))
+    relative_distances_save = np.concatenate(relative_distances_save) if len(relative_distances_save) != 0 \
+        else np.zeros((0, 2))
+
+    return {'tracks': final_tracks_save, 'distances': relative_distances_save}
 
 
 def make_trainable_trajectory_dataset_by_length_each_track(track_obj, length=20, save_path=None,
