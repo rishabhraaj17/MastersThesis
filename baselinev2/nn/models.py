@@ -1,13 +1,20 @@
+from pathlib import Path
+
 import torch
+from matplotlib import pyplot as plt, patches, lines as mlines
 import numpy as np
-from pytorch_lightning import LightningModule
+from pytorch_lightning import LightningModule, Trainer
 from torch import nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 
 from average_image.utils import compute_ade, compute_fde
-from baselinev2.config import MANUAL_SEED, LINEAR_CFG, DATASET_META, META_LABEL, VIDEO_NUMBER
+from baselinev2.config import MANUAL_SEED, LINEAR_CFG, DATASET_META, META_LABEL, VIDEO_NUMBER, \
+    SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_PER_CLASS_VIDEOS_LIST_FOR_NN, SDD_VIDEO_META_CLASSES_LIST_FOR_NN
+from baselinev2.constants import NetworkMode
+from baselinev2.nn.dataset import BaselineDataset
+from baselinev2.plot_utils import add_features_to_axis
 from log import initialize_logging, get_logger
 
 initialize_logging()
@@ -16,12 +23,12 @@ logger = get_logger('baselinev2.nn.models')
 torch.manual_seed(MANUAL_SEED)
 
 
-def make_layers(cfg, batch_norm=False, encoder=True, last_without_activation=True):
+def make_layers(cfg, batch_norm=False, encoder=True, last_without_activation=True, decoder_in_dim=32):
     layers = []
     if encoder:
         in_features = 2
     else:
-        in_features = 64
+        in_features = decoder_in_dim
     if last_without_activation:
         for v in cfg[:-1]:
             in_features, layers = core_linear_layers_maker(batch_norm, in_features, layers, v)
@@ -42,6 +49,41 @@ def core_linear_layers_maker(batch_norm, in_features, layers, v):
     return in_features, layers
 
 
+def add_line_to_axis(ax, features, marker_size=8, marker_shape='*', marker_color='blue', marker_edge_width=0.2):
+    ax.plot(features[:, 0], features[:, 1], marker_shape, markerfacecolor=marker_color, markeredgecolor='k',
+            markersize=marker_size, markeredgewidth=marker_edge_width)
+    ax.plot(features[:, 0], features[:, 1], color=marker_color)
+
+
+def plot_trajectories(obs_trajectory, gt_trajectory, pred_trajectory, frame_number, track_id, additional_text='',
+                      return_figure_only=False, save_path=None):
+    fig, ax = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+    add_line_to_axis(ax=ax, features=obs_trajectory)
+    add_line_to_axis(ax=ax, features=gt_trajectory, marker_color='r')
+    add_line_to_axis(ax=ax, features=pred_trajectory, marker_color='g')
+    ax.set_title('Trajectories')
+
+    fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}\n{additional_text}')
+
+    legends_dict = {'b': 'Observed', 'r': 'True', 'g': 'Predicted'}
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
+    if return_figure_only:
+        plt.close()
+        return fig
+
+    if save_path is not None:
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path + f"frame_{frame_number}.png")
+        plt.close()
+    else:
+        plt.show()
+
+    return fig
+
+
 class BaselineEncoder(nn.Module):
     def __init__(self):
         super(BaselineEncoder, self).__init__()
@@ -60,20 +102,23 @@ class BaselineDecoder(nn.Module):
 
 class BaselineRNN(LightningModule):
     """
-    Watch 8 time steps, predict next 12 (learn 8 - supervised, 12 - unsupervised)
+    Watch 8 time steps, predict next 12
     """
 
-    def __init__(self, meta=None, original_frame_shape=None, num_frames_between_two_time_steps=12, lr=1e-5,
-                 meta_video=None, meta_train_video_number=None, meta_val_video_number=None, time_steps=5,
-                 train_dataset=None, val_dataset=None, batch_size=1, num_workers=0, use_batch_norm=False):
+    def __init__(self, original_frame_shape=None, prediction_length=12, lr=1e-5, time_steps=5,
+                 train_dataset=None, val_dataset=None, batch_size=1, num_workers=0, use_batch_norm=False,
+                 lstm_num_layers: int = 1):
         super(BaselineRNN, self).__init__()
 
-        self.block_1 = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
-                                   last_without_activation=False)
-        self.encoder = nn.LSTMCell(input_size=16, hidden_size=32)
-        self.decoder = nn.LSTMCell(input_size=32, hidden_size=64)
-        self.block_2 = make_layers(LINEAR_CFG['decoder'], batch_norm=use_batch_norm, encoder=False,
-                                   last_without_activation=True)
+        self.pre_encoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
+                                       last_without_activation=False)
+        # self.encoder = nn.LSTMCell(input_size=16, hidden_size=32)
+        self.encoder = nn.LSTM(input_size=16, hidden_size=32, num_layers=1, bias=True)
+        self.pre_decoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
+                                       last_without_activation=False)
+        self.decoder = nn.LSTMCell(input_size=16, hidden_size=32)
+        self.post_decoder = make_layers(LINEAR_CFG['decoder'], batch_norm=use_batch_norm, encoder=False,
+                                        last_without_activation=True)
 
         self.num_workers = num_workers
         self.batch_size = batch_size
@@ -82,48 +127,74 @@ class BaselineRNN(LightningModule):
         self.val_dataset = val_dataset
         self.train_dataset = train_dataset
 
-        self.original_frame_shape = original_frame_shape
-        self.num_frames_between_two_time_steps = num_frames_between_two_time_steps
+        self.lstm_num_layers = lstm_num_layers
 
-        self.meta = meta
-        self.train_ratio = float(self.meta.get_meta(meta_video, meta_train_video_number)[0]['Ratio'].to_numpy()[0])
-        self.val_ratio = float(self.meta.get_meta(meta_video, meta_val_video_number)[0]['Ratio'].to_numpy()[0])
+        self.original_frame_shape = original_frame_shape
+        self.prediction_length = prediction_length
 
         self.ts = time_steps
 
-        self.save_hyperparameters('lr', 'time_steps', 'meta_video', 'batch_size', 'meta_train_video_number',
-                                  'meta_val_video_number', 'use_batch_norm')
+        self.save_hyperparameters('lr', 'time_steps', 'batch_size', 'use_batch_norm')
 
     def forward(self, x):
         return NotImplemented
 
     def one_step(self, batch):
-        tracks, relative_distances = batch
-        # last 2 values are bounding box centers
-        agents_position = tracks[..., -2:]
-        relative_velocities = relative_distances / 0.4
-        print()
+        in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = batch
 
-        return NotImplemented
+        total_loss = torch.tensor(data=0, dtype=torch.float32, device=self.device)
+        predicted_xy, true_xy = [], []
+
+        # Encoder
+        b, seq_len = in_uv.size(0), in_uv.size(1)
+        h0, c0 = self.init_hidden_states(b_size=b)
+        out = self.pre_encoder(in_uv.view(-1, 2))
+        out = F.relu(out.view(seq_len, b, -1))
+        out, (h_enc, c_enc) = self.encoder(out, (h0, c0))
+        # Decoder
+        # Last (x,y) and (u,v) position at T=8
+        last_xy = in_xy[:, -1, ...]
+        last_uv = in_uv[:, -1, ...]
+
+        h_dec, c_dec = h_enc.squeeze(0), c_enc.squeeze(0)
+        for gt_pred_xy in gt_xy.permute(1, 0, 2):
+            out = self.pre_decoder(last_uv)
+            h_dec, c_dec = self.decoder(out, (h_dec, c_dec))
+            pred_uv = self.post_decoder(F.relu(h_dec))
+            out = last_xy + (pred_uv * 0.4)
+            total_loss += self.center_based_loss_meters(gt_center=gt_pred_xy, pred_center=out, ratio=ratio[0].item())
+
+            predicted_xy.append(out.detach().cpu().numpy())
+            true_xy.append(gt_pred_xy.detach().cpu().numpy())
+
+            last_xy = out
+            last_uv = pred_uv
+
+        ade = compute_ade(np.stack(predicted_xy), np.stack(true_xy)).item()
+        fde = compute_fde(np.stack(predicted_xy), np.stack(true_xy)).item()
+
+        return total_loss / self.prediction_length, ade, fde, ratio[0].item()
 
     def init_hidden_states(self, b_size):
-        hx, cx = torch.zeros(size=(b_size, 32), device=self.device), torch.zeros(size=(b_size, 32), device=self.device)
-        hx_1, cx_1 = torch.zeros(size=(b_size, 64), device=self.device), torch.zeros(size=(b_size, 64),
-                                                                                     device=self.device)
+        hx, cx = torch.zeros(size=(self.lstm_num_layers, b_size, 32), device=self.device), \
+                 torch.zeros(size=(self.lstm_num_layers, b_size, 32), device=self.device)
         torch.nn.init.xavier_normal_(hx)
         torch.nn.init.xavier_normal_(cx)
-        torch.nn.init.xavier_normal_(hx_1)
-        torch.nn.init.xavier_normal_(cx_1)
 
-        return cx, cx_1, hx, hx_1
+        return hx, cx
 
-    def center_based_loss_meters(self, gt_center, pred_center):
-        if self.training:
-            to_m = self.train_ratio
-        else:
-            to_m = self.val_ratio
-        loss = self.l2_norm(pred_center, gt_center) * to_m
+    def center_based_loss_meters(self, gt_center, pred_center, ratio):
+        loss = self.l2_norm(pred_center, gt_center) * ratio
         return loss
+
+    @staticmethod
+    def plot_one_trajectory(in_xy, true_xy, predicted_xy, idx, frame_number=0):
+        obs_trajectory = np.stack(in_xy[idx].cpu().numpy())
+        true_trajectory = np.stack([t[idx] for t in true_xy])
+        pred_trajectory = np.stack([t[idx] for t in predicted_xy])
+
+        plot_trajectories(obs_trajectory=obs_trajectory, gt_trajectory=true_trajectory, pred_trajectory=pred_trajectory,
+                          frame_number=frame_number, track_id=idx)
 
     @staticmethod
     def l2_norm(point1, point2):
@@ -138,29 +209,38 @@ class BaselineRNN(LightningModule):
                           num_workers=self.num_workers)
 
     def training_step(self, batch, batch_idx):
-        loss, ade, fde = self.one_step(batch)
-        if ade is None or fde is None:
-            tensorboard_logs = {'train_loss': loss, 'train/ade': 0, 'train/fde': 0}
-        else:
-            tensorboard_logs = {'train_loss': loss, 'train/ade': ade * self.train_ratio,
-                                'train/fde': fde * self.train_ratio}
-        return {'loss': loss, 'log': tensorboard_logs}
+        loss, ade, fde, ratio = self.one_step(batch)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/ade', ade * ratio, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/fde', fde * ratio, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+
+        return loss
+        # if ade is None or fde is None:
+        #
+        #     tensorboard_logs = {'train_loss': loss, 'train/ade': 0, 'train/fde': 0}
+        # else:
+        #     tensorboard_logs = {'train_loss': loss, 'train/ade': ade * ratio, 'train/fde': fde * ratio}
+        # return {'loss': loss, 'log': tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
-        loss, ade, fde = self.one_step(batch)
-        if ade is None or fde is None:
-            tensorboard_logs = {'val_loss': loss, 'val/ade': 0, 'val/fde': 0}
-        else:
-            tensorboard_logs = {'val_loss': loss, 'val/ade': ade * self.val_ratio, 'val/fde': fde * self.val_ratio}
+        loss, ade, fde, ratio = self.one_step(batch)
+        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/ade', ade * ratio, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/fde', fde * ratio, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
-        return {'loss': loss, 'log': tensorboard_logs}
+        return loss
+        # if ade is None or fde is None:
+        #     tensorboard_logs = {'val_loss': loss, 'val/ade': 0, 'val/fde': 0}
+        # else:
+        #     tensorboard_logs = {'val_loss': loss, 'val/ade': ade * ratio, 'val/fde': fde * ratio}
+        # return {'loss': loss, 'log': tensorboard_logs}
 
     def configure_optimizers(self):
         opt = torch.optim.Adam(self.parameters(), lr=self.lr)
         schedulers = [
             {
-                'scheduler': ReduceLROnPlateau(opt, patience=10, verbose=True, factor=0.1, cooldown=2),
-                'monitor': 'val_loss',
+                'scheduler': ReduceLROnPlateau(opt, patience=15, verbose=True, factor=0.1, cooldown=2),
+                'monitor': 'val_loss_epoch',
                 'interval': 'epoch',
                 'frequency': 1
             }]
@@ -168,16 +248,18 @@ class BaselineRNN(LightningModule):
 
 
 if __name__ == '__main__':
-    dummy_tracks_in = torch.randn(size=(20, 64, 12))
-    dummy_rel_distance_in = torch.randn(size=(19, 64, 2))
-    # encoder_linear = nn.Sequential(nn.Linear(2, 16),
-    #                                nn.ReLU(),
-    #                                nn.Linear(16, 32),
-    #                                nn.ReLU())
-    # encoder_lstm = nn.LSTM(input_size=32, hidden_size=64, num_layers=1, bias=True)
-    # o = encoder_linear(dummy_tracks_in[:8, :, -2:].view(-1, 2))
-    # o = encoder_lstm(o.view(8, 64, -1))
-    m = BaselineRNN(meta=DATASET_META, meta_video=META_LABEL, meta_train_video_number=VIDEO_NUMBER,
-                    meta_val_video_number=VIDEO_NUMBER)
-    o = m.one_step([dummy_tracks_in, dummy_rel_distance_in])
-    print(o.shape)
+    train_datasets, val_datasets = [], []
+    for v_idx, (video_class, meta) in enumerate(zip(SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_VIDEO_META_CLASSES_LIST_FOR_NN)):
+        for video_number in SDD_PER_CLASS_VIDEOS_LIST_FOR_NN[v_idx]:
+            train_datasets.append(BaselineDataset(video_class=video_class, video_number=video_number,
+                                                  split=NetworkMode.TRAIN, meta_label=meta))
+            val_datasets.append(BaselineDataset(video_class=video_class, video_number=video_number,
+                                                split=NetworkMode.VALIDATION, meta_label=meta))
+    dataset_train = ConcatDataset(datasets=train_datasets)
+    dataset_val = ConcatDataset(datasets=val_datasets)
+
+    m = BaselineRNN(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=1024, num_workers=0, lr=1e-2,
+                    use_batch_norm=False)
+
+    trainer = Trainer(gpus=1, max_epochs=1)
+    trainer.fit(model=m)

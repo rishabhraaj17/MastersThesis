@@ -13,11 +13,11 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from tqdm import tqdm
 
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost, get_frame_annotations
-from average_image.constants import ANNOTATION_COLUMNS, SDDVideoClasses
+from average_image.constants import ANNOTATION_COLUMNS, SDDVideoClasses, SDDVideoDatasets
 from baselinev2.config import VIDEO_PATH, ANNOTATION_CSV_PATH, VIDEO_SAVE_PATH, ANNOTATION_TXT_PATH, \
     TRAIN_SPLIT_PERCENTAGE, VALIDATION_SPLIT_PERCENTAGE, TEST_SPLIT_PERCENTAGE, SPLIT_ANNOTATION_SAVE_PATH, \
     SDD_ANNOTATIONS_ROOT_PATH, SDD_VIDEO_CLASSES_LIST, SDD_PER_CLASS_VIDEOS_LIST, SAVE_BASE_PATH, \
-    SDD_VIDEO_CLASSES_RESUME_LIST, SDD_PER_CLASS_VIDEOS_RESUME_LIST
+    SDD_VIDEO_CLASSES_RESUME_LIST, SDD_PER_CLASS_VIDEOS_RESUME_LIST, DATASET_META
 from baselinev2.constants import NetworkMode
 from baselinev2.plot_utils import plot_for_video_image_and_box
 from baselinev2.structures import TracksDataset, SingleTrack
@@ -431,9 +431,15 @@ def generate_annotation_for_all():
 
 
 class BaselineDataset(Dataset):
-    def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode, root: str = SAVE_BASE_PATH,
+    def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode, 
+                 meta_label: SDDVideoDatasets, root: str = SAVE_BASE_PATH,
                  observation_length: int = 8, prediction_length: int = 12):
         super(BaselineDataset, self).__init__()
+        try:
+            self.ratio = float(DATASET_META.get_meta(meta_label, video_number)[0]['Ratio'].to_numpy()[0])
+        except IndexError:
+            # Homography not known!
+            self.ratio = 1
         path_to_dataset = f'{root}{video_class.value}/video{video_number}/splits/'
 
         self.tracks = np.load(f'{path_to_dataset}{split.value}_tracks.npy', allow_pickle=True, mmap_mode='r+')
@@ -459,17 +465,18 @@ class BaselineDataset(Dataset):
         gt_frame_numbers = tracks[..., self.observation_length:, 5].int()
 
         return in_xy, gt_xy, in_velocities, gt_velocities, in_track_ids, gt_track_ids, in_frame_numbers, \
-               gt_frame_numbers
+               gt_frame_numbers, self.ratio
 
 
 if __name__ == '__main__':
-    # d1 = BaselineDataset(SDDVideoClasses.NEXUS, 11, NetworkMode.TRAIN)
-    # d2 = BaselineDataset(SDDVideoClasses.NEXUS, 11, NetworkMode.TRAIN)
+    d1 = BaselineDataset(SDDVideoClasses.LITTLE, 1, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.LITTLE)
+    # d2 = BaselineDataset(SDDVideoClasses.COUPA, 0, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.COUPA)
     # d = ConcatDataset([d1, d2])
-    # loader = DataLoader(d, batch_size=32)
-    # dd = next(iter(loader))
-    # print()
-    generate_annotation_for_all()
+    d = ConcatDataset([d1])
+    loader = DataLoader(d, batch_size=32)
+    dd = next(iter(loader))
+    print()
+    # generate_annotation_for_all()
     # ff = np.load('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/'
     #              'SDD_Features/nexus/video11/splits/train_distances.npy', allow_pickle=True, mmap_mode='r')
     # print()
