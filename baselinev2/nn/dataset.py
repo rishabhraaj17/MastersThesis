@@ -430,37 +430,6 @@ def generate_annotation_for_all():
     logger.info('Finished generating all annotations!')
 
 
-class BaselineDatasetV0(Dataset):
-    def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode, root: str = SAVE_BASE_PATH,
-                 observation_length: int = 8, prediction_length: int = 12):
-        super(BaselineDatasetV0, self).__init__()
-        path_to_dataset = f'{root}{video_class.value}/video{video_number}/splits/{split.value}.pt'
-        dataset = torch.load(path_to_dataset)
-
-        self.tracks = dataset['tracks']
-        self.relative_distances = dataset['distances']
-
-        self.prediction_length = prediction_length
-        self.observation_length = observation_length
-
-    def __len__(self):
-        return len(self.relative_distances)
-
-    def __getitem__(self, item):
-        tracks, relative_distances = self.tracks[item], self.relative_distances[item]
-        in_xy = torch.from_numpy(tracks[..., :self.observation_length, -2:].astype(np.float32))
-        gt_xy = torch.from_numpy(tracks[..., self.observation_length:, -2:].astype(np.float32))
-        in_velocities = torch.from_numpy(relative_distances[..., :self.observation_length - 1, :].astype(np.float32))
-        gt_velocities = torch.from_numpy(relative_distances[..., self.observation_length:, :].astype(np.float32))
-        in_track_ids = torch.from_numpy(tracks[..., :self.observation_length, 0].astype(np.float32))
-        gt_track_ids = torch.from_numpy(tracks[..., self.observation_length:, 0].astype(np.float32))
-        in_frame_numbers = torch.from_numpy(tracks[..., :self.observation_length, 5].astype(np.float32))
-        gt_frame_numbers = torch.from_numpy(tracks[..., self.observation_length:, 5].astype(np.float32))
-
-        return in_xy, gt_xy, in_velocities, gt_velocities, in_track_ids, gt_track_ids, in_frame_numbers, \
-               gt_frame_numbers
-
-
 class BaselineDataset(Dataset):
     def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode, root: str = SAVE_BASE_PATH,
                  observation_length: int = 8, prediction_length: int = 12):
@@ -482,8 +451,8 @@ class BaselineDataset(Dataset):
                                      torch.from_numpy(self.relative_distances[item])
         in_xy = tracks[..., :self.observation_length, -2:]
         gt_xy = tracks[..., self.observation_length:, -2:]
-        in_velocities = relative_distances[..., :self.observation_length - 1, :]
-        gt_velocities = relative_distances[..., self.observation_length:, :]
+        in_velocities = relative_distances[..., :self.observation_length - 1, :] / 0.4
+        gt_velocities = relative_distances[..., self.observation_length:, :] / 0.4
         in_track_ids = tracks[..., :self.observation_length, 0].int()
         gt_track_ids = tracks[..., self.observation_length:, 0].int()
         in_frame_numbers = tracks[..., :self.observation_length, 5].int()
