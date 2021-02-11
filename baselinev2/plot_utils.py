@@ -790,3 +790,38 @@ def plot_processing_steps(xy_cloud, shifted_xy_cloud, xy_box, shifted_xy_box,
         Path(save_path).mkdir(parents=True, exist_ok=True)
         plt.savefig(save_path + f'fig_frame_{frame_number}_track_{track_id}.png')
         plt.close()
+
+
+def add_line_to_axis(ax, features, marker_size=8, marker_shape='*', marker_color='blue', marker_edge_width=0.2):
+    ax.plot(features[:, 0], features[:, 1], marker_shape, markerfacecolor=marker_color, markeredgecolor='k',
+            markersize=marker_size, markeredgewidth=marker_edge_width)
+    ax.plot(features[:, 0], features[:, 1], color=marker_color)
+
+
+def plot_trajectories(obs_trajectory, gt_trajectory, pred_trajectory, frame_number, track_id, additional_text='',
+                      return_figure_only=False, save_path=None):
+    fig, ax = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+    add_line_to_axis(ax=ax, features=obs_trajectory)
+    add_line_to_axis(ax=ax, features=gt_trajectory, marker_color='r')
+    add_line_to_axis(ax=ax, features=pred_trajectory, marker_color='g')
+    ax.set_title('Trajectories')
+
+    fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}\n{additional_text}')
+
+    legends_dict = {'b': 'Observed', 'r': 'True', 'g': 'Predicted'}
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
+    if return_figure_only:
+        plt.close()
+        return fig
+
+    if save_path is not None:
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path + f"frame_{frame_number}.png")
+        plt.close()
+    else:
+        plt.show()
+
+    return fig

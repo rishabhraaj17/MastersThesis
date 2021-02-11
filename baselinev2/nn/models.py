@@ -1,7 +1,4 @@
-from pathlib import Path
-
 import torch
-from matplotlib import pyplot as plt, patches, lines as mlines
 import numpy as np
 from pytorch_lightning import LightningModule, Trainer
 from torch import nn
@@ -10,11 +7,11 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, ConcatDataset
 
 from average_image.utils import compute_ade, compute_fde
-from baselinev2.config import MANUAL_SEED, LINEAR_CFG, DATASET_META, META_LABEL, VIDEO_NUMBER, \
-    SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_PER_CLASS_VIDEOS_LIST_FOR_NN, SDD_VIDEO_META_CLASSES_LIST_FOR_NN
+from baselinev2.config import MANUAL_SEED, LINEAR_CFG, SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_PER_CLASS_VIDEOS_LIST_FOR_NN,\
+    SDD_VIDEO_META_CLASSES_LIST_FOR_NN, NUM_WORKERS, BATCH_SIZE, LR, USE_BATCH_NORM, NUM_EPOCHS
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import BaselineDataset
-from baselinev2.plot_utils import add_features_to_axis
+from baselinev2.plot_utils import plot_trajectories
 from log import initialize_logging, get_logger
 
 initialize_logging()
@@ -23,7 +20,8 @@ logger = get_logger('baselinev2.nn.models')
 torch.manual_seed(MANUAL_SEED)
 
 
-def make_layers(cfg, batch_norm=False, encoder=True, last_without_activation=True, decoder_in_dim=32):
+def make_layers(cfg, batch_norm=False, encoder=True, last_without_activation=True,
+                decoder_in_dim=LINEAR_CFG['lstm_encoder']):
     layers = []
     if encoder:
         in_features = 2
@@ -47,41 +45,6 @@ def core_linear_layers_maker(batch_norm, in_features, layers, v):
         layers += [linear, nn.ReLU(inplace=True)]
     in_features = v
     return in_features, layers
-
-
-def add_line_to_axis(ax, features, marker_size=8, marker_shape='*', marker_color='blue', marker_edge_width=0.2):
-    ax.plot(features[:, 0], features[:, 1], marker_shape, markerfacecolor=marker_color, markeredgecolor='k',
-            markersize=marker_size, markeredgewidth=marker_edge_width)
-    ax.plot(features[:, 0], features[:, 1], color=marker_color)
-
-
-def plot_trajectories(obs_trajectory, gt_trajectory, pred_trajectory, frame_number, track_id, additional_text='',
-                      return_figure_only=False, save_path=None):
-    fig, ax = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
-    add_line_to_axis(ax=ax, features=obs_trajectory)
-    add_line_to_axis(ax=ax, features=gt_trajectory, marker_color='r')
-    add_line_to_axis(ax=ax, features=pred_trajectory, marker_color='g')
-    ax.set_title('Trajectories')
-
-    fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}\n{additional_text}')
-
-    legends_dict = {'b': 'Observed', 'r': 'True', 'g': 'Predicted'}
-
-    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
-    fig.legend(handles=legend_patches, loc=2)
-
-    if return_figure_only:
-        plt.close()
-        return fig
-
-    if save_path is not None:
-        Path(save_path).mkdir(parents=True, exist_ok=True)
-        fig.savefig(save_path + f"frame_{frame_number}.png")
-        plt.close()
-    else:
-        plt.show()
-
-    return fig
 
 
 class BaselineEncoder(nn.Module):
@@ -112,11 +75,11 @@ class BaselineRNN(LightningModule):
 
         self.pre_encoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
                                        last_without_activation=False)
-        # self.encoder = nn.LSTMCell(input_size=16, hidden_size=32)
-        self.encoder = nn.LSTM(input_size=16, hidden_size=32, num_layers=1, bias=True)
+        self.encoder = nn.LSTM(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'],
+                               num_layers=lstm_num_layers, bias=True)
         self.pre_decoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
                                        last_without_activation=False)
-        self.decoder = nn.LSTMCell(input_size=16, hidden_size=32)
+        self.decoder = nn.LSTMCell(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'])
         self.post_decoder = make_layers(LINEAR_CFG['decoder'], batch_norm=use_batch_norm, encoder=False,
                                         last_without_activation=True)
 
@@ -176,8 +139,8 @@ class BaselineRNN(LightningModule):
         return total_loss / self.prediction_length, ade, fde, ratio[0].item()
 
     def init_hidden_states(self, b_size):
-        hx, cx = torch.zeros(size=(self.lstm_num_layers, b_size, 32), device=self.device), \
-                 torch.zeros(size=(self.lstm_num_layers, b_size, 32), device=self.device)
+        hx, cx = torch.zeros(size=(self.lstm_num_layers, b_size, LINEAR_CFG['lstm_encoder']), device=self.device), \
+                 torch.zeros(size=(self.lstm_num_layers, b_size, LINEAR_CFG['lstm_encoder']), device=self.device)
         torch.nn.init.xavier_normal_(hx)
         torch.nn.init.xavier_normal_(cx)
 
@@ -215,12 +178,6 @@ class BaselineRNN(LightningModule):
         self.log('train/fde', fde * ratio, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
         return loss
-        # if ade is None or fde is None:
-        #
-        #     tensorboard_logs = {'train_loss': loss, 'train/ade': 0, 'train/fde': 0}
-        # else:
-        #     tensorboard_logs = {'train_loss': loss, 'train/ade': ade * ratio, 'train/fde': fde * ratio}
-        # return {'loss': loss, 'log': tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
         loss, ade, fde, ratio = self.one_step(batch)
@@ -229,11 +186,6 @@ class BaselineRNN(LightningModule):
         self.log('val/fde', fde * ratio, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
         return loss
-        # if ade is None or fde is None:
-        #     tensorboard_logs = {'val_loss': loss, 'val/ade': 0, 'val/fde': 0}
-        # else:
-        #     tensorboard_logs = {'val_loss': loss, 'val/ade': ade * ratio, 'val/fde': fde * ratio}
-        # return {'loss': loss, 'log': tensorboard_logs}
 
     def configure_optimizers(self):
         opt = torch.optim.Adam(self.parameters(), lr=self.lr)
@@ -258,8 +210,8 @@ if __name__ == '__main__':
     dataset_train = ConcatDataset(datasets=train_datasets)
     dataset_val = ConcatDataset(datasets=val_datasets)
 
-    m = BaselineRNN(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=1024, num_workers=0, lr=1e-2,
-                    use_batch_norm=False)
+    m = BaselineRNN(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=BATCH_SIZE,
+                    num_workers=NUM_WORKERS, lr=LR, use_batch_norm=USE_BATCH_NORM)
 
-    trainer = Trainer(gpus=1, max_epochs=1)
+    trainer = Trainer(gpus=1, max_epochs=NUM_EPOCHS)
     trainer.fit(model=m)
