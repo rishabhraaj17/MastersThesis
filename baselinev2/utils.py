@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import scipy
 import skimage
+import timeout_decorator
 import torch
 import torchvision
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
@@ -17,7 +18,9 @@ from average_image.feature_clustering import MeanShiftClustering
 from average_image.feature_extractor import FeatureExtractor
 from baseline.extracted_of_optimization import find_points_inside_circle, is_point_inside_circle, \
     clouds_distance_matrix, smallest_n_indices
-from baselinev2.config import DATASET_META, META_LABEL, VIDEO_LABEL, VIDEO_NUMBER, BASE_PATH, plot_save_path
+from baselinev2.config import DATASET_META, META_LABEL, VIDEO_LABEL, VIDEO_NUMBER, BASE_PATH, plot_save_path, \
+    CLUSTERING_TIMEOUT
+from baselinev2.exceptions import TimeoutException
 from baselinev2.plot_utils import plot_features_with_mask, \
     plot_track_history_with_angle_info_with_track_plot, plot_for_video_current_frame
 from baselinev2.structures import ObjectFeatures, AgentFeatures
@@ -51,6 +54,18 @@ def first_violation_till_now(direction, angle):
 
 def mean_shift_clustering(data, bandwidth: float = 0.1, min_bin_freq: int = 3, max_iter: int = 300,
                           bin_seeding: bool = False, cluster_all: bool = True):
+    mean_shift = MeanShiftClustering(data=data, bandwidth=bandwidth, min_bin_freq=min_bin_freq, max_iter=max_iter,
+                                     bin_seeding=bin_seeding, cluster_all=cluster_all)
+    mean_shift.cluster(renormalize=False)
+    labels_unique, points_per_cluster = np.unique(mean_shift.labels, return_counts=True)
+    mean_shift.cluster_distribution = dict(zip(labels_unique, points_per_cluster))
+    n_clusters_ = len(labels_unique)
+    return mean_shift, n_clusters_
+
+
+@timeout_decorator.timeout(seconds=CLUSTERING_TIMEOUT, timeout_exception=TimeoutException)
+def mean_shift_clustering_with_timeout(data, bandwidth: float = 0.1, min_bin_freq: int = 3, max_iter: int = 300,
+                                       bin_seeding: bool = False, cluster_all: bool = True):
     mean_shift = MeanShiftClustering(data=data, bandwidth=bandwidth, min_bin_freq=min_bin_freq, max_iter=max_iter,
                                      bin_seeding=bin_seeding, cluster_all=cluster_all)
     mean_shift.cluster(renormalize=False)
