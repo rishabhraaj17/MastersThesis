@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, ConcatDataset
 
+from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from average_image.utils import compute_ade, compute_fde
 from baselinev2.config import MANUAL_SEED, LINEAR_CFG, SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_PER_CLASS_VIDEOS_LIST_FOR_NN,\
     SDD_VIDEO_META_CLASSES_LIST_FOR_NN, NUM_WORKERS, BATCH_SIZE, LR, USE_BATCH_NORM, NUM_EPOCHS
@@ -200,18 +201,21 @@ class BaselineRNN(LightningModule):
 
 
 if __name__ == '__main__':
-    train_datasets, val_datasets = [], []
-    for v_idx, (video_class, meta) in enumerate(zip(SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_VIDEO_META_CLASSES_LIST_FOR_NN)):
-        for video_number in SDD_PER_CLASS_VIDEOS_LIST_FOR_NN[v_idx]:
-            train_datasets.append(BaselineDataset(video_class=video_class, video_number=video_number,
-                                                  split=NetworkMode.TRAIN, meta_label=meta))
-            val_datasets.append(BaselineDataset(video_class=video_class, video_number=video_number,
-                                                split=NetworkMode.VALIDATION, meta_label=meta))
-    dataset_train = ConcatDataset(datasets=train_datasets)
-    dataset_val = ConcatDataset(datasets=val_datasets)
+    # train_datasets, val_datasets = [], []
+    # for v_idx, (video_class, meta) in enumerate(zip(SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_VIDEO_META_CLASSES_LIST_FOR_NN)):
+    #     for video_number in SDD_PER_CLASS_VIDEOS_LIST_FOR_NN[v_idx]:
+    #         train_datasets.append(BaselineDataset(video_class=video_class, video_number=video_number,
+    #                                               split=NetworkMode.TRAIN, meta_label=meta))
+    #         val_datasets.append(BaselineDataset(video_class=video_class, video_number=video_number,
+    #                                             split=NetworkMode.VALIDATION, meta_label=meta))
+    # dataset_train = ConcatDataset(datasets=train_datasets)
+    # dataset_val = ConcatDataset(datasets=val_datasets)
+
+    dataset_train = BaselineDataset(SDDVideoClasses.LITTLE, 1, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.LITTLE)
+    dataset_val = BaselineDataset(SDDVideoClasses.LITTLE, 0, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.LITTLE)
 
     m = BaselineRNN(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=BATCH_SIZE,
                     num_workers=NUM_WORKERS, lr=LR, use_batch_norm=USE_BATCH_NORM)
 
-    trainer = Trainer(gpus=1, max_epochs=NUM_EPOCHS)
+    trainer = Trainer(gpus=1, max_epochs=NUM_EPOCHS, overfit_batches=2)
     trainer.fit(model=m)
