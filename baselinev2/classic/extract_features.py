@@ -3067,7 +3067,7 @@ def preprocess_data_zero_shot_minimal_with_timeout(
         filter_switch_boxes_based_on_angle_and_recent_history=True,
         compute_histories_for_plot=True, min_track_length_to_filter_switch_box=20,
         angle_threshold_to_filter=120):
-    clustering_failed = True
+    clustering_failed = False
     sdd_simple = SDDSimpleDataset(root=BASE_PATH, video_label=VIDEO_LABEL, frames_per_clip=1, num_workers=8,
                                   num_videos=1, video_number_to_use=VIDEO_NUMBER,
                                   step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
@@ -3120,7 +3120,7 @@ def preprocess_data_zero_shot_minimal_with_timeout(
             original_shape = new_shape = [frames.shape[1], frames.shape[2]]
             for frame_idx, (frame, frame_number) in tqdm(enumerate(zip(frames, frame_numbers)),
                                                          total=len(frame_numbers)):
-                if part_idx == 0 and frame_idx == 0 and clustering_failed:  # assuming it has failed in the start
+                if (part_idx == 0 and frame_idx == 0) or clustering_failed:
                     # STEP 1: a> Get GT for the first frame
                     validation_annotations, first_frame_mask = first_frame_processing_and_gt_association(
                         df, first_frame_mask,
@@ -3140,74 +3140,72 @@ def preprocess_data_zero_shot_minimal_with_timeout(
                     if features_skipped_idx.size != 0:
                         features_skipped = all_cloud[features_skipped_idx]
 
-                        while clustering_failed:
-                            try:
-                                # STEP 4h: b> cluster to group points
-                                mean_shift, n_clusters = mean_shift_clustering_with_timeout(
-                                    features_skipped, bin_seeding=False, min_bin_freq=8,
-                                    cluster_all=True, bandwidth=4, max_iter=100)
-                                cluster_centers = mean_shift.cluster_centers
+                        try:
+                            # STEP 4h: b> cluster to group points
+                            mean_shift, n_clusters = mean_shift_clustering_with_timeout(
+                                features_skipped, bin_seeding=False, min_bin_freq=8,
+                                cluster_all=True, bandwidth=4, max_iter=100)
+                            cluster_centers = mean_shift.cluster_centers
 
-                                # STEP 4h: c> prune cluster centers
-                                # combine centers inside radius + eliminate noise
-                                final_cluster_centers, final_cluster_centers_idx = prune_clusters(
-                                    cluster_centers, mean_shift, radius + extra_radius,
-                                    min_points_in_cluster=min_points_in_cluster)
+                            # STEP 4h: c> prune cluster centers
+                            # combine centers inside radius + eliminate noise
+                            final_cluster_centers, final_cluster_centers_idx = prune_clusters(
+                                cluster_centers, mean_shift, radius + extra_radius,
+                                min_points_in_cluster=min_points_in_cluster)
 
-                                if final_cluster_centers.size != 0:
-                                    t_w, t_h = generic_box_wh, generic_box_wh  # 100, 100
-                                    # STEP 4h: d> start new potential tracks
-                                    for cluster_center, cluster_center_idx in \
-                                            zip(final_cluster_centers, final_cluster_centers_idx):
-                                        cluster_center_x, cluster_center_y = np.round(cluster_center).astype(np.int)
+                            if final_cluster_centers.size != 0:
+                                t_w, t_h = generic_box_wh, generic_box_wh  # 100, 100
+                                # STEP 4h: d> start new potential tracks
+                                for cluster_center, cluster_center_idx in \
+                                        zip(final_cluster_centers, final_cluster_centers_idx):
+                                    cluster_center_x, cluster_center_y = np.round(cluster_center).astype(np.int)
 
-                                        # flexible_box, points_in_current_cluster = calculate_flexible_bounding_box(
-                                        #     cluster_center_idx, cluster_center_x, cluster_center_y, mean_shift)
+                                    # flexible_box, points_in_current_cluster = calculate_flexible_bounding_box(
+                                    #     cluster_center_idx, cluster_center_x, cluster_center_y, mean_shift)
 
-                                        # t_box = centroids_to_min_max([cluster_center_x, cluster_center_y, t_w, t_h])
-                                        t_box = torchvision.ops.box_convert(
-                                            torch.tensor([cluster_center_x, cluster_center_y, t_w, t_h]),
-                                            'cxcywh', 'xyxy').int().numpy()
-                                        # Note: Do not start track if bbox is out of frame
-                                        if allow_only_for_first_frame_use_is_box_overlapping_live_boxes and \
-                                                not (np.sign(t_box) < 0).any() and \
-                                                not is_box_overlapping_live_boxes(t_box, [t.bbox for t in running_tracks]):
+                                    # t_box = centroids_to_min_max([cluster_center_x, cluster_center_y, t_w, t_h])
+                                    t_box = torchvision.ops.box_convert(
+                                        torch.tensor([cluster_center_x, cluster_center_y, t_w, t_h]),
+                                        'cxcywh', 'xyxy').int().numpy()
+                                    # Note: Do not start track if bbox is out of frame
+                                    if allow_only_for_first_frame_use_is_box_overlapping_live_boxes and \
+                                            not (np.sign(t_box) < 0).any() and \
+                                            not is_box_overlapping_live_boxes(t_box, [t.bbox for t in running_tracks]):
+                                        # NOTE: the second check might result in killing potential tracks!
+                                        t_id = max(track_ids_used) + 1 if len(track_ids_used) else 0
+                                        running_tracks.append(Track(bbox=t_box, idx=t_id))
+                                        track_ids_used.append(t_id)
+                                        new_track_boxes.append(t_box)
+                                    elif use_is_box_overlapping_live_boxes:
+                                        if not (np.sign(t_box) < 0).any() and \
+                                                not is_box_overlapping_live_boxes(t_box,
+                                                                                  [t.bbox for t in running_tracks]):
                                             # NOTE: the second check might result in killing potential tracks!
-                                            t_id = max(track_ids_used) + 1 if len(track_ids_used) else 0
+                                            t_id = max(track_ids_used) + 1
                                             running_tracks.append(Track(bbox=t_box, idx=t_id))
                                             track_ids_used.append(t_id)
                                             new_track_boxes.append(t_box)
-                                        elif use_is_box_overlapping_live_boxes:
-                                            if not (np.sign(t_box) < 0).any() and \
-                                                    not is_box_overlapping_live_boxes(t_box,
-                                                                                      [t.bbox for t in running_tracks]):
-                                                # NOTE: the second check might result in killing potential tracks!
-                                                t_id = max(track_ids_used) + 1
-                                                running_tracks.append(Track(bbox=t_box, idx=t_id))
-                                                track_ids_used.append(t_id)
-                                                new_track_boxes.append(t_box)
-                                        else:
-                                            if not (np.sign(t_box) < 0).any():
-                                                t_id = max(track_ids_used) + 1
-                                                running_tracks.append(Track(bbox=t_box, idx=t_id))
-                                                track_ids_used.append(t_id)
-                                                new_track_boxes.append(t_box)
-                                clustering_failed = False
-                            except TimeoutException:
-                                clustering_failed = True
-                                logger.info('Clustering took too much time for first/last frame, trying next now')
-                        else:
+                                    else:
+                                        if not (np.sign(t_box) < 0).any():
+                                            t_id = max(track_ids_used) + 1
+                                            running_tracks.append(Track(bbox=t_box, idx=t_id))
+                                            track_ids_used.append(t_id)
+                                            new_track_boxes.append(t_box)
+
                             clustering_failed = False
                             logger.info('Clustering worked out! Moving on to phase 2!')
+                        except TimeoutException:
+                            clustering_failed = True
+                            logger.info('Clustering took too much time for first/last frame, trying next now')
 
-                            # plot_features_with_circles(
-                            #     all_cloud, features_covered, features_skipped, first_frame_mask, marker_size=8,
-                            #     cluster_centers=final_cluster_centers, num_clusters=final_cluster_centers.shape[0],
-                            #     frame_number=frame_number, boxes=validation_annotations[:, :-1],
-                            #     radius=radius+extra_radius,
-                            #     additional_text=
-                            #     f'Original Cluster Center Count: {n_clusters}\nPruned Cluster Distribution: '
-                            #     f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
+                        # plot_features_with_circles(
+                        #     all_cloud, features_covered, features_skipped, first_frame_mask, marker_size=8,
+                        #     cluster_centers=final_cluster_centers, num_clusters=final_cluster_centers.shape[0],
+                        #     frame_number=frame_number, boxes=validation_annotations[:, :-1],
+                        #     radius=radius+extra_radius,
+                        #     additional_text=
+                        #     f'Original Cluster Center Count: {n_clusters}\nPruned Cluster Distribution: '
+                        #     f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
 
                     new_track_boxes = np.stack(new_track_boxes) if len(new_track_boxes) > 0 else np.empty(shape=(0,))
 
