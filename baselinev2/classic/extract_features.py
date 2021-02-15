@@ -20,7 +20,7 @@ from average_image.feature_extractor import FeatureExtractor
 from average_image.utils import is_inside_bbox
 from baselinev2.config import ROOT_PATH, BATCH_CHECKPOINT, RESUME_MODE, CSV_MODE, EXECUTE_STEP, DATASET_META, \
     META_LABEL, VIDEO_LABEL, VIDEO_NUMBER, SAVE_PATH, BASE_PATH, video_save_path, plot_save_path, features_save_path, \
-    version
+    version, TIMEOUT_MODE
 from baselinev2.constants import STEP, ObjectDetectionParameters
 from baselinev2.exceptions import TimeoutException
 from baselinev2.structures import ObjectFeatures, MinimalObjectFeatures, AgentFeatures, FrameFeatures, TrackFeatures, \
@@ -9953,6 +9953,7 @@ if __name__ == '__main__':
     elif not eval_mode and EXECUTE_STEP == STEP.MINIMAL:
         csv_mode = CSV_MODE
         resume_mode = RESUME_MODE
+        use_timeout = TIMEOUT_MODE
         logger.info('MINIMAL MODE')
 
         video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
@@ -9989,6 +9990,10 @@ if __name__ == '__main__':
                                       min_track_length_threshold=track_length_threshold,
                                       csv_save_path=features_save_path)
         elif resume_mode:
+            if use_timeout:
+                resume_method = preprocess_data_zero_shot_minimal_resumable_with_timeout
+            else:
+                resume_method = preprocess_data_zero_shot_minimal_resumable
             features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
                                  f'/minimal_zero_shot/parts/'
             # features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
@@ -10000,7 +10005,7 @@ if __name__ == '__main__':
             accumulated_features: Dict[Any, Any] = torch.load(features_base_path + every_part_file[-1])
             logger.info(f'Resuming from batch {accumulated_features["part_idx"]}')
 
-            feats = preprocess_data_zero_shot_minimal_resumable(
+            feats = resume_method(
                 last_saved_features_dict=accumulated_features,
                 var_threshold=None, plot=False, radius=param['radius'],
                 video_mode=True, video_save_path=video_save_path + 'extraction.avi',
@@ -10014,7 +10019,11 @@ if __name__ == '__main__':
                 filter_switch_boxes_based_on_angle_and_recent_history=True,
                 compute_histories_for_plot=True)
         else:
-            feats = preprocess_data_zero_shot_minimal(
+            if use_timeout:
+                method_to_call = preprocess_data_zero_shot_minimal_with_timeout
+            else:
+                method_to_call = preprocess_data_zero_shot_minimal
+            feats = method_to_call(
                 var_threshold=None, plot=False, radius=param['radius'],
                 video_mode=True, video_save_path=video_save_path + 'extraction.avi',
                 desired_fps=5, overlap_percent=0.4, plot_save_path=plot_save_path,
