@@ -3207,65 +3207,66 @@ def preprocess_data_zero_shot_minimal_with_timeout(
                         #     f'Original Cluster Center Count: {n_clusters}\nPruned Cluster Distribution: '
                         #     f'{[mean_shift.cluster_distribution[x] for x in final_cluster_centers_idx]}')
 
-                    new_track_boxes = np.stack(new_track_boxes) if len(new_track_boxes) > 0 else np.empty(shape=(0,))
+                    if not clustering_failed:
+                        new_track_boxes = np.stack(new_track_boxes) if len(new_track_boxes) > 0 else np.empty(shape=(0,))
 
-                    r_boxes = [b.bbox for b in running_tracks]
-                    r_boxes_idx = [b.idx for b in running_tracks]
-                    select_track_idx = 4
+                        r_boxes = [b.bbox for b in running_tracks]
+                        r_boxes_idx = [b.idx for b in running_tracks]
+                        select_track_idx = 4
 
-                    r_boxes = torch.tensor(r_boxes, dtype=torch.int)
-                    a_boxes = torch.from_numpy(validation_annotations[:, :-1])
-                    # Fixme: If no boxes in first frame!!
-                    iou_boxes = torchvision.ops.box_iou(a_boxes, r_boxes).numpy()
-                    iou_boxes_threshold = iou_boxes.copy()
-                    iou_boxes_threshold[iou_boxes_threshold < iou_threshold] = 0
-                    # TODO: Replace with Hungarian
-                    iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold)
-                    iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold.T).T
-                    match_idx = np.where(iou_boxes)
-                    a_match_idx_threshold, r_match_idx_threshold = np.where(iou_boxes_threshold)
-                    matching_boxes_with_iou = [(a, r, iou_boxes_threshold[a, r])
-                                               for a, r in zip(a_match_idx_threshold, r_match_idx_threshold)]
+                        r_boxes = torch.tensor(r_boxes, dtype=torch.int)
+                        a_boxes = torch.from_numpy(validation_annotations[:, :-1])
+                        # Fixme: If no boxes in first frame!!
+                        iou_boxes = torchvision.ops.box_iou(a_boxes, r_boxes).numpy()
+                        iou_boxes_threshold = iou_boxes.copy()
+                        iou_boxes_threshold[iou_boxes_threshold < iou_threshold] = 0
+                        # TODO: Replace with Hungarian
+                        iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold)
+                        iou_boxes_threshold = filter_for_one_to_one_matches(iou_boxes_threshold.T).T
+                        match_idx = np.where(iou_boxes)
+                        a_match_idx_threshold, r_match_idx_threshold = np.where(iou_boxes_threshold)
+                        matching_boxes_with_iou = [(a, r, iou_boxes_threshold[a, r])
+                                                   for a, r in zip(a_match_idx_threshold, r_match_idx_threshold)]
 
-                    #  precision/recall
-                    tp = len(a_match_idx_threshold)
-                    fp = len(r_boxes) - len(a_match_idx_threshold)
-                    fn = len(a_boxes) - len(a_match_idx_threshold)
+                        #  precision/recall
+                        tp = len(a_match_idx_threshold)
+                        fp = len(r_boxes) - len(a_match_idx_threshold)
+                        fn = len(a_boxes) - len(a_match_idx_threshold)
 
-                    tp_list.append(tp)
-                    fp_list.append(fp)
-                    fn_list.append(fn)
+                        tp_list.append(tp)
+                        fp_list.append(fp)
+                        fn_list.append(fn)
 
-                    precision = tp / (tp + fp)
-                    recall = tp / (tp + fn)
-                    precision_list.append(precision)
-                    recall_list.append(recall)
-                    matching_boxes_with_iou_list.append(matching_boxes_with_iou)
+                        precision = tp / (tp + fp)
+                        recall = tp / (tp + fn) if (tp + fn) != 0 else 0
+                        precision_list.append(precision)
+                        recall_list.append(recall)
+                        matching_boxes_with_iou_list.append(matching_boxes_with_iou)
 
-                    last_frame_live_tracks = []
+                        last_frame_live_tracks = []
 
-                    fig = plot_for_video(
-                        gt_rgb=frame, gt_mask=first_frame_mask, last_frame_rgb=frame,
-                        last_frame_mask=first_frame_mask, current_frame_rgb=frame,
-                        current_frame_mask=first_frame_mask, gt_annotations=validation_annotations[:, :-1],
-                        last_frame_annotation=last_frame_live_tracks,
-                        current_frame_annotation=[t.bbox for t in running_tracks],
-                        new_track_annotation=new_track_boxes,
-                        frame_number=frame_number,
-                        additional_text=
-                        f'Precision: {precision} | Recall: {recall}\n'
-                        f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
-                        f'Track Ids Killed: '
-                        f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
-                        video_mode=False,
-                        save_path=f'{plot_save_path}zero_shot/plots{min_points_in_cluster}/')
+                        fig = plot_for_video(
+                            gt_rgb=frame, gt_mask=first_frame_mask, last_frame_rgb=frame,
+                            last_frame_mask=first_frame_mask, current_frame_rgb=frame,
+                            current_frame_mask=first_frame_mask, gt_annotations=validation_annotations[:, :-1],
+                            last_frame_annotation=last_frame_live_tracks,
+                            current_frame_annotation=[t.bbox for t in running_tracks],
+                            new_track_annotation=new_track_boxes,
+                            frame_number=frame_number,
+                            additional_text=
+                            f'Precision: {precision} | Recall: {recall}\n'
+                            f'Track Ids Active: {[t.idx for t in running_tracks]}\n'
+                            f'Track Ids Killed: '
+                            f'{np.setdiff1d([t.idx for t in last_frame_live_tracks], [t.idx for t in running_tracks])}',
+                            video_mode=False,
+                            save_path=f'{plot_save_path}zero_shot/plots{min_points_in_cluster}/')
 
-                    # STEP 1: b> Store them for the next ts and update these variables in further iterations
-                    last_frame = frame.copy()
-                    second_last_frame = last_frame.copy()
-                    last_frame_live_tracks = running_tracks
-                    last_frame_mask = first_frame_mask.copy()
-                    last_frame_gt_tracks = {a[-1]: a[:-1] for a in validation_annotations}
+                        # STEP 1: b> Store them for the next ts and update these variables in further iterations
+                        last_frame = frame.copy()
+                        second_last_frame = last_frame.copy()
+                        last_frame_live_tracks = running_tracks
+                        last_frame_mask = first_frame_mask.copy()
+                        last_frame_gt_tracks = {a[-1]: a[:-1] for a in validation_annotations}
                 else:
                     running_tracks, object_features = [], []
                     # STEP 2: Get the OF for both ((t-1), t) and ((t), (t+1))
@@ -9988,10 +9989,10 @@ if __name__ == '__main__':
                                       min_track_length_threshold=track_length_threshold,
                                       csv_save_path=features_save_path)
         elif resume_mode:
-            # features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
-            #                      f'/minimal_zero_shot/parts/'
             features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
-                                 f'/parts/'
+                                 f'/minimal_zero_shot/parts/'
+            # features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+            #                      f'/parts/'
             every_part_file = np.array(os.listdir(features_base_path))
             part_idx = np.array([int(s[:-3].split('_')[-1]) for s in every_part_file]).argsort()
             every_part_file = every_part_file[part_idx]
