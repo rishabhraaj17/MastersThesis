@@ -9935,23 +9935,20 @@ if __name__ == '__main__':
     elif not eval_mode and EXECUTE_STEP == STEP.GENERATE_ANNOTATIONS:
         use_v2 = True
         track_length_threshold = 5
-        features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
-                             f'/minimal_zero_shot/parts/'
-        # features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
-        #                      f'/parts/'
-
-        csv_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/csv_annotation/'
-        Path(csv_path).mkdir(parents=True, exist_ok=True)
-
-        # accumulated_features_filename = 'accumulated_features_from_finally.pt'
-
-        # accumulated_features_path = f'{features_base_path}{accumulated_features_filename}'
-
-        every_part_file = np.array(os.listdir(features_base_path))
-        part_idx = np.array([int(s[:-3].split('_')[-1]) for s in every_part_file]).argsort()
-        every_part_file = every_part_file[part_idx]
 
         if not GENERATE_BUNDLED_ANNOTATIONS and use_v2:
+            features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+                                 f'/minimal_zero_shot/parts/'
+            # features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+            #                      f'/parts/'
+
+            csv_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/csv_annotation/'
+            Path(csv_path).mkdir(parents=True, exist_ok=True)
+
+            every_part_file = np.array(os.listdir(features_base_path))
+            part_idx = np.array([int(s[:-3].split('_')[-1]) for s in every_part_file]).argsort()
+            every_part_file = every_part_file[part_idx]
+
             combine_features_generate_annotations_v2(files_base_path=features_base_path, files_list=every_part_file,
                                                      min_track_length_threshold=track_length_threshold,
                                                      csv_save_path=csv_path,
@@ -9974,6 +9971,18 @@ if __name__ == '__main__':
                                                              csv_save_path=csv_path,
                                                              do_filter=True, low_memory_mode=False)
         else:
+            features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+                                 f'/minimal_zero_shot/parts/'
+            # features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+            #                      f'/parts/'
+
+            csv_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/csv_annotation/'
+            Path(csv_path).mkdir(parents=True, exist_ok=True)
+
+            every_part_file = np.array(os.listdir(features_base_path))
+            part_idx = np.array([int(s[:-3].split('_')[-1]) for s in every_part_file]).argsort()
+            every_part_file = every_part_file[part_idx]
+
             combine_features_generate_annotations(files_base_path=features_base_path, files_list=every_part_file,
                                                   min_track_length_threshold=track_length_threshold,
                                                   csv_save_path=csv_path,
