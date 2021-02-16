@@ -667,6 +667,7 @@ def filter_low_length_tracks_lvl2(track_based_features, frame_based_features, lo
     if low_memory_mode:
         f_per_frame_features = frame_based_features
     else:
+        logger.info('copy to alter the data')
         f_per_frame_features = copy.deepcopy(frame_based_features)
 
     for frame_number, frame_features in frame_based_features.items():
