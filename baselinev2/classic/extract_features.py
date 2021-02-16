@@ -20,7 +20,8 @@ from average_image.feature_extractor import FeatureExtractor
 from average_image.utils import is_inside_bbox
 from baselinev2.config import ROOT_PATH, BATCH_CHECKPOINT, RESUME_MODE, CSV_MODE, EXECUTE_STEP, DATASET_META, \
     META_LABEL, VIDEO_LABEL, VIDEO_NUMBER, SAVE_PATH, BASE_PATH, video_save_path, plot_save_path, features_save_path, \
-    version, TIMEOUT_MODE
+    version, TIMEOUT_MODE, GENERATE_BUNDLED_ANNOTATIONS, BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST, \
+    BUNDLED_ANNOTATIONS_PER_CLASSES_VIDEO_LIST
 from baselinev2.constants import STEP, ObjectDetectionParameters
 from baselinev2.exceptions import TimeoutException
 from baselinev2.structures import ObjectFeatures, MinimalObjectFeatures, AgentFeatures, FrameFeatures, TrackFeatures, \
@@ -9719,37 +9720,7 @@ def combine_features_generate_annotations_v2(files_base_path, files_list, csv_sa
     frame_based_accumulated_features_0: Dict[int, FrameFeatures] = \
         part_features_0['accumulated_features']
 
-    logger.info('Combining Features')
-    for p_idx in tqdm(range(1, len(files_list))):
-        part_features_temp_1: Dict[Any, Any] = torch.load(files_base_path + files_list[p_idx])
-        track_based_accumulated_features_1: Dict[int, TrackFeatures] = \
-            part_features_temp_1['track_based_accumulated_features']
-        frame_based_accumulated_features_1: Dict[int, FrameFeatures] = \
-            part_features_temp_1['accumulated_features']
-
-        same_keys = np.intersect1d(list(track_based_accumulated_features_0.keys()),
-                                   list(track_based_accumulated_features_1.keys())).tolist()
-
-        keys_to_skip_during_filtering = []
-        for s_key in same_keys:
-            len_0 = len(track_based_accumulated_features_0[s_key].object_features)
-            len_1 = len(track_based_accumulated_features_1[s_key].object_features)
-
-            if len_0 < min_track_length_threshold < len_0 + len_1:
-                # if track length is lower than threshold now but it lasts longer actually don't filter it
-                keys_to_skip_during_filtering.append(s_key)
-
-            # if track length is longer than threshold, it should be longer in next batch
-            # since we keep the live tracks during save, remove the one already seen
-            # temp_list_0 = track_based_accumulated_features_0[s_key].object_features
-            # temp_list_1 = track_based_accumulated_features_1[s_key].object_features
-
-            track_based_accumulated_features_1[s_key].object_features = \
-                track_based_accumulated_features_1[s_key].object_features[len_0:]
-
-            # if track length is smaller in both dicts, filter it out
-            assert len(track_based_accumulated_features_1[s_key].object_features) == len_1 - len_0
-
+    if len(files_list) == 1:
         annotation_data.extend(extracted_features_in_csv(track_based_features=track_based_accumulated_features_0,
                                                          frame_based_features=frame_based_accumulated_features_0,
                                                          do_filter=do_filter,
@@ -9757,10 +9728,50 @@ def combine_features_generate_annotations_v2(files_base_path, files_list, csv_sa
                                                          csv_save_path=csv_save_path,
                                                          low_memory_mode=low_memory_mode,
                                                          return_list=True,
-                                                         track_ids_to_skip=keys_to_skip_during_filtering))
+                                                         track_ids_to_skip=[]))
+    else:
+        logger.info('Combining Features')
+        for p_idx in tqdm(range(1, len(files_list))):
+            part_features_temp_1: Dict[Any, Any] = torch.load(files_base_path + files_list[p_idx])
+            track_based_accumulated_features_1: Dict[int, TrackFeatures] = \
+                part_features_temp_1['track_based_accumulated_features']
+            frame_based_accumulated_features_1: Dict[int, FrameFeatures] = \
+                part_features_temp_1['accumulated_features']
 
-        track_based_accumulated_features_0 = copy.deepcopy(track_based_accumulated_features_1)
-        frame_based_accumulated_features_0 = copy.deepcopy(frame_based_accumulated_features_1)
+            same_keys = np.intersect1d(list(track_based_accumulated_features_0.keys()),
+                                       list(track_based_accumulated_features_1.keys())).tolist()
+
+            keys_to_skip_during_filtering = []
+            for s_key in same_keys:
+                len_0 = len(track_based_accumulated_features_0[s_key].object_features)
+                len_1 = len(track_based_accumulated_features_1[s_key].object_features)
+
+                if len_0 < min_track_length_threshold < len_0 + len_1:
+                    # if track length is lower than threshold now but it lasts longer actually don't filter it
+                    keys_to_skip_during_filtering.append(s_key)
+
+                # if track length is longer than threshold, it should be longer in next batch
+                # since we keep the live tracks during save, remove the one already seen
+                # temp_list_0 = track_based_accumulated_features_0[s_key].object_features
+                # temp_list_1 = track_based_accumulated_features_1[s_key].object_features
+
+                track_based_accumulated_features_1[s_key].object_features = \
+                    track_based_accumulated_features_1[s_key].object_features[len_0:]
+
+                # if track length is smaller in both dicts, filter it out
+                assert len(track_based_accumulated_features_1[s_key].object_features) == len_1 - len_0
+
+            annotation_data.extend(extracted_features_in_csv(track_based_features=track_based_accumulated_features_0,
+                                                             frame_based_features=frame_based_accumulated_features_0,
+                                                             do_filter=do_filter,
+                                                             min_track_length_threshold=min_track_length_threshold,
+                                                             csv_save_path=csv_save_path,
+                                                             low_memory_mode=low_memory_mode,
+                                                             return_list=True,
+                                                             track_ids_to_skip=keys_to_skip_during_filtering))
+
+            track_based_accumulated_features_0 = copy.deepcopy(track_based_accumulated_features_1)
+            frame_based_accumulated_features_0 = copy.deepcopy(frame_based_accumulated_features_1)
 
     logger.info('Annotation extraction completed!')
     df = pd.DataFrame(data=annotation_data, columns=[
@@ -9940,11 +9951,28 @@ if __name__ == '__main__':
         part_idx = np.array([int(s[:-3].split('_')[-1]) for s in every_part_file]).argsort()
         every_part_file = every_part_file[part_idx]
 
-        if use_v2:
+        if not GENERATE_BUNDLED_ANNOTATIONS and use_v2:
             combine_features_generate_annotations_v2(files_base_path=features_base_path, files_list=every_part_file,
                                                      min_track_length_threshold=track_length_threshold,
                                                      csv_save_path=csv_path,
                                                      do_filter=True, low_memory_mode=False)
+        elif use_v2 and GENERATE_BUNDLED_ANNOTATIONS:
+            for v_id, v_clz in enumerate(BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST):
+                for v_num in BUNDLED_ANNOTATIONS_PER_CLASSES_VIDEO_LIST[v_id]:
+                    features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{v_clz.value}{v_num}' \
+                                         f'/minimal_zero_shot/parts/'
+                    csv_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{v_clz.value}{v_num}/csv_annotation/'
+                    Path(csv_path).mkdir(parents=True, exist_ok=True)
+                    features_chunk_list = np.array(os.listdir(features_base_path))
+                    part_idx = np.array([int(s[:-3].split('_')[-1]) for s in features_chunk_list]).argsort()
+                    features_chunk_list = features_chunk_list[part_idx]
+
+                    logger.info(f'Generating annotations for Video: {v_clz.value}{v_num}')
+                    combine_features_generate_annotations_v2(files_base_path=features_base_path,
+                                                             files_list=features_chunk_list,
+                                                             min_track_length_threshold=track_length_threshold,
+                                                             csv_save_path=csv_path,
+                                                             do_filter=True, low_memory_mode=False)
         else:
             combine_features_generate_annotations(files_base_path=features_base_path, files_list=every_part_file,
                                                   min_track_length_threshold=track_length_threshold,

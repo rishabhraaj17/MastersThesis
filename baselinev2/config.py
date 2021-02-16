@@ -31,7 +31,7 @@ SAVE_BASE_PATH = f"{ROOT_PATH}Datasets/SDD_Features/"
 
 BASE_PATH = f"{ROOT_PATH}Datasets/SDD/"
 
-EXECUTE_STEP = STEP.MINIMAL
+EXECUTE_STEP = STEP.GENERATE_ANNOTATIONS
 
 version = 0
 video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/'
@@ -93,6 +93,16 @@ SDD_PER_CLASS_VIDEOS_RESUME_LIST = [[2, 3, 4], [0, 1, 2, 3, 4, 5, 6, 7, 8],
                                     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], [0, 1, 2, 3],
                                     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], [0, 1, 2, 3]]
 
+GENERATE_BUNDLED_ANNOTATIONS = True
+BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST = \
+    [SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.DEATH_CIRCLE, SDDVideoClasses.GATES,
+     SDDVideoClasses.HYANG, SDDVideoClasses.LITTLE, SDDVideoClasses.NEXUS, SDDVideoClasses.QUAD]
+BUNDLED_ANNOTATIONS_PER_CLASSES_VIDEO_LIST = \
+    [[0, 1, 2, 3, 4, 5, 6], [0, 1, 2, 3], [0, 1, 2, 3, 4], [0, 1, 2, 3, 4, 5, 6, 7, 8],
+     [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], [0, 1, 2, 3], [0, 1, 2, 4, 6, 7, 8, 9, 10, 11], [0, 1, 2, 3]]
+# BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST = [SDDVideoClasses.HYANG, SDDVideoClasses.NEXUS]
+# BUNDLED_ANNOTATIONS_PER_CLASSES_VIDEO_LIST = [[0, 2], [3]]
+
 # SDD_VIDEO_CLASSES_RESUME_LIST = [SDDVideoClasses.LITTLE]
 # SDD_PER_CLASS_VIDEOS_RESUME_LIST = [[0]]
 
@@ -104,12 +114,12 @@ TEST_SPLIT_PERCENTAGE = 0.25
 
 TIME_STEPS = 5
 NUM_WORKERS = 12
-BATCH_SIZE = 1024
+BATCH_SIZE = 256
 LR = 1e-2
 NUM_EPOCHS = 500
 OVERFIT = False
 
-USE_BATCH_NORM = False
+USE_BATCH_NORM = True
 GT_BASED = False
 CENTER_BASED = True
 SAME_INIT = False
