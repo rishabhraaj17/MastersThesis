@@ -71,7 +71,7 @@ class BaselineRNN(LightningModule):
 
     def __init__(self, original_frame_shape=None, prediction_length=12, lr=1e-5, time_steps=5,
                  train_dataset=None, val_dataset=None, batch_size=1, num_workers=0, use_batch_norm=False,
-                 lstm_num_layers: int = 1, overfit_mode: bool = False):
+                 lstm_num_layers: int = 1, overfit_mode: bool = False, shuffle: bool = False, pin_memory: bool = True):
         super(BaselineRNN, self).__init__()
 
         self.pre_encoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
@@ -93,13 +93,15 @@ class BaselineRNN(LightningModule):
 
         self.lstm_num_layers = lstm_num_layers
         self.overfit_mode = overfit_mode
+        self.shuffle = shuffle
+        self.pin_memory = pin_memory
 
         self.original_frame_shape = original_frame_shape
         self.prediction_length = prediction_length
 
         self.ts = time_steps
 
-        self.save_hyperparameters('lr', 'time_steps', 'batch_size', 'use_batch_norm', 'overfit_mode')
+        self.save_hyperparameters('lr', 'time_steps', 'batch_size', 'use_batch_norm', 'overfit_mode', 'shuffle')
 
     def forward(self, x):
         return NotImplemented
@@ -167,11 +169,11 @@ class BaselineRNN(LightningModule):
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, self.batch_size, collate_fn=None,
-                          num_workers=self.num_workers)
+                          num_workers=self.num_workers, shuffle=self.shuffle, pin_memory=self.pin_memory)
 
     def val_dataloader(self):
         return DataLoader(self.val_dataset, self.batch_size * 2, collate_fn=None,
-                          num_workers=self.num_workers)
+                          num_workers=self.num_workers, shuffle=self.shuffle, pin_memory=self.pin_memory)
 
     def training_step(self, batch, batch_idx):
         loss, ade, fde, ratio = self.one_step(batch)
@@ -206,6 +208,9 @@ if __name__ == '__main__':
         overfit_batches = 2
     else:
         overfit_batches = 0.0
+
+    video_number: int = 3
+
     # train_datasets, val_datasets = [], []
     # for v_idx, (video_class, meta) in enumerate(zip(SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_VIDEO_META_CLASSES_LIST_FOR_NN)):
     #     for video_number in SDD_PER_CLASS_VIDEOS_LIST_FOR_NN[v_idx]:
@@ -216,11 +221,14 @@ if __name__ == '__main__':
     # dataset_train = ConcatDataset(datasets=train_datasets)
     # dataset_val = ConcatDataset(datasets=val_datasets)
 
-    dataset_train = BaselineDataset(SDDVideoClasses.LITTLE, 1, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.LITTLE)
-    dataset_val = BaselineDataset(SDDVideoClasses.LITTLE, 0, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.LITTLE)
+    dataset_train = BaselineDataset(SDDVideoClasses.LITTLE, video_number, NetworkMode.TRAIN,
+                                    meta_label=SDDVideoDatasets.LITTLE)
+    dataset_val = BaselineDataset(SDDVideoClasses.LITTLE, video_number, NetworkMode.VALIDATION,
+                                  meta_label=SDDVideoDatasets.LITTLE)
 
     m = BaselineRNN(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=BATCH_SIZE,
-                    num_workers=NUM_WORKERS, lr=LR, use_batch_norm=USE_BATCH_NORM, overfit_mode=OVERFIT)
+                    num_workers=NUM_WORKERS, lr=LR, use_batch_norm=USE_BATCH_NORM, overfit_mode=OVERFIT,
+                    shuffle=True, pin_memory=True)
 
     trainer = Trainer(gpus=1, max_epochs=NUM_EPOCHS)
     trainer.fit(model=m)
