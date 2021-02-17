@@ -104,7 +104,8 @@ def overfit_two_loss(net, loader, optimizer, num_epochs=5000):
 
 
 if __name__ == '__main__':
-    single_chunk_fit = False
+    single_chunk_fit = True
+    generated = True
     num_workers = 12
     shuffle = True
 
@@ -122,11 +123,14 @@ if __name__ == '__main__':
 
     checkpoint_root_path = f'../baselinev2/lightning_logs/version_{version}/'
     # model = BaselineRNN()
-    model = BaselineRNNStacked(encoder_lstm_num_layers=4, decoder_lstm_num_layers=5)
+    model = BaselineRNNStacked(encoder_lstm_num_layers=4, decoder_lstm_num_layers=5, generated_dataset=generated)
 
     if single_chunk_fit:
         overfit_chunk = 1
-        overfit_chunk_path = f"{ROOT_PATH}Datasets/OverfitChunks/overfit{overfit_chunk}.pt"
+        if generated:
+            overfit_chunk_path = f"{ROOT_PATH}Datasets/OverfitChunks/generated_overfit{overfit_chunk}.pt"
+        else:
+            overfit_chunk_path = f"{ROOT_PATH}Datasets/OverfitChunks/overfit{overfit_chunk}.pt"
 
         overfit_data = torch.load(overfit_chunk_path)
 
@@ -134,7 +138,11 @@ if __name__ == '__main__':
         overfit_dataloader = DataLoader(overfit_dataset, 1)
     else:
         overfit_chunks = [0, 1, 2, 3, 4, 5]
-        overfit_data_list = [torch.load(f"{ROOT_PATH}Datasets/OverfitChunks/overfit{o}.pt") for o in overfit_chunks]
+        if generated:
+            overfit_data_list = [torch.load(f"{ROOT_PATH}Datasets/OverfitChunks/generated_overfit{o}.pt")
+                                 for o in overfit_chunks]
+        else:
+            overfit_data_list = [torch.load(f"{ROOT_PATH}Datasets/OverfitChunks/overfit{o}.pt") for o in overfit_chunks]
         overfit_data = None
         for o_data in overfit_data_list:
             if overfit_data is None:

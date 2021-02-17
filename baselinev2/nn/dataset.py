@@ -101,7 +101,7 @@ if __name__ == '__main__':
     # d2 = BaselineDataset(SDDVideoClasses.COUPA, 0, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.COUPA)
     # d = ConcatDataset([d1, d2])
     d = ConcatDataset([d1])
-    loader = DataLoader(d, batch_size=32, shuffle=True)
+    loader = DataLoader(d, batch_size=1, shuffle=True)
     # iterator = iter(loader)
     for data in loader:
         # in_xy, gt_xy, _, _, in_track_ids, _, in_frame_numbers, _, _ = data  # next(iterator)

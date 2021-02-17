@@ -288,7 +288,8 @@ class BaselineRNNStacked(BaselineRNN):
     def __init__(self, original_frame_shape=None, prediction_length=12, lr=1e-5, time_steps=5,
                  train_dataset=None, val_dataset=None, batch_size=1, num_workers=0, use_batch_norm=False,
                  encoder_lstm_num_layers: int = 1, overfit_mode: bool = False, shuffle: bool = False,
-                 pin_memory: bool = True, decoder_lstm_num_layers: int = 1, return_pred: bool = False):
+                 pin_memory: bool = True, decoder_lstm_num_layers: int = 1, return_pred: bool = False,
+                 generated_dataset: bool = False):
         super(BaselineRNNStacked, self).__init__(
             original_frame_shape=original_frame_shape, prediction_length=prediction_length, lr=lr,
             time_steps=time_steps, train_dataset=train_dataset, val_dataset=val_dataset, batch_size=batch_size,
@@ -313,9 +314,14 @@ class BaselineRNNStacked(BaselineRNN):
         self.post_decoder = make_layers(LINEAR_CFG['decoder'], batch_norm=use_batch_norm, encoder=False,
                                         last_without_activation=True)
         self.return_pred = return_pred
+        self.generated_dataset = generated_dataset
 
     def forward(self, batch):
-        in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = batch
+        if self.generated_dataset:
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, \
+            mapped_in_xy, mapped_gt_xy, ratio = batch
+        else:
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = batch
 
         total_loss = torch.tensor(data=0, dtype=torch.float32, device=self.device)
         predicted_xy, true_xy = [], []
