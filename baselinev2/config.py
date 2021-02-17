@@ -93,7 +93,7 @@ SDD_PER_CLASS_VIDEOS_RESUME_LIST = [[2, 3, 4], [0, 1, 2, 3, 4, 5, 6, 7, 8],
                                     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], [0, 1, 2, 3],
                                     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], [0, 1, 2, 3]]
 
-GENERATE_BUNDLED_ANNOTATIONS = True
+GENERATE_BUNDLED_ANNOTATIONS = False
 BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST = \
     [SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.DEATH_CIRCLE, SDDVideoClasses.GATES,
      SDDVideoClasses.HYANG, SDDVideoClasses.LITTLE, SDDVideoClasses.NEXUS, SDDVideoClasses.QUAD]
@@ -115,7 +115,7 @@ TEST_SPLIT_PERCENTAGE = 0.25
 TIME_STEPS = 5
 NUM_WORKERS = 12
 BATCH_SIZE = 256
-LR = 1e-2
+LR = 1e-3
 NUM_EPOCHS = 500
 OVERFIT = False
 

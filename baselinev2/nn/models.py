@@ -103,8 +103,87 @@ class BaselineRNN(LightningModule):
 
         self.save_hyperparameters('lr', 'time_steps', 'batch_size', 'use_batch_norm', 'overfit_mode', 'shuffle')
 
-    def forward(self, x):
-        return NotImplemented
+    def forward(self, x, two_losses=False):
+        if two_losses:
+            return self.forward_two_losses(x)
+        else:
+            return self.forward_one_loss(x)
+
+    def forward_two_losses(self, x):
+        in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = x
+
+        total_loss = torch.tensor(data=0, dtype=torch.float32, device=self.device)
+        total_loss_velocity = torch.tensor(data=0, dtype=torch.float32, device=self.device)
+        predicted_xy, true_xy = [], []
+
+        # Encoder
+        b, seq_len = in_uv.size(0), in_uv.size(1)
+        h0, c0 = self.init_hidden_states(b_size=b)
+        out = self.pre_encoder(in_uv.view(-1, 2))
+        out = F.relu(out.view(seq_len, b, -1))
+        out, (h_enc, c_enc) = self.encoder(out, (h0, c0))
+        # Decoder
+        # Last (x,y) and (u,v) position at T=8
+        last_xy = in_xy[:, -1, ...]
+        last_uv = in_uv[:, -1, ...]
+
+        h_dec, c_dec = h_enc.squeeze(0), c_enc.squeeze(0)
+        for gt_pred_xy, gt_pred_uv in zip(gt_xy.permute(1, 0, 2), gt_uv.permute(1, 0, 2)):
+            out = self.pre_decoder(last_uv)
+            h_dec, c_dec = self.decoder(out, (h_dec, c_dec))
+            pred_uv = self.post_decoder(F.relu(h_dec))
+            out = last_xy + (pred_uv * 0.4)
+
+            total_loss += self.center_based_loss_meters(gt_center=gt_pred_xy, pred_center=out, ratio=ratio[0].item())
+            total_loss_velocity += self.center_based_loss_meters(gt_center=gt_pred_uv, pred_center=pred_uv, ratio=1)
+
+            predicted_xy.append(out.detach().cpu().numpy())
+            true_xy.append(gt_pred_xy.detach().cpu().numpy())
+
+            last_xy = out
+            last_uv = pred_uv
+
+        ade = compute_ade(np.stack(predicted_xy), np.stack(true_xy)).item()
+        fde = compute_fde(np.stack(predicted_xy), np.stack(true_xy)).item()
+
+        return total_loss / self.prediction_length, total_loss_velocity / self.prediction_length, ade, fde, \
+               ratio[0].item(), np.stack(predicted_xy)
+
+    def forward_one_loss(self, x):
+        in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = x
+
+        total_loss = torch.tensor(data=0, dtype=torch.float32, device=self.device)
+        predicted_xy, true_xy = [], []
+
+        # Encoder
+        b, seq_len = in_uv.size(0), in_uv.size(1)
+        h0, c0 = self.init_hidden_states(b_size=b)
+        out = self.pre_encoder(in_uv.view(-1, 2))
+        out = F.relu(out.view(seq_len, b, -1))
+        out, (h_enc, c_enc) = self.encoder(out, (h0, c0))
+        # Decoder
+        # Last (x,y) and (u,v) position at T=8
+        last_xy = in_xy[:, -1, ...]
+        last_uv = in_uv[:, -1, ...]
+
+        h_dec, c_dec = h_enc.squeeze(0), c_enc.squeeze(0)
+        for gt_pred_xy in gt_xy.permute(1, 0, 2):
+            out = self.pre_decoder(last_uv)
+            h_dec, c_dec = self.decoder(out, (h_dec, c_dec))
+            pred_uv = self.post_decoder(F.relu(h_dec))
+            out = last_xy + (pred_uv * 0.4)
+            total_loss += self.center_based_loss_meters(gt_center=gt_pred_xy, pred_center=out, ratio=ratio[0].item())
+
+            predicted_xy.append(out.detach().cpu().numpy())
+            true_xy.append(gt_pred_xy.detach().cpu().numpy())
+
+            last_xy = out
+            last_uv = pred_uv
+
+        ade = compute_ade(np.stack(predicted_xy), np.stack(true_xy)).item()
+        fde = compute_fde(np.stack(predicted_xy), np.stack(true_xy)).item()
+
+        return total_loss / self.prediction_length, ade, fde, ratio[0].item(), np.stack(predicted_xy)
 
     def one_step(self, batch):
         in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = batch

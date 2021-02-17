@@ -102,12 +102,12 @@ if __name__ == '__main__':
 
     sdd_video_class = SDDVideoClasses.LITTLE
     sdd_meta_class = SDDVideoDatasets.LITTLE
-    network_mode = NetworkMode.VALIDATION
+    network_mode = NetworkMode.TRAIN
     sdd_video_number = 3
 
     path_to_video = f'{BASE_PATH}videos/{sdd_video_class.value}/video{sdd_video_number}/video.mov'
 
-    version = 6
+    version = 7
 
     plot_save_path = f'{ROOT_PATH}Plots/baseline_v2/nn/v{version}/{sdd_video_class.value}{sdd_video_number}/' \
                      f'eval_plots/{network_mode.value}/'
