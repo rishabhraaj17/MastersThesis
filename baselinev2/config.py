@@ -37,6 +37,7 @@ version = 0
 video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/'
 plot_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/'
 features_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/'
+GENERATED_DATASET_ROOT = f'{ROOT_PATH}Plots/baseline_v2/v{version}/'
 
 CLASSIC_MODE = True
 NN_FOLDER = 'nn_v0/'

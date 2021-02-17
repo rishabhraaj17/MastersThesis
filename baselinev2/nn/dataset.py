@@ -18,7 +18,8 @@ from baselinev2.config import VIDEO_PATH, ANNOTATION_CSV_PATH, VIDEO_SAVE_PATH, 
     TRAIN_SPLIT_PERCENTAGE, VALIDATION_SPLIT_PERCENTAGE, TEST_SPLIT_PERCENTAGE, SPLIT_ANNOTATION_SAVE_PATH, \
     SDD_ANNOTATIONS_ROOT_PATH, SDD_VIDEO_CLASSES_LIST, SDD_PER_CLASS_VIDEOS_LIST, SAVE_BASE_PATH, \
     SDD_VIDEO_CLASSES_RESUME_LIST, SDD_PER_CLASS_VIDEOS_RESUME_LIST, DATASET_META, \
-    BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST, BUNDLED_ANNOTATIONS_PER_CLASSES_VIDEO_LIST, ROOT_PATH, version
+    BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST, BUNDLED_ANNOTATIONS_PER_CLASSES_VIDEO_LIST, ROOT_PATH, version, \
+    GENERATED_DATASET_ROOT, BASE_PATH
 from baselinev2.constants import NetworkMode
 from baselinev2.plot_utils import plot_for_video_image_and_box, plot_trajectories_with_frame
 from baselinev2.structures import TracksDataset, SingleTrack
@@ -628,25 +629,72 @@ class BaselineDataset(Dataset):
                gt_frame_numbers, self.ratio
 
 
+class BaselineGeneratedDataset(Dataset):
+    def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode,
+                 meta_label: SDDVideoDatasets, root: str = GENERATED_DATASET_ROOT,
+                 observation_length: int = 8, prediction_length: int = 12):
+        super(BaselineGeneratedDataset, self).__init__()
+        try:
+            self.ratio = float(DATASET_META.get_meta(meta_label, video_number)[0]['Ratio'].to_numpy()[0])
+        except IndexError:
+            # Homography not known!
+            self.ratio = 1
+        path_to_dataset = f'{root}{video_class.value}{video_number}/splits/'
+
+        self.tracks = np.load(f'{path_to_dataset}{split.value}_tracks.npy', allow_pickle=True, mmap_mode='r+')
+        self.relative_distances = np.load(f'{path_to_dataset}{split.value}_distances.npy', allow_pickle=True,
+                                          mmap_mode='r+')
+
+        self.prediction_length = prediction_length
+        self.observation_length = observation_length
+
+    def __len__(self):
+        return len(self.relative_distances)
+
+    def __getitem__(self, item):
+        tracks, relative_distances = torch.from_numpy(self.tracks[item]), \
+                                     torch.from_numpy(self.relative_distances[item])
+        in_xy = tracks[..., :self.observation_length, 7:9]
+        gt_xy = tracks[..., self.observation_length:, 7:9]
+        in_velocities = relative_distances[..., :self.observation_length - 1, :] / 0.4
+        gt_velocities = relative_distances[..., self.observation_length:, :] / 0.4
+        in_track_ids = tracks[..., :self.observation_length, 0].int()
+        gt_track_ids = tracks[..., self.observation_length:, 0].int()
+        in_frame_numbers = tracks[..., :self.observation_length, 5].int()
+        gt_frame_numbers = tracks[..., self.observation_length:, 5].int()
+        mapped_in_xy = tracks[..., :self.observation_length, -2:]
+        mapped_gt_xy = tracks[..., self.observation_length:, -2:]
+
+        return in_xy, gt_xy, in_velocities, gt_velocities, in_track_ids, gt_track_ids, in_frame_numbers, \
+               gt_frame_numbers, mapped_in_xy, mapped_gt_xy, self.ratio
+
+
 if __name__ == '__main__':
-    # d1 = BaselineDataset(SDDVideoClasses.DEATH_CIRCLE, 1, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.DEATH_CIRCLE)
-    # # d2 = BaselineDataset(SDDVideoClasses.COUPA, 0, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.COUPA)
-    # # d = ConcatDataset([d1, d2])
-    # d = ConcatDataset([d1])
-    # loader = DataLoader(d, batch_size=32)
-    # # iterator = iter(loader)
-    # for data in loader:
-    #     in_xy, gt_xy, _, _, in_track_ids, _, in_frame_numbers, _, _ = data  # next(iterator)
-    #     frame_num = in_frame_numbers[0, 0].item()
-    #     track_id = in_track_ids[0, 0].item()
-    #     obs_trajectory = np.stack(in_xy[0].cpu().numpy())
-    #     true_trajectory = np.stack(gt_xy[0].cpu().numpy())
-    #     pred_trajectory = np.stack(gt_xy[0].cpu().numpy())
-    #     current_frame = extract_frame_from_video(VIDEO_PATH, frame_number=frame_num)
-    #     plot_trajectories_with_frame(current_frame, obs_trajectory, true_trajectory, pred_trajectory,
-    #                                  frame_number=frame_num, track_id=track_id)
-    #     print()
-    generate_annotation_for_all_generated_tracks()
+    video_class = SDDVideoClasses.LITTLE
+    video_num = 3
+    meta_label = SDDVideoDatasets.LITTLE
+    d1 = BaselineGeneratedDataset(video_class, video_num, NetworkMode.TRAIN, meta_label=meta_label)
+    # d2 = BaselineDataset(SDDVideoClasses.COUPA, 0, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.COUPA)
+    # d = ConcatDataset([d1, d2])
+    d = ConcatDataset([d1])
+    loader = DataLoader(d, batch_size=32, shuffle=True)
+    # iterator = iter(loader)
+    for data in loader:
+        # in_xy, gt_xy, _, _, in_track_ids, _, in_frame_numbers, _, _ = data  # next(iterator)
+        in_xy, gt_xy, _, _, in_track_ids, _, in_frame_numbers, _, _, mapped_gt_xy, _ = data  # next(iterator)
+        frame_num = in_frame_numbers[0, 0].item()
+        track_id = in_track_ids[0, 0].item()
+        obs_trajectory = np.stack(in_xy[0].cpu().numpy())
+        true_trajectory = np.stack(gt_xy[0].cpu().numpy())
+        pred_trajectory = np.stack(mapped_gt_xy[0].cpu().numpy()) \
+            if not torch.isnan(mapped_gt_xy[0]).any().item() else np.zeros((0, 2))
+        # current_frame = extract_frame_from_video(VIDEO_PATH, frame_number=frame_num)
+        current_frame = extract_frame_from_video(f'{BASE_PATH}videos/{video_class.value}/video{video_num}/video.mov',
+                                                 frame_number=frame_num)
+        plot_trajectories_with_frame(current_frame, obs_trajectory, true_trajectory, pred_trajectory,
+                                     frame_number=frame_num, track_id=track_id)
+        print()
+    # generate_annotation_for_all_generated_tracks()
     # ff = np.load('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/'
     #              'SDD_Features/nexus/video11/splits/train_distances.npy', allow_pickle=True, mmap_mode='r')
     # print()
