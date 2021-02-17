@@ -654,16 +654,16 @@ class BaselineGeneratedDataset(Dataset):
     def __getitem__(self, item):
         tracks, relative_distances = torch.from_numpy(self.tracks[item]), \
                                      torch.from_numpy(self.relative_distances[item])
-        in_xy = tracks[..., :self.observation_length, 7:9]
-        gt_xy = tracks[..., self.observation_length:, 7:9]
-        in_velocities = relative_distances[..., :self.observation_length - 1, :] / 0.4
-        gt_velocities = relative_distances[..., self.observation_length:, :] / 0.4
-        in_track_ids = tracks[..., :self.observation_length, 0].int()
-        gt_track_ids = tracks[..., self.observation_length:, 0].int()
-        in_frame_numbers = tracks[..., :self.observation_length, 5].int()
-        gt_frame_numbers = tracks[..., self.observation_length:, 5].int()
-        mapped_in_xy = tracks[..., :self.observation_length, -2:]
-        mapped_gt_xy = tracks[..., self.observation_length:, -2:]
+        in_xy = tracks[:self.observation_length, 6:8]
+        gt_xy = tracks[self.observation_length:, 6:8]
+        in_velocities = relative_distances[:self.observation_length - 1, :] / 0.4
+        gt_velocities = relative_distances[self.observation_length:, :] / 0.4
+        in_track_ids = tracks[:self.observation_length, 0].int()
+        gt_track_ids = tracks[self.observation_length:, 0].int()
+        in_frame_numbers = tracks[:self.observation_length, 5].int()
+        gt_frame_numbers = tracks[self.observation_length:, 5].int()
+        mapped_in_xy = tracks[:self.observation_length, -2:]
+        mapped_gt_xy = tracks[self.observation_length:, -2:]
 
         return in_xy, gt_xy, in_velocities, gt_velocities, in_track_ids, gt_track_ids, in_frame_numbers, \
                gt_frame_numbers, mapped_in_xy, mapped_gt_xy, self.ratio
