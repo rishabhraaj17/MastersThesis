@@ -71,7 +71,8 @@ class BaselineRNN(LightningModule):
 
     def __init__(self, original_frame_shape=None, prediction_length=12, lr=1e-5, time_steps=5,
                  train_dataset=None, val_dataset=None, batch_size=1, num_workers=0, use_batch_norm=False,
-                 lstm_num_layers: int = 1, overfit_mode: bool = False, shuffle: bool = False, pin_memory: bool = True):
+                 lstm_num_layers: int = 1, overfit_mode: bool = False, shuffle: bool = False, pin_memory: bool = True,
+                 two_losses: bool = False):
         super(BaselineRNN, self).__init__()
 
         self.pre_encoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
@@ -99,12 +100,13 @@ class BaselineRNN(LightningModule):
         self.original_frame_shape = original_frame_shape
         self.prediction_length = prediction_length
 
+        self.two_losses = two_losses
         self.ts = time_steps
 
         self.save_hyperparameters('lr', 'time_steps', 'batch_size', 'use_batch_norm', 'overfit_mode', 'shuffle')
 
-    def forward(self, x, two_losses=False):
-        if two_losses:
+    def forward(self, x):
+        if self.two_losses:
             return self.forward_two_losses(x)
         else:
             return self.forward_one_loss(x)
@@ -280,6 +282,114 @@ class BaselineRNN(LightningModule):
                 'frequency': 1
             }]
         return [opt], schedulers
+
+
+class BaselineRNNStacked(BaselineRNN):
+    def __init__(self, original_frame_shape=None, prediction_length=12, lr=1e-5, time_steps=5,
+                 train_dataset=None, val_dataset=None, batch_size=1, num_workers=0, use_batch_norm=False,
+                 encoder_lstm_num_layers: int = 1, overfit_mode: bool = False, shuffle: bool = False,
+                 pin_memory: bool = True, decoder_lstm_num_layers: int = 1, return_pred: bool = False):
+        super(BaselineRNNStacked, self).__init__(
+            original_frame_shape=original_frame_shape, prediction_length=prediction_length, lr=lr,
+            time_steps=time_steps, train_dataset=train_dataset, val_dataset=val_dataset, batch_size=batch_size,
+            num_workers=num_workers, use_batch_norm=use_batch_norm, lstm_num_layers=encoder_lstm_num_layers,
+            overfit_mode=overfit_mode, shuffle=shuffle, pin_memory=pin_memory)
+
+        self.decoder_lstm_num_layers = decoder_lstm_num_layers
+
+        self.pre_encoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
+                                       last_without_activation=False)
+        self.encoder = nn.LSTM(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'],
+                               num_layers=encoder_lstm_num_layers, bias=True)
+        self.pre_decoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
+                                       last_without_activation=False)
+        self.decoder = nn.LSTMCell(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'])
+
+        if decoder_lstm_num_layers > 1:
+            self.decoder_extra_layers = nn.ModuleList(
+                [nn.LSTMCell(input_size=LINEAR_CFG['lstm_encoder'], hidden_size=LINEAR_CFG['lstm_encoder'])
+                 for _ in range(decoder_lstm_num_layers)])
+
+        self.post_decoder = make_layers(LINEAR_CFG['decoder'], batch_norm=use_batch_norm, encoder=False,
+                                        last_without_activation=True)
+        self.return_pred = return_pred
+
+    def forward(self, batch):
+        in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = batch
+
+        total_loss = torch.tensor(data=0, dtype=torch.float32, device=self.device)
+        predicted_xy, true_xy = [], []
+        hidden_states, cell_states = None, None
+
+        # Encoder
+        b, seq_len = in_uv.size(0), in_uv.size(1)
+        if self.decoder_lstm_num_layers > 1:
+            hidden_states, cell_states = self.init_hidden_states(b_size=b)
+            h0, c0 = hidden_states[0], cell_states[0]
+        else:
+            h0, c0 = self.init_hidden_states(b_size=b)
+
+        out = self.pre_encoder(in_uv.view(-1, 2))
+        out = F.relu(out.view(seq_len, b, -1))
+        out, (h_enc, c_enc) = self.encoder(out, (h0, c0))
+
+        # Decoder
+        # Last (x,y) and (u,v) position at T=8
+        last_xy = in_xy[:, -1, ...]
+        last_uv = in_uv[:, -1, ...]
+
+        # h_dec, c_dec = h_enc.squeeze(0), c_enc.squeeze(0)
+        h_dec, c_dec = h_enc[-1, ...], c_enc[-1, ...]
+        for gt_pred_xy in gt_xy.permute(1, 0, 2):
+            out = self.pre_decoder(last_uv)
+            h_dec, c_dec = self.decoder(out, (h_dec, c_dec))
+
+            if self.decoder_lstm_num_layers > 1:
+                for d_idx, extra_decoder in enumerate(self.decoder_extra_layers):
+                    h_dec, c_dec = extra_decoder(F.relu(h_dec), (hidden_states[d_idx + 1], cell_states[d_idx + 1]))
+
+            pred_uv = self.post_decoder(F.relu(h_dec))
+            out = last_xy + (pred_uv * 0.4)
+            # out = last_xy + pred_uv
+            total_loss += self.center_based_loss_meters(gt_center=gt_pred_xy, pred_center=out, ratio=ratio[0].item())
+
+            predicted_xy.append(out.detach().cpu().numpy())
+            true_xy.append(gt_pred_xy.detach().cpu().numpy())
+
+            last_xy = out
+            last_uv = pred_uv
+
+        ade = compute_ade(np.stack(predicted_xy), np.stack(true_xy)).item()
+        fde = compute_fde(np.stack(predicted_xy), np.stack(true_xy)).item()
+
+        if self.return_pred:
+            return total_loss / self.prediction_length, ade, fde, ratio[0].item(), np.stack(predicted_xy)
+
+        return total_loss / self.prediction_length, ade, fde, ratio[0].item()
+
+    def one_step(self, batch):
+        return self(batch)
+
+    def init_hidden_states(self, b_size):
+        hx = torch.zeros(size=(self.lstm_num_layers, b_size, LINEAR_CFG['lstm_encoder']), device=self.device)
+        cx = torch.zeros(size=(self.lstm_num_layers, b_size, LINEAR_CFG['lstm_encoder']), device=self.device)
+        torch.nn.init.xavier_normal_(hx)
+        torch.nn.init.xavier_normal_(cx)
+
+        if self.decoder_lstm_num_layers > 1:
+            hidden_states, cell_states = [hx], [cx]
+            for _ in range(self.decoder_lstm_num_layers):
+                h = torch.zeros(
+                    size=(b_size, LINEAR_CFG['lstm_encoder']), device=self.device)
+                c = torch.zeros(
+                    size=(b_size, LINEAR_CFG['lstm_encoder']), device=self.device)
+                torch.nn.init.xavier_normal_(h)
+                torch.nn.init.xavier_normal_(c)
+                hidden_states.append(h)
+                cell_states.append(c)
+            return hidden_states, cell_states
+        else:
+            return hx, cx
 
 
 if __name__ == '__main__':
