@@ -17,7 +17,8 @@ from average_image.constants import ANNOTATION_COLUMNS, SDDVideoClasses, SDDVide
 from baselinev2.config import VIDEO_PATH, ANNOTATION_CSV_PATH, VIDEO_SAVE_PATH, ANNOTATION_TXT_PATH, \
     TRAIN_SPLIT_PERCENTAGE, VALIDATION_SPLIT_PERCENTAGE, TEST_SPLIT_PERCENTAGE, SPLIT_ANNOTATION_SAVE_PATH, \
     SDD_ANNOTATIONS_ROOT_PATH, SDD_VIDEO_CLASSES_LIST, SDD_PER_CLASS_VIDEOS_LIST, SAVE_BASE_PATH, \
-    SDD_VIDEO_CLASSES_RESUME_LIST, SDD_PER_CLASS_VIDEOS_RESUME_LIST, DATASET_META
+    SDD_VIDEO_CLASSES_RESUME_LIST, SDD_PER_CLASS_VIDEOS_RESUME_LIST, DATASET_META, \
+    BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST, BUNDLED_ANNOTATIONS_PER_CLASSES_VIDEO_LIST, ROOT_PATH, version
 from baselinev2.constants import NetworkMode
 from baselinev2.plot_utils import plot_for_video_image_and_box, plot_trajectories_with_frame
 from baselinev2.structures import TracksDataset, SingleTrack
@@ -64,6 +65,13 @@ def sort_annotations_by_frame_numbers(annotation_path):
     return annotations
 
 
+def sort_generated_annotations_by_frame_numbers(annotation_path):
+    annotations = pd.read_csv(annotation_path)
+    annotations = annotations.sort_values(by=['frame_number']).reset_index()
+    annotations = annotations.drop(columns=['index'])
+    return annotations
+
+
 def sort_annotations_by_track_ids(annotation_path):
     annotations = pd.read_csv(annotation_path, index_col='Unnamed: 0')
     annotations = annotations.sort_values(by=['track_id']).reset_index()
@@ -86,6 +94,21 @@ def split_annotations(annotation_path):
     return train_set, val_set, test_set
 
 
+def split_generated_annotations(annotation_path):
+    annotations = sort_generated_annotations_by_frame_numbers(annotation_path)
+    train_set, test_set = train_test_split(annotations, train_size=TRAIN_SPLIT_PERCENTAGE,
+                                           test_size=VALIDATION_SPLIT_PERCENTAGE + TEST_SPLIT_PERCENTAGE,
+                                           shuffle=False, stratify=None)
+
+    train_set, test_set = adjust_splits_for_frame(larger_set=train_set, smaller_set=test_set, generated_tracks=True)
+
+    test_set, val_set = train_test_split(test_set, train_size=0.3,
+                                         test_size=0.7, shuffle=False, stratify=None)
+
+    val_set, test_set = adjust_splits_for_frame(larger_set=test_set, smaller_set=val_set, generated_tracks=True)
+    return train_set, val_set, test_set
+
+
 def split_annotations_by_tracks(annotation_path):
     annotations = sort_annotations_by_track_ids(annotation_path)
     train_set, test_set = train_test_split(annotations, train_size=TRAIN_SPLIT_PERCENTAGE,
@@ -101,13 +124,17 @@ def split_annotations_by_tracks(annotation_path):
     return train_set, val_set, test_set
 
 
-def adjust_splits_for_frame(larger_set, smaller_set):
-    last_frame_in_larger = larger_set.iloc[-1]['frame']
-    first_frame_in_smaller = smaller_set.iloc[0]['frame']
+def adjust_splits_for_frame(larger_set, smaller_set, generated_tracks=False):
+    if generated_tracks:
+        frame_label = 'frame_number'
+    else:
+        frame_label = 'frame'
+    last_frame_in_larger = larger_set.iloc[-1][frame_label]
+    first_frame_in_smaller = smaller_set.iloc[0][frame_label]
 
     if last_frame_in_larger == first_frame_in_smaller:
-        same_frame_larger = larger_set[larger_set['frame'] == last_frame_in_larger]
-        same_frame_smaller = smaller_set[smaller_set['frame'] == first_frame_in_smaller]
+        same_frame_larger = larger_set[larger_set[frame_label] == last_frame_in_larger]
+        same_frame_smaller = smaller_set[smaller_set[frame_label] == first_frame_in_smaller]
 
         if len(same_frame_larger) >= len(same_frame_smaller):
             larger_set = pd.concat([larger_set, same_frame_smaller])
@@ -356,6 +383,46 @@ def turn_splits_into_trajectory_dataset_each_track(split_path, num_frames_in_jum
     return {'tracks': final_tracks_save, 'distances': relative_distances_save}
 
 
+def turn_splits_into_trajectory_dataset_each_generated_track(split_path, num_frames_in_jump=12, time_between_frames=0.4,
+                                                             dataframe_mode=False):
+    if dataframe_mode:
+        split: pd.DataFrame = split_path
+    else:
+        split: pd.DataFrame = pd.read_csv(split_path.value)
+
+    unique_tracks = split.track_id.unique()
+    final_tracks_save, relative_distances_save = [], []
+    for t_id in tqdm(unique_tracks):
+        track_df = split[split.track_id == t_id]
+        # unique_frames_in_track = track_df.frame.unique()
+
+        tracks_list: List[SingleTrack] = []
+        # for start_frame in unique_frames_in_track:
+        #     track_df_with_jumps: pd.DataFrame = track_df.iloc[
+        #                                         track_df[track_df.frame == start_frame].index[0]::num_frames_in_jump]
+        #     # track_df_with_jumps: pd.DataFrame = track_df.iloc[start_frame::num_frames_in_jump]
+        for start_frame in range(len(track_df)):
+            track_df_with_jumps: pd.DataFrame = track_df.iloc[start_frame::num_frames_in_jump]
+            track: SingleTrack = SingleTrack(
+                data=track_df_with_jumps.to_numpy(),
+                frames=track_df_with_jumps.frame_number.to_numpy(),
+                valid=True if len(track_df_with_jumps) >= 20 else False
+            )
+            tracks_list.append(track)
+
+        tracks, distances = make_trainable_trajectory_dataset_by_length_each_generated_track(track_obj=tracks_list)
+        if tracks.size != 0:
+            final_tracks_save.append(tracks)
+        if distances.size != 0:
+            relative_distances_save.append(distances)
+
+    final_tracks_save = np.concatenate(final_tracks_save) if len(final_tracks_save) != 0 else np.zeros((0, 12))
+    relative_distances_save = np.concatenate(relative_distances_save) if len(relative_distances_save) != 0 \
+        else np.zeros((0, 2))
+
+    return {'tracks': final_tracks_save, 'distances': relative_distances_save}
+
+
 def make_trainable_trajectory_dataset_by_length_each_track(track_obj, length=20, save_path=None,
                                                            numpy_save=False):
     final_tracks, relative_distances = [], []
@@ -366,6 +433,23 @@ def make_trainable_trajectory_dataset_by_length_each_track(track_obj, length=20,
             for split in splits:
                 relative_distances.append(get_relative_distances(split))
                 final_tracks.append(np.hstack((split[:, 0:6], split[:, 10:])).astype(np.float32))
+
+    final_tracks = np.stack(final_tracks) if len(final_tracks) != 0 else np.zeros((0, 12))
+    relative_distances = np.stack(relative_distances) if len(relative_distances) != 0 else np.zeros((0, 2))
+
+    return final_tracks, relative_distances
+
+
+def make_trainable_trajectory_dataset_by_length_each_generated_track(track_obj, length=20, save_path=None,
+                                                                     numpy_save=False):
+    final_tracks, relative_distances = [], []
+    for track in track_obj:
+        if len(track.data) > length:
+            # split array into parts of max length
+            splits, remaining_part = array_split_by_length(track.data, length=length)
+            for split in splits:
+                relative_distances.append(get_relative_distances_generated_track(split))
+                final_tracks.append(np.hstack((split[:, 0:6], split[:, 7:])).astype(np.float32))
 
     final_tracks = np.stack(final_tracks) if len(final_tracks) != 0 else np.zeros((0, 12))
     relative_distances = np.stack(relative_distances) if len(relative_distances) != 0 else np.zeros((0, 2))
@@ -411,11 +495,60 @@ def split_annotations_and_save_as_track_datasets_by_length_for_one(annotation_pa
     logger.info(f'Saved track datasets at {path_to_save}')
 
 
+def split_annotations_and_save_as_generated_track_datasets_by_length_for_one(annotation_path, path_to_save, length=20,
+                                                                             by_track=False, save_as_numpy=True,
+                                                                             mem_mode=True):
+    if by_track:
+        train_set, val_set, test_set = split_annotations_by_tracks(annotation_path)
+    else:
+        train_set, val_set, test_set = split_generated_annotations(annotation_path)
+
+    Path(path_to_save).mkdir(parents=True, exist_ok=True)
+
+    logger.info('Processing Train set')
+    train_dataset = turn_splits_into_trajectory_dataset_each_generated_track(train_set, dataframe_mode=True)
+    logger.info('Processing Validation set')
+    val_dataset = turn_splits_into_trajectory_dataset_each_generated_track(val_set, dataframe_mode=True)
+    logger.info('Processing Test set')
+    test_dataset = turn_splits_into_trajectory_dataset_each_generated_track(test_set, dataframe_mode=True)
+
+    if save_as_numpy:
+        if mem_mode:
+            np.save(path_to_save + 'train_tracks.npy', train_dataset['tracks'])
+            np.save(path_to_save + 'train_distances.npy', train_dataset['distances'])
+
+            np.save(path_to_save + 'val_tracks.npy', val_dataset['tracks'])
+            np.save(path_to_save + 'val_distances.npy', val_dataset['distances'])
+
+            np.save(path_to_save + 'test_tracks.npy', test_dataset['tracks'])
+            np.save(path_to_save + 'test_distances.npy', test_dataset['distances'])
+        else:
+            np.savez(path_to_save + 'train.npz', tracks=train_dataset['tracks'], distances=train_dataset['distances'])
+            np.savez(path_to_save + 'val.npz', tracks=val_dataset['tracks'], distances=val_dataset['distances'])
+            np.savez(path_to_save + 'test.npz', tracks=test_dataset['tracks'], distances=test_dataset['distances'])
+    else:
+        torch.save(train_dataset, path_to_save + 'train.pt')
+        torch.save(val_dataset, path_to_save + 'val.pt')
+        torch.save(test_dataset, path_to_save + 'test.pt')
+
+    logger.info(f'Saved track datasets at {path_to_save}')
+
+
 def get_relative_distances(arr):
     relative_distances = []
     for idx in range(len(arr) - 1):
         dist = np.linalg.norm((np.expand_dims(arr[idx + 1, -2:], axis=0).astype(np.float32) -
                                np.expand_dims(arr[idx, -2:], axis=0).astype(np.float32)),
+                              ord=2, axis=0)
+        relative_distances.append(dist)
+    return np.array(relative_distances)
+
+
+def get_relative_distances_generated_track(arr):
+    relative_distances = []
+    for idx in range(len(arr) - 1):
+        dist = np.linalg.norm((np.expand_dims(arr[idx + 1, 7:9], axis=0).astype(np.float32) -
+                               np.expand_dims(arr[idx, 7:9], axis=0).astype(np.float32)),
                               ord=2, axis=0)
         relative_distances.append(dist)
     return np.array(relative_distances)
@@ -444,8 +577,21 @@ def generate_annotation_for_all():
     logger.info('Finished generating all annotations!')
 
 
+def generate_annotation_for_all_generated_tracks():
+    for idx, video_class in enumerate(BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST):
+        for video_number in BUNDLED_ANNOTATIONS_PER_CLASSES_VIDEO_LIST[idx]:
+            logger.info(f'Processing for {video_class.value} - {video_number}')
+            # for one is mem efficient
+            split_annotations_and_save_as_generated_track_datasets_by_length_for_one(
+                annotation_path=f'{ROOT_PATH}Plots/baseline_v2/v{version}/{video_class.value}{video_number}/'
+                                f'csv_annotation/generated_annotations.csv',
+                path_to_save=f'{ROOT_PATH}Plots/baseline_v2/v{version}/{video_class.value}{video_number}/splits/',
+                by_track=False)
+    logger.info('Finished generating all annotations!')
+
+
 class BaselineDataset(Dataset):
-    def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode, 
+    def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode,
                  meta_label: SDDVideoDatasets, root: str = SAVE_BASE_PATH,
                  observation_length: int = 8, prediction_length: int = 12):
         super(BaselineDataset, self).__init__()
@@ -483,25 +629,24 @@ class BaselineDataset(Dataset):
 
 
 if __name__ == '__main__':
-    d1 = BaselineDataset(SDDVideoClasses.DEATH_CIRCLE, 1, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.DEATH_CIRCLE)
-    # d2 = BaselineDataset(SDDVideoClasses.COUPA, 0, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.COUPA)
-    # d = ConcatDataset([d1, d2])
-    d = ConcatDataset([d1])
-    loader = DataLoader(d, batch_size=32)
-    # iterator = iter(loader)
-    for data in loader:
-        in_xy, gt_xy, _, _, in_track_ids, _, in_frame_numbers, _, _ = data  # next(iterator)
-        frame_num = in_frame_numbers[0, 0].item()
-        track_id = in_track_ids[0, 0].item()
-        obs_trajectory = np.stack(in_xy[0].cpu().numpy())
-        true_trajectory = np.stack(gt_xy[0].cpu().numpy())
-        pred_trajectory = np.stack(gt_xy[0].cpu().numpy())
-        current_frame = extract_frame_from_video(VIDEO_PATH, frame_number=frame_num)
-        plot_trajectories_with_frame(current_frame, obs_trajectory, true_trajectory, pred_trajectory,
-                                     frame_number=frame_num, track_id=track_id)
-        print()
-    print()
-    # generate_annotation_for_all()
+    # d1 = BaselineDataset(SDDVideoClasses.DEATH_CIRCLE, 1, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.DEATH_CIRCLE)
+    # # d2 = BaselineDataset(SDDVideoClasses.COUPA, 0, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.COUPA)
+    # # d = ConcatDataset([d1, d2])
+    # d = ConcatDataset([d1])
+    # loader = DataLoader(d, batch_size=32)
+    # # iterator = iter(loader)
+    # for data in loader:
+    #     in_xy, gt_xy, _, _, in_track_ids, _, in_frame_numbers, _, _ = data  # next(iterator)
+    #     frame_num = in_frame_numbers[0, 0].item()
+    #     track_id = in_track_ids[0, 0].item()
+    #     obs_trajectory = np.stack(in_xy[0].cpu().numpy())
+    #     true_trajectory = np.stack(gt_xy[0].cpu().numpy())
+    #     pred_trajectory = np.stack(gt_xy[0].cpu().numpy())
+    #     current_frame = extract_frame_from_video(VIDEO_PATH, frame_number=frame_num)
+    #     plot_trajectories_with_frame(current_frame, obs_trajectory, true_trajectory, pred_trajectory,
+    #                                  frame_number=frame_num, track_id=track_id)
+    #     print()
+    generate_annotation_for_all_generated_tracks()
     # ff = np.load('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/'
     #              'SDD_Features/nexus/video11/splits/train_distances.npy', allow_pickle=True, mmap_mode='r')
     # print()
