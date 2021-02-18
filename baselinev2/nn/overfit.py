@@ -8,8 +8,9 @@ from tqdm import tqdm, trange
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from baselinev2.config import BASE_PATH, ROOT_PATH
 from baselinev2.constants import NetworkMode
+from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.models import BaselineRNN, BaselineRNNStacked
-from baselinev2.plot_utils import plot_trajectories
+from baselinev2.plot_utils import plot_trajectories, plot_trajectory_alongside_frame
 from log import initialize_logging, get_logger
 
 matplotlib.style.use('ggplot')
@@ -26,7 +27,7 @@ def plot_array(arr, title, xlabel, ylabel):
     plt.show()
 
 
-def overfit(net, loader, optimizer, num_epochs=5000, batch_mode=False):
+def overfit(net, loader, optimizer, num_epochs=5000, batch_mode=False, video_path=None):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, patience=500, cooldown=10, verbose=True)
     net.train()
     net.return_pred = True
@@ -50,12 +51,18 @@ def overfit(net, loader, optimizer, num_epochs=5000, batch_mode=False):
                 if epoch % 500 == 0:
                     if batch_mode:
                         im_idx = np.random.choice(6, 1).item()
-                        plot_trajectories(
-                            obs_trajectory=data[0][im_idx].squeeze().numpy(), gt_trajectory=data[1][im_idx].squeeze().numpy(),
-                            pred_trajectory=pred_trajectory[:, im_idx, ...].squeeze(), frame_number=data[6][im_idx].squeeze()[0].item(),
+                        plot_trajectory_alongside_frame(
+                            frame=extract_frame_from_video(
+                                video_path=video_path, frame_number=data[6][im_idx].squeeze()[0].item()),
+                            obs_trajectory=data[0][im_idx].squeeze().numpy(),
+                            gt_trajectory=data[1][im_idx].squeeze().numpy(),
+                            pred_trajectory=pred_trajectory[:, im_idx, ...].squeeze(),
+                            frame_number=data[6][im_idx].squeeze()[0].item(),
                             track_id=data[4][im_idx].squeeze()[0].item())
                     else:
-                        plot_trajectories(
+                        plot_trajectory_alongside_frame(
+                            frame=extract_frame_from_video(
+                                video_path=video_path, frame_number=data[6].squeeze()[0].item()),
                             obs_trajectory=data[0].squeeze().numpy(), gt_trajectory=data[1].squeeze().numpy(),
                             pred_trajectory=pred_trajectory.squeeze(), frame_number=data[6].squeeze()[0].item(),
                             track_id=data[4].squeeze()[0].item())
@@ -104,7 +111,7 @@ def overfit_two_loss(net, loader, optimizer, num_epochs=5000):
 
 
 if __name__ == '__main__':
-    single_chunk_fit = True
+    single_chunk_fit = False
     generated = True
     num_workers = 12
     shuffle = True
@@ -126,7 +133,7 @@ if __name__ == '__main__':
     model = BaselineRNNStacked(encoder_lstm_num_layers=4, decoder_lstm_num_layers=5, generated_dataset=generated)
 
     if single_chunk_fit:
-        overfit_chunk = 1
+        overfit_chunk = 3
         if generated:
             overfit_chunk_path = f"{ROOT_PATH}Datasets/OverfitChunks/generated_overfit{overfit_chunk}.pt"
         else:
@@ -154,11 +161,12 @@ if __name__ == '__main__':
         overfit_dataset = TensorDataset(*overfit_data)
         overfit_dataloader = DataLoader(overfit_dataset, len(overfit_chunks))
 
-    lr = 3e-4
+    lr = 5e-3
     optim = torch.optim.Adam(model.parameters(), lr=lr, amsgrad=True)
     # optim = torch.optim.SGD(model.parameters(), lr=lr)
 
-    overfit(net=model, loader=overfit_dataloader, optimizer=optim, num_epochs=5000, batch_mode=not single_chunk_fit)
+    overfit(net=model, loader=overfit_dataloader, optimizer=optim, num_epochs=5000, batch_mode=not single_chunk_fit,
+            video_path=path_to_video)
     # overfit_two_loss(net=model, loader=overfit_dataloader, optimizer=optim, num_epochs=5000)
 
     print()
