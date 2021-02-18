@@ -27,8 +27,66 @@ def plot_array(arr, title, xlabel, ylabel):
     plt.show()
 
 
+def reverse_slices(arr):
+    arr_cloned = arr.clone()
+    arr_cloned[:, 0], arr_cloned[:, 1] = arr[:, 1], arr[:, 0]
+    return arr_cloned
+
+
+def reverse_u_v(batch):
+    out_in_xy, out_gt_xy, out_in_uv, out_gt_uv, out_in_track_ids, = [], [], [], [], []
+    out_gt_track_ids, out_in_frame_numbers, out_gt_frame_numbers, out_ratio = [], [], [], []
+    for data in batch:
+        in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = data
+        in_uv = reverse_slices(in_uv)
+        gt_uv = reverse_slices(gt_uv)
+        
+        out_in_xy.append(in_xy)
+        out_gt_xy.append(gt_xy)
+        out_in_uv.append(in_uv)
+        out_gt_uv.append(gt_uv)
+        out_in_track_ids.append(in_track_ids)
+        out_gt_track_ids.append(gt_track_ids)
+        out_in_frame_numbers.append(in_frame_numbers)
+        out_gt_frame_numbers.append(gt_frame_numbers)
+        out_ratio.append(ratio)
+        
+    return [torch.stack(out_in_xy), torch.stack(out_gt_xy), torch.stack(out_in_uv), torch.stack(out_gt_uv),
+            torch.stack(out_in_track_ids), torch.stack(out_gt_track_ids), torch.stack(out_in_frame_numbers),
+            torch.stack(out_gt_frame_numbers), torch.stack(out_ratio)]
+
+
+def reverse_u_v_generated(batch):
+    out_in_xy, out_gt_xy, out_in_uv, out_gt_uv, out_in_track_ids, = [], [], [], [], []
+    out_gt_track_ids, out_in_frame_numbers, out_gt_frame_numbers, out_ratio = [], [], [], []
+    out_mapped_in_xy, out_mapped_gt_xy = [], []
+    for data in batch:
+        in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, \
+        mapped_in_xy, mapped_gt_xy, ratio = data
+        in_uv = reverse_slices(in_uv)
+        gt_uv = reverse_slices(gt_uv)
+        
+        out_in_xy.append(in_xy)
+        out_gt_xy.append(gt_xy)
+        out_in_uv.append(in_uv)
+        out_gt_uv.append(gt_uv)
+        out_in_track_ids.append(in_track_ids)
+        out_gt_track_ids.append(gt_track_ids)
+        out_in_frame_numbers.append(in_frame_numbers)
+        out_gt_frame_numbers.append(gt_frame_numbers)
+        out_mapped_in_xy.append(mapped_in_xy)
+        out_mapped_gt_xy.append(mapped_gt_xy)
+        out_ratio.append(ratio)
+        
+    return [torch.stack(out_in_xy), torch.stack(out_gt_xy), torch.stack(out_in_uv), torch.stack(out_gt_uv),
+            torch.stack(out_in_track_ids), torch.stack(out_gt_track_ids), torch.stack(out_in_frame_numbers),
+            torch.stack(out_gt_frame_numbers), torch.stack(out_mapped_in_xy), torch.stack(out_mapped_gt_xy),
+            torch.stack(out_ratio)]
+
+
 def overfit(net, loader, optimizer, num_epochs=5000, batch_mode=False, video_path=None):
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, patience=500, cooldown=10, verbose=True)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, patience=500, cooldown=10, verbose=True,
+                                                           factor=0.2)
     net.train()
     net.return_pred = True
     running_loss, running_ade, running_fde = [], [], []
@@ -111,10 +169,12 @@ def overfit_two_loss(net, loader, optimizer, num_epochs=5000):
 
 
 if __name__ == '__main__':
-    single_chunk_fit = True
+    single_chunk_fit = False
     generated = True
     num_workers = 12
     shuffle = True
+
+    do_reverse_slices = False
 
     sdd_video_class = SDDVideoClasses.LITTLE
     sdd_meta_class = SDDVideoDatasets.LITTLE
@@ -130,10 +190,11 @@ if __name__ == '__main__':
 
     checkpoint_root_path = f'../baselinev2/lightning_logs/version_{version}/'
     # model = BaselineRNN()
-    model = BaselineRNNStacked(encoder_lstm_num_layers=4, decoder_lstm_num_layers=5, generated_dataset=generated)
+    model = BaselineRNNStacked(encoder_lstm_num_layers=1, decoder_lstm_num_layers=1, generated_dataset=generated,
+                               use_batch_norm=True)
 
     if single_chunk_fit:
-        overfit_chunk = 3
+        overfit_chunk = 1
         if generated:
             overfit_chunk_path = f"{ROOT_PATH}Datasets/OverfitChunks/generated_overfit{overfit_chunk}.pt"
         else:
@@ -142,7 +203,9 @@ if __name__ == '__main__':
         overfit_data = torch.load(overfit_chunk_path)
 
         overfit_dataset = TensorDataset(*overfit_data)
-        overfit_dataloader = DataLoader(overfit_dataset, 1)
+        overfit_dataloader = DataLoader(
+            overfit_dataset, 1,
+            collate_fn=(reverse_u_v_generated if generated else reverse_u_v) if do_reverse_slices else None)
     else:
         overfit_chunks = [0, 1, 2, 3, 4, 5]
         if generated:
@@ -159,13 +222,19 @@ if __name__ == '__main__':
                     overfit_data[idx] = torch.cat((overfit_data[idx], o_data[idx]))
 
         overfit_dataset = TensorDataset(*overfit_data)
-        overfit_dataloader = DataLoader(overfit_dataset, len(overfit_chunks))
+        overfit_dataloader = DataLoader(
+            overfit_dataset, len(overfit_chunks),
+            collate_fn=(reverse_u_v_generated if generated else reverse_u_v) if do_reverse_slices else None)
 
-    lr = 5e-3
+    # lr = 5e-1  # single
+    # lr = 1e-2  # batch - good one
+    # lr = 7e-3
+    # lr = 5e-3  # - best
+    lr = 1e-3  # 2e-3
     optim = torch.optim.Adam(model.parameters(), lr=lr, amsgrad=True)
     # optim = torch.optim.SGD(model.parameters(), lr=lr)
 
-    overfit(net=model, loader=overfit_dataloader, optimizer=optim, num_epochs=5000, batch_mode=not single_chunk_fit,
+    overfit(net=model, loader=overfit_dataloader, optimizer=optim, num_epochs=15000, batch_mode=not single_chunk_fit,
             video_path=path_to_video)
     # overfit_two_loss(net=model, loader=overfit_dataloader, optimizer=optim, num_epochs=5000)
 

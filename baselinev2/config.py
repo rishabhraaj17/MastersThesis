@@ -137,9 +137,24 @@ GT_EPOCH = 88
 MANUAL_SEED = 42
 GENERATOR_SEED = torch.Generator().manual_seed(MANUAL_SEED)
 
+# LINEAR_CFG = {
+#     'encoder': [4, 8, 16, 32, 64],
+#     'decoder': [64, 32, 16, 8, 4, 2],
+#     'lstm_in': 64,
+#     'lstm_encoder': 128
+# }
+
+# small network
+# LINEAR_CFG = {
+#     'encoder': [8],
+#     'decoder': [2],
+#     'lstm_in': 8,
+#     'lstm_encoder': 16
+# }
+
 LINEAR_CFG = {
-    'encoder': [4, 8, 16, 32, 64],
-    'decoder': [64, 32, 16, 8, 4, 2],
-    'lstm_in': 64,
-    'lstm_encoder': 128
+    'encoder': [32],
+    'decoder': [32, 2],
+    'lstm_in': 32,
+    'lstm_encoder': 64
 }

@@ -254,7 +254,7 @@ class BaselineRNN(LightningModule):
 
     def val_dataloader(self):
         return DataLoader(self.val_dataset, self.batch_size * 2, collate_fn=None,
-                          num_workers=self.num_workers, shuffle=self.shuffle, pin_memory=self.pin_memory)
+                          num_workers=self.num_workers, shuffle=False, pin_memory=self.pin_memory)
 
     def training_step(self, batch, batch_idx):
         loss, ade, fde, ratio = self.one_step(batch)
