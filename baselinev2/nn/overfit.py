@@ -111,7 +111,7 @@ def overfit_two_loss(net, loader, optimizer, num_epochs=5000):
 
 
 if __name__ == '__main__':
-    single_chunk_fit = False
+    single_chunk_fit = True
     generated = True
     num_workers = 12
     shuffle = True
