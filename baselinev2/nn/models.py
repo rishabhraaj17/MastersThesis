@@ -421,9 +421,9 @@ if __name__ == '__main__':
     dataset_val = BaselineDataset(SDDVideoClasses.LITTLE, video_number, NetworkMode.VALIDATION,
                                   meta_label=SDDVideoDatasets.LITTLE)
 
-    m = BaselineRNN(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=BATCH_SIZE,
-                    num_workers=NUM_WORKERS, lr=LR, use_batch_norm=USE_BATCH_NORM, overfit_mode=OVERFIT,
-                    shuffle=True, pin_memory=True)
+    m = BaselineRNNStacked(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=BATCH_SIZE,
+                           num_workers=NUM_WORKERS, lr=LR, use_batch_norm=USE_BATCH_NORM, overfit_mode=OVERFIT,
+                           shuffle=True, pin_memory=True)
 
     trainer = Trainer(gpus=1, max_epochs=NUM_EPOCHS)
     trainer.fit(model=m)
