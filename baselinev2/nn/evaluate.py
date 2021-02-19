@@ -81,7 +81,7 @@ def evaluate_model(model: nn.Module, data_loader: DataLoader, checkpoint_root_pa
             obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
             pred_trajectory=pred_trajectory, frame_number=plot_frame_number,
             track_id=plot_track_id, additional_text=f'Frame Numbers: {all_frame_numbers}\nADE: {ade} | FDE: {fde}',
-            save_path=plot_path
+            save_path=f'{plot_path}{checkpoint_file}/'
         )
         # plot_trajectories_with_frame(
         #     frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
@@ -108,7 +108,7 @@ if __name__ == '__main__':
 
     path_to_video = f'{BASE_PATH}videos/{sdd_video_class.value}/video{sdd_video_number}/video.mov'
 
-    version = 7
+    version = 9
 
     plot_save_path = f'{ROOT_PATH}Plots/baseline_v2/nn/v{version}/{sdd_video_class.value}{sdd_video_number}/' \
                      f'eval_plots/{network_mode.value}/'

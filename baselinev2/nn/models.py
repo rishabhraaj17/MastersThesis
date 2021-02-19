@@ -276,7 +276,7 @@ class BaselineRNN(LightningModule):
         opt = torch.optim.Adam(self.parameters(), lr=self.lr)
         schedulers = [
             {
-                'scheduler': ReduceLROnPlateau(opt, patience=15, verbose=True, factor=0.1, cooldown=2),
+                'scheduler': ReduceLROnPlateau(opt, patience=15, verbose=True, factor=0.2, cooldown=2),
                 'monitor': 'val_loss_epoch',
                 'interval': 'epoch',
                 'frequency': 1
