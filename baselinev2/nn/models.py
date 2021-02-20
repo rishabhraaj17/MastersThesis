@@ -11,7 +11,7 @@ from average_image.utils import compute_ade, compute_fde
 from baselinev2.config import MANUAL_SEED, LINEAR_CFG, SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_PER_CLASS_VIDEOS_LIST_FOR_NN, \
     SDD_VIDEO_META_CLASSES_LIST_FOR_NN, NUM_WORKERS, BATCH_SIZE, LR, USE_BATCH_NORM, NUM_EPOCHS, OVERFIT
 from baselinev2.constants import NetworkMode
-from baselinev2.nn.dataset import BaselineDataset
+from baselinev2.nn.dataset import BaselineDataset, BaselineGeneratedDataset
 from baselinev2.plot_utils import plot_trajectories
 from log import initialize_logging, get_logger
 
@@ -316,6 +316,8 @@ class BaselineRNNStacked(BaselineRNN):
         self.return_pred = return_pred
         self.generated_dataset = generated_dataset
 
+        self.save_hyperparameters('lr', 'generated_dataset', 'batch_size', 'use_batch_norm', 'overfit_mode', 'shuffle')
+
     def forward(self, batch):
         if self.generated_dataset:
             in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, \
@@ -416,14 +418,18 @@ if __name__ == '__main__':
     # dataset_train = ConcatDataset(datasets=train_datasets)
     # dataset_val = ConcatDataset(datasets=val_datasets)
 
-    dataset_train = BaselineDataset(SDDVideoClasses.LITTLE, video_number, NetworkMode.TRAIN,
-                                    meta_label=SDDVideoDatasets.LITTLE)
-    dataset_val = BaselineDataset(SDDVideoClasses.LITTLE, video_number, NetworkMode.VALIDATION,
-                                  meta_label=SDDVideoDatasets.LITTLE)
+    # dataset_train = BaselineDataset(SDDVideoClasses.LITTLE, video_number, NetworkMode.TRAIN,
+    #                                 meta_label=SDDVideoDatasets.LITTLE)
+    # dataset_val = BaselineDataset(SDDVideoClasses.LITTLE, video_number, NetworkMode.VALIDATION,
+    #                               meta_label=SDDVideoDatasets.LITTLE)
+    dataset_train = BaselineGeneratedDataset(SDDVideoClasses.LITTLE, video_number, NetworkMode.TRAIN,
+                                             meta_label=SDDVideoDatasets.LITTLE)
+    dataset_val = BaselineGeneratedDataset(SDDVideoClasses.LITTLE, video_number, NetworkMode.VALIDATION,
+                                           meta_label=SDDVideoDatasets.LITTLE)
 
     m = BaselineRNNStacked(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=BATCH_SIZE,
                            num_workers=NUM_WORKERS, lr=LR, use_batch_norm=USE_BATCH_NORM, overfit_mode=OVERFIT,
-                           shuffle=True, pin_memory=True)
+                           shuffle=True, pin_memory=True, generated_dataset=True)
 
     trainer = Trainer(gpus=1, max_epochs=NUM_EPOCHS)
     trainer.fit(model=m)
