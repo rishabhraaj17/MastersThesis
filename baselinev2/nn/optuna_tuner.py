@@ -13,7 +13,7 @@ from baselinev2.nn.models import BaselineRNNStacked
 
 DEVICE = torch.device("cuda")
 DIR = f'{ROOT_PATH}Plots/Optuna'
-EPOCHS = 5
+EPOCHS = 10
 LOG_INTERVAL = 10
 
 
@@ -30,7 +30,7 @@ def get_loaders(trial):
     dataset_train = BaselineDataset(SDDVideoClasses.LITTLE, 3, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.LITTLE)
     dataset_val = BaselineDataset(SDDVideoClasses.LITTLE, 3, NetworkMode.VALIDATION, meta_label=SDDVideoDatasets.LITTLE)
 
-    batch_size = trial.suggest_int("batch_size", 256, 1024, step=256)
+    batch_size = trial.suggest_int("batch_size", 64, 1024, step=64)
     # Load MNIST dataset.
     train_loader = torch.utils.data.DataLoader(
         dataset_train,
@@ -46,13 +46,13 @@ def get_loaders(trial):
     return train_loader, valid_loader
 
 
-def objective(trial):
+def objective(trial: optuna.Trial):
     # Generate the model.
     model = define_model(trial).to(DEVICE)
 
     # Generate the optimizers.
     optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "RMSprop"])
-    lr = trial.suggest_float("lr", 1e-5, 1e-1, log=True)
+    lr = trial.suggest_float("lr", 1e-5, 5e-1, log=True)
     optimizer = getattr(optim, optimizer_name)(model.parameters(), lr=lr)
 
     # Get the MNIST dataset.
@@ -85,13 +85,13 @@ def objective(trial):
                 loss, ade, fde, ratio = model(data)
                 # Get the index of the max log-probability.
 
-        trial.report(ade, epoch)
+        trial.report(loss, epoch)
 
         # Handle pruning based on the intermediate value.
         if trial.should_prune():
             raise optuna.exceptions.TrialPruned()
 
-    return ade
+    return loss
 
 
 if __name__ == "__main__":

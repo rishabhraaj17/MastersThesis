@@ -1,6 +1,5 @@
 import os
 import shutil
-import tempfile
 from pathlib import Path
 
 import torch
@@ -14,10 +13,15 @@ from ray.tune.integration.pytorch_lightning import TuneReportCallback, \
     TuneReportCheckpointCallback
 
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
-from baselinev2.config import ROOT_PATH
+from baselinev2.config import ROOT_PATH, SAVE_BASE_PATH
 from baselinev2.constants import NetworkMode
-from baselinev2.nn.evaluate import get_dataset
+from baselinev2.nn.dataset import BaselineDataset
 from baselinev2.nn.models import BaselineRNNStacked
+
+
+def get_dataset(video_class: SDDVideoClasses, video_number: int, mode: NetworkMode, meta_label: SDDVideoDatasets):
+    return BaselineDataset(video_class, video_number, mode, meta_label=meta_label,
+                           root='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD_Features/')
 
 
 def get_datasets():
@@ -57,8 +61,8 @@ class TuneBaselineRNNStacked(BaselineRNNStacked):
         fde_list = [x["val_fde"] for x in outputs]
         avg_fde = sum(fde_list) / len(fde_list)
         self.log("ptl/val_loss", avg_loss)
-        self.log("ptl/val_ade", avg_ade)
-        self.log("ptl/val_fde", avg_ade)
+        self.log("ptl/val_ade", torch.tensor(avg_ade))
+        self.log("ptl/val_fde", torch.tensor(avg_ade))
 
 
 def train(config):
@@ -72,7 +76,7 @@ def train(config):
 
 def train_tune(config, data_dir=f'{ROOT_PATH}Plots/Ray/', num_epochs=10, num_gpus=0):
     train_dataset, val_dataset = get_datasets()
-    model = TuneBaselineRNNStacked(config=config, train_dataset=train_dataset, val_dataset=val_dataset, num_workers=0,
+    model = TuneBaselineRNNStacked(config=config, train_dataset=train_dataset, val_dataset=val_dataset, num_workers=12,
                                    use_batch_norm=False, shuffle=True, data_dir=data_dir)
     trainer = Trainer(
         max_epochs=num_epochs,
@@ -91,8 +95,9 @@ def train_tune(config, data_dir=f'{ROOT_PATH}Plots/Ray/', num_epochs=10, num_gpu
     trainer.fit(model)
 
 
-def tune_asha(num_samples=10, num_epochs=10, gpus_per_trial=0):
+def tune_asha(num_samples=10, num_epochs=10, gpus_per_trial=0, cpu_per_trail=1):
     data_dir = os.path.join(f'{ROOT_PATH}Plots/Ray/', "mnist_data_")
+    Path(data_dir).mkdir(parents=True, exist_ok=True)
 
     config = {
         "lr": tune.loguniform(1e-6, 1e-1),
@@ -115,7 +120,7 @@ def tune_asha(num_samples=10, num_epochs=10, gpus_per_trial=0):
             num_epochs=num_epochs,
             num_gpus=gpus_per_trial),
         resources_per_trial={
-            "cpu": 1,
+            "cpu": cpu_per_trail,
             "gpu": gpus_per_trial
         },
         metric="loss",
@@ -161,13 +166,14 @@ def train_tune_checkpoint(config, checkpoint_dir=None, data_dir=None, num_epochs
         trainer.current_epoch = ckpt["epoch"]
     else:
         model = TuneBaselineRNNStacked(config=config, train_dataset=train_dataset, val_dataset=val_dataset,
-                                       num_workers=0, use_batch_norm=False, shuffle=True, data_dir=data_dir)
+                                       num_workers=12, use_batch_norm=False, shuffle=True, data_dir=data_dir)
 
     trainer.fit(model)
 
 
-def tune_pbt(num_samples=10, num_epochs=10, gpus_per_trial=0):
+def tune_pbt(num_samples=10, num_epochs=10, gpus_per_trial=0, cpu_per_trail=1):
     data_dir = os.path.join(f'{ROOT_PATH}Plots/Ray/', "mnist_data_")
+    Path(data_dir).mkdir(parents=True, exist_ok=True)
 
     config = {
         "lr": 1e-3,
@@ -192,7 +198,7 @@ def tune_pbt(num_samples=10, num_epochs=10, gpus_per_trial=0):
             num_epochs=num_epochs,
             num_gpus=gpus_per_trial),
         resources_per_trial={
-            "cpu": 1,
+            "cpu": cpu_per_trail,
             "gpu": gpus_per_trial
         },
         metric="loss",
@@ -213,4 +219,5 @@ if __name__ == '__main__':
         "lr": 1e-3,
         "batch_size": 64
     }
-    train(config=config)
+    # train(config=config)
+    tune_pbt(num_samples=20, num_epochs=10, gpus_per_trial=1, cpu_per_trail=12)
