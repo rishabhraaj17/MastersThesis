@@ -6,6 +6,8 @@ from pytorch_lightning import LightningModule
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
+from average_image.utils import compute_ade, compute_fde
+
 
 # Taken from : https://github.com/PMMon/Thesis_Social_Interactions
 
@@ -197,13 +199,13 @@ class Encoder(nn.Module):
         :return final_h: Final hidden state/compressed latent information of shaoe (self.nr_layer, batch_size, self.encoder_h_dim)
         """
         # Encode observed Trajectory
-        batch_size = obs_traj.size(1)
+        batch_size = obs_traj.size(0)
         if not state_tuple:
             state_tuple = self.init_hidden(batch_size, obs_traj)
         if self.embedding_dim:
             obs_traj = self.spatial_embedding(obs_traj)
 
-        output, state = self.encoder(obs_traj, state_tuple)
+        output, state = self.encoder(obs_traj.permute(1, 0, 2), state_tuple)
         final_h = state[0]
 
         return output, final_h
@@ -288,7 +290,7 @@ class Decoder(nn.Module):
             decoder_input = decoder_input.view(1, batch_size, self.embedding_dim)
 
             # If True, pass information about the destination of each pedestrians to decoder input
-            if self.final_position:
+            if self.final_position:  # better results
                 destination_input = self.spatial_embedding(dest - last_pos)
                 destination_input = destination_input.view(-1, self.embedding_dim)
                 decoder_input = torch.cat([decoder_input.view(-1, self.embedding_dim), destination_input], dim=1)
@@ -587,7 +589,7 @@ class LSTM(BaseModel):
         :param inputs: Dictionary that holds information about the observed trajectories
         :return: Dictionary with information about the predicted trajectories
         """
-        batch_size = inputs["in_xy"].size(1)
+        batch_size = inputs["in_xy"].size(0)
 
         _, h = self.encoder(inputs["in_dxdy"])
 
@@ -597,24 +599,24 @@ class LSTM(BaseModel):
         c = self.init_c(batch_size).to(inputs["in_xy"])
 
         # Last observed position
-        x0 = inputs["in_xy"][-1]
-        v0 = inputs["in_dxdy"][-1]
+        x0 = inputs["in_xy"].permute(1, 0, 2)[-1]
+        v0 = inputs["in_dxdy"].permute(1, 0, 2)[-1]
         state_tuple = (h, c)
 
         # Provide information about final position
         if self.final_position:
-            dest = inputs["gt"][-1]
+            dest = inputs["gt"].permute(1, 0, 2)[-1]
         else:
             dest = 0
 
         # If data is loaded with information about all pedestrians in a scene, pass this information to the decoder
-        if "seq_start_end" in inputs.keys():
+        if "seq_start_end" in inputs.keys():  # todo: try it out
             seq_start_end = inputs["seq_start_end"]
         else:
             seq_start_end = []
 
         # If missing data is padded, pass information about which trajectories are padded to the decoder
-        if "pred_check" in inputs.keys():
+        if "pred_check" in inputs.keys():  # todo: try it out
             pred_check = inputs["pred_check"]
         else:
             pred_check = torch.ones(batch_size, 1)
@@ -657,7 +659,38 @@ class BaselineLSTM(LSTM, LightningModule):
             in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = x
 
         inputs = {'in_xy': in_xy, 'in_dxdy': in_uv, 'gt': gt_xy}
-        super(BaselineLSTM, self).forward(inputs)
+        out = super(BaselineLSTM, self).forward(inputs)
+        return out['out_xy'], out['out_dxdy'], out['h'], out['out_xy_all'], out['out_dxdy_all'], gt_xy, gt_uv, ratio
+
+    def one_step(self, x):
+        pred_xy, pred_uv, hidden_state, pred_xy_all, pred_uv_all, gt_xy, gt_uv, ratio = self(x)
+        pred_xy = pred_xy.permute(1, 0, 2)
+        loss = torch.linalg.norm(gt_xy - pred_xy, ord=2, dim=0).mean()
+
+        pred_xy = pred_xy.detach()
+
+        ade = compute_ade(pred_xy, gt_xy).item()
+
+        pred_xy = pred_xy.permute(1, 0, 2)
+        fde = compute_fde(pred_xy, gt_xy.permute(1, 0, 2)).item()
+
+        return loss, ade, fde, ratio, pred_xy
+
+    def training_step(self, batch, batch_idx):
+        loss, ade, fde, ratio, _ = self.one_step(batch)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/ade', ade * ratio, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/fde', fde * ratio, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss, ade, fde, ratio, _ = self.one_step(batch)
+        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/ade', ade * ratio, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/fde', fde * ratio, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+
+        return loss
 
     def configure_optimizers(self):
         opt = torch.optim.Adam(self.parameters(), lr=self.lr)
