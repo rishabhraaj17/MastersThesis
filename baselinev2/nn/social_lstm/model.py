@@ -667,14 +667,14 @@ class BaselineLSTM(LSTM, LightningModule):
         pred_xy = pred_xy.permute(1, 0, 2)
         loss = torch.linalg.norm(gt_xy - pred_xy, ord=2, dim=0).mean()
 
-        pred_xy = pred_xy.detach()
+        pred_xy = pred_xy.detach().cpu()
 
-        ade = compute_ade(pred_xy, gt_xy).item()
+        ade = compute_ade(pred_xy, gt_xy.cpu()).item()
 
         pred_xy = pred_xy.permute(1, 0, 2)
-        fde = compute_fde(pred_xy, gt_xy.permute(1, 0, 2)).item()
+        fde = compute_fde(pred_xy, gt_xy.cpu().permute(1, 0, 2)).item()
 
-        return loss, ade, fde, ratio, pred_xy
+        return loss, ade, fde, ratio[0].item(), pred_xy
 
     def training_step(self, batch, batch_idx):
         loss, ade, fde, ratio, _ = self.one_step(batch)
@@ -696,7 +696,7 @@ class BaselineLSTM(LSTM, LightningModule):
         opt = torch.optim.Adam(self.parameters(), lr=self.lr)
         schedulers = [
             {
-                'scheduler': ReduceLROnPlateau(opt, patience=15, verbose=True, factor=0.2, cooldown=2),
+                'scheduler': ReduceLROnPlateau(opt, patience=15, verbose=True, factor=0.1, cooldown=2),
                 'monitor': 'val_loss_epoch',
                 'interval': 'epoch',
                 'frequency': 1

@@ -15,6 +15,8 @@ from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.models import BaselineRNN
+from baselinev2.nn.overfit import social_lstm_parser
+from baselinev2.nn.social_lstm.model import BaselineLSTM
 from baselinev2.plot_utils import plot_trajectory_alongside_frame
 
 
@@ -96,6 +98,7 @@ def evaluate_model(model: nn.Module, data_loader: DataLoader, checkpoint_root_pa
 if __name__ == '__main__':
     num_workers = 12
     shuffle = True
+    use_social_lstm_model = True
 
     sdd_video_class = SDDVideoClasses.LITTLE
     sdd_meta_class = SDDVideoDatasets.LITTLE
@@ -104,7 +107,7 @@ if __name__ == '__main__':
 
     path_to_video = f'{BASE_PATH}videos/{sdd_video_class.value}/video{sdd_video_number}/video.mov'
 
-    version = 9
+    version = 14
 
     plot_save_path = f'{ROOT_PATH}Plots/baseline_v2/nn/v{version}/{sdd_video_class.value}{sdd_video_number}/' \
                      f'eval_plots/{network_mode.value}/'
@@ -112,7 +115,7 @@ if __name__ == '__main__':
     checkpoint_root_path = f'../baselinev2/lightning_logs/version_{version}/'
     dataset = get_dataset(video_clazz=sdd_video_class, video_number=sdd_video_number, mode=network_mode,
                           meta_label=sdd_meta_class)
-    model = BaselineRNN()
+    model = BaselineRNN() if not use_social_lstm_model else BaselineLSTM
 
     evaluate_model(model=model, data_loader=DataLoader(dataset, batch_size=1, num_workers=num_workers, shuffle=shuffle),
                    checkpoint_root_path=checkpoint_root_path, video_path=path_to_video, plot_path=plot_save_path)
