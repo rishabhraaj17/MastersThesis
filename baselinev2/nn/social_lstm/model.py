@@ -2,6 +2,10 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+from pytorch_lightning import LightningModule
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import DataLoader
+
 
 # Taken from : https://github.com/PMMon/Thesis_Social_Interactions
 
@@ -624,3 +628,52 @@ class LSTM(BaseModel):
                            dest=dest)
 
         return out
+
+
+class BaselineLSTM(LSTM, LightningModule):
+    def __init__(self, args, generated_dataset=False, train_dataset=None, val_dataset=None, batch_size=256,
+                 num_workers=12, lr=5e-3, use_batch_norm=False, over_fit_mode=False, shuffle=True, pin_memory=True):
+        super(BaselineLSTM, self).__init__(args=args)
+        self.generated_dataset = generated_dataset
+
+        self.train_dataset = train_dataset
+        self.val_dataset = val_dataset
+
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.lr = lr
+        self.use_batch_norm = use_batch_norm
+        self.over_fit_mode = over_fit_mode
+        self.shuffle = shuffle
+        self.pin_memory = pin_memory
+
+        self.save_hyperparameters('lr', 'generated_dataset', 'batch_size', 'use_batch_norm', 'over_fit_mode', 'shuffle')
+
+    def forward(self, x):
+        if self.generated_dataset:
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, \
+            mapped_in_xy, mapped_gt_xy, ratio = x
+        else:
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = x
+
+        inputs = {'in_xy': in_xy, 'in_dxdy': in_uv, 'gt': gt_xy}
+        super(BaselineLSTM, self).forward(inputs)
+
+    def configure_optimizers(self):
+        opt = torch.optim.Adam(self.parameters(), lr=self.lr)
+        schedulers = [
+            {
+                'scheduler': ReduceLROnPlateau(opt, patience=15, verbose=True, factor=0.2, cooldown=2),
+                'monitor': 'val_loss_epoch',
+                'interval': 'epoch',
+                'frequency': 1
+            }]
+        return [opt], schedulers
+
+    def train_dataloader(self):
+        return DataLoader(self.train_dataset, self.batch_size, collate_fn=None,
+                          num_workers=self.num_workers, shuffle=self.shuffle, pin_memory=self.pin_memory)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset, self.batch_size * 2, collate_fn=None,
+                          num_workers=self.num_workers, shuffle=False, pin_memory=self.pin_memory)

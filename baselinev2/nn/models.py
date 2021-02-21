@@ -346,8 +346,10 @@ class BaselineRNNStacked(BaselineRNN):
         last_xy = in_xy[:, -1, ...]
         last_uv = in_uv[:, -1, ...]
 
-        # h_dec, c_dec = h_enc.squeeze(0), c_enc.squeeze(0)
-        h_dec, c_dec = h_enc[-1, ...], c_enc[-1, ...]
+        # h_dec, c_dec = h_enc[-1, ...], c_enc[-1, ...]
+        h_dec, c_dec = h_enc[-1, ...], torch.zeros_like(c_enc[-1, ...])
+        torch.nn.init.xavier_normal_(c_dec)
+
         for gt_pred_xy in gt_xy.permute(1, 0, 2):
             out = self.pre_decoder(last_uv)
             h_dec, c_dec = self.decoder(out, (h_dec, c_dec))

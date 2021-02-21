@@ -10,6 +10,7 @@ from baselinev2.config import BATCH_SIZE, NUM_WORKERS, LR, USE_BATCH_NORM, OVERF
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.models import BaselineRNNStacked
+from baselinev2.nn.social_lstm.model import BaselineLSTM
 
 
 def get_model(train_dataset, val_dataset, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, lr=LR,
@@ -34,6 +35,34 @@ def get_model(train_dataset, val_dataset, batch_size=BATCH_SIZE, num_workers=NUM
                                    num_workers=num_workers, lr=lr, use_batch_norm=use_batch_norm,
                                    overfit_mode=over_fit_mode, shuffle=shuffle, pin_memory=pin_memory,
                                    generated_dataset=generated_dataset)
+    model.train()
+    return model
+
+
+def get_social_model(train_dataset, val_dataset, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, lr=LR,
+                     use_batch_norm=USE_BATCH_NORM, over_fit_mode=OVERFIT, shuffle=True, pin_memory=True,
+                     generated_dataset=True, from_checkpoint=None, checkpoint_root_path=None):
+    args = None
+    if from_checkpoint:
+        checkpoint_path = checkpoint_root_path + 'checkpoints/'
+        checkpoint_file = os.listdir(checkpoint_path)[-1]
+        model = BaselineLSTM.load_from_checkpoint(
+            checkpoint_path=checkpoint_path + checkpoint_file,
+            hparams_file=f'{checkpoint_root_path}hparams.yaml',
+            map_location=None,
+            train_dataset=train_dataset,
+            val_dataset=val_dataset,
+            num_workers=num_workers,
+            shuffle=shuffle,
+            pin_memory=pin_memory,
+            generated_dataset=generated_dataset,
+            args=args
+        )
+    else:
+        model = BaselineLSTM(train_dataset=train_dataset, val_dataset=val_dataset, batch_size=batch_size,
+                             num_workers=num_workers, lr=lr, use_batch_norm=use_batch_norm,
+                             over_fit_mode=over_fit_mode, shuffle=shuffle, pin_memory=pin_memory,
+                             generated_dataset=generated_dataset, args=args)
     model.train()
     return model
 

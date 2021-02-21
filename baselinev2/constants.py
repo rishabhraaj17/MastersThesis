@@ -41,3 +41,8 @@ class NetworkMode(Enum):
     TRAIN = 'train'
     VALIDATION = 'val'
     TEST = 'test'
+
+
+class Models(Enum):
+    BASELINE = 0
+    SOCIAL_LSTM = 1
