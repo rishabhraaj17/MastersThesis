@@ -12,14 +12,10 @@ from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from average_image.utils import compute_fde, compute_ade
 from baselinev2.config import BASE_PATH, ROOT_PATH
 from baselinev2.constants import NetworkMode
-from baselinev2.nn.dataset import BaselineDataset
+from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.models import BaselineRNN
-from baselinev2.plot_utils import plot_trajectories_with_frame, plot_trajectories, plot_trajectory_alongside_frame
-
-
-def get_dataset(video_class: SDDVideoClasses, video_number: int, mode: NetworkMode, meta_label: SDDVideoDatasets):
-    return BaselineDataset(video_class, video_number, mode, meta_label=meta_label)
+from baselinev2.plot_utils import plot_trajectory_alongside_frame
 
 
 @torch.no_grad()
@@ -114,7 +110,7 @@ if __name__ == '__main__':
                      f'eval_plots/{network_mode.value}/'
 
     checkpoint_root_path = f'../baselinev2/lightning_logs/version_{version}/'
-    dataset = get_dataset(video_class=sdd_video_class, video_number=sdd_video_number, mode=network_mode,
+    dataset = get_dataset(video_clazz=sdd_video_class, video_number=sdd_video_number, mode=network_mode,
                           meta_label=sdd_meta_class)
     model = BaselineRNN()
 

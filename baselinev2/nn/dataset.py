@@ -5,7 +5,8 @@ from torch.utils.data import Dataset, ConcatDataset, DataLoader
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from baselinev2.config import SAVE_BASE_PATH, \
     DATASET_META, \
-    GENERATED_DATASET_ROOT, BASE_PATH
+    GENERATED_DATASET_ROOT, BASE_PATH, SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_PER_CLASS_VIDEOS_LIST_FOR_NN, \
+    SDD_VIDEO_META_CLASSES_LIST_FOR_NN
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import plot_trajectories_with_frame
@@ -93,11 +94,33 @@ class BaselineGeneratedDataset(Dataset):
                gt_frame_numbers, mapped_in_xy, mapped_gt_xy, self.ratio
 
 
+def get_dataset(video_clazz: SDDVideoClasses, video_number: int, mode: NetworkMode, meta_label: SDDVideoDatasets,
+                get_generated: bool = False):
+    return BaselineGeneratedDataset(video_clazz, video_number, mode, meta_label=meta_label) if get_generated else \
+        BaselineDataset(video_clazz, video_number, mode, meta_label=meta_label)
+
+
+def get_all_dataset(get_generated: bool = False):
+    dataset = BaselineGeneratedDataset if get_generated else BaselineDataset
+
+    train_datasets, val_datasets = [], []
+    for v_idx, (video_clazz, meta) in enumerate(zip(SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_VIDEO_META_CLASSES_LIST_FOR_NN)):
+        for video_number in SDD_PER_CLASS_VIDEOS_LIST_FOR_NN[v_idx]:
+            train_datasets.append(dataset(video_class=video_clazz, video_number=video_number,
+                                          split=NetworkMode.TRAIN, meta_label=meta))
+            val_datasets.append(dataset(video_class=video_clazz, video_number=video_number,
+                                        split=NetworkMode.VALIDATION, meta_label=meta))
+    dataset_train = ConcatDataset(datasets=train_datasets)
+    dataset_val = ConcatDataset(datasets=val_datasets)
+
+    return dataset_train, dataset_val
+
+
 if __name__ == '__main__':
     video_class = SDDVideoClasses.LITTLE
     video_num = 3
-    meta_label = SDDVideoDatasets.LITTLE
-    d1 = BaselineGeneratedDataset(video_class, video_num, NetworkMode.TRAIN, meta_label=meta_label)
+    meta_labelz = SDDVideoDatasets.LITTLE
+    d1 = BaselineGeneratedDataset(video_class, video_num, NetworkMode.TRAIN, meta_label=meta_labelz)
     # d2 = BaselineDataset(SDDVideoClasses.COUPA, 0, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.COUPA)
     # d = ConcatDataset([d1, d2])
     d = ConcatDataset([d1])

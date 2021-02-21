@@ -158,3 +158,20 @@ LINEAR_CFG = {
     'lstm_in': 32,
     'lstm_encoder': 64
 }
+
+TRAIN_CLASS = SDDVideoClasses.LITTLE
+VAL_CLASS = TRAIN_CLASS
+
+TRAIN_VIDEO_NUMBER = 3
+VAL_VIDEO_NUMBER = TRAIN_VIDEO_NUMBER
+
+TRAIN_META = SDDVideoDatasets.LITTLE
+VAL_META = TRAIN_META
+
+USE_GENERATED_DATA = False  # Use unsupervised trajectories or not
+RESUME_TRAINING = False
+RESUME_VERSION = 9
+CHECKPOINT_ROOT = f'lightning_logs/version_{RESUME_VERSION}/'
+
+OVERFIT_BATCHES = 0.0
+LIMIT_BATCHES = (1.0, 1.0)  # (Train, Val)
