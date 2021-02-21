@@ -95,13 +95,14 @@ def train_tune(config, data_dir=f'{ROOT_PATH}Plots/Ray/', num_epochs=10, num_gpu
     trainer.fit(model)
 
 
-def tune_asha(num_samples=10, num_epochs=10, gpus_per_trial=0, cpu_per_trail=1):
+def tune_asha(num_samples=10, num_epochs=10, gpus_per_trial=0, cpu_per_trail=1, exp_name='tune_asha'):
     data_dir = os.path.join(f'{ROOT_PATH}Plots/Ray/', "mnist_data_")
     Path(data_dir).mkdir(parents=True, exist_ok=True)
 
     config = {
         "lr": tune.loguniform(1e-6, 1e-1),
-        "batch_size": tune.choice([128, 256, 512, 1024, 2048]),
+        # "batch_size": tune.choice([128, 256, 512, 1024, 2048]),
+        "batch_size": tune.choice([1024]),
     }
 
     scheduler = ASHAScheduler(
@@ -129,7 +130,7 @@ def tune_asha(num_samples=10, num_epochs=10, gpus_per_trial=0, cpu_per_trail=1):
         num_samples=num_samples,
         scheduler=scheduler,
         progress_reporter=reporter,
-        name="tune_asha")
+        name=exp_name)
 
     print("Best hyperparameters found were: ", analysis.best_config)
 
@@ -171,7 +172,7 @@ def train_tune_checkpoint(config, checkpoint_dir=None, data_dir=None, num_epochs
     trainer.fit(model)
 
 
-def tune_pbt(num_samples=10, num_epochs=10, gpus_per_trial=0, cpu_per_trail=1):
+def tune_pbt(num_samples=10, num_epochs=10, gpus_per_trial=0, cpu_per_trail=1, exp_name="tune_pbt"):
     data_dir = os.path.join(f'{ROOT_PATH}Plots/Ray/', "mnist_data_")
     Path(data_dir).mkdir(parents=True, exist_ok=True)
 
@@ -184,7 +185,8 @@ def tune_pbt(num_samples=10, num_epochs=10, gpus_per_trial=0, cpu_per_trail=1):
         perturbation_interval=4,
         hyperparam_mutations={
             "lr": tune.loguniform(1e-6, 1e-1),
-            "batch_size": [128, 256, 512, 1024, 2048]
+            # "batch_size": [128, 256, 512, 1024, 2048],
+            "batch_size": [1024]
         })
 
     reporter = CLIReporter(
@@ -207,7 +209,7 @@ def tune_pbt(num_samples=10, num_epochs=10, gpus_per_trial=0, cpu_per_trail=1):
         num_samples=num_samples,
         scheduler=scheduler,
         progress_reporter=reporter,
-        name="tune_pbt")
+        name=exp_name)
 
     print("Best hyperparameters found were: ", analysis.best_config)
 
@@ -220,4 +222,4 @@ if __name__ == '__main__':
         "batch_size": 64
     }
     # train(config=config)
-    tune_pbt(num_samples=20, num_epochs=10, gpus_per_trial=1, cpu_per_trail=12)
+    tune_asha(num_samples=25, num_epochs=20, gpus_per_trial=1, cpu_per_trail=12, exp_name='tune_asha_lr')
