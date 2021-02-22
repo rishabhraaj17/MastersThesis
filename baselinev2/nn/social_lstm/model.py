@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np
 
 from pytorch_lightning import LightningModule
+from torch.nn.functional import relu6
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
@@ -16,6 +17,8 @@ from average_image.utils import compute_ade, compute_fde
 # and decoder of the Vanilla/Social LSTM Model, the pooling layer of
 # the Social LSTM Model, etc.
 # =====================================================================
+EMBEDDING_ACTIVATION_FUNCTION = relu6  # torch.tanh
+
 
 def make_mlp(dim_list, activation, batch_norm=False, dropout=0.0):
     """
@@ -34,6 +37,8 @@ def make_mlp(dim_list, activation, batch_norm=False, dropout=0.0):
             layers.append(nn.BatchNorm1d(dim_out))
         if activation == 'relu':
             layers.append(nn.ReLU())
+        elif activation == 'relu6':
+            layers.append(nn.ReLU6())
         elif activation == 'tanh':
             layers.append(nn.Tanh())
         elif activation == 'leakyrelu':
@@ -204,6 +209,7 @@ class Encoder(nn.Module):
             state_tuple = self.init_hidden(batch_size, obs_traj)
         if self.embedding_dim:
             obs_traj = self.spatial_embedding(obs_traj)
+            obs_traj = EMBEDDING_ACTIVATION_FUNCTION(obs_traj)
 
         output, state = self.encoder(obs_traj.permute(1, 0, 2), state_tuple)
         final_h = state[0]
@@ -218,7 +224,8 @@ class Decoder(nn.Module):
 
     def __init__(self, seq_len=12, input_dim=2, decoder_h_dim=128, embedding_dim=64, dropout=0.0, mlp_dim=128,
                  batch_norm=False, num_layers=1, pool_every_timestep=True, pooling="social_pooling",
-                 neighborhood_size=2.0, grid_size=8, pool_dim=None, activation_function="relu", final_position=False):
+                 neighborhood_size=2.0, grid_size=8, pool_dim=None, activation_function="relu",
+                 final_position=False):
         super(Decoder, self).__init__()
 
         self.__dict__.update(locals())
@@ -287,6 +294,7 @@ class Decoder(nn.Module):
 
             # For each element in seq_len (for each coordinate-pair) increase dimension by spatial embedding dimension
             decoder_input = self.spatial_embedding(last_pos_rel)
+            decoder_input = EMBEDDING_ACTIVATION_FUNCTION(decoder_input)
             decoder_input = decoder_input.view(1, batch_size, self.embedding_dim)
 
             # If True, pass information about the destination of each pedestrians to decoder input

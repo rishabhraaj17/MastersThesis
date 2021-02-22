@@ -229,7 +229,7 @@ if __name__ == '__main__':
     generated = True
     num_workers = 12
     shuffle = True
-    use_social_lstm_model = False
+    use_social_lstm_model = True
 
     do_reverse_slices = False
 
