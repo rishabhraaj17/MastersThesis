@@ -14,7 +14,7 @@ from average_image.utils import compute_fde, compute_ade
 from baselinev2.config import BASE_PATH, ROOT_PATH, DEBUG_MODE, EVAL_USE_SOCIAL_LSTM_MODEL, EVAL_USE_BATCH_NORM, \
     EVAL_PATH_TO_VIDEO, EVAL_PLOT_PATH, GT_CHECKPOINT_ROOT_PATH, UNSUPERVISED_CHECKPOINT_ROOT_PATH, EVAL_TRAIN_CLASS, \
     EVAL_TRAIN_VIDEO_NUMBER, EVAL_TRAIN_META, EVAL_VAL_CLASS, EVAL_VAL_VIDEO_NUMBER, EVAL_VAL_META, EVAL_TEST_CLASS, \
-    EVAL_TEST_VIDEO_NUMBER, EVAL_TEST_META, EVAL_BATCH_SIZE, EVAL_SHUFFLE, EVAL_WORKERS
+    EVAL_TEST_VIDEO_NUMBER, EVAL_TEST_META, EVAL_BATCH_SIZE, EVAL_SHUFFLE, EVAL_WORKERS, PLOT_MODE
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.data_utils import extract_frame_from_video
@@ -354,7 +354,7 @@ if __name__ == '__main__':
             val_loader=val_loader,
             test_loader=test_loader,
             social_lstm=EVAL_USE_SOCIAL_LSTM_MODEL,
-            plot=False,
+            plot=PLOT_MODE,
             use_batch_norm=EVAL_USE_BATCH_NORM,
             video_path=EVAL_PATH_TO_VIDEO,
             plot_path=EVAL_PLOT_PATH,
