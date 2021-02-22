@@ -175,7 +175,7 @@ def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loade
                         video_path, split_name):
     supervised_ade_list, supervised_fde_list = [], []
     unsupervised_ade_list, unsupervised_fde_list = [], []
-    for idx, data in tqdm(enumerate(loader), total=len(loader.dataset)):
+    for idx, data in enumerate(tqdm(loader)):
         in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = data
 
         supervised_loss, supervised_ade, supervised_fde, supervised_ratio, supervised_pred_trajectory = \
@@ -183,17 +183,17 @@ def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loade
         unsupervised_loss, unsupervised_ade, unsupervised_fde, unsupervised_ratio, unsupervised_pred_trajectory = \
             unsupervised_caller(data)
 
-        plot_frame_number = in_frame_numbers.squeeze()[0].item()
-        plot_track_id = in_track_ids.squeeze()[0].item()
-        all_frame_numbers = torch.cat((in_frame_numbers.squeeze(), gt_frame_numbers.squeeze())).tolist()
-
-        obs_trajectory = in_xy.squeeze().numpy()
-        gt_trajectory = gt_xy.squeeze().numpy()
-
-        supervised_pred_trajectory = supervised_pred_trajectory.squeeze().numpy()
-        unsupervised_pred_trajectory = unsupervised_pred_trajectory.squeeze().numpy()
-
         if plot:
+            plot_frame_number = in_frame_numbers.squeeze()[0].item()
+            plot_track_id = in_track_ids.squeeze()[0].item()
+            all_frame_numbers = torch.cat((in_frame_numbers.squeeze(), gt_frame_numbers.squeeze())).tolist()
+
+            obs_trajectory = in_xy.squeeze().numpy()
+            gt_trajectory = gt_xy.squeeze().numpy()
+
+            supervised_pred_trajectory = supervised_pred_trajectory.squeeze().numpy()
+            unsupervised_pred_trajectory = unsupervised_pred_trajectory.squeeze().numpy()
+
             if plot_four_way:
                 plot_and_compare_trajectory_four_way(
                     frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
