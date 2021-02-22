@@ -252,7 +252,7 @@ if __name__ == '__main__':
                              use_batch_norm=False)
     else:
         model = BaselineRNNStacked(encoder_lstm_num_layers=1, decoder_lstm_num_layers=1, generated_dataset=generated,
-                                   use_batch_norm=True)
+                                   use_batch_norm=True, relative_velocities=False)
 
     if single_chunk_fit:
         overfit_chunk = 1

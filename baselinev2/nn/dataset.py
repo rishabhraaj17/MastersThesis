@@ -19,7 +19,8 @@ logger = get_logger('baselinev2.nn.dataset')
 class BaselineDataset(Dataset):
     def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode,
                  meta_label: SDDVideoDatasets, root: str = SAVE_BASE_PATH,
-                 observation_length: int = 8, prediction_length: int = 12):
+                 observation_length: int = 8, prediction_length: int = 12,
+                 relative_velocities: bool = False):
         super(BaselineDataset, self).__init__()
         try:
             self.ratio = float(DATASET_META.get_meta(meta_label, video_number)[0]['Ratio'].to_numpy()[0])
@@ -34,6 +35,7 @@ class BaselineDataset(Dataset):
 
         self.prediction_length = prediction_length
         self.observation_length = observation_length
+        self.relative_velocities = relative_velocities
 
     def __len__(self):
         return len(self.relative_distances)
@@ -43,8 +45,10 @@ class BaselineDataset(Dataset):
                                      torch.from_numpy(self.relative_distances[item])
         in_xy = tracks[..., :self.observation_length, -2:]
         gt_xy = tracks[..., self.observation_length:, -2:]
-        in_velocities = relative_distances[..., :self.observation_length - 1, :] / 0.4
-        gt_velocities = relative_distances[..., self.observation_length:, :] / 0.4
+        in_velocities = relative_distances[..., :self.observation_length - 1, :] / 0.4 \
+            if self.relative_velocities else relative_distances[..., :self.observation_length - 1, :]
+        gt_velocities = relative_distances[..., self.observation_length:, :] / 0.4 \
+            if self.relative_velocities else relative_distances[..., self.observation_length:, :]
         in_track_ids = tracks[..., :self.observation_length, 0].int()
         gt_track_ids = tracks[..., self.observation_length:, 0].int()
         in_frame_numbers = tracks[..., :self.observation_length, 5].int()
@@ -57,7 +61,7 @@ class BaselineDataset(Dataset):
 class BaselineGeneratedDataset(Dataset):
     def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode,
                  meta_label: SDDVideoDatasets, root: str = GENERATED_DATASET_ROOT,
-                 observation_length: int = 8, prediction_length: int = 12):
+                 observation_length: int = 8, prediction_length: int = 12, relative_velocities: bool = False):
         super(BaselineGeneratedDataset, self).__init__()
         try:
             self.ratio = float(DATASET_META.get_meta(meta_label, video_number)[0]['Ratio'].to_numpy()[0])
@@ -72,6 +76,7 @@ class BaselineGeneratedDataset(Dataset):
 
         self.prediction_length = prediction_length
         self.observation_length = observation_length
+        self.relative_velocities = relative_velocities
 
     def __len__(self):
         return len(self.relative_distances)
@@ -81,8 +86,10 @@ class BaselineGeneratedDataset(Dataset):
                                      torch.from_numpy(self.relative_distances[item])
         in_xy = tracks[:self.observation_length, 6:8]
         gt_xy = tracks[self.observation_length:, 6:8]
-        in_velocities = relative_distances[:self.observation_length - 1, :] / 0.4
-        gt_velocities = relative_distances[self.observation_length:, :] / 0.4
+        in_velocities = relative_distances[:self.observation_length - 1, :] / 0.4 \
+            if self.relative_velocities else relative_distances[:self.observation_length - 1, :]
+        gt_velocities = relative_distances[self.observation_length:, :] / 0.4 \
+            if self.relative_velocities else relative_distances[self.observation_length:, :]
         in_track_ids = tracks[:self.observation_length, 0].int()
         gt_track_ids = tracks[self.observation_length:, 0].int()
         in_frame_numbers = tracks[:self.observation_length, 5].int()

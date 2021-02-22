@@ -289,7 +289,7 @@ class BaselineRNNStacked(BaselineRNN):
                  train_dataset=None, val_dataset=None, batch_size=1, num_workers=0, use_batch_norm=False,
                  encoder_lstm_num_layers: int = 1, overfit_mode: bool = False, shuffle: bool = False,
                  pin_memory: bool = True, decoder_lstm_num_layers: int = 1, return_pred: bool = False,
-                 generated_dataset: bool = False):
+                 generated_dataset: bool = False, relative_velocities: bool = False):
         super(BaselineRNNStacked, self).__init__(
             original_frame_shape=original_frame_shape, prediction_length=prediction_length, lr=lr,
             time_steps=time_steps, train_dataset=train_dataset, val_dataset=val_dataset, batch_size=batch_size,
@@ -315,8 +315,10 @@ class BaselineRNNStacked(BaselineRNN):
                                         last_without_activation=True)
         self.return_pred = return_pred
         self.generated_dataset = generated_dataset
+        self.relative_velocities = relative_velocities
 
-        self.save_hyperparameters('lr', 'generated_dataset', 'batch_size', 'use_batch_norm', 'overfit_mode', 'shuffle')
+        self.save_hyperparameters('lr', 'generated_dataset', 'batch_size', 'use_batch_norm', 'overfit_mode', 'shuffle',
+                                  'relative_velocities')
 
     def forward(self, batch):
         if self.generated_dataset:
@@ -359,8 +361,7 @@ class BaselineRNNStacked(BaselineRNN):
                     h_dec, c_dec = extra_decoder(F.relu(h_dec), (hidden_states[d_idx + 1], cell_states[d_idx + 1]))
 
             pred_uv = self.post_decoder(F.relu(h_dec))
-            out = last_xy + (pred_uv * 0.4)
-            # out = last_xy + pred_uv
+            out = last_xy + (pred_uv * 0.4) if self.relative_velocities else last_xy + pred_uv
             total_loss += self.center_based_loss_meters(gt_center=gt_pred_xy, pred_center=out, ratio=ratio[0].item())
 
             predicted_xy.append(out.detach().cpu().numpy())
