@@ -90,7 +90,7 @@ def reverse_u_v_generated(batch):
 
 def overfit(net, loader, optimizer, num_epochs=5000, batch_mode=False, video_path=None, social_lstm=False):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, patience=500, cooldown=10, verbose=True,
-                                                           factor=0.2)
+                                                           factor=0.1)
     net.train()
     net.return_pred = True
 
@@ -229,7 +229,7 @@ if __name__ == '__main__':
     generated = True
     num_workers = 12
     shuffle = True
-    use_social_lstm_model = True
+    use_social_lstm_model = False
 
     do_reverse_slices = False
 
@@ -248,7 +248,7 @@ if __name__ == '__main__':
     checkpoint_root_path = f'../baselinev2/lightning_logs/version_{version}/'
     # model = BaselineRNN()
     if use_social_lstm_model:
-        model = BaselineLSTM(args=social_lstm_parser(pass_final_pos=True), generated_dataset=generated,
+        model = BaselineLSTM(args=social_lstm_parser(pass_final_pos=False), generated_dataset=generated,
                              use_batch_norm=False)
     else:
         model = BaselineRNNStacked(encoder_lstm_num_layers=1, decoder_lstm_num_layers=1, generated_dataset=generated,
@@ -295,7 +295,7 @@ if __name__ == '__main__':
     optim = torch.optim.Adam(model.parameters(), lr=lr, amsgrad=True)
     # optim = torch.optim.SGD(model.parameters(), lr=lr)
 
-    overfit(net=model, loader=overfit_dataloader, optimizer=optim, num_epochs=15000, batch_mode=not single_chunk_fit,
+    overfit(net=model, loader=overfit_dataloader, optimizer=optim, num_epochs=20000, batch_mode=not single_chunk_fit,
             video_path=path_to_video, social_lstm=use_social_lstm_model)
     # overfit_two_loss(net=model, loader=overfit_dataloader, optimizer=optim, num_epochs=5000)
 

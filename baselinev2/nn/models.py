@@ -246,7 +246,7 @@ class BaselineRNN(LightningModule):
 
     @staticmethod
     def l2_norm(point1, point2):
-        return torch.norm(point1 - point2, p=2)
+        return torch.linalg.norm(point1 - point2, ord=2, dim=-1).mean()
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, self.batch_size, collate_fn=None,

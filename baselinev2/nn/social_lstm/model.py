@@ -665,7 +665,7 @@ class BaselineLSTM(LSTM, LightningModule):
     def one_step(self, x):
         pred_xy, pred_uv, hidden_state, pred_xy_all, pred_uv_all, gt_xy, gt_uv, ratio = self(x)
         pred_xy = pred_xy.permute(1, 0, 2)
-        loss = torch.linalg.norm(gt_xy - pred_xy, ord=2, dim=0).mean()
+        loss = torch.linalg.norm(gt_xy - pred_xy, ord=2, dim=-1).mean()
 
         pred_xy = pred_xy.detach().cpu()
 
