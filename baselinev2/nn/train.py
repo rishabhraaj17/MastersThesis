@@ -12,6 +12,10 @@ from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.models import BaselineRNNStacked
 from baselinev2.nn.overfit import social_lstm_parser
 from baselinev2.nn.social_lstm.model import BaselineLSTM
+from log import initialize_logging, get_logger
+
+initialize_logging()
+logger = get_logger('baselinev2.nn.train')
 
 
 def get_model(train_dataset, val_dataset, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, lr=LR,

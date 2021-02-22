@@ -1,6 +1,7 @@
 import os
 from typing import Optional
 
+import matplotlib
 import torch
 import numpy as np
 from torch import nn
@@ -10,14 +11,24 @@ from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from average_image.utils import compute_fde, compute_ade
-from baselinev2.config import BASE_PATH, ROOT_PATH
+from baselinev2.config import BASE_PATH, ROOT_PATH, DEBUG_MODE, EVAL_USE_SOCIAL_LSTM_MODEL, EVAL_USE_BATCH_NORM, \
+    EVAL_PATH_TO_VIDEO, EVAL_PLOT_PATH, GT_CHECKPOINT_ROOT_PATH, UNSUPERVISED_CHECKPOINT_ROOT_PATH, EVAL_TRAIN_CLASS, \
+    EVAL_TRAIN_VIDEO_NUMBER, EVAL_TRAIN_META, EVAL_VAL_CLASS, EVAL_VAL_VIDEO_NUMBER, EVAL_VAL_META, EVAL_TEST_CLASS, \
+    EVAL_TEST_VIDEO_NUMBER, EVAL_TEST_META, EVAL_BATCH_SIZE, EVAL_SHUFFLE, EVAL_WORKERS
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.data_utils import extract_frame_from_video
-from baselinev2.nn.models import BaselineRNN
+from baselinev2.nn.models import BaselineRNN, BaselineRNNStacked
 from baselinev2.nn.overfit import social_lstm_parser
 from baselinev2.nn.social_lstm.model import BaselineLSTM
-from baselinev2.plot_utils import plot_trajectory_alongside_frame
+from baselinev2.plot_utils import plot_trajectory_alongside_frame, plot_and_compare_trajectory_four_way, \
+    plot_and_compare_trajectory_alongside_frame
+from log import initialize_logging, get_logger
+
+matplotlib.style.use('ggplot')
+
+initialize_logging()
+logger = get_logger('baselinev2.nn.evaluate')
 
 
 @torch.no_grad()
@@ -118,35 +129,234 @@ def evaluate_social_lstm_model(model: nn.Module, data_loader: DataLoader, checkp
         )
 
 
-if __name__ == '__main__':
-    num_workers = 12
-    shuffle = True
-    use_social_lstm_model = True
-
-    sdd_video_class = SDDVideoClasses.LITTLE
-    sdd_meta_class = SDDVideoDatasets.LITTLE
-    network_mode = NetworkMode.TRAIN
-    sdd_video_number = 3
-
-    path_to_video = f'{BASE_PATH}videos/{sdd_video_class.value}/video{sdd_video_number}/video.mov'
-
-    version = 14
-
-    plot_save_path = f'{ROOT_PATH}Plots/baseline_v2/nn/v{version}/{sdd_video_class.value}{sdd_video_number}/' \
-                     f'eval_plots/{network_mode.value}/'
-
-    checkpoint_root_path = f'../baselinev2/lightning_logs/version_{version}/'
-    dataset = get_dataset(video_clazz=sdd_video_class, video_number=sdd_video_number, mode=network_mode,
-                          meta_label=sdd_meta_class)
-    model = BaselineRNN() if not use_social_lstm_model else BaselineLSTM
-
-    if use_social_lstm_model:
-        evaluate_social_lstm_model(
-            model=model,
-            data_loader=DataLoader(dataset, batch_size=1, num_workers=num_workers, shuffle=shuffle),
-            checkpoint_root_path=checkpoint_root_path, video_path=path_to_video,
-            plot_path=plot_save_path)
+def get_models(social_lstm, supervised_checkpoint_root_path, unsupervised_checkpoint_root_path, use_batch_norm):
+    supervised_checkpoint_path = supervised_checkpoint_root_path + 'checkpoints/'
+    supervised_checkpoint_file = os.listdir(supervised_checkpoint_path)[-1]
+    unsupervised_checkpoint_path = unsupervised_checkpoint_root_path + 'checkpoints/'
+    unsupervised_checkpoint_file = os.listdir(unsupervised_checkpoint_path)[-1]
+    if social_lstm:
+        supervised_net = BaselineLSTM.load_from_checkpoint(
+            checkpoint_path=supervised_checkpoint_path + supervised_checkpoint_file,
+            hparams_file=f'{supervised_checkpoint_root_path}hparams.yaml',
+            map_location=None,
+            args=social_lstm_parser(pass_final_pos=True),
+            use_batch_norm=use_batch_norm
+        )
+        unsupervised_net = BaselineLSTM.load_from_checkpoint(
+            checkpoint_path=unsupervised_checkpoint_path + unsupervised_checkpoint_file,
+            hparams_file=f'{unsupervised_checkpoint_root_path}hparams.yaml',
+            map_location=None,
+            args=social_lstm_parser(pass_final_pos=True),
+            generated_dataset=False,  # we evaluate on ground-truth trajectories
+            use_batch_norm=use_batch_norm
+        )
     else:
-        evaluate_model(model=model,
-                       data_loader=DataLoader(dataset, batch_size=1, num_workers=num_workers, shuffle=shuffle),
-                       checkpoint_root_path=checkpoint_root_path, video_path=path_to_video, plot_path=plot_save_path)
+        supervised_net = BaselineRNNStacked.load_from_checkpoint(
+            checkpoint_path=supervised_checkpoint_path + supervised_checkpoint_file,
+            hparams_file=f'{supervised_checkpoint_root_path}hparams.yaml',
+            map_location=None,
+            use_batch_norm=use_batch_norm,
+            return_pred=True
+        )
+        unsupervised_net = BaselineRNNStacked.load_from_checkpoint(
+            checkpoint_path=unsupervised_checkpoint_path + unsupervised_checkpoint_file,
+            hparams_file=f'{unsupervised_checkpoint_root_path}hparams.yaml',
+            map_location=None,
+            generated_dataset=False,  # we evaluate on ground-truth trajectories
+            use_batch_norm=use_batch_norm,
+            return_pred=True
+        )
+    supervised_net.eval()
+    unsupervised_net.eval()
+    return supervised_net, unsupervised_net
+
+
+def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loader, unsupervised_caller,
+                        video_path, split_name):
+    supervised_ade_list, supervised_fde_list = [], []
+    unsupervised_ade_list, unsupervised_fde_list = [], []
+    for idx, data in tqdm(enumerate(loader), total=len(loader.dataset)):
+        in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = data
+
+        supervised_loss, supervised_ade, supervised_fde, supervised_ratio, supervised_pred_trajectory = \
+            supervised_caller(data)
+        unsupervised_loss, unsupervised_ade, unsupervised_fde, unsupervised_ratio, unsupervised_pred_trajectory = \
+            unsupervised_caller(data)
+
+        plot_frame_number = in_frame_numbers.squeeze()[0].item()
+        plot_track_id = in_track_ids.squeeze()[0].item()
+        all_frame_numbers = torch.cat((in_frame_numbers.squeeze(), gt_frame_numbers.squeeze())).tolist()
+
+        obs_trajectory = in_xy.squeeze().numpy()
+        gt_trajectory = gt_xy.squeeze().numpy()
+
+        supervised_pred_trajectory = supervised_pred_trajectory.squeeze().numpy()
+        unsupervised_pred_trajectory = unsupervised_pred_trajectory.squeeze().numpy()
+
+        if plot:
+            if plot_four_way:
+                plot_and_compare_trajectory_four_way(
+                    frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
+                    supervised_obs_trajectory=obs_trajectory,
+                    supervised_gt_trajectory=gt_trajectory,
+                    supervised_pred_trajectory=supervised_pred_trajectory,
+                    unsupervised_obs_trajectory=obs_trajectory,
+                    unsupervised_gt_trajectory=gt_trajectory,
+                    unsupervised_pred_trajectory=unsupervised_pred_trajectory,
+                    frame_number=plot_frame_number,
+                    track_id=plot_track_id,
+                    additional_text=f'Frame Numbers: {all_frame_numbers}'
+                                    f'\nGround Truth -> ADE: {supervised_ade} | FDE: {supervised_fde}'
+                                    f'\nUnsupervised -> ADE: {unsupervised_ade} | FDE: {unsupervised_fde}',
+                    save_path=f'{plot_path}{split_name}/'
+                )
+            else:
+                plot_and_compare_trajectory_alongside_frame(
+                    frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
+                    supervised_obs_trajectory=obs_trajectory,
+                    supervised_gt_trajectory=gt_trajectory,
+                    supervised_pred_trajectory=supervised_pred_trajectory,
+                    unsupervised_obs_trajectory=obs_trajectory,
+                    unsupervised_gt_trajectory=gt_trajectory,
+                    unsupervised_pred_trajectory=unsupervised_pred_trajectory,
+                    frame_number=plot_frame_number,
+                    track_id=plot_track_id,
+                    additional_text=f'Frame Numbers: {all_frame_numbers}'
+                                    f'\nGround Truth -> ADE: {supervised_ade} | FDE: {supervised_fde}'
+                                    f'\nUnsupervised -> ADE: {unsupervised_ade} | FDE: {unsupervised_fde}',
+                    save_path=f'{plot_path}{split_name}/',
+                    include_frame=True
+                )
+
+        supervised_ade_list.append(supervised_ade)
+        supervised_fde_list.append(supervised_fde)
+        unsupervised_ade_list.append(unsupervised_ade)
+        unsupervised_fde_list.append(unsupervised_fde)
+
+    return supervised_ade_list, supervised_fde_list, unsupervised_ade_list, unsupervised_fde_list
+
+
+def get_metrics(supervised_ade_list, supervised_fde_list, unsupervised_ade_list, unsupervised_fde_list):
+    return np.array(supervised_ade_list).mean(), np.array(supervised_fde_list).mean(), \
+           np.array(unsupervised_ade_list).mean(), np.array(unsupervised_fde_list).mean()
+
+
+@torch.no_grad()
+def eval_models(supervised_checkpoint_root_path: str, unsupervised_checkpoint_root_path: str, train_loader: DataLoader,
+                val_loader: DataLoader, test_loader: DataLoader, social_lstm: bool = True, plot: bool = False,
+                use_batch_norm: bool = False, video_path: str = None, plot_path: Optional[str] = None,
+                plot_four_way: bool = False):
+    supervised_net, unsupervised_net = get_models(social_lstm, supervised_checkpoint_root_path,
+                                                  unsupervised_checkpoint_root_path, use_batch_norm)
+
+    supervised_caller = supervised_net.one_step if social_lstm else supervised_net
+    unsupervised_caller = unsupervised_net.one_step if social_lstm else unsupervised_net
+
+    logger.info('Evaluating for Test Set')
+    test_supervised_ade_list, test_supervised_fde_list, test_unsupervised_ade_list, test_unsupervised_fde_list = \
+        evaluate_per_loader(
+            plot, plot_four_way, plot_path, supervised_caller, test_loader, unsupervised_caller, video_path,
+            split_name=NetworkMode.TEST.name)
+
+    logger.info('Evaluating for Validation Set')
+    val_supervised_ade_list, val_supervised_fde_list, val_unsupervised_ade_list, val_unsupervised_fde_list = \
+        evaluate_per_loader(
+            plot, plot_four_way, plot_path, supervised_caller, val_loader, unsupervised_caller, video_path,
+            split_name=NetworkMode.VALIDATION.name)
+
+    logger.info('Evaluating for Train Set')
+    train_supervised_ade_list, train_supervised_fde_list, train_unsupervised_ade_list, train_unsupervised_fde_list = \
+        evaluate_per_loader(
+            plot, plot_four_way, plot_path, supervised_caller, train_loader, unsupervised_caller, video_path,
+            split_name=NetworkMode.TRAIN.name)
+
+    train_supervised_ade, train_supervised_fde, train_unsupervised_ade, train_unsupervised_fde = get_metrics(
+        train_supervised_ade_list, train_supervised_fde_list, train_unsupervised_ade_list, train_unsupervised_fde_list
+    )
+
+    val_supervised_ade, val_supervised_fde, val_unsupervised_ade, val_unsupervised_fde = get_metrics(
+        val_supervised_ade_list, val_supervised_fde_list, val_unsupervised_ade_list, val_unsupervised_fde_list
+    )
+
+    test_supervised_ade, test_supervised_fde, test_unsupervised_ade, test_unsupervised_fde = get_metrics(
+        test_supervised_ade_list, test_supervised_fde_list, test_unsupervised_ade_list, test_unsupervised_fde_list
+    )
+
+    logger.info('Train Set')
+    logger.info(f'ADE - GT: {train_supervised_ade} | Unsupervised: {train_unsupervised_ade}')
+    logger.info(f'FDE - GT: {train_supervised_fde} | Unsupervised: {train_unsupervised_fde}')
+
+    logger.info('Validation Set')
+    logger.info(f'ADE - GT: {val_supervised_ade} | Unsupervised: {val_unsupervised_ade}')
+    logger.info(f'FDE - GT: {val_supervised_fde} | Unsupervised: {val_unsupervised_fde}')
+
+    logger.info('Test Set')
+    logger.info(f'ADE - GT: {test_supervised_ade} | Unsupervised: {test_unsupervised_ade}')
+    logger.info(f'FDE - GT: {test_supervised_fde} | Unsupervised: {test_unsupervised_fde}')
+
+
+def get_eval_loaders():
+    train_set = get_dataset(video_clazz=EVAL_TRAIN_CLASS, video_number=EVAL_TRAIN_VIDEO_NUMBER,
+                            mode=NetworkMode.TRAIN, meta_label=EVAL_TRAIN_META, get_generated=False)
+    val_set = get_dataset(video_clazz=EVAL_VAL_CLASS, video_number=EVAL_VAL_VIDEO_NUMBER,
+                          mode=NetworkMode.VALIDATION, meta_label=EVAL_VAL_META, get_generated=False)
+    test_set = get_dataset(video_clazz=EVAL_TEST_CLASS, video_number=EVAL_TEST_VIDEO_NUMBER,
+                           mode=NetworkMode.TEST, meta_label=EVAL_TEST_META, get_generated=False)
+
+    train_loader = DataLoader(train_set, batch_size=EVAL_BATCH_SIZE, shuffle=EVAL_SHUFFLE, num_workers=EVAL_WORKERS)
+    val_loader = DataLoader(val_set, batch_size=EVAL_BATCH_SIZE, shuffle=EVAL_SHUFFLE, num_workers=EVAL_WORKERS)
+    test_loader = DataLoader(test_set, batch_size=EVAL_BATCH_SIZE, shuffle=EVAL_SHUFFLE, num_workers=EVAL_WORKERS)
+
+    return train_loader, val_loader, test_loader
+
+
+if __name__ == '__main__':
+    if DEBUG_MODE:
+        num_workers = 12
+        shuffle = True
+        use_social_lstm_model = True
+
+        sdd_video_class = SDDVideoClasses.LITTLE
+        sdd_meta_class = SDDVideoDatasets.LITTLE
+        network_mode = NetworkMode.TRAIN
+        sdd_video_number = 3
+
+        path_to_video = f'{BASE_PATH}videos/{sdd_video_class.value}/video{sdd_video_number}/video.mov'
+
+        version = 14
+
+        plot_save_path = f'{ROOT_PATH}Plots/baseline_v2/nn/v{version}/{sdd_video_class.value}{sdd_video_number}/' \
+                         f'eval_plots/{network_mode.value}/'
+
+        checkpoint_root_path = f'../baselinev2/lightning_logs/version_{version}/'
+        dataset = get_dataset(video_clazz=sdd_video_class, video_number=sdd_video_number, mode=network_mode,
+                              meta_label=sdd_meta_class)
+        model = BaselineRNN() if not use_social_lstm_model else BaselineLSTM
+
+        if use_social_lstm_model:
+            evaluate_social_lstm_model(
+                model=model,
+                data_loader=DataLoader(dataset, batch_size=1, num_workers=num_workers, shuffle=shuffle),
+                checkpoint_root_path=checkpoint_root_path, video_path=path_to_video,
+                plot_path=plot_save_path)
+        else:
+            evaluate_model(
+                model=model,
+                data_loader=DataLoader(dataset, batch_size=1, num_workers=num_workers, shuffle=shuffle),
+                checkpoint_root_path=checkpoint_root_path, video_path=path_to_video, plot_path=plot_save_path)
+    else:
+        train_loader, val_loader, test_loader = get_eval_loaders()
+
+        eval_models(
+            supervised_checkpoint_root_path=GT_CHECKPOINT_ROOT_PATH,
+            unsupervised_checkpoint_root_path=UNSUPERVISED_CHECKPOINT_ROOT_PATH,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            test_loader=test_loader,
+            social_lstm=EVAL_USE_SOCIAL_LSTM_MODEL,
+            plot=False,
+            use_batch_norm=EVAL_USE_BATCH_NORM,
+            video_path=EVAL_PATH_TO_VIDEO,
+            plot_path=EVAL_PLOT_PATH,
+            plot_four_way=True
+        )
