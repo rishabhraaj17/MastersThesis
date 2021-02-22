@@ -81,18 +81,41 @@ def evaluate_model(model: nn.Module, data_loader: DataLoader, checkpoint_root_pa
             track_id=plot_track_id, additional_text=f'Frame Numbers: {all_frame_numbers}\nADE: {ade} | FDE: {fde}',
             save_path=f'{plot_path}{checkpoint_file}/'
         )
-        # plot_trajectories_with_frame(
-        #     frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
-        #     obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
-        #     pred_trajectory=pred_trajectory, frame_number=plot_frame_number,
-        #     track_id=plot_track_id, additional_text=in_frame_numbers.squeeze()
-        # )
-        # plot_trajectories(
-        #     obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
-        #     pred_trajectory=pred_trajectory, frame_number=plot_frame_number,
-        #     track_id=plot_track_id, additional_text=in_frame_numbers.squeeze())
 
-        # print()
+
+@torch.no_grad()
+def evaluate_social_lstm_model(model: nn.Module, data_loader: DataLoader, checkpoint_root_path: str, video_path: str,
+                               plot_path: Optional[str] = None):
+    checkpoint_path = checkpoint_root_path + 'checkpoints/'
+    checkpoint_file = os.listdir(checkpoint_path)[-1]
+    model = model.load_from_checkpoint(
+        checkpoint_path=checkpoint_path + checkpoint_file,
+        hparams_file=f'{checkpoint_root_path}hparams.yaml',
+        map_location=None,
+        args=social_lstm_parser(pass_final_pos=True)
+    )
+
+    model.eval()
+
+    for idx, data in tqdm(enumerate(data_loader), total=len(data_loader.dataset)):
+        in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = data
+
+        loss, ade, fde, ratio, pred_trajectory = model.one_step(data)
+
+        plot_frame_number = in_frame_numbers.squeeze()[0].item()
+        plot_track_id = in_track_ids.squeeze()[0].item()
+        obs_trajectory = in_xy.squeeze().numpy()
+        gt_trajectory = gt_xy.squeeze().numpy()
+        pred_trajectory = pred_trajectory.squeeze().numpy()
+        all_frame_numbers = torch.cat((in_frame_numbers.squeeze(), gt_frame_numbers.squeeze())).tolist()
+
+        plot_trajectory_alongside_frame(
+            frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
+            obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
+            pred_trajectory=pred_trajectory, frame_number=plot_frame_number,
+            track_id=plot_track_id, additional_text=f'Frame Numbers: {all_frame_numbers}\nADE: {ade} | FDE: {fde}',
+            save_path=f'{plot_path}repo_version/{checkpoint_file}/'
+        )
 
 
 if __name__ == '__main__':
@@ -117,5 +140,13 @@ if __name__ == '__main__':
                           meta_label=sdd_meta_class)
     model = BaselineRNN() if not use_social_lstm_model else BaselineLSTM
 
-    evaluate_model(model=model, data_loader=DataLoader(dataset, batch_size=1, num_workers=num_workers, shuffle=shuffle),
-                   checkpoint_root_path=checkpoint_root_path, video_path=path_to_video, plot_path=plot_save_path)
+    if use_social_lstm_model:
+        evaluate_social_lstm_model(
+            model=model,
+            data_loader=DataLoader(dataset, batch_size=1, num_workers=num_workers, shuffle=shuffle),
+            checkpoint_root_path=checkpoint_root_path, video_path=path_to_video,
+            plot_path=plot_save_path)
+    else:
+        evaluate_model(model=model,
+                       data_loader=DataLoader(dataset, batch_size=1, num_workers=num_workers, shuffle=shuffle),
+                       checkpoint_root_path=checkpoint_root_path, video_path=path_to_video, plot_path=plot_save_path)
