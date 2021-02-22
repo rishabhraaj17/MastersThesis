@@ -6,7 +6,7 @@ from pytorch_lightning import Trainer
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from baselinev2.config import BATCH_SIZE, NUM_WORKERS, LR, USE_BATCH_NORM, OVERFIT, NUM_EPOCHS, LIMIT_BATCHES, \
     OVERFIT_BATCHES, CHECKPOINT_ROOT, RESUME_TRAINING, USE_GENERATED_DATA, TRAIN_CLASS, TRAIN_VIDEO_NUMBER, TRAIN_META, \
-    VAL_CLASS, VAL_VIDEO_NUMBER, VAL_META, USE_SOCIAL_LSTM_MODEL, USE_FINAL_POSITIONS
+    VAL_CLASS, VAL_VIDEO_NUMBER, VAL_META, USE_SOCIAL_LSTM_MODEL, USE_FINAL_POSITIONS, USE_RELATIVE_VELOCITIES
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.models import BaselineRNNStacked
@@ -20,7 +20,7 @@ logger = get_logger('baselinev2.nn.train')
 
 def get_model(train_dataset, val_dataset, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, lr=LR,
               use_batch_norm=USE_BATCH_NORM, over_fit_mode=OVERFIT, shuffle=True, pin_memory=True,
-              generated_dataset=True, from_checkpoint=None, checkpoint_root_path=None):
+              generated_dataset=True, from_checkpoint=None, checkpoint_root_path=None, relative_velocities=False):
     if from_checkpoint:
         checkpoint_path = checkpoint_root_path + 'checkpoints/'
         checkpoint_file = os.listdir(checkpoint_path)[-1]
@@ -33,13 +33,14 @@ def get_model(train_dataset, val_dataset, batch_size=BATCH_SIZE, num_workers=NUM
             num_workers=num_workers,
             shuffle=shuffle,
             pin_memory=pin_memory,
-            generated_dataset=generated_dataset
+            generated_dataset=generated_dataset,
+            relative_velocities=relative_velocities
         )
     else:
         model = BaselineRNNStacked(train_dataset=train_dataset, val_dataset=val_dataset, batch_size=batch_size,
                                    num_workers=num_workers, lr=lr, use_batch_norm=use_batch_norm,
                                    overfit_mode=over_fit_mode, shuffle=shuffle, pin_memory=pin_memory,
-                                   generated_dataset=generated_dataset)
+                                   generated_dataset=generated_dataset, relative_velocities=relative_velocities)
     model.train()
     return model
 
@@ -97,7 +98,7 @@ def train(train_video_class: SDDVideoClasses, train_video_number: int, train_mod
           pin_memory: bool = True, use_batch_norm: bool = USE_BATCH_NORM, over_fit_mode: bool = OVERFIT,
           from_checkpoint=None, checkpoint_root_path=None, gpus=1 if torch.cuda.is_available() else None,
           max_epochs=NUM_EPOCHS, limit_train_batches=1.0, limit_val_batches=1.0, over_fit_batches=0.0,
-          use_social_lstm_model=True, pass_final_pos=True):
+          use_social_lstm_model=True, pass_final_pos=True, relative_velocities=False):
     dataset_train, dataset_val = get_train_validation_dataset(
         train_video_class=train_video_class, train_video_number=train_video_number, train_mode=train_mode,
         train_meta_label=train_meta_label, val_video_class=val_video_class, val_video_number=val_video_number,
@@ -112,7 +113,8 @@ def train(train_video_class: SDDVideoClasses, train_video_number: int, train_mod
         model = get_model(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=batch_size,
                           num_workers=num_workers, lr=lr, use_batch_norm=use_batch_norm, over_fit_mode=over_fit_mode,
                           shuffle=shuffle, pin_memory=pin_memory, generated_dataset=get_generated,
-                          from_checkpoint=from_checkpoint, checkpoint_root_path=checkpoint_root_path)
+                          from_checkpoint=from_checkpoint, checkpoint_root_path=checkpoint_root_path,
+                          relative_velocities=relative_velocities)
     trainer = get_trainer(gpus=gpus, max_epochs=max_epochs, limit_train_batches=limit_train_batches,
                           limit_val_batches=limit_val_batches,
                           over_fit_batches=over_fit_batches if over_fit_mode else 0.0)
@@ -146,5 +148,6 @@ if __name__ == '__main__':
         limit_val_batches=LIMIT_BATCHES[1],
         over_fit_batches=OVERFIT_BATCHES,
         use_social_lstm_model=USE_SOCIAL_LSTM_MODEL,
-        pass_final_pos=USE_FINAL_POSITIONS
+        pass_final_pos=USE_FINAL_POSITIONS,
+        relative_velocities=USE_RELATIVE_VELOCITIES
     )
