@@ -14,7 +14,8 @@ from average_image.utils import compute_fde, compute_ade
 from baselinev2.config import BASE_PATH, ROOT_PATH, DEBUG_MODE, EVAL_USE_SOCIAL_LSTM_MODEL, EVAL_USE_BATCH_NORM, \
     EVAL_PATH_TO_VIDEO, EVAL_PLOT_PATH, GT_CHECKPOINT_ROOT_PATH, UNSUPERVISED_CHECKPOINT_ROOT_PATH, EVAL_TRAIN_CLASS, \
     EVAL_TRAIN_VIDEO_NUMBER, EVAL_TRAIN_META, EVAL_VAL_CLASS, EVAL_VAL_VIDEO_NUMBER, EVAL_VAL_META, EVAL_TEST_CLASS, \
-    EVAL_TEST_VIDEO_NUMBER, EVAL_TEST_META, EVAL_BATCH_SIZE, EVAL_SHUFFLE, EVAL_WORKERS, PLOT_MODE
+    EVAL_TEST_VIDEO_NUMBER, EVAL_TEST_META, EVAL_BATCH_SIZE, EVAL_SHUFFLE, EVAL_WORKERS, PLOT_MODE, \
+    EVAL_USE_FINAL_POSITIONS_SUPERVISED, EVAL_USE_FINAL_POSITIONS_UNSUPERVISED
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.data_utils import extract_frame_from_video
@@ -129,7 +130,8 @@ def evaluate_social_lstm_model(model: nn.Module, data_loader: DataLoader, checkp
         )
 
 
-def get_models(social_lstm, supervised_checkpoint_root_path, unsupervised_checkpoint_root_path, use_batch_norm):
+def get_models(social_lstm, supervised_checkpoint_root_path, unsupervised_checkpoint_root_path, use_batch_norm,
+               supervised_pass_final_pos=True, unsupervised_pass_final_pos=True):
     supervised_checkpoint_path = supervised_checkpoint_root_path + 'checkpoints/'
     supervised_checkpoint_file = os.listdir(supervised_checkpoint_path)[-1]
     unsupervised_checkpoint_path = unsupervised_checkpoint_root_path + 'checkpoints/'
@@ -139,14 +141,14 @@ def get_models(social_lstm, supervised_checkpoint_root_path, unsupervised_checkp
             checkpoint_path=supervised_checkpoint_path + supervised_checkpoint_file,
             hparams_file=f'{supervised_checkpoint_root_path}hparams.yaml',
             map_location=None,
-            args=social_lstm_parser(pass_final_pos=True),
+            args=social_lstm_parser(pass_final_pos=supervised_pass_final_pos),
             use_batch_norm=use_batch_norm
         )
         unsupervised_net = BaselineLSTM.load_from_checkpoint(
             checkpoint_path=unsupervised_checkpoint_path + unsupervised_checkpoint_file,
             hparams_file=f'{unsupervised_checkpoint_root_path}hparams.yaml',
             map_location=None,
-            args=social_lstm_parser(pass_final_pos=True),
+            args=social_lstm_parser(pass_final_pos=unsupervised_pass_final_pos),
             generated_dataset=False,  # we evaluate on ground-truth trajectories
             use_batch_norm=use_batch_norm
         )
@@ -172,7 +174,7 @@ def get_models(social_lstm, supervised_checkpoint_root_path, unsupervised_checkp
 
 
 def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loader, unsupervised_caller,
-                        video_path, split_name):
+                        video_path, split_name, metrics_in_meters=True):
     supervised_ade_list, supervised_fde_list = [], []
     unsupervised_ade_list, unsupervised_fde_list = [], []
     for idx, data in enumerate(tqdm(loader)):
@@ -182,6 +184,12 @@ def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loade
             supervised_caller(data)
         unsupervised_loss, unsupervised_ade, unsupervised_fde, unsupervised_ratio, unsupervised_pred_trajectory = \
             unsupervised_caller(data)
+
+        if metrics_in_meters:
+            supervised_ade *= supervised_ratio
+            supervised_fde *= supervised_ratio
+            unsupervised_ade *= unsupervised_ratio
+            unsupervised_fde *= unsupervised_ratio
 
         if plot:
             plot_frame_number = in_frame_numbers.squeeze()[0].item()
@@ -245,9 +253,12 @@ def get_metrics(supervised_ade_list, supervised_fde_list, unsupervised_ade_list,
 def eval_models(supervised_checkpoint_root_path: str, unsupervised_checkpoint_root_path: str, train_loader: DataLoader,
                 val_loader: DataLoader, test_loader: DataLoader, social_lstm: bool = True, plot: bool = False,
                 use_batch_norm: bool = False, video_path: str = None, plot_path: Optional[str] = None,
-                plot_four_way: bool = False):
+                plot_four_way: bool = False, supervised_pass_final_pos: bool = True,
+                unsupervised_pass_final_pos: bool = True, metrics_in_meters: bool = True):
     supervised_net, unsupervised_net = get_models(social_lstm, supervised_checkpoint_root_path,
-                                                  unsupervised_checkpoint_root_path, use_batch_norm)
+                                                  unsupervised_checkpoint_root_path, use_batch_norm,
+                                                  supervised_pass_final_pos=supervised_pass_final_pos,
+                                                  unsupervised_pass_final_pos=unsupervised_pass_final_pos)
 
     supervised_caller = supervised_net.one_step if social_lstm else supervised_net
     unsupervised_caller = unsupervised_net.one_step if social_lstm else unsupervised_net
@@ -256,19 +267,19 @@ def eval_models(supervised_checkpoint_root_path: str, unsupervised_checkpoint_ro
     test_supervised_ade_list, test_supervised_fde_list, test_unsupervised_ade_list, test_unsupervised_fde_list = \
         evaluate_per_loader(
             plot, plot_four_way, plot_path, supervised_caller, test_loader, unsupervised_caller, video_path,
-            split_name=NetworkMode.TEST.name)
+            split_name=NetworkMode.TEST.name, metrics_in_meters=metrics_in_meters)
 
     logger.info('Evaluating for Validation Set')
     val_supervised_ade_list, val_supervised_fde_list, val_unsupervised_ade_list, val_unsupervised_fde_list = \
         evaluate_per_loader(
             plot, plot_four_way, plot_path, supervised_caller, val_loader, unsupervised_caller, video_path,
-            split_name=NetworkMode.VALIDATION.name)
+            split_name=NetworkMode.VALIDATION.name, metrics_in_meters=metrics_in_meters)
 
     logger.info('Evaluating for Train Set')
     train_supervised_ade_list, train_supervised_fde_list, train_unsupervised_ade_list, train_unsupervised_fde_list = \
         evaluate_per_loader(
             plot, plot_four_way, plot_path, supervised_caller, train_loader, unsupervised_caller, video_path,
-            split_name=NetworkMode.TRAIN.name)
+            split_name=NetworkMode.TRAIN.name, metrics_in_meters=metrics_in_meters)
 
     train_supervised_ade, train_supervised_fde, train_unsupervised_ade, train_unsupervised_fde = get_metrics(
         train_supervised_ade_list, train_supervised_fde_list, train_unsupervised_ade_list, train_unsupervised_fde_list
@@ -358,5 +369,8 @@ if __name__ == '__main__':
             use_batch_norm=EVAL_USE_BATCH_NORM,
             video_path=EVAL_PATH_TO_VIDEO,
             plot_path=EVAL_PLOT_PATH,
-            plot_four_way=True
+            plot_four_way=True,
+            supervised_pass_final_pos=EVAL_USE_FINAL_POSITIONS_SUPERVISED,
+            unsupervised_pass_final_pos=EVAL_USE_FINAL_POSITIONS_UNSUPERVISED,
+            metrics_in_meters=True
         )
