@@ -100,7 +100,9 @@ def tune_asha(num_samples=10, num_epochs=10, gpus_per_trial=0, cpu_per_trail=1, 
     Path(data_dir).mkdir(parents=True, exist_ok=True)
 
     config = {
-        "lr": tune.loguniform(1e-6, 1e-1),
+        # "lr": tune.loguniform(1e-6, 1e-1),
+        "lr": tune.choice([1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 2e-1, 2e-2, 2e-3, 2e-4, 2e-5, 3e-1, 3e-2, 3e-3, 3e-4, 3e-5,
+                           4e-1, 4e-2, 4e-3, 4e-4, 4e-5, 5e-5, 5e-2, 5e-3, 5e-4, 5e-5]),
         # "batch_size": tune.choice([128, 256, 512, 1024, 2048]),
         "batch_size": tune.choice([1024]),
     }
@@ -184,7 +186,9 @@ def tune_pbt(num_samples=10, num_epochs=10, gpus_per_trial=0, cpu_per_trail=1, e
     scheduler = PopulationBasedTraining(
         perturbation_interval=4,
         hyperparam_mutations={
-            "lr": tune.loguniform(1e-6, 1e-1),
+            # "lr": tune.loguniform(1e-6, 1e-1),
+            "lr": tune.choice([1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 2e-1, 2e-2, 2e-3, 2e-4, 2e-5, 3e-1, 3e-2, 3e-3, 3e-4, 3e-5,
+                               4e-1, 4e-2, 4e-3, 4e-4, 4e-5, 5e-5, 5e-2, 5e-3, 5e-4, 5e-5]),
             # "batch_size": [128, 256, 512, 1024, 2048],
             "batch_size": [1024]
         })
@@ -222,4 +226,5 @@ if __name__ == '__main__':
         "batch_size": 64
     }
     # train(config=config)
+    # tune_pbt(num_samples=25, num_epochs=20, gpus_per_trial=1, cpu_per_trail=12, exp_name='tune_pbt_lr')
     tune_asha(num_samples=25, num_epochs=20, gpus_per_trial=1, cpu_per_trail=12, exp_name='tune_asha_lr')
