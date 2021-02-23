@@ -142,7 +142,7 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
         val_mode=val_mode, val_meta_label=val_meta_label, get_generated=get_generated)
     loader_train = DataLoader(dataset_train, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle,
                               pin_memory=pin_memory)
-    loader_val = DataLoader(dataset_val, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle,
+    loader_val = DataLoader(dataset_val, batch_size=batch_size, num_workers=num_workers, shuffle=False,
                             pin_memory=pin_memory)
     if use_social_lstm_model:
         model = get_social_model(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=batch_size,
@@ -166,46 +166,86 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
                                                            factor=0.1)
     summary_writer = SummaryWriter(comment='custom')
 
-    for epoch in range(max_epochs):
-        with tqdm(loader_train, position=0) as t:
-            t.set_description('Epoch %i' % epoch)
-            for idx, data in enumerate(loader_train):
-                data = [d.to(DEVICE) for d in data]
-                loss, ade, fde, ratio, pred_trajectory = network(data)
+    best_val_loss = 10e7
+    resume_dict = {}
+    resume_dict_save_root_path = 'runs/'
 
-                t.set_postfix(loss=loss.item(), ade=ade, fde=fde)
-                t.update()
+    try:
+        for epoch in range(max_epochs):
+            with tqdm(loader_train, position=0) as t:
+                t.set_description('Epoch %i' % epoch)
+                for idx, data in enumerate(loader_train):
+                    data = [d.to(DEVICE) for d in data]
+                    loss, ade, fde, ratio, pred_trajectory = network(data)
 
-                loss.backward()
-                optimizer.step()
-                optimizer.zero_grad()
+                    t.set_postfix(loss=loss.item(), ade=ade, fde=fde)
+                    t.update()
 
-                summary_writer.add_scalar('train/loss', loss.item(), global_step=idx)
-                summary_writer.add_scalar('train/ade', ade, global_step=idx)
-                summary_writer.add_scalar('train/fde', fde, global_step=idx)
+                    loss.backward()
+                    optimizer.step()
+                    optimizer.zero_grad()
 
-                summary_writer.add_scalar('train/loss_epoch', loss.item(), global_step=epoch)
-                summary_writer.add_scalar('train/ade_epoch', ade, global_step=epoch)
-                summary_writer.add_scalar('train/fde_epoch', fde, global_step=epoch)
+                    summary_writer.add_scalar('train/loss', loss.item(), global_step=idx)
+                    summary_writer.add_scalar('train/ade', ade, global_step=idx)
+                    summary_writer.add_scalar('train/fde', fde, global_step=idx)
 
-        with tqdm(loader_val, colour='green', position=1) as v:
-            v.set_description('Epoch %i' % epoch)
-            for idx, data in enumerate(tqdm(loader_val)):
-                data = [d.to(DEVICE) for d in data]
-                loss, ade, fde, ratio, pred_trajectory = network(data)
+                    summary_writer.add_scalar('train/loss_epoch', loss.item(), global_step=epoch)
+                    summary_writer.add_scalar('train/ade_epoch', ade, global_step=epoch)
+                    summary_writer.add_scalar('train/fde_epoch', fde, global_step=epoch)
 
-                v.set_postfix(loss=loss.item(), ade=ade, fde=fde)
-                v.update()
+                    for name, weight in model.named_parameters():
+                        summary_writer.add_histogram(name, weight, epoch)
+                        summary_writer.add_histogram(f'{name}.grad', weight.grad, epoch)
 
-                summary_writer.add_scalar('val/loss', loss.item(), global_step=idx)
-                summary_writer.add_scalar('val/ade', ade, global_step=idx)
-                summary_writer.add_scalar('val/fde', fde, global_step=idx)
+            with tqdm(loader_val, colour='green', position=1) as v:
+                v.set_description('Epoch %i' % epoch)
+                for idx, data in enumerate(tqdm(loader_val)):
+                    data = [d.to(DEVICE) for d in data]
+                    v_loss, v_ade, v_fde, ratio, pred_trajectory = network(data)
 
-                summary_writer.add_scalar('val/loss_epoch', loss.item(), global_step=epoch)
-                summary_writer.add_scalar('val/ade_epoch', ade, global_step=epoch)
-                summary_writer.add_scalar('val/fde_epoch', fde, global_step=epoch)
+                    v.set_postfix(loss=v_loss.item(), ade=v_ade, fde=v_fde)
+                    v.update()
 
-            scheduler.step(loss)
+                    summary_writer.add_scalar('val/loss', v_loss.item(), global_step=idx)
+                    summary_writer.add_scalar('val/ade', v_ade, global_step=idx)
+                    summary_writer.add_scalar('val/fde', v_fde, global_step=idx)
+
+                    summary_writer.add_scalar('val/loss_epoch', v_loss.item(), global_step=epoch)
+                    summary_writer.add_scalar('val/ade_epoch', v_ade, global_step=epoch)
+                    summary_writer.add_scalar('val/fde_epoch', v_fde, global_step=epoch)
+
+                    summary_writer.add_scalar('lr', lr, global_step=idx)
+                    summary_writer.add_scalar('epoch', epoch, global_step=epoch)
+
+                scheduler.step(v_loss)
+
+                if v_loss.item() < best_val_loss:
+                    best_val_loss = v_loss.item()
+                    resume_dict = {'model_state_dict': model.state_dict(),
+                                   'optimizer_state_dict': optimizer.state_dict(),
+                                   'epoch': epoch,
+                                   'val_loss': v_loss,
+                                   'lr': lr,
+                                   'batch_size': batch_size,
+                                   'model_name': 'social_lstm' if use_social_lstm_model else 'baseline',
+                                   'generated_data': get_generated,
+                                   'use_batch_norm': use_batch_norm,
+                                   'train_class': train_video_class.name,
+                                   'train_video_number': train_video_number,
+                                   'val_class': val_video_class.name,
+                                   'val_video_number': val_video_number,
+                                   'use_social_lstm': use_social_lstm_model,
+                                   'use_destinations': pass_final_pos,
+                                   'use_relative_velocities': relative_velocities
+                                   }
+    except KeyboardInterrupt:
+        logger.warn('Keyboard Interrupt: Saving and exiting gracefully.')
+        resume_dict_save_folder = os.listdir(resume_dict_save_root_path)[-1]
+        torch.save(resume_dict, f'{resume_dict_save_root_path}{resume_dict_save_folder}/checkpoint.ckpt')
+    finally:
+        resume_dict_save_folder = os.listdir(resume_dict_save_root_path)[-1]
+        torch.save(resume_dict, f'{resume_dict_save_root_path}{resume_dict_save_folder}/checkpoint.ckpt')
+        logger.info('Saving and exiting gracefully.')
 
 
 if __name__ == '__main__':
