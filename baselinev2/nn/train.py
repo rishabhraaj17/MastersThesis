@@ -166,42 +166,52 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
                                                            factor=0.1)
     summary_writer = SummaryWriter(comment='custom')
 
-    with trange(max_epochs) as t:
-        for epoch in t:
-            for idx, data in enumerate(tqdm(loader_train)):
+    for epoch in range(max_epochs):
+        with tqdm(loader_train, position=0) as t:
+            t.set_description('Epoch %i' % epoch)
+            for idx, data in enumerate(loader_train):
                 data = [d.to(DEVICE) for d in data]
                 loss, ade, fde, ratio, pred_trajectory = network(data)
-                t.set_description('Epoch %i' % epoch)
+
+                ade *= ratio
+                fde *= ratio
+
                 t.set_postfix(loss=loss.item(), ade=ade, fde=fde)
+                t.update()
 
                 loss.backward()
                 optimizer.step()
                 optimizer.zero_grad()
 
-                summary_writer.add_scalar('train/loss', loss.item())
-                summary_writer.add_scalar('train/ade', ade)
-                summary_writer.add_scalar('train/fde', fde)
+                summary_writer.add_scalar('train/loss', loss.item(), global_step=idx)
+                summary_writer.add_scalar('train/ade', ade, global_step=idx)
+                summary_writer.add_scalar('train/fde', fde, global_step=idx)
 
-                summary_writer.add_scalar('train/loss_epoch', loss.item(), global_step=len(loader_train.dataset))
-                summary_writer.add_scalar('train/ade_epoch', ade, global_step=len(loader_train.dataset))
-                summary_writer.add_scalar('train/fde_epoch', fde, global_step=len(loader_train.dataset))
+                summary_writer.add_scalar('train/loss_epoch', loss.item(), global_step=epoch)
+                summary_writer.add_scalar('train/ade_epoch', ade, global_step=epoch)
+                summary_writer.add_scalar('train/fde_epoch', fde, global_step=epoch)
 
-        for epoch in t:
+        with tqdm(loader_val, colour='green', position=1) as v:
+            v.set_description('Epoch %i' % epoch)
             for idx, data in enumerate(tqdm(loader_val)):
                 data = [d.to(DEVICE) for d in data]
                 loss, ade, fde, ratio, pred_trajectory = network(data)
-                t.set_description('Epoch %i' % epoch)
-                t.set_postfix(loss=loss.item(), ade=ade, fde=fde)
 
-                scheduler.step(loss)
+                ade *= ratio
+                fde *= ratio
 
-                summary_writer.add_scalar('val/loss', loss.item())
-                summary_writer.add_scalar('val/ade', ade)
-                summary_writer.add_scalar('val/fde', fde)
+                v.set_postfix(loss=loss.item(), ade=ade, fde=fde)
+                v.update()
 
-                summary_writer.add_scalar('val/loss_epoch', loss.item(), global_step=len(loader_val.dataset))
-                summary_writer.add_scalar('val/ade_epoch', ade, global_step=len(loader_val.dataset))
-                summary_writer.add_scalar('val/fde_epoch', fde, global_step=len(loader_val.dataset))
+                summary_writer.add_scalar('val/loss', loss.item(), global_step=idx)
+                summary_writer.add_scalar('val/ade', ade, global_step=idx)
+                summary_writer.add_scalar('val/fde', fde, global_step=idx)
+
+                summary_writer.add_scalar('val/loss_epoch', loss.item(), global_step=epoch)
+                summary_writer.add_scalar('val/ade_epoch', ade, global_step=epoch)
+                summary_writer.add_scalar('val/fde_epoch', fde, global_step=epoch)
+
+            scheduler.step(loss)
 
 
 if __name__ == '__main__':
