@@ -373,6 +373,9 @@ class BaselineRNNStacked(BaselineRNN):
         ade = compute_ade(np.stack(predicted_xy), np.stack(true_xy)).item()
         fde = compute_fde(np.stack(predicted_xy), np.stack(true_xy)).item()
 
+        ade *= ratio[0].item()
+        fde *= ratio[0].item()
+
         if self.return_pred:
             return total_loss / self.prediction_length, ade, fde, ratio[0].item(), np.stack(predicted_xy)
 

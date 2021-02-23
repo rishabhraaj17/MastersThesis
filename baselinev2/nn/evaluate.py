@@ -185,11 +185,11 @@ def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loade
         unsupervised_loss, unsupervised_ade, unsupervised_fde, unsupervised_ratio, unsupervised_pred_trajectory = \
             unsupervised_caller(data)
 
-        if metrics_in_meters:
-            supervised_ade *= supervised_ratio
-            supervised_fde *= supervised_ratio
-            unsupervised_ade *= unsupervised_ratio
-            unsupervised_fde *= unsupervised_ratio
+        # if metrics_in_meters:  # Added in model itself
+        #     supervised_ade *= supervised_ratio
+        #     supervised_fde *= supervised_ratio
+        #     unsupervised_ade *= unsupervised_ratio
+        #     unsupervised_fde *= unsupervised_ratio
 
         if plot:
             plot_frame_number = in_frame_numbers.squeeze()[0].item()

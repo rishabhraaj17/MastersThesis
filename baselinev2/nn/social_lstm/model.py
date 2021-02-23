@@ -673,7 +673,7 @@ class BaselineLSTM(LSTM, LightningModule):
     def one_step(self, x):
         pred_xy, pred_uv, hidden_state, pred_xy_all, pred_uv_all, gt_xy, gt_uv, ratio = self(x)
         pred_xy = pred_xy.permute(1, 0, 2)
-        loss = torch.linalg.norm(gt_xy - pred_xy, ord=2, dim=-1).mean()
+        loss = torch.linalg.norm(gt_xy - pred_xy, ord=2, dim=-1).mean() * ratio[0].item()
 
         pred_xy = pred_xy.detach().cpu()
 
@@ -681,6 +681,9 @@ class BaselineLSTM(LSTM, LightningModule):
 
         pred_xy = pred_xy.permute(1, 0, 2)
         fde = compute_fde(pred_xy, gt_xy.cpu().permute(1, 0, 2)).item()
+
+        ade *= ratio[0].item()
+        fde *= ratio[0].item()
 
         return loss, ade, fde, ratio[0].item(), pred_xy
 
