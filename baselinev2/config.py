@@ -181,6 +181,9 @@ USE_FINAL_POSITIONS = False
 
 USE_RELATIVE_VELOCITIES = False
 
+TRAIN_CUSTOM = True
+DEVICE = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+
 # Evaluation
 DEBUG_MODE = False
 PLOT_MODE = False
