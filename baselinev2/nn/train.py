@@ -173,9 +173,6 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
                 data = [d.to(DEVICE) for d in data]
                 loss, ade, fde, ratio, pred_trajectory = network(data)
 
-                ade *= ratio
-                fde *= ratio
-
                 t.set_postfix(loss=loss.item(), ade=ade, fde=fde)
                 t.update()
 
@@ -196,9 +193,6 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
             for idx, data in enumerate(tqdm(loader_val)):
                 data = [d.to(DEVICE) for d in data]
                 loss, ade, fde, ratio, pred_trajectory = network(data)
-
-                ade *= ratio
-                fde *= ratio
 
                 v.set_postfix(loss=loss.item(), ade=ade, fde=fde)
                 v.update()
