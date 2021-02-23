@@ -183,6 +183,7 @@ USE_RELATIVE_VELOCITIES = False
 
 TRAIN_CUSTOM = True
 DEVICE = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+LOG_HISTOGRAM = False
 
 # Evaluation
 DEBUG_MODE = False

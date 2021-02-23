@@ -23,14 +23,15 @@ LOG_INTERVAL = 10
 
 def define_model(trial):
     use_batch_norm = trial.suggest_int("use_batch_norm", 0, 1)
-    return BaselineRNNStacked(use_batch_norm=bool(use_batch_norm))
+    return BaselineRNNStacked(use_batch_norm=bool(use_batch_norm), return_pred=True)
 
 
 def get_loaders(trial):
     dataset_train = BaselineDataset(SDDVideoClasses.LITTLE, 3, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.LITTLE)
     dataset_val = BaselineDataset(SDDVideoClasses.LITTLE, 3, NetworkMode.VALIDATION, meta_label=SDDVideoDatasets.LITTLE)
 
-    batch_size = trial.suggest_int("batch_size", 64, 1024, step=64)
+    # batch_size = trial.suggest_int("batch_size", 64, 1024, step=64)
+    batch_size = 1024
     # Load MNIST dataset.
     train_loader = torch.utils.data.DataLoader(
         dataset_train,
@@ -51,7 +52,8 @@ def objective(trial: optuna.Trial):
     model = define_model(trial).to(DEVICE)
 
     # Generate the optimizers.
-    optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "RMSprop"])
+    # optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "RMSprop"])
+    optimizer_name = trial.suggest_categorical("optimizer", ["Adam"])
     lr = trial.suggest_float("lr", 1e-5, 5e-1, log=True)
     optimizer = getattr(optim, optimizer_name)(model.parameters(), lr=lr)
 
@@ -65,11 +67,11 @@ def objective(trial: optuna.Trial):
             # Limiting training data for faster epochs.
             # if batch_idx * BATCHSIZE >= N_TRAIN_EXAMPLES:
             #     break
+            optimizer.zero_grad()
 
             data = [d.to(DEVICE) for d in data]
 
-            optimizer.zero_grad()
-            loss, ade, fde, ratio = model(data)
+            loss, ade, fde, ratio, _ = model(data)
             loss.backward()
             optimizer.step()
 
@@ -82,7 +84,7 @@ def objective(trial: optuna.Trial):
                 # if batch_idx * BATCHSIZE >= N_VALID_EXAMPLES:
                 #     break
                 data = [d.to(DEVICE) for d in data]
-                loss, ade, fde, ratio = model(data)
+                loss, ade, fde, ratio, _ = model(data)
                 # Get the index of the max log-probability.
 
         trial.report(loss, epoch)

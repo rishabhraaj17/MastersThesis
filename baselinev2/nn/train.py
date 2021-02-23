@@ -10,7 +10,7 @@ from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from baselinev2.config import BATCH_SIZE, NUM_WORKERS, LR, USE_BATCH_NORM, OVERFIT, NUM_EPOCHS, LIMIT_BATCHES, \
     OVERFIT_BATCHES, CHECKPOINT_ROOT, RESUME_TRAINING, USE_GENERATED_DATA, TRAIN_CLASS, TRAIN_VIDEO_NUMBER, TRAIN_META, \
     VAL_CLASS, VAL_VIDEO_NUMBER, VAL_META, USE_SOCIAL_LSTM_MODEL, USE_FINAL_POSITIONS, USE_RELATIVE_VELOCITIES, DEVICE, \
-    TRAIN_CUSTOM
+    TRAIN_CUSTOM, LOG_HISTOGRAM
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.models import BaselineRNNStacked
@@ -158,13 +158,12 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
                           relative_velocities=relative_velocities)
 
     model.to(DEVICE)
-    model.train()
 
     network = model.one_step if use_social_lstm_model else model
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, amsgrad=True)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, patience=20, cooldown=2, verbose=True,
                                                            factor=0.1)
-    summary_writer = SummaryWriter(comment='custom')
+    summary_writer = SummaryWriter(comment='social_lstm' if use_social_lstm_model else 'baseline')
 
     best_val_loss = 10e7
     resume_dict = {}
@@ -172,9 +171,12 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
 
     try:
         for epoch in range(max_epochs):
+            model.train()
             with tqdm(loader_train, position=0) as t:
                 t.set_description('Epoch %i' % epoch)
                 for idx, data in enumerate(loader_train):
+                    optimizer.zero_grad()
+
                     data = [d.to(DEVICE) for d in data]
                     loss, ade, fde, ratio, pred_trajectory = network(data)
 
@@ -183,7 +185,6 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
 
                     loss.backward()
                     optimizer.step()
-                    optimizer.zero_grad()
 
                     summary_writer.add_scalar('train/loss', loss.item(), global_step=idx)
                     summary_writer.add_scalar('train/ade', ade, global_step=idx)
@@ -193,38 +194,45 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
                     summary_writer.add_scalar('train/ade_epoch', ade, global_step=epoch)
                     summary_writer.add_scalar('train/fde_epoch', fde, global_step=epoch)
 
-                    for name, weight in model.named_parameters():
-                        summary_writer.add_histogram(name, weight, epoch)
-                        summary_writer.add_histogram(f'{name}.grad', weight.grad, epoch)
+                    if LOG_HISTOGRAM:
+                        for name, weight in model.named_parameters():
+                            summary_writer.add_histogram(name, weight, epoch)
+                            summary_writer.add_histogram(f'{name}.grad', weight.grad, epoch)
 
+            model.eval()
+            running_v_loss = []
             with tqdm(loader_val, colour='green', position=1) as v:
                 v.set_description('Epoch %i' % epoch)
-                for idx, data in enumerate(tqdm(loader_val)):
-                    data = [d.to(DEVICE) for d in data]
-                    v_loss, v_ade, v_fde, ratio, pred_trajectory = network(data)
+                with torch.no_grad():
+                    for idx, data in enumerate(tqdm(loader_val)):
+                        data = [d.to(DEVICE) for d in data]
+                        v_loss, v_ade, v_fde, ratio, pred_trajectory = network(data)
 
-                    v.set_postfix(loss=v_loss.item(), ade=v_ade, fde=v_fde)
-                    v.update()
+                        v.set_postfix(loss=v_loss.item(), ade=v_ade, fde=v_fde)
+                        v.update()
 
-                    summary_writer.add_scalar('val/loss', v_loss.item(), global_step=idx)
-                    summary_writer.add_scalar('val/ade', v_ade, global_step=idx)
-                    summary_writer.add_scalar('val/fde', v_fde, global_step=idx)
+                        summary_writer.add_scalar('val/loss', v_loss.item(), global_step=idx)
+                        summary_writer.add_scalar('val/ade', v_ade, global_step=idx)
+                        summary_writer.add_scalar('val/fde', v_fde, global_step=idx)
 
-                    summary_writer.add_scalar('val/loss_epoch', v_loss.item(), global_step=epoch)
-                    summary_writer.add_scalar('val/ade_epoch', v_ade, global_step=epoch)
-                    summary_writer.add_scalar('val/fde_epoch', v_fde, global_step=epoch)
+                        summary_writer.add_scalar('val/loss_epoch', v_loss.item(), global_step=epoch)
+                        summary_writer.add_scalar('val/ade_epoch', v_ade, global_step=epoch)
+                        summary_writer.add_scalar('val/fde_epoch', v_fde, global_step=epoch)
 
-                    summary_writer.add_scalar('lr', lr, global_step=idx)
-                    summary_writer.add_scalar('epoch', epoch, global_step=epoch)
+                        summary_writer.add_scalar('lr', lr, global_step=idx)
+                        summary_writer.add_scalar('epoch', epoch, global_step=epoch)
 
-                scheduler.step(v_loss)
+                        running_v_loss.append(v_loss.item())
 
-                if v_loss.item() < best_val_loss:
-                    best_val_loss = v_loss.item()
+                epoch_v_loss = torch.tensor(running_v_loss).mean().item()
+                scheduler.step(epoch_v_loss)
+
+                if epoch_v_loss < best_val_loss:
+                    best_val_loss = epoch_v_loss
                     resume_dict = {'model_state_dict': model.state_dict(),
                                    'optimizer_state_dict': optimizer.state_dict(),
                                    'epoch': epoch,
-                                   'val_loss': v_loss,
+                                   'val_loss': epoch_v_loss,
                                    'lr': lr,
                                    'batch_size': batch_size,
                                    'model_name': 'social_lstm' if use_social_lstm_model else 'baseline',
@@ -238,14 +246,21 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
                                    'use_destinations': pass_final_pos,
                                    'use_relative_velocities': relative_velocities
                                    }
+                    logger.info(f'Checkpoint Updated at epoch {epoch}, loss {epoch_v_loss}')
     except KeyboardInterrupt:
-        logger.warn('Keyboard Interrupt: Saving and exiting gracefully.')
-        resume_dict_save_folder = os.listdir(resume_dict_save_root_path)[-1]
-        torch.save(resume_dict, f'{resume_dict_save_root_path}{resume_dict_save_folder}/checkpoint.ckpt')
+        logger.warning('Keyboard Interrupt: Saving and exiting gracefully.')
     finally:
-        resume_dict_save_folder = os.listdir(resume_dict_save_root_path)[-1]
-        torch.save(resume_dict, f'{resume_dict_save_root_path}{resume_dict_save_folder}/checkpoint.ckpt')
+        resume_dict_save_folder = os.listdir(resume_dict_save_root_path)
+        resume_dict_save_folder.sort()
+        resume_dict_save_folder = resume_dict_save_folder[-1]
+        resume_dict.update({
+            'last_model_state_dict': model.state_dict(),
+            'last_optimizer_state_dict': optimizer.state_dict(),
+        })
+        torch.save(resume_dict, f'{resume_dict_save_root_path}{resume_dict_save_folder}/'
+                                f'{resume_dict_save_folder}_checkpoint.ckpt')
         logger.info('Saving and exiting gracefully.')
+        logger.info(f"Best model at epoch: {resume_dict['epoch']}")
 
 
 if __name__ == '__main__':
