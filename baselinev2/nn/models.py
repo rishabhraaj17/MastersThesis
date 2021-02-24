@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 import numpy as np
 from pytorch_lightning import LightningModule, Trainer
@@ -21,7 +23,7 @@ logger = get_logger('baselinev2.nn.models')
 torch.manual_seed(MANUAL_SEED)
 
 
-def make_layers(cfg, batch_norm=False, encoder=True, last_without_activation=True,
+def make_layers(cfg, batch_norm=False, encoder=True, last_without_activation=True, dropout=None,
                 decoder_in_dim=LINEAR_CFG['lstm_encoder']):
     layers = []
     if encoder:
@@ -30,18 +32,22 @@ def make_layers(cfg, batch_norm=False, encoder=True, last_without_activation=Tru
         in_features = decoder_in_dim
     if last_without_activation:
         for v in cfg[:-1]:
-            in_features, layers = core_linear_layers_maker(batch_norm, in_features, layers, v)
+            in_features, layers = core_linear_layers_maker(batch_norm, in_features, layers, v, dropout)
         layers += [nn.Linear(in_features, cfg[-1])]
     else:
         for v in cfg:
-            in_features, layers = core_linear_layers_maker(batch_norm, in_features, layers, v)
+            in_features, layers = core_linear_layers_maker(batch_norm, in_features, layers, v, dropout)
     return nn.Sequential(*layers)
 
 
-def core_linear_layers_maker(batch_norm, in_features, layers, v):
+def core_linear_layers_maker(batch_norm, in_features, layers, v, dropout):
     linear = nn.Linear(in_features, v)
-    if batch_norm:
+    if batch_norm and dropout is not None:
+        layers += [linear, nn.BatchNorm1d(v), nn.ReLU(inplace=True), nn.Dropout(dropout)]
+    elif batch_norm:
         layers += [linear, nn.BatchNorm1d(v), nn.ReLU(inplace=True)]
+    elif dropout is not None:
+        layers += [linear, nn.ReLU(inplace=True), nn.Dropout(dropout)]
     else:
         layers += [linear, nn.ReLU(inplace=True)]
     in_features = v
@@ -409,6 +415,192 @@ class BaselineRNNStacked(BaselineRNN):
             return hx, cx
 
 
+class BaselineRNNStackedSimple(BaselineRNN):
+    def __init__(self, original_frame_shape=None, prediction_length=12, lr=1e-5, time_steps=5,
+                 train_dataset=None, val_dataset=None, batch_size=1, num_workers=0, use_batch_norm=False,
+                 encoder_lstm_num_layers: int = 1, overfit_mode: bool = False, shuffle: bool = False,
+                 pin_memory: bool = True, decoder_lstm_num_layers: int = 1, return_pred: bool = True,
+                 generated_dataset: bool = False, relative_velocities: bool = False, dropout: Optional[float] = None,
+                 rnn_dropout: float = 0, use_gru: bool = False, learn_hidden_states: bool = False):
+        super(BaselineRNNStackedSimple, self).__init__(
+            original_frame_shape=original_frame_shape, prediction_length=prediction_length, lr=lr,
+            time_steps=time_steps, train_dataset=train_dataset, val_dataset=val_dataset, batch_size=batch_size,
+            num_workers=num_workers, use_batch_norm=use_batch_norm, lstm_num_layers=encoder_lstm_num_layers,
+            overfit_mode=overfit_mode, shuffle=shuffle, pin_memory=pin_memory)
+
+        if learn_hidden_states:
+            data = torch.zeros((encoder_lstm_num_layers, batch_size, LINEAR_CFG['lstm_encoder']))
+            torch.nn.init.xavier_normal_(data)
+
+        self.pre_encoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
+                                       last_without_activation=False, dropout=dropout)
+        if use_gru:
+            self.encoder = nn.GRU(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'],
+                                  num_layers=encoder_lstm_num_layers, bias=True, dropout=rnn_dropout)
+            if learn_hidden_states:
+                self.encoder_hidden = nn.Parameter(data.clone())
+        else:
+            self.encoder = nn.LSTM(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'],
+                                   num_layers=encoder_lstm_num_layers, bias=True, dropout=rnn_dropout)
+            if learn_hidden_states:
+                self.encoder_hidden = nn.Parameter(data.clone())
+                self.encoder_cell_state = nn.Parameter(data.clone())
+
+        self.pre_decoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
+                                       last_without_activation=False, dropout=dropout)
+
+        if use_gru:
+            self.decoder = nn.GRU(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'],
+                                  num_layers=decoder_lstm_num_layers, bias=True, dropout=rnn_dropout)
+        else:
+            self.decoder = nn.LSTM(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'],
+                                   num_layers=decoder_lstm_num_layers, bias=True, dropout=rnn_dropout)
+            if learn_hidden_states:
+                self.decoder_cell_state = nn.Parameter(data.clone())
+
+        self.post_decoder = make_layers(LINEAR_CFG['decoder'], batch_norm=use_batch_norm, encoder=False,
+                                        last_without_activation=True, dropout=dropout)
+        self.return_pred = return_pred
+        self.generated_dataset = generated_dataset
+        self.relative_velocities = relative_velocities
+        self.decoder_lstm_num_layers = decoder_lstm_num_layers
+        self.use_gru = use_gru
+        self.learn_hidden_states = learn_hidden_states
+
+        self.save_hyperparameters('lr', 'generated_dataset', 'batch_size', 'use_batch_norm', 'overfit_mode', 'shuffle',
+                                  'relative_velocities', 'dropout', 'rnn_dropout', 'use_gru', 'learn_hidden_states',
+                                  'encoder_lstm_num_layers', 'decoder_lstm_num_layers', 'generated_dataset')
+
+    def init_hidden_states(self, b_size):
+        hx = torch.zeros(size=(self.lstm_num_layers, b_size, LINEAR_CFG['lstm_encoder']), device=self.device)
+        cx = torch.zeros(size=(self.lstm_num_layers, b_size, LINEAR_CFG['lstm_encoder']), device=self.device)
+        dec_cx = torch.zeros(size=(self.decoder_lstm_num_layers, b_size, LINEAR_CFG['lstm_encoder']),
+                             device=self.device)
+        torch.nn.init.xavier_normal_(hx)
+        torch.nn.init.xavier_normal_(cx)
+        torch.nn.init.xavier_normal_(dec_cx)
+
+        return hx, cx, dec_cx
+
+    def forward(self, x):
+        return self.forward_gru(x) if self.use_gru else self.forward_lstm(x)
+
+    def forward_gru(self, batch):
+        if self.generated_dataset:
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, \
+            mapped_in_xy, mapped_gt_xy, ratio = batch
+        else:
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = batch
+
+        predicted_xy, true_xy, predicted_xy_for_loss = [], [], []
+
+        # Encoder
+        b, seq_len = in_uv.size(0), in_uv.size(1)
+        if self.learn_hidden_states:
+            h0 = self.encoder_hidden
+        else:
+            h0, _, _ = self.init_hidden_states(b_size=b)
+
+        out = self.pre_encoder(in_uv.view(-1, 2))
+        out = out.view(seq_len, b, -1)
+        out, h_enc = self.encoder(out, h0)
+
+        # Decoder
+        # Last (x,y) and (u,v) position at T=8
+        last_xy = in_xy[:, -1, ...]
+        last_uv = in_uv[:, -1, ...]
+
+        h_dec = h_enc  # [-1, ...]  # , torch.zeros_like(c_enc[-1, ...])
+
+        for gt_pred_xy in gt_xy.permute(1, 0, 2):
+            out = self.pre_decoder(last_uv)
+            out, h_dec = self.decoder(out.unsqueeze(0), h_dec)
+
+            pred_uv = self.post_decoder(out.squeeze(0))
+            out = last_xy + (pred_uv * 0.4) if self.relative_velocities else last_xy + pred_uv
+
+            predicted_xy_for_loss.append(out)
+            predicted_xy.append(out.detach().cpu().numpy())
+            true_xy.append(gt_pred_xy.detach().cpu().numpy())
+
+            last_xy = out
+            last_uv = pred_uv
+
+        ade = compute_ade(np.stack(predicted_xy), np.stack(true_xy)).item()
+        fde = compute_fde(np.stack(predicted_xy), np.stack(true_xy)).item()
+
+        ade *= ratio[0].item()
+        fde *= ratio[0].item()
+
+        loss = torch.linalg.norm(gt_xy -
+                                 torch.stack(predicted_xy_for_loss, dim=1),
+                                 ord=2, dim=-1).mean() * ratio[0].item()
+
+        if self.return_pred:
+            return loss, ade, fde, ratio[0].item(), np.stack(predicted_xy)
+
+        return loss, ade, fde, ratio[0].item()
+
+    def forward_lstm(self, batch):
+        if self.generated_dataset:
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, \
+            mapped_in_xy, mapped_gt_xy, ratio = batch
+        else:
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = batch
+
+        predicted_xy, true_xy, predicted_xy_for_loss = [], [], []
+
+        # Encoder
+        b, seq_len = in_uv.size(0), in_uv.size(1)
+        if self.learn_hidden_states:
+            h0, c0, c_dec = self.encoder_hidden, self.encoder_cell_state, self.decoder_cell_state
+        else:
+            h0, c0, c_dec = self.init_hidden_states(b_size=b)
+
+        out = self.pre_encoder(in_uv.view(-1, 2))
+        out = out.view(seq_len, b, -1)
+        out, (h_enc, c_enc) = self.encoder(out, (h0, c0))
+
+        # Decoder
+        # Last (x,y) and (u,v) position at T=8
+        last_xy = in_xy[:, -1, ...]
+        last_uv = in_uv[:, -1, ...]
+
+        h_dec = h_enc  # [-1, ...]  # , torch.zeros_like(c_enc[-1, ...])
+
+        for gt_pred_xy in gt_xy.permute(1, 0, 2):
+            out = self.pre_decoder(last_uv)
+            out, (h_dec, c_dec) = self.decoder(out.unsqueeze(0), (h_dec, c_dec))
+
+            pred_uv = self.post_decoder(out.squeeze(0))
+            out = last_xy + (pred_uv * 0.4) if self.relative_velocities else last_xy + pred_uv
+
+            predicted_xy_for_loss.append(out)
+            predicted_xy.append(out.detach().cpu().numpy())
+            true_xy.append(gt_pred_xy.detach().cpu().numpy())
+
+            last_xy = out
+            last_uv = pred_uv
+
+        ade = compute_ade(np.stack(predicted_xy), np.stack(true_xy)).item()
+        fde = compute_fde(np.stack(predicted_xy), np.stack(true_xy)).item()
+
+        ade *= ratio[0].item()
+        fde *= ratio[0].item()
+
+        loss = torch.linalg.norm(gt_xy -
+                                 torch.stack(predicted_xy_for_loss, dim=1),
+                                 ord=2, dim=-1).mean() * ratio[0].item()
+
+        if self.return_pred:
+            return loss, ade, fde, ratio[0].item(), np.stack(predicted_xy)
+
+        return loss, ade, fde, ratio[0].item()
+
+    def one_step(self, batch):
+        return self(batch)
+
+
 if __name__ == '__main__':
     if OVERFIT:
         overfit_batches = 2
@@ -426,9 +618,10 @@ if __name__ == '__main__':
     dataset_val = BaselineGeneratedDataset(SDDVideoClasses.LITTLE, video_number, NetworkMode.VALIDATION,
                                            meta_label=SDDVideoDatasets.LITTLE)
 
-    m = BaselineRNNStacked(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=BATCH_SIZE,
-                           num_workers=NUM_WORKERS, lr=LR, use_batch_norm=USE_BATCH_NORM, overfit_mode=OVERFIT,
-                           shuffle=True, pin_memory=True, generated_dataset=True)
+    m = BaselineRNNStackedSimple(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=BATCH_SIZE,
+                                 num_workers=0, lr=LR, use_batch_norm=USE_BATCH_NORM, overfit_mode=OVERFIT,
+                                 shuffle=True, pin_memory=True, generated_dataset=True, dropout=None, rnn_dropout=0,
+                                 encoder_lstm_num_layers=2)
 
     trainer = Trainer(gpus=1, max_epochs=NUM_EPOCHS)
     trainer.fit(model=m)

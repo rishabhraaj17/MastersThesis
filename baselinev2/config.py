@@ -152,20 +152,20 @@ GENERATOR_SEED = torch.Generator().manual_seed(MANUAL_SEED)
 #     'lstm_encoder': 16
 # }
 #
-# LINEAR_CFG = {
-#     'encoder': [32],
-#     'decoder': [32, 2],
-#     'lstm_in': 32,
-#     'lstm_encoder': 64
-# }
-
-# Bigger
 LINEAR_CFG = {
-    'encoder': [32, 64],
-    'decoder': [64, 32, 2],
-    'lstm_in': 64,
-    'lstm_encoder': 128
+    'encoder': [32],
+    'decoder': [32, 2],
+    'lstm_in': 32,
+    'lstm_encoder': 64
 }
+
+# # Bigger
+# LINEAR_CFG = {
+#     'encoder': [32, 64],
+#     'decoder': [64, 32, 2],
+#     'lstm_in': 64,
+#     'lstm_encoder': 128
+# }
 
 TRAIN_CLASS = SDDVideoClasses.LITTLE
 VAL_CLASS = TRAIN_CLASS
@@ -185,7 +185,13 @@ OVERFIT_BATCHES = 0.0
 LIMIT_BATCHES = (1.0, 1.0)  # (Train, Val)
 
 USE_SOCIAL_LSTM_MODEL = False
+USE_SIMPLE_MODEL = False
+USE_GRU = False
 USE_FINAL_POSITIONS = False
+
+DROPOUT = None
+RNN_DROPOUT = 0
+RNN_LAYERS = 1
 
 USE_RELATIVE_VELOCITIES = False
 
@@ -198,6 +204,7 @@ DEBUG_MODE = False
 PLOT_MODE = False
 
 EVAL_USE_SOCIAL_LSTM_MODEL = True
+EVAL_USE_SIMPLE_MODEL = False
 EVAL_USE_BATCH_NORM = False
 
 EVAL_USE_FINAL_POSITIONS_SUPERVISED = True

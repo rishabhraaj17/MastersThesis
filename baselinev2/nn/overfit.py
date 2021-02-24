@@ -11,7 +11,7 @@ from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from baselinev2.config import BASE_PATH, ROOT_PATH
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.data_utils import extract_frame_from_video
-from baselinev2.nn.models import BaselineRNN, BaselineRNNStacked
+from baselinev2.nn.models import BaselineRNN, BaselineRNNStacked, BaselineRNNStackedSimple
 from baselinev2.nn.social_lstm.model import BaselineLSTM
 from baselinev2.nn.social_lstm.train import bool_flag
 from baselinev2.plot_utils import plot_trajectories, plot_trajectory_alongside_frame
@@ -44,7 +44,7 @@ def reverse_u_v(batch):
         in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = data
         in_uv = reverse_slices(in_uv)
         gt_uv = reverse_slices(gt_uv)
-        
+
         out_in_xy.append(in_xy)
         out_gt_xy.append(gt_xy)
         out_in_uv.append(in_uv)
@@ -54,7 +54,7 @@ def reverse_u_v(batch):
         out_in_frame_numbers.append(in_frame_numbers)
         out_gt_frame_numbers.append(gt_frame_numbers)
         out_ratio.append(ratio)
-        
+
     return [torch.stack(out_in_xy), torch.stack(out_gt_xy), torch.stack(out_in_uv), torch.stack(out_gt_uv),
             torch.stack(out_in_track_ids), torch.stack(out_gt_track_ids), torch.stack(out_in_frame_numbers),
             torch.stack(out_gt_frame_numbers), torch.stack(out_ratio)]
@@ -69,7 +69,7 @@ def reverse_u_v_generated(batch):
         mapped_in_xy, mapped_gt_xy, ratio = data
         in_uv = reverse_slices(in_uv)
         gt_uv = reverse_slices(gt_uv)
-        
+
         out_in_xy.append(in_xy)
         out_gt_xy.append(gt_xy)
         out_in_uv.append(in_uv)
@@ -81,7 +81,7 @@ def reverse_u_v_generated(batch):
         out_mapped_in_xy.append(mapped_in_xy)
         out_mapped_gt_xy.append(mapped_gt_xy)
         out_ratio.append(ratio)
-        
+
     return [torch.stack(out_in_xy), torch.stack(out_gt_xy), torch.stack(out_in_uv), torch.stack(out_gt_uv),
             torch.stack(out_in_track_ids), torch.stack(out_gt_track_ids), torch.stack(out_in_frame_numbers),
             torch.stack(out_gt_frame_numbers), torch.stack(out_mapped_in_xy), torch.stack(out_mapped_gt_xy),
@@ -226,10 +226,10 @@ def social_lstm_parser(batch_size=32, learning_rate=0.001, pass_final_pos=False)
 
 if __name__ == '__main__':
     single_chunk_fit = False
-    generated = True
+    generated = False
     num_workers = 12
     shuffle = True
-    use_social_lstm_model = True
+    use_social_lstm_model = False
 
     do_reverse_slices = False
 
@@ -251,8 +251,15 @@ if __name__ == '__main__':
         model = BaselineLSTM(args=social_lstm_parser(pass_final_pos=False), generated_dataset=generated,
                              use_batch_norm=False)
     else:
-        model = BaselineRNNStacked(encoder_lstm_num_layers=1, decoder_lstm_num_layers=1, generated_dataset=generated,
-                                   use_batch_norm=True, relative_velocities=False)
+        # model = BaselineRNNStacked(encoder_lstm_num_layers=1, decoder_lstm_num_layers=1, generated_dataset=generated,
+        #                            use_batch_norm=True, relative_velocities=False)
+
+        model = BaselineRNNStackedSimple(encoder_lstm_num_layers=1, decoder_lstm_num_layers=1, use_gru=True,
+                                         generated_dataset=generated, batch_size=1 if single_chunk_fit else 6,
+                                         use_batch_norm=False, relative_velocities=False, learn_hidden_states=True)
+        # model = BaselineRNNStackedSimple(encoder_lstm_num_layers=2, decoder_lstm_num_layers=2,
+        #                                  generated_dataset=generated, rnn_dropout=0.2,
+        #                                  use_batch_norm=True, relative_velocities=False, dropout=0.2)
 
     if single_chunk_fit:
         overfit_chunk = 1
@@ -268,7 +275,7 @@ if __name__ == '__main__':
             overfit_dataset, 1,
             collate_fn=(reverse_u_v_generated if generated else reverse_u_v) if do_reverse_slices else None)
     else:
-        overfit_chunks = [0, 1, 2, 3, 4, 5]
+        overfit_chunks = [0, 1, 2, 3, 4, 5] if generated else [i for i in range(32)]
         if generated:
             overfit_data_list = [torch.load(f"{ROOT_PATH}Datasets/OverfitChunks/generated_overfit{o}.pt")
                                  for o in overfit_chunks]
@@ -291,7 +298,7 @@ if __name__ == '__main__':
     # lr = 1e-2  # batch - good one
     # lr = 7e-3
     # lr = 5e-3  # - best
-    lr = 1e-3  # 2e-3
+    lr = 2e-3  # 1.5e-2  # 2e-3
     optim = torch.optim.Adam(model.parameters(), lr=lr, amsgrad=True)
     # optim = torch.optim.SGD(model.parameters(), lr=lr)
 
