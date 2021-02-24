@@ -143,7 +143,7 @@ def train(train_video_class: SDDVideoClasses, train_video_number: int, train_mod
           max_epochs=NUM_EPOCHS, limit_train_batches=1.0, limit_val_batches=1.0, over_fit_batches=0.0,
           use_social_lstm_model=True, pass_final_pos=True, relative_velocities=False,
           use_simple_model: bool = False, use_gru: bool = False, dropout=None, rnn_dropout=0, num_rnn_layers=1,
-          learn_hidden_states=False):
+          learn_hidden_states=False, drop_last=True):
     dataset_train, dataset_val = get_train_validation_dataset(
         train_video_class=train_video_class, train_video_number=train_video_number, train_mode=train_mode,
         train_meta_label=train_meta_label, val_video_class=val_video_class, val_video_number=val_video_number,
@@ -184,16 +184,16 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
                  pin_memory: bool = True, use_batch_norm: bool = USE_BATCH_NORM, over_fit_mode: bool = OVERFIT,
                  from_checkpoint=None, checkpoint_root_path=None, gpus=1 if torch.cuda.is_available() else None,
                  max_epochs=NUM_EPOCHS, limit_train_batches=1.0, limit_val_batches=1.0, over_fit_batches=0.0,
-                 use_social_lstm_model=True, pass_final_pos=True, relative_velocities=False,
+                 use_social_lstm_model=True, pass_final_pos=True, relative_velocities=False, drop_last=True,
                  use_simple_model: bool = False, use_gru: bool = False, dropout=None, rnn_dropout=0, num_rnn_layers=1):
     dataset_train, dataset_val = get_train_validation_dataset(
         train_video_class=train_video_class, train_video_number=train_video_number, train_mode=train_mode,
         train_meta_label=train_meta_label, val_video_class=val_video_class, val_video_number=val_video_number,
         val_mode=val_mode, val_meta_label=val_meta_label, get_generated=get_generated)
     loader_train = DataLoader(dataset_train, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle,
-                              pin_memory=pin_memory)
+                              pin_memory=pin_memory, drop_last=drop_last)
     loader_val = DataLoader(dataset_val, batch_size=batch_size, num_workers=num_workers, shuffle=False,
-                            pin_memory=pin_memory)
+                            pin_memory=pin_memory, drop_last=drop_last)
     if use_social_lstm_model:
         model = get_social_model(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=batch_size,
                                  num_workers=num_workers, lr=lr, use_batch_norm=use_batch_norm,
@@ -379,5 +379,6 @@ if __name__ == '__main__':
         dropout=DROPOUT,
         rnn_dropout=RNN_DROPOUT,
         num_rnn_layers=RNN_LAYERS,
-        learn_hidden_states=LEARN_HIDDEN_STATES
+        learn_hidden_states=LEARN_HIDDEN_STATES,
+        drop_last=True
     )
