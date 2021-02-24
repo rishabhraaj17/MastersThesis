@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import matplotlib
 import torch
@@ -23,12 +24,17 @@ initialize_logging()
 logger = get_logger('baselinev2.nn.overfit')
 
 
-def plot_array(arr, title, xlabel, ylabel):
+def plot_array(arr, title, xlabel, ylabel, save_path=None):
     plt.title(title)
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.plot(arr)
-    plt.show()
+    if save_path is not None:
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path + f"{title}.png")
+        plt.close()
+    else:
+        plt.show()
 
 
 def reverse_slices(arr):
@@ -89,7 +95,7 @@ def reverse_u_v_generated(batch):
 
 
 def overfit(net, loader, optimizer, num_epochs=5000, batch_mode=False, video_path=None, social_lstm=False,
-            img_batch_size=6):
+            img_batch_size=6, save_plot_path=None):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, patience=500, cooldown=10, verbose=True,
                                                            factor=0.1)
     net.train()
@@ -114,7 +120,7 @@ def overfit(net, loader, optimizer, num_epochs=5000, batch_mode=False, video_pat
 
                 scheduler.step(loss)
 
-                if epoch % 500 == 0:
+                if epoch % 1500 == 0:
                     if batch_mode:
                         im_idx = np.random.choice(img_batch_size, 1).item()
                         plot_trajectory_alongside_frame(
@@ -124,19 +130,29 @@ def overfit(net, loader, optimizer, num_epochs=5000, batch_mode=False, video_pat
                             gt_trajectory=data[1][im_idx].squeeze().numpy(),
                             pred_trajectory=pred_trajectory[:, im_idx, ...].squeeze(),
                             frame_number=data[6][im_idx].squeeze()[0].item(),
-                            track_id=data[4][im_idx].squeeze()[0].item())
+                            track_id=data[4][im_idx].squeeze()[0].item(), save_path=save_plot_path)
                     else:
                         plot_trajectory_alongside_frame(
                             frame=extract_frame_from_video(
                                 video_path=video_path, frame_number=data[6].squeeze()[0].item()),
                             obs_trajectory=data[0].squeeze().numpy(), gt_trajectory=data[1].squeeze().numpy(),
                             pred_trajectory=pred_trajectory.squeeze(), frame_number=data[6].squeeze()[0].item(),
-                            track_id=data[4].squeeze()[0].item())
+                            track_id=data[4].squeeze()[0].item(), save_path=save_plot_path)
+                if epoch == list(range(num_epochs))[-1]:
+                    for im_idx in range(img_batch_size):
+                        plot_trajectory_alongside_frame(
+                            frame=extract_frame_from_video(
+                                video_path=video_path, frame_number=data[6][im_idx].squeeze()[0].item()),
+                            obs_trajectory=data[0][im_idx].squeeze().numpy(),
+                            gt_trajectory=data[1][im_idx].squeeze().numpy(),
+                            pred_trajectory=pred_trajectory[:, im_idx, ...].squeeze(),
+                            frame_number=data[6][im_idx].squeeze()[0].item(),
+                            track_id=data[4][im_idx].squeeze()[0].item(), save_path=save_plot_path+'last_epoch/')
 
     logger.info(f'Total Loss : {sum(running_loss) / num_epochs}')
-    plot_array(running_loss, 'Loss', 'epoch', 'loss')
-    plot_array(running_ade, 'ADE', 'epoch', 'ade')
-    plot_array(running_fde, 'FDE', 'epoch', 'fde')
+    plot_array(running_loss, 'Loss', 'epoch', 'loss', save_path=save_plot_path)
+    plot_array(running_ade, 'ADE', 'epoch', 'ade', save_path=save_plot_path)
+    plot_array(running_fde, 'FDE', 'epoch', 'fde', save_path=save_plot_path)
 
 
 def overfit_two_loss(net, loader, optimizer, num_epochs=5000):
@@ -233,6 +249,13 @@ if __name__ == '__main__':
     shuffle = True
     use_social_lstm_model = False
 
+    use_bn = True
+    use_gru = False
+    learn_hidden_states = True
+    rel_velocities = False
+    rnn_layers_count = 1
+    num_epochs = 20000
+
     do_reverse_slices = False
 
     sdd_video_class = SDDVideoClasses.LITTLE
@@ -256,10 +279,12 @@ if __name__ == '__main__':
         # model = BaselineRNNStacked(encoder_lstm_num_layers=1, decoder_lstm_num_layers=1, generated_dataset=generated,
         #                            use_batch_norm=True, relative_velocities=False)
 
-        model = BaselineRNNStackedSimple(encoder_lstm_num_layers=1, decoder_lstm_num_layers=1, use_gru=True,
+        model = BaselineRNNStackedSimple(encoder_lstm_num_layers=rnn_layers_count,
+                                         decoder_lstm_num_layers=rnn_layers_count, use_gru=use_gru,
                                          generated_dataset=generated,
                                          batch_size=1 if single_chunk_fit else gt_batch_size,
-                                         use_batch_norm=False, relative_velocities=False, learn_hidden_states=True)
+                                         use_batch_norm=use_bn, relative_velocities=rel_velocities,
+                                         learn_hidden_states=learn_hidden_states)
         # model = BaselineRNNStackedSimple(encoder_lstm_num_layers=2, decoder_lstm_num_layers=2,
         #                                  generated_dataset=generated, rnn_dropout=0.2,
         #                                  use_batch_norm=True, relative_velocities=False, dropout=0.2)
@@ -305,8 +330,14 @@ if __name__ == '__main__':
     optim = torch.optim.Adam(model.parameters(), lr=lr, amsgrad=True)
     # optim = torch.optim.SGD(model.parameters(), lr=lr)
 
-    overfit(net=model, loader=overfit_dataloader, optimizer=optim, num_epochs=20000, batch_mode=not single_chunk_fit,
-            video_path=path_to_video, social_lstm=use_social_lstm_model, img_batch_size=gt_batch_size)
+    overfit(net=model, loader=overfit_dataloader, optimizer=optim, num_epochs=num_epochs, batch_mode=not single_chunk_fit,
+            video_path=path_to_video, social_lstm=use_social_lstm_model, img_batch_size=gt_batch_size,
+            save_plot_path=f'{ROOT_PATH}Plots/baseline_v2/nn/OVERFIT/{sdd_video_class.value}{sdd_video_number}/' \
+                           f'epoch_count{num_epochs}/{"social" if use_social_lstm_model else "baseline"}_'
+                           f'generated_{generated}__'
+                           f'batch_norm_{use_bn}__generated_{generated}__gru_{use_gru}__'
+                           f'learn_hidden_{learn_hidden_states}__rel_velocities_{rel_velocities}'
+                           f'__rnn_layers_{rnn_layers_count}/')
     # overfit_two_loss(net=model, loader=overfit_dataloader, optimizer=optim, num_epochs=5000)
 
     print()
