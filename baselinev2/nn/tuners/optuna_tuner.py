@@ -10,6 +10,8 @@ from baselinev2.config import ROOT_PATH
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import BaselineDataset
 from baselinev2.nn.models import BaselineRNNStacked
+from baselinev2.nn.overfit import social_lstm_parser
+from baselinev2.nn.social_lstm.model import BaselineLSTM
 
 DEVICE = torch.device("cuda")
 DIR = f'{ROOT_PATH}Plots/Optuna'
@@ -23,7 +25,9 @@ LOG_INTERVAL = 10
 
 def define_model(trial):
     use_batch_norm = trial.suggest_int("use_batch_norm", 0, 1)
-    return BaselineRNNStacked(use_batch_norm=bool(use_batch_norm), return_pred=True)
+    # return BaselineRNNStacked(use_batch_norm=bool(use_batch_norm), return_pred=True)
+    return BaselineLSTM(args=social_lstm_parser(pass_final_pos=False), generated_dataset=False,
+                        use_batch_norm=use_batch_norm)
 
 
 def get_loaders(trial):
@@ -71,7 +75,7 @@ def objective(trial: optuna.Trial):
 
             data = [d.to(DEVICE) for d in data]
 
-            loss, ade, fde, ratio, _ = model(data)
+            loss, ade, fde, ratio, _ = model.one_step(data)  # model(data)
             loss.backward()
             optimizer.step()
 
@@ -84,7 +88,7 @@ def objective(trial: optuna.Trial):
                 # if batch_idx * BATCHSIZE >= N_VALID_EXAMPLES:
                 #     break
                 data = [d.to(DEVICE) for d in data]
-                loss, ade, fde, ratio, _ = model(data)
+                loss, ade, fde, ratio, _ = model.one_step(data)  # model(data)
                 # Get the index of the max log-probability.
 
         trial.report(loss, epoch)

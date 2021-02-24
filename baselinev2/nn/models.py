@@ -340,7 +340,8 @@ class BaselineRNNStacked(BaselineRNN):
             h0, c0 = self.init_hidden_states(b_size=b)
 
         out = self.pre_encoder(in_uv.view(-1, 2))
-        out = F.relu(out.view(seq_len, b, -1))
+        # out = F.relu(out.view(seq_len, b, -1))  # covered in pre-encoder
+        out = out.view(seq_len, b, -1)
         out, (h_enc, c_enc) = self.encoder(out, (h0, c0))
 
         # Decoder
@@ -358,9 +359,11 @@ class BaselineRNNStacked(BaselineRNN):
 
             if self.decoder_lstm_num_layers > 1:
                 for d_idx, extra_decoder in enumerate(self.decoder_extra_layers):
-                    h_dec, c_dec = extra_decoder(F.relu(h_dec), (hidden_states[d_idx + 1], cell_states[d_idx + 1]))
+                    # h_dec, c_dec = extra_decoder(F.relu(h_dec), (hidden_states[d_idx + 1], cell_states[d_idx + 1]))
+                    h_dec, c_dec = extra_decoder(h_dec, (hidden_states[d_idx + 1], cell_states[d_idx + 1]))
 
-            pred_uv = self.post_decoder(F.relu(h_dec))
+            # pred_uv = self.post_decoder(F.relu(h_dec))
+            pred_uv = self.post_decoder(h_dec)
             out = last_xy + (pred_uv * 0.4) if self.relative_velocities else last_xy + pred_uv
             total_loss += self.center_based_loss_meters(gt_center=gt_pred_xy, pred_center=out, ratio=ratio[0].item())
 

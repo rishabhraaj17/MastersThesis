@@ -219,7 +219,9 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
                         summary_writer.add_scalar('val/ade_epoch', v_ade, global_step=epoch)
                         summary_writer.add_scalar('val/fde_epoch', v_fde, global_step=epoch)
 
-                        summary_writer.add_scalar('lr', lr, global_step=idx)
+                        summary_writer.add_scalar('lr',
+                                                  [param_group['lr'] for param_group in optimizer.param_groups][-1],
+                                                  global_step=idx)
                         summary_writer.add_scalar('epoch', epoch, global_step=epoch)
 
                         running_v_loss.append(v_loss.item())
@@ -231,11 +233,13 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
                     best_val_loss = epoch_v_loss
                     resume_dict = {'model_state_dict': model.state_dict(),
                                    'optimizer_state_dict': optimizer.state_dict(),
+                                   'scheduler_state_dict': scheduler.state_dict(),
                                    'epoch': epoch,
                                    'val_loss': epoch_v_loss,
                                    'lr': lr,
                                    'batch_size': batch_size,
                                    'model_name': 'social_lstm' if use_social_lstm_model else 'baseline',
+                                   'architecture': str(model),
                                    'generated_data': get_generated,
                                    'use_batch_norm': use_batch_norm,
                                    'train_class': train_video_class.name,
@@ -256,6 +260,7 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
         resume_dict.update({
             'last_model_state_dict': model.state_dict(),
             'last_optimizer_state_dict': optimizer.state_dict(),
+            'last_scheduler_state_dict': scheduler.state_dict(),
         })
         torch.save(resume_dict, f'{resume_dict_save_root_path}{resume_dict_save_folder}/'
                                 f'{resume_dict_save_folder}_checkpoint.ckpt')

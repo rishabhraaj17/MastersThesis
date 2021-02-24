@@ -151,12 +151,20 @@ GENERATOR_SEED = torch.Generator().manual_seed(MANUAL_SEED)
 #     'lstm_in': 8,
 #     'lstm_encoder': 16
 # }
+#
+# LINEAR_CFG = {
+#     'encoder': [32],
+#     'decoder': [32, 2],
+#     'lstm_in': 32,
+#     'lstm_encoder': 64
+# }
 
+# Bigger
 LINEAR_CFG = {
-    'encoder': [32],
-    'decoder': [32, 2],
-    'lstm_in': 32,
-    'lstm_encoder': 64
+    'encoder': [32, 64],
+    'decoder': [64, 32, 2],
+    'lstm_in': 64,
+    'lstm_encoder': 128
 }
 
 TRAIN_CLASS = SDDVideoClasses.LITTLE
