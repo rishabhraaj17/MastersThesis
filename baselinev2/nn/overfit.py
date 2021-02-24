@@ -88,7 +88,8 @@ def reverse_u_v_generated(batch):
             torch.stack(out_ratio)]
 
 
-def overfit(net, loader, optimizer, num_epochs=5000, batch_mode=False, video_path=None, social_lstm=False):
+def overfit(net, loader, optimizer, num_epochs=5000, batch_mode=False, video_path=None, social_lstm=False,
+            img_batch_size=6):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, patience=500, cooldown=10, verbose=True,
                                                            factor=0.1)
     net.train()
@@ -115,7 +116,7 @@ def overfit(net, loader, optimizer, num_epochs=5000, batch_mode=False, video_pat
 
                 if epoch % 500 == 0:
                     if batch_mode:
-                        im_idx = np.random.choice(6, 1).item()
+                        im_idx = np.random.choice(img_batch_size, 1).item()
                         plot_trajectory_alongside_frame(
                             frame=extract_frame_from_video(
                                 video_path=video_path, frame_number=data[6][im_idx].squeeze()[0].item()),
@@ -227,6 +228,7 @@ def social_lstm_parser(batch_size=32, learning_rate=0.001, pass_final_pos=False)
 if __name__ == '__main__':
     single_chunk_fit = False
     generated = False
+    gt_batch_size = 32
     num_workers = 12
     shuffle = True
     use_social_lstm_model = False
@@ -255,7 +257,8 @@ if __name__ == '__main__':
         #                            use_batch_norm=True, relative_velocities=False)
 
         model = BaselineRNNStackedSimple(encoder_lstm_num_layers=1, decoder_lstm_num_layers=1, use_gru=True,
-                                         generated_dataset=generated, batch_size=1 if single_chunk_fit else 6,
+                                         generated_dataset=generated,
+                                         batch_size=1 if single_chunk_fit else gt_batch_size,
                                          use_batch_norm=False, relative_velocities=False, learn_hidden_states=True)
         # model = BaselineRNNStackedSimple(encoder_lstm_num_layers=2, decoder_lstm_num_layers=2,
         #                                  generated_dataset=generated, rnn_dropout=0.2,
@@ -275,7 +278,7 @@ if __name__ == '__main__':
             overfit_dataset, 1,
             collate_fn=(reverse_u_v_generated if generated else reverse_u_v) if do_reverse_slices else None)
     else:
-        overfit_chunks = [0, 1, 2, 3, 4, 5] if generated else [i for i in range(32)]
+        overfit_chunks = [0, 1, 2, 3, 4, 5] if generated else [i for i in range(gt_batch_size)]
         if generated:
             overfit_data_list = [torch.load(f"{ROOT_PATH}Datasets/OverfitChunks/generated_overfit{o}.pt")
                                  for o in overfit_chunks]
@@ -303,7 +306,7 @@ if __name__ == '__main__':
     # optim = torch.optim.SGD(model.parameters(), lr=lr)
 
     overfit(net=model, loader=overfit_dataloader, optimizer=optim, num_epochs=20000, batch_mode=not single_chunk_fit,
-            video_path=path_to_video, social_lstm=use_social_lstm_model)
+            video_path=path_to_video, social_lstm=use_social_lstm_model, img_batch_size=gt_batch_size)
     # overfit_two_loss(net=model, loader=overfit_dataloader, optimizer=optim, num_epochs=5000)
 
     print()
