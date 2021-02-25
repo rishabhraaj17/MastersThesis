@@ -2,7 +2,7 @@ import torch
 
 from average_image.constants import SDDVideoDatasets, SDDVideoClasses
 from average_image.utils import SDDMeta
-from baselinev2.constants import STEP
+from baselinev2.constants import STEP, SDDVideoClassAndNumbers
 
 SEVER_MODE = False
 
@@ -145,26 +145,26 @@ GENERATOR_SEED = torch.Generator().manual_seed(MANUAL_SEED)
 # }
 
 # small network
-# LINEAR_CFG = {
-#     'encoder': [8],
-#     'decoder': [2],
-#     'lstm_in': 8,
-#     'lstm_encoder': 16
-# }
-# smaller
 LINEAR_CFG = {
-    'encoder': [4],
+    'encoder': [8],
     'decoder': [2],
-    'lstm_in': 4,
-    'lstm_encoder': 8
+    'lstm_in': 8,
+    'lstm_encoder': 16
 }
+# smaller
+# LINEAR_CFG = {
+#     'encoder': [4],
+#     'decoder': [2],
+#     'lstm_in': 4,
+#     'lstm_encoder': 8
+# }
 #
-LINEAR_CFG = {
-    'encoder': [32],
-    'decoder': [32, 2],
-    'lstm_in': 32,
-    'lstm_encoder': 64
-}
+# LINEAR_CFG = {
+#     'encoder': [32],
+#     'decoder': [32, 2],
+#     'lstm_in': 32,
+#     'lstm_encoder': 64
+# }
 
 # # Bigger
 # LINEAR_CFG = {
@@ -175,7 +175,9 @@ LINEAR_CFG = {
 # }
 
 TRAIN_CLASS = SDDVideoClasses.LITTLE
+TRAIN_CLASS_FOR_WHOLE = SDDVideoClassAndNumbers.LITTLE
 VAL_CLASS = TRAIN_CLASS
+VAL_CLASS_FOR_WHOLE = TRAIN_CLASS_FOR_WHOLE
 
 TRAIN_VIDEO_NUMBER = 3
 VAL_VIDEO_NUMBER = TRAIN_VIDEO_NUMBER
@@ -183,7 +185,11 @@ VAL_VIDEO_NUMBER = TRAIN_VIDEO_NUMBER
 TRAIN_META = SDDVideoDatasets.LITTLE
 VAL_META = TRAIN_META
 
-USE_GENERATED_DATA = False  # Use unsupervised trajectories or not
+TRAIN_FOR_WHOLE_CLASS = True
+TRAIN_VIDEOS_TO_SKIP = ()
+VAL_VIDEOS_TO_SKIP = ()
+
+USE_GENERATED_DATA = True  # Use unsupervised trajectories or not
 RESUME_TRAINING = False
 RESUME_VERSION = 9
 CHECKPOINT_ROOT = f'lightning_logs/version_{RESUME_VERSION}/'

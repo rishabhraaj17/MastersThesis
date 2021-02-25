@@ -1,5 +1,7 @@
 from enum import Enum
 
+from average_image.constants import SDDVideoClasses
+
 
 class STEP(Enum):
     SEMI_SUPERVISED = 0
@@ -46,3 +48,14 @@ class NetworkMode(Enum):
 class Models(Enum):
     BASELINE = 0
     SOCIAL_LSTM = 1
+
+
+class SDDVideoClassAndNumbers(Enum):
+    BOOKSTORE = (SDDVideoClasses.BOOKSTORE, (0, 1, 2, 3, 4, 5, 6))
+    COUPA = (SDDVideoClasses.COUPA, (0, 1, 2, 3))
+    DEATH_CIRCLE = (SDDVideoClasses.DEATH_CIRCLE, (0, 1, 2, 3, 4))
+    GATES = (SDDVideoClasses.GATES, (0, 1, 2, 3, 4, 5, 6, 7, 8))
+    HYANG = (SDDVideoClasses.HYANG, (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
+    LITTLE = (SDDVideoClasses.LITTLE, (0, 1, 2, 3))
+    NEXUS = (SDDVideoClasses.NEXUS, (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11))
+    QUAD = (SDDVideoClasses.QUAD, (0, 1, 2, 3))
