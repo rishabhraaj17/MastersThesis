@@ -140,8 +140,8 @@ def get_train_validation_dataset(train_video_class: SDDVideoClasses, train_video
     return dataset_train, dataset_val
 
 
-def get_dataset_for_class_v0(video_class: SDDVideoClassAndNumbers, meta_label: SDDVideoDatasets, mode: NetworkMode,
-                             get_generated: bool = False, videos_to_skip: Union[List, Tuple] = ()):
+def get_dataset_for_one_class(video_class: SDDVideoClassAndNumbers, meta_label: SDDVideoDatasets, mode: NetworkMode,
+                              get_generated: bool = False, videos_to_skip: Union[List, Tuple] = ()):
     datasets = []
     all_videos = video_class.value[-1]
     videos_to_consider = np.setdiff1d(all_videos, videos_to_skip)
