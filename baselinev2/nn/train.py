@@ -11,7 +11,7 @@ from baselinev2.config import BATCH_SIZE, NUM_WORKERS, LR, USE_BATCH_NORM, OVERF
     OVERFIT_BATCHES, CHECKPOINT_ROOT, RESUME_TRAINING, USE_GENERATED_DATA, TRAIN_CLASS, TRAIN_VIDEO_NUMBER, TRAIN_META, \
     VAL_CLASS, VAL_VIDEO_NUMBER, VAL_META, USE_SOCIAL_LSTM_MODEL, USE_FINAL_POSITIONS, USE_RELATIVE_VELOCITIES, DEVICE, \
     TRAIN_CUSTOM, LOG_HISTOGRAM, USE_SIMPLE_MODEL, USE_GRU, RNN_DROPOUT, RNN_LAYERS, DROPOUT, LEARN_HIDDEN_STATES, \
-    FEED_MODEL_DISTANCES_IN_METERS
+    FEED_MODEL_DISTANCES_IN_METERS, LINEAR_CFG
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.models import BaselineRNNStacked, BaselineRNNStackedSimple
@@ -25,7 +25,8 @@ logger = get_logger('baselinev2.nn.train')
 
 def get_model(train_dataset, val_dataset, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, lr=LR,
               use_batch_norm=USE_BATCH_NORM, over_fit_mode=OVERFIT, shuffle=True, pin_memory=True,
-              generated_dataset=True, from_checkpoint=None, checkpoint_root_path=None, relative_velocities=False):
+              generated_dataset=True, from_checkpoint=None, checkpoint_root_path=None, relative_velocities=False,
+              arch_config=LINEAR_CFG):
     if from_checkpoint:
         checkpoint_path = checkpoint_root_path + 'checkpoints/'
         checkpoint_file = os.listdir(checkpoint_path)[-1]
@@ -39,14 +40,15 @@ def get_model(train_dataset, val_dataset, batch_size=BATCH_SIZE, num_workers=NUM
             shuffle=shuffle,
             pin_memory=pin_memory,
             generated_dataset=generated_dataset,
-            relative_velocities=relative_velocities
+            relative_velocities=relative_velocities,
+            arch_config=arch_config
         )
     else:
         model = BaselineRNNStacked(train_dataset=train_dataset, val_dataset=val_dataset, batch_size=batch_size,
                                    num_workers=num_workers, lr=lr, use_batch_norm=use_batch_norm,
                                    overfit_mode=over_fit_mode, shuffle=shuffle, pin_memory=pin_memory,
                                    generated_dataset=generated_dataset, relative_velocities=relative_velocities,
-                                   return_pred=True)
+                                   return_pred=True, arch_config=arch_config)
     model.train()
     return model
 
@@ -55,7 +57,7 @@ def get_simple_model(train_dataset, val_dataset, batch_size=BATCH_SIZE, num_work
                      use_batch_norm=USE_BATCH_NORM, over_fit_mode=OVERFIT, shuffle=True, pin_memory=True,
                      generated_dataset=True, from_checkpoint=None, checkpoint_root_path=None, use_gru=False,
                      relative_velocities=False, dropout=None, rnn_dropout=0, num_rnn_layers=1,
-                     learn_hidden_states=False, feed_model_distances_in_meters=False):
+                     learn_hidden_states=False, feed_model_distances_in_meters=False, arch_config=LINEAR_CFG):
     if from_checkpoint:
         checkpoint_path = checkpoint_root_path + 'checkpoints/'
         checkpoint_file = os.listdir(checkpoint_path)[-1]
@@ -76,7 +78,8 @@ def get_simple_model(train_dataset, val_dataset, batch_size=BATCH_SIZE, num_work
             decoder_lstm_num_layers=num_rnn_layers,
             use_gru=use_gru,
             learn_hidden_states=learn_hidden_states,
-            feed_model_distances_in_meters=feed_model_distances_in_meters
+            feed_model_distances_in_meters=feed_model_distances_in_meters,
+            arch_config=arch_config
         )
     else:
         model = BaselineRNNStackedSimple(train_dataset=train_dataset, val_dataset=val_dataset, batch_size=batch_size,
@@ -85,7 +88,7 @@ def get_simple_model(train_dataset, val_dataset, batch_size=BATCH_SIZE, num_work
                                          generated_dataset=generated_dataset, relative_velocities=relative_velocities,
                                          return_pred=True, dropout=dropout, rnn_dropout=rnn_dropout, use_gru=use_gru,
                                          encoder_lstm_num_layers=num_rnn_layers, decoder_lstm_num_layers=num_rnn_layers,
-                                         learn_hidden_states=learn_hidden_states,
+                                         learn_hidden_states=learn_hidden_states, arch_config=arch_config,
                                          feed_model_distances_in_meters=feed_model_distances_in_meters)
     model.train()
     return model
@@ -146,7 +149,7 @@ def train(train_video_class: SDDVideoClasses, train_video_number: int, train_mod
           max_epochs=NUM_EPOCHS, limit_train_batches=1.0, limit_val_batches=1.0, over_fit_batches=0.0,
           use_social_lstm_model=True, pass_final_pos=True, relative_velocities=False,
           use_simple_model: bool = False, use_gru: bool = False, dropout=None, rnn_dropout=0, num_rnn_layers=1,
-          learn_hidden_states=False, drop_last=True, feed_model_distances_in_meters=True):
+          learn_hidden_states=False, drop_last=True, feed_model_distances_in_meters=True, arch_config=LINEAR_CFG):
     dataset_train, dataset_val = get_train_validation_dataset(
         train_video_class=train_video_class, train_video_number=train_video_number, train_mode=train_mode,
         train_meta_label=train_meta_label, val_video_class=val_video_class, val_video_number=val_video_number,
@@ -166,13 +169,14 @@ def train(train_video_class: SDDVideoClasses, train_video_number: int, train_mod
                                  relative_velocities=relative_velocities, dropout=dropout,
                                  rnn_dropout=rnn_dropout, num_rnn_layers=num_rnn_layers,
                                  learn_hidden_states=learn_hidden_states,
-                                 feed_model_distances_in_meters=feed_model_distances_in_meters)
+                                 feed_model_distances_in_meters=feed_model_distances_in_meters,
+                                 arch_config=arch_config)
     else:
         model = get_model(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=batch_size,
                           num_workers=num_workers, lr=lr, use_batch_norm=use_batch_norm, over_fit_mode=over_fit_mode,
                           shuffle=shuffle, pin_memory=pin_memory, generated_dataset=get_generated,
                           from_checkpoint=from_checkpoint, checkpoint_root_path=checkpoint_root_path,
-                          relative_velocities=relative_velocities)
+                          relative_velocities=relative_velocities, arch_config=arch_config)
     trainer = get_trainer(gpus=gpus, max_epochs=max_epochs, limit_train_batches=limit_train_batches,
                           limit_val_batches=limit_val_batches,
                           over_fit_batches=over_fit_batches if over_fit_mode else 0.0)
@@ -190,7 +194,7 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
                  max_epochs=NUM_EPOCHS, limit_train_batches=1.0, limit_val_batches=1.0, over_fit_batches=0.0,
                  use_social_lstm_model=True, pass_final_pos=True, relative_velocities=False, drop_last=True,
                  use_simple_model: bool = False, use_gru: bool = False, dropout=None, rnn_dropout=0, num_rnn_layers=1,
-                 feed_model_distances_in_meters=False):
+                 feed_model_distances_in_meters=False, arch_config=LINEAR_CFG):
     dataset_train, dataset_val = get_train_validation_dataset(
         train_video_class=train_video_class, train_video_number=train_video_number, train_mode=train_mode,
         train_meta_label=train_meta_label, val_video_class=val_video_class, val_video_number=val_video_number,
@@ -214,13 +218,14 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
                                  relative_velocities=relative_velocities, dropout=dropout,
                                  rnn_dropout=rnn_dropout, num_rnn_layers=num_rnn_layers,
                                  learn_hidden_states=learn_hidden_states,
-                                 feed_model_distances_in_meters=feed_model_distances_in_meters)
+                                 feed_model_distances_in_meters=feed_model_distances_in_meters,
+                                 arch_config=arch_config)
     else:
         model = get_model(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=batch_size,
                           num_workers=num_workers, lr=lr, use_batch_norm=use_batch_norm, over_fit_mode=over_fit_mode,
                           shuffle=shuffle, pin_memory=pin_memory, generated_dataset=get_generated,
                           from_checkpoint=from_checkpoint, checkpoint_root_path=checkpoint_root_path,
-                          relative_velocities=relative_velocities)
+                          relative_velocities=relative_velocities, arch_config=arch_config)
 
     model.to(DEVICE)
 
@@ -398,5 +403,6 @@ if __name__ == '__main__':
         num_rnn_layers=RNN_LAYERS,
         learn_hidden_states=LEARN_HIDDEN_STATES,
         drop_last=True,
-        feed_model_distances_in_meters=FEED_MODEL_DISTANCES_IN_METERS
+        feed_model_distances_in_meters=FEED_MODEL_DISTANCES_IN_METERS,
+        arch_config=LINEAR_CFG
     )

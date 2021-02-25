@@ -75,20 +75,22 @@ class BaselineRNN(LightningModule):
     Watch 8 time steps, predict next 12
     """
 
-    def __init__(self, original_frame_shape=None, prediction_length=12, lr=1e-5, time_steps=5,
+    def __init__(self, arch_config=LINEAR_CFG, original_frame_shape=None, prediction_length=12, lr=1e-5, time_steps=5,
                  train_dataset=None, val_dataset=None, batch_size=1, num_workers=0, use_batch_norm=False,
                  lstm_num_layers: int = 1, overfit_mode: bool = False, shuffle: bool = False, pin_memory: bool = True,
                  two_losses: bool = False):
         super(BaselineRNN, self).__init__()
+        
+        self.arch_config = arch_config
 
-        self.pre_encoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
+        self.pre_encoder = make_layers(arch_config['encoder'], batch_norm=use_batch_norm, encoder=True,
                                        last_without_activation=False)
-        self.encoder = nn.LSTM(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'],
+        self.encoder = nn.LSTM(input_size=arch_config['lstm_in'], hidden_size=arch_config['lstm_encoder'],
                                num_layers=lstm_num_layers, bias=True)
-        self.pre_decoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
+        self.pre_decoder = make_layers(arch_config['encoder'], batch_norm=use_batch_norm, encoder=True,
                                        last_without_activation=False)
-        self.decoder = nn.LSTMCell(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'])
-        self.post_decoder = make_layers(LINEAR_CFG['decoder'], batch_norm=use_batch_norm, encoder=False,
+        self.decoder = nn.LSTMCell(input_size=arch_config['lstm_in'], hidden_size=arch_config['lstm_encoder'])
+        self.post_decoder = make_layers(arch_config['decoder'], batch_norm=use_batch_norm, encoder=False,
                                         last_without_activation=True)
 
         self.num_workers = num_workers
@@ -230,8 +232,9 @@ class BaselineRNN(LightningModule):
         return total_loss / self.prediction_length, ade, fde, ratio[0].item()
 
     def init_hidden_states(self, b_size):
-        hx, cx = torch.zeros(size=(self.lstm_num_layers, b_size, LINEAR_CFG['lstm_encoder']), device=self.device), \
-                 torch.zeros(size=(self.lstm_num_layers, b_size, LINEAR_CFG['lstm_encoder']), device=self.device)
+        hx, cx = torch.zeros(
+            size=(self.lstm_num_layers, b_size, self.arch_config['lstm_encoder']), device=self.device), \
+                 torch.zeros(size=(self.lstm_num_layers, b_size, self.arch_config['lstm_encoder']), device=self.device)
         torch.nn.init.xavier_normal_(hx)
         torch.nn.init.xavier_normal_(cx)
 
@@ -291,12 +294,13 @@ class BaselineRNN(LightningModule):
 
 
 class BaselineRNNStacked(BaselineRNN):
-    def __init__(self, original_frame_shape=None, prediction_length=12, lr=1e-5, time_steps=5,
+    def __init__(self, arch_config=LINEAR_CFG, original_frame_shape=None, prediction_length=12, lr=1e-5, time_steps=5,
                  train_dataset=None, val_dataset=None, batch_size=1, num_workers=0, use_batch_norm=False,
                  encoder_lstm_num_layers: int = 1, overfit_mode: bool = False, shuffle: bool = False,
                  pin_memory: bool = True, decoder_lstm_num_layers: int = 1, return_pred: bool = False,
                  generated_dataset: bool = False, relative_velocities: bool = False):
         super(BaselineRNNStacked, self).__init__(
+            arch_config=arch_config,
             original_frame_shape=original_frame_shape, prediction_length=prediction_length, lr=lr,
             time_steps=time_steps, train_dataset=train_dataset, val_dataset=val_dataset, batch_size=batch_size,
             num_workers=num_workers, use_batch_norm=use_batch_norm, lstm_num_layers=encoder_lstm_num_layers,
@@ -304,20 +308,20 @@ class BaselineRNNStacked(BaselineRNN):
 
         self.decoder_lstm_num_layers = decoder_lstm_num_layers
 
-        self.pre_encoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
+        self.pre_encoder = make_layers(arch_config['encoder'], batch_norm=use_batch_norm, encoder=True,
                                        last_without_activation=False)
-        self.encoder = nn.LSTM(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'],
+        self.encoder = nn.LSTM(input_size=arch_config['lstm_in'], hidden_size=arch_config['lstm_encoder'],
                                num_layers=encoder_lstm_num_layers, bias=True)
-        self.pre_decoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
+        self.pre_decoder = make_layers(arch_config['encoder'], batch_norm=use_batch_norm, encoder=True,
                                        last_without_activation=False)
-        self.decoder = nn.LSTMCell(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'])
+        self.decoder = nn.LSTMCell(input_size=arch_config['lstm_in'], hidden_size=arch_config['lstm_encoder'])
 
         if decoder_lstm_num_layers > 1:
             self.decoder_extra_layers = nn.ModuleList(
-                [nn.LSTMCell(input_size=LINEAR_CFG['lstm_encoder'], hidden_size=LINEAR_CFG['lstm_encoder'])
+                [nn.LSTMCell(input_size=arch_config['lstm_encoder'], hidden_size=arch_config['lstm_encoder'])
                  for _ in range(decoder_lstm_num_layers)])
 
-        self.post_decoder = make_layers(LINEAR_CFG['decoder'], batch_norm=use_batch_norm, encoder=False,
+        self.post_decoder = make_layers(arch_config['decoder'], batch_norm=use_batch_norm, encoder=False,
                                         last_without_activation=True)
         self.return_pred = return_pred
         self.generated_dataset = generated_dataset
@@ -394,8 +398,8 @@ class BaselineRNNStacked(BaselineRNN):
         return self(batch)
 
     def init_hidden_states(self, b_size):
-        hx = torch.zeros(size=(self.lstm_num_layers, b_size, LINEAR_CFG['lstm_encoder']), device=self.device)
-        cx = torch.zeros(size=(self.lstm_num_layers, b_size, LINEAR_CFG['lstm_encoder']), device=self.device)
+        hx = torch.zeros(size=(self.lstm_num_layers, b_size, self.arch_config['lstm_encoder']), device=self.device)
+        cx = torch.zeros(size=(self.lstm_num_layers, b_size, self.arch_config['lstm_encoder']), device=self.device)
         torch.nn.init.xavier_normal_(hx)
         torch.nn.init.xavier_normal_(cx)
 
@@ -403,9 +407,9 @@ class BaselineRNNStacked(BaselineRNN):
             hidden_states, cell_states = [hx], [cx]
             for _ in range(self.decoder_lstm_num_layers):
                 h = torch.zeros(
-                    size=(b_size, LINEAR_CFG['lstm_encoder']), device=self.device)
+                    size=(b_size, self.arch_config['lstm_encoder']), device=self.device)
                 c = torch.zeros(
-                    size=(b_size, LINEAR_CFG['lstm_encoder']), device=self.device)
+                    size=(b_size, self.arch_config['lstm_encoder']), device=self.device)
                 torch.nn.init.xavier_normal_(h)
                 torch.nn.init.xavier_normal_(c)
                 hidden_states.append(h)
@@ -416,7 +420,7 @@ class BaselineRNNStacked(BaselineRNN):
 
 
 class BaselineRNNStackedSimple(BaselineRNN):
-    def __init__(self, original_frame_shape=None, prediction_length=12, lr=1e-5, time_steps=5,
+    def __init__(self, arch_config=LINEAR_CFG, original_frame_shape=None, prediction_length=12, lr=1e-5, time_steps=5,
                  train_dataset=None, val_dataset=None, batch_size=1, num_workers=0, use_batch_norm=False,
                  encoder_lstm_num_layers: int = 1, overfit_mode: bool = False, shuffle: bool = False,
                  pin_memory: bool = True, decoder_lstm_num_layers: int = 1, return_pred: bool = True,
@@ -424,37 +428,38 @@ class BaselineRNNStackedSimple(BaselineRNN):
                  rnn_dropout: float = 0, use_gru: bool = False, learn_hidden_states: bool = False,
                  feed_model_distances_in_meters: bool = False):
         super(BaselineRNNStackedSimple, self).__init__(
+            arch_config=arch_config,
             original_frame_shape=original_frame_shape, prediction_length=prediction_length, lr=lr,
             time_steps=time_steps, train_dataset=train_dataset, val_dataset=val_dataset, batch_size=batch_size,
             num_workers=num_workers, use_batch_norm=use_batch_norm, lstm_num_layers=encoder_lstm_num_layers,
             overfit_mode=overfit_mode, shuffle=shuffle, pin_memory=pin_memory)
 
         if learn_hidden_states:
-            data = torch.zeros((encoder_lstm_num_layers, batch_size, LINEAR_CFG['lstm_encoder']))
+            data = torch.zeros((encoder_lstm_num_layers, batch_size, arch_config['lstm_encoder']))
             torch.nn.init.xavier_normal_(data)
 
-        self.pre_encoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
+        self.pre_encoder = make_layers(arch_config['encoder'], batch_norm=use_batch_norm, encoder=True,
                                        last_without_activation=False, dropout=dropout)
         if use_gru:
-            self.encoder = nn.GRU(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'],
+            self.encoder = nn.GRU(input_size=arch_config['lstm_in'], hidden_size=arch_config['lstm_encoder'],
                                   num_layers=encoder_lstm_num_layers, bias=True, dropout=rnn_dropout)
             if learn_hidden_states:
                 self.encoder_hidden = nn.Parameter(data.clone())
         else:
-            self.encoder = nn.LSTM(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'],
+            self.encoder = nn.LSTM(input_size=arch_config['lstm_in'], hidden_size=arch_config['lstm_encoder'],
                                    num_layers=encoder_lstm_num_layers, bias=True, dropout=rnn_dropout)
             if learn_hidden_states:
                 self.encoder_hidden = nn.Parameter(data.clone())
                 self.encoder_cell_state = nn.Parameter(data.clone())
 
-        self.pre_decoder = make_layers(LINEAR_CFG['encoder'], batch_norm=use_batch_norm, encoder=True,
+        self.pre_decoder = make_layers(arch_config['encoder'], batch_norm=use_batch_norm, encoder=True,
                                        last_without_activation=False, dropout=dropout)
 
         if use_gru:
-            self.decoder = nn.GRU(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'],
+            self.decoder = nn.GRU(input_size=arch_config['lstm_in'], hidden_size=arch_config['lstm_encoder'],
                                   num_layers=decoder_lstm_num_layers, bias=True, dropout=rnn_dropout)
         else:
-            self.decoder = nn.LSTM(input_size=LINEAR_CFG['lstm_in'], hidden_size=LINEAR_CFG['lstm_encoder'],
+            self.decoder = nn.LSTM(input_size=arch_config['lstm_in'], hidden_size=arch_config['lstm_encoder'],
                                    num_layers=decoder_lstm_num_layers, bias=True, dropout=rnn_dropout)
             if learn_hidden_states:
                 self.decoder_cell_state = nn.Parameter(data.clone())
@@ -476,9 +481,9 @@ class BaselineRNNStackedSimple(BaselineRNN):
                                   'feed_model_distances_in_meters')
 
     def init_hidden_states(self, b_size):
-        hx = torch.zeros(size=(self.lstm_num_layers, b_size, LINEAR_CFG['lstm_encoder']), device=self.device)
-        cx = torch.zeros(size=(self.lstm_num_layers, b_size, LINEAR_CFG['lstm_encoder']), device=self.device)
-        dec_cx = torch.zeros(size=(self.decoder_lstm_num_layers, b_size, LINEAR_CFG['lstm_encoder']),
+        hx = torch.zeros(size=(self.lstm_num_layers, b_size, self.arch_config['lstm_encoder']), device=self.device)
+        cx = torch.zeros(size=(self.lstm_num_layers, b_size, self.arch_config['lstm_encoder']), device=self.device)
+        dec_cx = torch.zeros(size=(self.decoder_lstm_num_layers, b_size, self.arch_config['lstm_encoder']),
                              device=self.device)
         torch.nn.init.xavier_normal_(hx)
         torch.nn.init.xavier_normal_(cx)
