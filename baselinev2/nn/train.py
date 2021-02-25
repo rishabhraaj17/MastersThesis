@@ -17,7 +17,7 @@ from baselinev2.config import BATCH_SIZE, NUM_WORKERS, LR, USE_BATCH_NORM, OVERF
     VAL_CLASS, VAL_VIDEO_NUMBER, VAL_META, USE_SOCIAL_LSTM_MODEL, USE_FINAL_POSITIONS, USE_RELATIVE_VELOCITIES, DEVICE, \
     TRAIN_CUSTOM, LOG_HISTOGRAM, USE_SIMPLE_MODEL, USE_GRU, RNN_DROPOUT, RNN_LAYERS, DROPOUT, LEARN_HIDDEN_STATES, \
     FEED_MODEL_DISTANCES_IN_METERS, LINEAR_CFG, TRAIN_FOR_WHOLE_CLASS, TRAIN_CLASS_FOR_WHOLE, VAL_CLASS_FOR_WHOLE, \
-    TRAIN_VIDEOS_TO_SKIP, VAL_VIDEOS_TO_SKIP
+    TRAIN_VIDEOS_TO_SKIP, VAL_VIDEOS_TO_SKIP, SCHEDULER_PATIENCE, SCHEDULER_FACTOR, AMS_GRAD
 from baselinev2.constants import NetworkMode, SDDVideoClassAndNumbers
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.models import BaselineRNNStacked, BaselineRNNStackedSimple
@@ -140,8 +140,8 @@ def get_train_validation_dataset(train_video_class: SDDVideoClasses, train_video
     return dataset_train, dataset_val
 
 
-def get_dataset_for_class(video_class: SDDVideoClassAndNumbers, meta_label: SDDVideoDatasets, mode: NetworkMode,
-                          get_generated: bool = False, videos_to_skip: Union[List, Tuple] = ()):
+def get_dataset_for_class_v0(video_class: SDDVideoClassAndNumbers, meta_label: SDDVideoDatasets, mode: NetworkMode,
+                             get_generated: bool = False, videos_to_skip: Union[List, Tuple] = ()):
     datasets = []
     all_videos = video_class.value[-1]
     videos_to_consider = np.setdiff1d(all_videos, videos_to_skip)
@@ -151,10 +151,23 @@ def get_dataset_for_class(video_class: SDDVideoClassAndNumbers, meta_label: SDDV
     return ConcatDataset(datasets=datasets)
 
 
-def get_train_validation_dataset_for_class(train_video_class: SDDVideoClassAndNumbers,
-                                           train_meta_label: SDDVideoDatasets,
-                                           val_video_class: SDDVideoClassAndNumbers = None,
-                                           val_meta_label: SDDVideoDatasets = None, get_generated: bool = False,
+def get_dataset_for_class(video_class: List[SDDVideoClassAndNumbers], meta_label: List[SDDVideoDatasets],
+                          mode: NetworkMode, get_generated: bool = False,
+                          videos_to_skip: Union[List, Tuple] = ()):
+    datasets = []
+    for v_class, v_meta, skip_videos in zip(video_class, meta_label, videos_to_skip):
+        all_videos = v_class.value[-1]
+        videos_to_consider = np.setdiff1d(all_videos, skip_videos)
+        for v_num in videos_to_consider:
+            datasets.append(get_dataset(video_clazz=v_class.value[0], video_number=v_num, mode=mode,
+                                        meta_label=v_meta, get_generated=get_generated))
+    return ConcatDataset(datasets=datasets)
+
+
+def get_train_validation_dataset_for_class(train_video_class: List[SDDVideoClassAndNumbers],
+                                           train_meta_label: List[SDDVideoDatasets],
+                                           val_video_class: List[SDDVideoClassAndNumbers] = None,
+                                           val_meta_label: List[SDDVideoDatasets] = None, get_generated: bool = False,
                                            videos_to_skip_for_train: Union[List, Tuple] = (),
                                            videos_to_skip_for_val: Union[List, Tuple] = ()):
     train_dataset = get_dataset_for_class(video_class=train_video_class, meta_label=train_meta_label,
@@ -172,15 +185,15 @@ def get_trainer(gpus=1 if torch.cuda.is_available() else None, max_epochs=NUM_EP
                    limit_val_batches=limit_val_batches, overfit_batches=over_fit_batches if OVERFIT else 0.0)
 
 
-def train(train_video_class: Union[SDDVideoClasses, SDDVideoClassAndNumbers], train_video_number: int,
-          train_mode: NetworkMode, train_meta_label: SDDVideoDatasets,
-          val_video_class: Union[SDDVideoClasses, SDDVideoClassAndNumbers] = None, val_video_number: int = None,
-          val_mode: NetworkMode = None, val_meta_label: SDDVideoDatasets = None, get_generated: bool = False,
+def train(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAndNumbers]], train_video_number: int,
+          train_mode: NetworkMode, train_meta_label: Union[SDDVideoDatasets, List[SDDVideoDatasets]],
+          val_video_class: Union[SDDVideoClasses, List[SDDVideoClassAndNumbers]] = None, val_video_number: int = None,
+          val_mode: NetworkMode = None, val_meta_label: Union[SDDVideoDatasets, List[SDDVideoDatasets]] = None,
           shuffle: bool = True, lr: float = LR, batch_size: int = BATCH_SIZE, num_workers: int = NUM_WORKERS,
           pin_memory: bool = True, use_batch_norm: bool = USE_BATCH_NORM, over_fit_mode: bool = OVERFIT,
           from_checkpoint=None, checkpoint_root_path=None, gpus=1 if torch.cuda.is_available() else None,
           max_epochs=NUM_EPOCHS, limit_train_batches=1.0, limit_val_batches=1.0, over_fit_batches=0.0,
-          use_social_lstm_model=True, pass_final_pos=True, relative_velocities=False,
+          use_social_lstm_model=True, pass_final_pos=True, relative_velocities=False, get_generated: bool = False,
           use_simple_model: bool = False, use_gru: bool = False, dropout=None, rnn_dropout=0, num_rnn_layers=1,
           learn_hidden_states=False, drop_last=True, feed_model_distances_in_meters=True, arch_config=LINEAR_CFG,
           train_for_class=False, train_videos_to_skip=(), val_videos_to_skip=()):
@@ -225,11 +238,11 @@ def train(train_video_class: Union[SDDVideoClasses, SDDVideoClassAndNumbers], tr
     trainer.fit(model=model)
 
 
-def train_custom(train_video_class: Union[SDDVideoClasses, SDDVideoClassAndNumbers], train_video_number: int,
-                 train_mode: NetworkMode, train_meta_label: SDDVideoDatasets,
-                 val_video_class: Union[SDDVideoClasses, SDDVideoClassAndNumbers] = None,
-                 val_video_number: int = None, learn_hidden_states=False,
-                 val_mode: NetworkMode = None, val_meta_label: SDDVideoDatasets = None, get_generated: bool = False,
+def train_custom(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAndNumbers]], train_video_number: int,
+                 train_mode: NetworkMode, train_meta_label: Union[SDDVideoDatasets, List[SDDVideoDatasets]],
+                 val_video_class: Union[SDDVideoClasses, List[SDDVideoClassAndNumbers]] = None,
+                 val_video_number: int = None, learn_hidden_states=False, get_generated: bool = False,
+                 val_mode: NetworkMode = None, val_meta_label: Union[SDDVideoDatasets, List[SDDVideoDatasets]] = None,
                  shuffle: bool = True, lr: float = LR, batch_size: int = BATCH_SIZE, num_workers: int = NUM_WORKERS,
                  pin_memory: bool = True, use_batch_norm: bool = USE_BATCH_NORM, over_fit_mode: bool = OVERFIT,
                  from_checkpoint=None, checkpoint_root_path=None, gpus=1 if torch.cuda.is_available() else None,
@@ -280,9 +293,9 @@ def train_custom(train_video_class: Union[SDDVideoClasses, SDDVideoClassAndNumbe
     model.to(DEVICE)
 
     network = model if not use_social_lstm_model else model.one_step
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, amsgrad=True)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, patience=20, cooldown=2, verbose=True,
-                                                           factor=0.1)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, amsgrad=AMS_GRAD)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, patience=SCHEDULER_PATIENCE,
+                                                           cooldown=2, verbose=True, factor=SCHEDULER_FACTOR)
     summary_writer = SummaryWriter(comment='social_lstm' if use_social_lstm_model else 'baseline')
 
     best_val_loss = 10e7
@@ -384,9 +397,11 @@ def train_custom(train_video_class: Union[SDDVideoClasses, SDDVideoClassAndNumbe
                                    'architecture': str(model),
                                    'generated_data': get_generated,
                                    'use_batch_norm': use_batch_norm,
-                                   'train_class': train_video_class.name,
+                                   'train_class': train_video_class.name
+                                   if not train_for_class else [t.name for t in train_video_class],
                                    'train_video_number': train_video_number,
-                                   'val_class': val_video_class.name,
+                                   'val_class': val_video_class.name
+                                   if not train_for_class else [v.name for v in val_video_class],
                                    'val_video_number': val_video_number,
                                    'use_social_lstm': use_social_lstm_model,
                                    'use_destinations': pass_final_pos,
@@ -420,9 +435,42 @@ def train_custom(train_video_class: Union[SDDVideoClasses, SDDVideoClassAndNumbe
         final_path = f'{resume_dict_save_root_path}{resume_dict_save_folder}/'
         torch.save(resume_dict, f'{final_path}{resume_dict_save_folder}_checkpoint.ckpt')
         hparam_file = f'{final_path}{resume_dict_save_folder}_hparams.yaml'
-        Path(hparam_file).mkdir(parents=True, exist_ok=True)
-        with open(hparam_file, 'w') as f:
-            yaml.dump(resume_dict, f)
+        hparam_dict = {'epoch': epoch,
+                       'val_loss': epoch_v_loss,
+                       'lr': lr,
+                       'batch_size': batch_size,
+                       'model_name': 'social_lstm' if use_social_lstm_model else 'baseline',
+                       'architecture': str(model),
+                       'generated_data': get_generated,
+                       'use_batch_norm': use_batch_norm,
+                       'train_class': train_video_class.name
+                       if not train_for_class else [t.name for t in train_video_class],
+                       'train_video_number': train_video_number,
+                       'val_class': val_video_class.name
+                       if not train_for_class else [v.name for v in val_video_class],
+                       'val_video_number': val_video_number,
+                       'use_social_lstm': use_social_lstm_model,
+                       'use_destinations': pass_final_pos,
+                       'use_relative_velocities': relative_velocities,
+                       'num_rnn_layers': num_rnn_layers,
+                       'dropout': dropout,
+                       'rnn_dropout': rnn_dropout,
+                       'use_gru': use_gru,
+                       'use_social_lstm_model': use_social_lstm_model,
+                       'use_simple_model': use_simple_model,
+                       'from_checkpoint': from_checkpoint,
+                       'pass_final_pos': pass_final_pos,
+                       'relative_velocities': relative_velocities,
+                       'learn_hidden_states': learn_hidden_states,
+                       'feed_model_distances_in_meters': feed_model_distances_in_meters,
+                       'arch_config': arch_config,
+                       'train_for_class': train_for_class,
+                       'train_videos_to_skip': train_videos_to_skip,
+                       'val_videos_to_skip': val_videos_to_skip
+                       }
+        # Path(hparam_file).mkdir(parents=True, exist_ok=True)
+        with open(hparam_file, 'w+') as f:
+            yaml.dump(hparam_dict, f)
         logger.info('Saving and exiting gracefully.')
         logger.info(f"Best model at epoch: {resume_dict['epoch']}")
 
