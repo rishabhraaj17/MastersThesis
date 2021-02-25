@@ -8,8 +8,8 @@ from torch.utils.data import random_split
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from baselinev2.config import ROOT_PATH
 from baselinev2.constants import NetworkMode
-from baselinev2.nn.dataset import BaselineDataset
-from baselinev2.nn.models import BaselineRNNStacked
+from baselinev2.nn.dataset import BaselineDataset, BaselineGeneratedDataset
+from baselinev2.nn.models import BaselineRNNStacked, BaselineRNNStackedSimple
 from baselinev2.nn.overfit import social_lstm_parser
 from baselinev2.nn.social_lstm.model import BaselineLSTM
 
@@ -23,29 +23,44 @@ LOG_INTERVAL = 10
 # N_VALID_EXAMPLES = BATCHSIZE * 10
 
 
-def define_model(trial):
+def define_model(trial: optuna.Trial):
     use_batch_norm = trial.suggest_int("use_batch_norm", 0, 1)
+    use_gru = trial.suggest_int("use_gru", 0, 1)
+    rnn_layers = trial.suggest_int("rnn_layers", 1, 4)
     # return BaselineRNNStacked(use_batch_norm=bool(use_batch_norm), return_pred=True)
-    return BaselineLSTM(args=social_lstm_parser(pass_final_pos=False), generated_dataset=False,
-                        use_batch_norm=use_batch_norm)
+    # return BaselineLSTM(args=social_lstm_parser(pass_final_pos=False), generated_dataset=False,
+    #                     use_batch_norm=use_batch_norm)
+    return BaselineRNNStackedSimple(use_batch_norm=bool(use_batch_norm), use_gru=bool(use_gru), return_pred=True,
+                                    learn_hidden_states=False, encoder_lstm_num_layers=rnn_layers,
+                                    decoder_lstm_num_layers=rnn_layers, generated_dataset=True)
 
 
 def get_loaders(trial):
-    dataset_train = BaselineDataset(SDDVideoClasses.LITTLE, 3, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.LITTLE)
-    dataset_val = BaselineDataset(SDDVideoClasses.LITTLE, 3, NetworkMode.VALIDATION, meta_label=SDDVideoDatasets.LITTLE)
+    # dataset_train = BaselineDataset(SDDVideoClasses.LITTLE, 3, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.LITTLE)
+    # dataset_val = BaselineDataset(SDDVideoClasses.LITTLE, 3, NetworkMode.VALIDATION,
+    #                               meta_label=SDDVideoDatasets.LITTLE)
 
-    # batch_size = trial.suggest_int("batch_size", 64, 1024, step=64)
-    batch_size = 1024
+    dataset_train = BaselineGeneratedDataset(SDDVideoClasses.LITTLE, 3, NetworkMode.TRAIN,
+                                             meta_label=SDDVideoDatasets.LITTLE)
+    dataset_val = BaselineGeneratedDataset(SDDVideoClasses.LITTLE, 3, NetworkMode.VALIDATION,
+                                           meta_label=SDDVideoDatasets.LITTLE)
+
+    batch_size = trial.suggest_int("batch_size", 64, 1024, step=64)
+    # batch_size = 1024
     # Load MNIST dataset.
     train_loader = torch.utils.data.DataLoader(
         dataset_train,
         batch_size=batch_size,
         shuffle=True,
+        num_workers=12,
+        drop_last=True
     )
     valid_loader = torch.utils.data.DataLoader(
         dataset_val,
         batch_size=batch_size,
         shuffle=False,
+        num_workers=12,
+        drop_last=True
     )
 
     return train_loader, valid_loader
@@ -82,6 +97,7 @@ def objective(trial: optuna.Trial):
         # Validation of the model.
         model.eval()
         correct = 0
+        running_loss = []
         with torch.no_grad():
             for batch_idx, data in enumerate(valid_loader):
                 # Limiting validation data.
@@ -90,19 +106,21 @@ def objective(trial: optuna.Trial):
                 data = [d.to(DEVICE) for d in data]
                 loss, ade, fde, ratio, _ = model.one_step(data)  # model(data)
                 # Get the index of the max log-probability.
+                running_loss.append(loss.item())
 
-        trial.report(loss, epoch)
+        running_loss = torch.tensor(running_loss).mean()
+        trial.report(running_loss, epoch)
 
         # Handle pruning based on the intermediate value.
         if trial.should_prune():
             raise optuna.exceptions.TrialPruned()
 
-    return loss
+    return running_loss
 
 
 if __name__ == "__main__":
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=100, timeout=600, n_jobs=12, show_progress_bar=True)
+    study.optimize(objective, n_trials=100, timeout=1000, n_jobs=12, show_progress_bar=True)
 
     pruned_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED]
     complete_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]

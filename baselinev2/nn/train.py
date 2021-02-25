@@ -228,6 +228,10 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
     resume_dict = {}
     resume_dict_save_root_path = 'runs/'
 
+    resume_dict_save_folder = os.listdir(resume_dict_save_root_path)
+    resume_dict_save_folder.sort()
+    resume_dict_save_folder = resume_dict_save_folder[-1]
+
     epoch_t_loss, epoch_t_ade, epoch_t_fde, epoch_v_loss, epoch_v_ade, epoch_v_fde = None, None, None, None, None, None
 
     try:
@@ -325,15 +329,22 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
                                    'val_video_number': val_video_number,
                                    'use_social_lstm': use_social_lstm_model,
                                    'use_destinations': pass_final_pos,
-                                   'use_relative_velocities': relative_velocities
+                                   'use_relative_velocities': relative_velocities,
+                                   'num_rnn_layers': num_rnn_layers,
+                                   'dropout': dropout,
+                                   'rnn_dropout': rnn_dropout,
+                                   'use_gru': use_gru,
+                                   'use_social_lstm_model': use_social_lstm_model,
+                                   'use_simple_model': use_simple_model
                                    }
                     logger.info(f'Checkpoint Updated at epoch {epoch}, loss {epoch_v_loss}')
     except KeyboardInterrupt:
         logger.warning('Keyboard Interrupt: Saving and exiting gracefully.')
     finally:
-        resume_dict_save_folder = os.listdir(resume_dict_save_root_path)
-        resume_dict_save_folder.sort()
-        resume_dict_save_folder = resume_dict_save_folder[-1]
+        # Moved up to avoid replacing later ran experiments
+        # resume_dict_save_folder = os.listdir(resume_dict_save_root_path)
+        # resume_dict_save_folder.sort()
+        # resume_dict_save_folder = resume_dict_save_folder[-1]
         resume_dict.update({
             'last_model_state_dict': model.state_dict(),
             'last_optimizer_state_dict': optimizer.state_dict(),

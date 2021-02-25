@@ -131,6 +131,53 @@ def evaluate_social_lstm_model(model: nn.Module, data_loader: DataLoader, checkp
         )
 
 
+@torch.no_grad()
+def evaluate_simple_v2_model(model: Optional[nn.Module], data_loader: DataLoader, checkpoint_path: str,
+                             video_path: str, plot_path: Optional[str] = None, generated: bool = False):
+    checkpoint = torch.load(checkpoint_path)
+    model_state_dict = checkpoint['model_state_dict']
+    last_model_state_dict = checkpoint['last_model_state_dict']
+    model = BaselineRNNStackedSimple(use_batch_norm=checkpoint['use_batch_norm'],
+                                     encoder_lstm_num_layers=4,
+                                     decoder_lstm_num_layers=4,
+                                     return_pred=True,
+                                     generated_dataset=generated,
+                                     relative_velocities=False,
+                                     dropout=None, rnn_dropout=0, batch_size=32,
+                                     use_gru=False, learn_hidden_states=True)
+    model.load_state_dict(model_state_dict)
+
+    model.eval()
+
+    for idx, data in enumerate(tqdm(data_loader)):
+        if generated:
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, \
+            _, _, ratio = data
+        else:
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = data
+
+
+        loss, ade, fde, ratio, pred_trajectory = model.one_step(data)
+
+        im_idx = np.random.choice(32, 1).item()
+
+        plot_frame_number = in_frame_numbers.squeeze()[im_idx][0].item()
+        plot_track_id = in_track_ids.squeeze()[im_idx][0].item()
+        obs_trajectory = in_xy.squeeze().numpy()[im_idx]
+        gt_trajectory = gt_xy.squeeze().numpy()[im_idx]
+        pred_trajectory = pred_trajectory.squeeze()[:, im_idx, ...]
+        all_frame_numbers = torch.cat((in_frame_numbers.squeeze()[im_idx], gt_frame_numbers.squeeze()[im_idx])).tolist()
+
+        plot_trajectory_alongside_frame(
+            frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
+            obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
+            pred_trajectory=pred_trajectory, frame_number=plot_frame_number,
+            track_id=plot_track_id, additional_text=f'Frame Numbers: {all_frame_numbers}\nADE: {ade} | FDE: {fde}',
+            save_path=f'{plot_path}'
+        )
+        print()
+
+
 def get_models(social_lstm, supervised_checkpoint_root_path, unsupervised_checkpoint_root_path, use_batch_norm,
                supervised_pass_final_pos=True, unsupervised_pass_final_pos=True, use_simple_model_version=False):
     supervised_checkpoint_path = supervised_checkpoint_root_path + 'checkpoints/'
@@ -255,7 +302,7 @@ def get_metrics(supervised_ade_list, supervised_fde_list, unsupervised_ade_list,
 def eval_models(supervised_checkpoint_root_path: str, unsupervised_checkpoint_root_path: str, train_loader: DataLoader,
                 val_loader: DataLoader, test_loader: DataLoader, social_lstm: bool = True, plot: bool = False,
                 use_batch_norm: bool = False, video_path: str = None, plot_path: Optional[str] = None,
-                plot_four_way: bool = False, supervised_pass_final_pos: bool = True,  use_simple_model_version=False,
+                plot_four_way: bool = False, supervised_pass_final_pos: bool = True, use_simple_model_version=False,
                 unsupervised_pass_final_pos: bool = True, metrics_in_meters: bool = True):
     supervised_net, unsupervised_net = get_models(social_lstm, supervised_checkpoint_root_path,
                                                   unsupervised_checkpoint_root_path, use_batch_norm,
@@ -329,6 +376,7 @@ if __name__ == '__main__':
         num_workers = 0
         shuffle = True
         use_social_lstm_model = False
+        use_simple_v2_model = True
 
         sdd_video_class = SDDVideoClasses.LITTLE
         sdd_meta_class = SDDVideoDatasets.LITTLE
@@ -353,6 +401,20 @@ if __name__ == '__main__':
                 data_loader=DataLoader(dataset, batch_size=1, num_workers=num_workers, shuffle=shuffle),
                 checkpoint_root_path=checkpoint_root_path, video_path=path_to_video,
                 plot_path=plot_save_path)
+        elif use_simple_v2_model:
+            generated_dataset = False
+            dataset = get_dataset(video_clazz=sdd_video_class, video_number=sdd_video_number, mode=network_mode,
+                                  meta_label=sdd_meta_class, get_generated=generated_dataset)
+            checkpoint_path = f'../baselinev2/runs/Feb25_00-30-05_rishabh-Precision-5540baseline/' \
+                              f'Feb25_00-30-05_rishabh-Precision-5540baseline_checkpoint.ckpt'
+            experiment_name = os.path.split(checkpoint_path)[-1][:-5]
+            plot_save_path = f'{ROOT_PATH}Plots/baseline_v2/nn/EVAL_CUSTOM/{sdd_video_class.value}{sdd_video_number}/' \
+                             f'{network_mode.value}/{experiment_name}/'
+            evaluate_simple_v2_model(
+                model=None,
+                data_loader=DataLoader(dataset, batch_size=32, num_workers=num_workers, shuffle=shuffle),
+                checkpoint_path=checkpoint_path, video_path=path_to_video,
+                plot_path=plot_save_path, generated=generated_dataset)
         else:
             evaluate_model(
                 model=model,
