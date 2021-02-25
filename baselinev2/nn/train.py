@@ -10,7 +10,8 @@ from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from baselinev2.config import BATCH_SIZE, NUM_WORKERS, LR, USE_BATCH_NORM, OVERFIT, NUM_EPOCHS, LIMIT_BATCHES, \
     OVERFIT_BATCHES, CHECKPOINT_ROOT, RESUME_TRAINING, USE_GENERATED_DATA, TRAIN_CLASS, TRAIN_VIDEO_NUMBER, TRAIN_META, \
     VAL_CLASS, VAL_VIDEO_NUMBER, VAL_META, USE_SOCIAL_LSTM_MODEL, USE_FINAL_POSITIONS, USE_RELATIVE_VELOCITIES, DEVICE, \
-    TRAIN_CUSTOM, LOG_HISTOGRAM, USE_SIMPLE_MODEL, USE_GRU, RNN_DROPOUT, RNN_LAYERS, DROPOUT, LEARN_HIDDEN_STATES
+    TRAIN_CUSTOM, LOG_HISTOGRAM, USE_SIMPLE_MODEL, USE_GRU, RNN_DROPOUT, RNN_LAYERS, DROPOUT, LEARN_HIDDEN_STATES, \
+    FEED_MODEL_DISTANCES_IN_METERS
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.models import BaselineRNNStacked, BaselineRNNStackedSimple
@@ -54,7 +55,7 @@ def get_simple_model(train_dataset, val_dataset, batch_size=BATCH_SIZE, num_work
                      use_batch_norm=USE_BATCH_NORM, over_fit_mode=OVERFIT, shuffle=True, pin_memory=True,
                      generated_dataset=True, from_checkpoint=None, checkpoint_root_path=None, use_gru=False,
                      relative_velocities=False, dropout=None, rnn_dropout=0, num_rnn_layers=1,
-                     learn_hidden_states=False):
+                     learn_hidden_states=False, feed_model_distances_in_meters=False):
     if from_checkpoint:
         checkpoint_path = checkpoint_root_path + 'checkpoints/'
         checkpoint_file = os.listdir(checkpoint_path)[-1]
@@ -74,7 +75,8 @@ def get_simple_model(train_dataset, val_dataset, batch_size=BATCH_SIZE, num_work
             encoder_lstm_num_layers=num_rnn_layers,
             decoder_lstm_num_layers=num_rnn_layers,
             use_gru=use_gru,
-            learn_hidden_states=learn_hidden_states
+            learn_hidden_states=learn_hidden_states,
+            feed_model_distances_in_meters=feed_model_distances_in_meters
         )
     else:
         model = BaselineRNNStackedSimple(train_dataset=train_dataset, val_dataset=val_dataset, batch_size=batch_size,
@@ -83,7 +85,8 @@ def get_simple_model(train_dataset, val_dataset, batch_size=BATCH_SIZE, num_work
                                          generated_dataset=generated_dataset, relative_velocities=relative_velocities,
                                          return_pred=True, dropout=dropout, rnn_dropout=rnn_dropout, use_gru=use_gru,
                                          encoder_lstm_num_layers=num_rnn_layers, decoder_lstm_num_layers=num_rnn_layers,
-                                         learn_hidden_states=learn_hidden_states)
+                                         learn_hidden_states=learn_hidden_states,
+                                         feed_model_distances_in_meters=feed_model_distances_in_meters)
     model.train()
     return model
 
@@ -143,7 +146,7 @@ def train(train_video_class: SDDVideoClasses, train_video_number: int, train_mod
           max_epochs=NUM_EPOCHS, limit_train_batches=1.0, limit_val_batches=1.0, over_fit_batches=0.0,
           use_social_lstm_model=True, pass_final_pos=True, relative_velocities=False,
           use_simple_model: bool = False, use_gru: bool = False, dropout=None, rnn_dropout=0, num_rnn_layers=1,
-          learn_hidden_states=False, drop_last=True):
+          learn_hidden_states=False, drop_last=True, feed_model_distances_in_meters=True):
     dataset_train, dataset_val = get_train_validation_dataset(
         train_video_class=train_video_class, train_video_number=train_video_number, train_mode=train_mode,
         train_meta_label=train_meta_label, val_video_class=val_video_class, val_video_number=val_video_number,
@@ -162,7 +165,8 @@ def train(train_video_class: SDDVideoClasses, train_video_number: int, train_mod
                                  checkpoint_root_path=checkpoint_root_path, use_gru=use_gru,
                                  relative_velocities=relative_velocities, dropout=dropout,
                                  rnn_dropout=rnn_dropout, num_rnn_layers=num_rnn_layers,
-                                 learn_hidden_states=learn_hidden_states)
+                                 learn_hidden_states=learn_hidden_states,
+                                 feed_model_distances_in_meters=feed_model_distances_in_meters)
     else:
         model = get_model(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=batch_size,
                           num_workers=num_workers, lr=lr, use_batch_norm=use_batch_norm, over_fit_mode=over_fit_mode,
@@ -185,7 +189,8 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
                  from_checkpoint=None, checkpoint_root_path=None, gpus=1 if torch.cuda.is_available() else None,
                  max_epochs=NUM_EPOCHS, limit_train_batches=1.0, limit_val_batches=1.0, over_fit_batches=0.0,
                  use_social_lstm_model=True, pass_final_pos=True, relative_velocities=False, drop_last=True,
-                 use_simple_model: bool = False, use_gru: bool = False, dropout=None, rnn_dropout=0, num_rnn_layers=1):
+                 use_simple_model: bool = False, use_gru: bool = False, dropout=None, rnn_dropout=0, num_rnn_layers=1,
+                 feed_model_distances_in_meters=False):
     dataset_train, dataset_val = get_train_validation_dataset(
         train_video_class=train_video_class, train_video_number=train_video_number, train_mode=train_mode,
         train_meta_label=train_meta_label, val_video_class=val_video_class, val_video_number=val_video_number,
@@ -208,7 +213,8 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
                                  checkpoint_root_path=checkpoint_root_path, use_gru=use_gru,
                                  relative_velocities=relative_velocities, dropout=dropout,
                                  rnn_dropout=rnn_dropout, num_rnn_layers=num_rnn_layers,
-                                 learn_hidden_states=learn_hidden_states)
+                                 learn_hidden_states=learn_hidden_states,
+                                 feed_model_distances_in_meters=feed_model_distances_in_meters)
     else:
         model = get_model(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=batch_size,
                           num_workers=num_workers, lr=lr, use_batch_norm=use_batch_norm, over_fit_mode=over_fit_mode,
@@ -305,7 +311,7 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
 
                 summary_writer.add_scalar('lr',
                                           [param_group['lr'] for param_group in optimizer.param_groups][-1],
-                                          global_step=idx)
+                                          global_step=epoch)
                 summary_writer.add_scalar('epoch', epoch, global_step=epoch)
 
                 scheduler.step(epoch_v_loss)
@@ -391,5 +397,6 @@ if __name__ == '__main__':
         rnn_dropout=RNN_DROPOUT,
         num_rnn_layers=RNN_LAYERS,
         learn_hidden_states=LEARN_HIDDEN_STATES,
-        drop_last=True
+        drop_last=True,
+        feed_model_distances_in_meters=FEED_MODEL_DISTANCES_IN_METERS
     )

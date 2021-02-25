@@ -255,6 +255,7 @@ if __name__ == '__main__':
     rel_velocities = False
     rnn_layers_count = 1
     num_epochs = 20000
+    feed_model_distances_in_meters = False
 
     do_reverse_slices = False
 
@@ -284,7 +285,8 @@ if __name__ == '__main__':
                                          generated_dataset=generated,
                                          batch_size=1 if single_chunk_fit else gt_batch_size,
                                          use_batch_norm=use_bn, relative_velocities=rel_velocities,
-                                         learn_hidden_states=learn_hidden_states)
+                                         learn_hidden_states=learn_hidden_states,
+                                         feed_model_distances_in_meters=feed_model_distances_in_meters)
         # model = BaselineRNNStackedSimple(encoder_lstm_num_layers=2, decoder_lstm_num_layers=2,
         #                                  generated_dataset=generated, rnn_dropout=0.2,
         #                                  use_batch_norm=True, relative_velocities=False, dropout=0.2)
@@ -335,9 +337,9 @@ if __name__ == '__main__':
             save_plot_path=f'{ROOT_PATH}Plots/baseline_v2/nn/OVERFIT/{sdd_video_class.value}{sdd_video_number}/' \
                            f'epoch_count{num_epochs}/{"social" if use_social_lstm_model else "baseline"}_'
                            f'generated_{generated}__'
-                           f'batch_norm_{use_bn}__generated_{generated}__gru_{use_gru}__'
+                           f'batch_norm_{use_bn}__generated_{generated}__gru_{use_gru}___lr_{lr}'
                            f'learn_hidden_{learn_hidden_states}__rel_velocities_{rel_velocities}'
-                           f'__rnn_layers_{rnn_layers_count}/')
+                           f'__rnn_layers_{rnn_layers_count}__feed_in_meters_{feed_model_distances_in_meters}/')
     # overfit_two_loss(net=model, loader=overfit_dataloader, optimizer=optim, num_epochs=5000)
 
     print()

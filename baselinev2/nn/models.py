@@ -421,7 +421,8 @@ class BaselineRNNStackedSimple(BaselineRNN):
                  encoder_lstm_num_layers: int = 1, overfit_mode: bool = False, shuffle: bool = False,
                  pin_memory: bool = True, decoder_lstm_num_layers: int = 1, return_pred: bool = True,
                  generated_dataset: bool = False, relative_velocities: bool = False, dropout: Optional[float] = None,
-                 rnn_dropout: float = 0, use_gru: bool = False, learn_hidden_states: bool = False):
+                 rnn_dropout: float = 0, use_gru: bool = False, learn_hidden_states: bool = False,
+                 feed_model_distances_in_meters: bool = False):
         super(BaselineRNNStackedSimple, self).__init__(
             original_frame_shape=original_frame_shape, prediction_length=prediction_length, lr=lr,
             time_steps=time_steps, train_dataset=train_dataset, val_dataset=val_dataset, batch_size=batch_size,
@@ -467,9 +468,12 @@ class BaselineRNNStackedSimple(BaselineRNN):
         self.use_gru = use_gru
         self.learn_hidden_states = learn_hidden_states
 
+        self.feed_model_distances_in_meters = feed_model_distances_in_meters
+
         self.save_hyperparameters('lr', 'generated_dataset', 'batch_size', 'use_batch_norm', 'overfit_mode', 'shuffle',
                                   'relative_velocities', 'dropout', 'rnn_dropout', 'use_gru', 'learn_hidden_states',
-                                  'encoder_lstm_num_layers', 'decoder_lstm_num_layers', 'generated_dataset')
+                                  'encoder_lstm_num_layers', 'decoder_lstm_num_layers', 'generated_dataset',
+                                  'feed_model_distances_in_meters')
 
     def init_hidden_states(self, b_size):
         hx = torch.zeros(size=(self.lstm_num_layers, b_size, LINEAR_CFG['lstm_encoder']), device=self.device)
@@ -491,6 +495,10 @@ class BaselineRNNStackedSimple(BaselineRNN):
             mapped_in_xy, mapped_gt_xy, ratio = batch
         else:
             in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = batch
+
+        if self.feed_model_distances_in_meters:
+            # in_uv_pixels = in_uv.clone()
+            in_uv *= ratio[0].item()
 
         predicted_xy, true_xy, predicted_xy_for_loss = [], [], []
 
@@ -517,6 +525,8 @@ class BaselineRNNStackedSimple(BaselineRNN):
             out, h_dec = self.decoder(out.unsqueeze(0), h_dec)
 
             pred_uv = self.post_decoder(out.squeeze(0))
+            if self.feed_model_distances_in_meters:
+                pred_uv /= ratio[0].item()
             out = last_xy + (pred_uv * 0.4) if self.relative_velocities else last_xy + pred_uv
 
             predicted_xy_for_loss.append(out)
@@ -524,6 +534,8 @@ class BaselineRNNStackedSimple(BaselineRNN):
             true_xy.append(gt_pred_xy.detach().cpu().numpy())
 
             last_xy = out
+            if self.feed_model_distances_in_meters:
+                pred_uv *= ratio[0].item()
             last_uv = pred_uv
 
         ade = compute_ade(np.stack(predicted_xy), np.stack(true_xy)).item()
@@ -547,6 +559,10 @@ class BaselineRNNStackedSimple(BaselineRNN):
             mapped_in_xy, mapped_gt_xy, ratio = batch
         else:
             in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = batch
+
+        if self.feed_model_distances_in_meters:
+            # in_uv_pixels = in_uv.clone()
+            in_uv *= ratio[0].item()
 
         predicted_xy, true_xy, predicted_xy_for_loss = [], [], []
 
@@ -573,6 +589,8 @@ class BaselineRNNStackedSimple(BaselineRNN):
             out, (h_dec, c_dec) = self.decoder(out.unsqueeze(0), (h_dec, c_dec))
 
             pred_uv = self.post_decoder(out.squeeze(0))
+            if self.feed_model_distances_in_meters:
+                pred_uv /= ratio[0].item()
             out = last_xy + (pred_uv * 0.4) if self.relative_velocities else last_xy + pred_uv
 
             predicted_xy_for_loss.append(out)
@@ -580,6 +598,8 @@ class BaselineRNNStackedSimple(BaselineRNN):
             true_xy.append(gt_pred_xy.detach().cpu().numpy())
 
             last_xy = out
+            if self.feed_model_distances_in_meters:
+                pred_uv *= ratio[0].item()
             last_uv = pred_uv
 
         ade = compute_ade(np.stack(predicted_xy), np.stack(true_xy)).item()

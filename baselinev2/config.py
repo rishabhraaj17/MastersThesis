@@ -151,6 +151,13 @@ GENERATOR_SEED = torch.Generator().manual_seed(MANUAL_SEED)
 #     'lstm_in': 8,
 #     'lstm_encoder': 16
 # }
+# smaller
+LINEAR_CFG = {
+    'encoder': [4],
+    'decoder': [2],
+    'lstm_in': 4,
+    'lstm_encoder': 8
+}
 #
 LINEAR_CFG = {
     'encoder': [32],
