@@ -464,7 +464,7 @@ class BaselineRNNStackedSimple(BaselineRNN):
             if learn_hidden_states:
                 self.decoder_cell_state = nn.Parameter(data.clone())
 
-        self.post_decoder = make_layers(LINEAR_CFG['decoder'], batch_norm=use_batch_norm, encoder=False,
+        self.post_decoder = make_layers(arch_config['decoder'], batch_norm=use_batch_norm, encoder=False,
                                         last_without_activation=True, dropout=dropout)
         self.return_pred = return_pred
         self.generated_dataset = generated_dataset
