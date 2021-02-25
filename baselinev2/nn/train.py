@@ -1,4 +1,5 @@
 import os
+import yaml
 
 import torch
 from pytorch_lightning import Trainer
@@ -346,7 +347,13 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
                                    'rnn_dropout': rnn_dropout,
                                    'use_gru': use_gru,
                                    'use_social_lstm_model': use_social_lstm_model,
-                                   'use_simple_model': use_simple_model
+                                   'use_simple_model': use_simple_model,
+                                   'from_checkpoint': from_checkpoint,
+                                   'pass_final_pos': pass_final_pos,
+                                   'relative_velocities': relative_velocities,
+                                   'learn_hidden_states': learn_hidden_states,
+                                   'feed_model_distances_in_meters': feed_model_distances_in_meters,
+                                   'arch_config': arch_config
                                    }
                     logger.info(f'Checkpoint Updated at epoch {epoch}, loss {epoch_v_loss}')
     except KeyboardInterrupt:
@@ -361,8 +368,10 @@ def train_custom(train_video_class: SDDVideoClasses, train_video_number: int, tr
             'last_optimizer_state_dict': optimizer.state_dict(),
             'last_scheduler_state_dict': scheduler.state_dict(),
         })
-        torch.save(resume_dict, f'{resume_dict_save_root_path}{resume_dict_save_folder}/'
-                                f'{resume_dict_save_folder}_checkpoint.ckpt')
+        final_path = f'{resume_dict_save_root_path}{resume_dict_save_folder}/'
+        torch.save(resume_dict, f'{final_path}{resume_dict_save_folder}_checkpoint.ckpt')
+        with open(f'{final_path}{resume_dict_save_folder}_hparams.yaml') as f:
+            yaml.dump(resume_dict, f)
         logger.info('Saving and exiting gracefully.')
         logger.info(f"Best model at epoch: {resume_dict['epoch']}")
 
