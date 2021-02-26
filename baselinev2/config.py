@@ -177,14 +177,15 @@ LINEAR_CFG = {
 TRAIN_FOR_WHOLE_CLASS = True
 
 TRAIN_CLASS = SDDVideoClasses.LITTLE
-TRAIN_CLASS_FOR_WHOLE = [SDDVideoClassAndNumbers.LITTLE]
+TRAIN_CLASS_FOR_WHOLE = [SDDVideoClassAndNumbers.LITTLE, SDDVideoClassAndNumbers.DEATH_CIRCLE]
 VAL_CLASS = TRAIN_CLASS
 VAL_CLASS_FOR_WHOLE = TRAIN_CLASS_FOR_WHOLE
 
 TRAIN_VIDEO_NUMBER = 3
 VAL_VIDEO_NUMBER = TRAIN_VIDEO_NUMBER
 
-TRAIN_META = SDDVideoDatasets.LITTLE if not TRAIN_FOR_WHOLE_CLASS else [SDDVideoDatasets.LITTLE]
+TRAIN_META = SDDVideoDatasets.LITTLE if not TRAIN_FOR_WHOLE_CLASS else \
+    [SDDVideoDatasets.LITTLE, SDDVideoDatasets.DEATH_CIRCLE]
 VAL_META = TRAIN_META
 
 TRAIN_VIDEOS_TO_SKIP = [()]
@@ -199,7 +200,7 @@ OVERFIT_BATCHES = 0.0
 LIMIT_BATCHES = (1.0, 1.0)  # (Train, Val)
 # Custom Solver
 SCHEDULER_FACTOR = 0.1
-SCHEDULER_PATIENCE = 50
+SCHEDULER_PATIENCE = 500
 AMS_GRAD = True
 
 
@@ -216,6 +217,13 @@ LEARN_HIDDEN_STATES = False
 USE_RELATIVE_VELOCITIES = False
 
 TRAIN_CUSTOM = True
+RESUME_CUSTOM_TRAINING_PATH = f'runs/Feb26_00-37-11_rishabh-Precision-5540baseline/' \
+                              f'Feb26_00-37-11_rishabh-Precision-5540baseline_checkpoint.ckpt'
+RESUME_CUSTOM_HPARAM_PATH = f'runs/Feb26_00-37-11_rishabh-Precision-5540baseline/' \
+                            f'Feb26_00-37-11_rishabh-Precision-5540baseline_hparams.yaml'
+RESUME_ADDITIONAL_EPOCH = 1000
+RESUME_FROM_LAST_EPOCH = True
+
 DEVICE = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 LOG_HISTOGRAM = False
 

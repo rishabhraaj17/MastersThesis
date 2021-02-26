@@ -17,7 +17,8 @@ from baselinev2.config import BATCH_SIZE, NUM_WORKERS, LR, USE_BATCH_NORM, OVERF
     VAL_CLASS, VAL_VIDEO_NUMBER, VAL_META, USE_SOCIAL_LSTM_MODEL, USE_FINAL_POSITIONS, USE_RELATIVE_VELOCITIES, DEVICE, \
     TRAIN_CUSTOM, LOG_HISTOGRAM, USE_SIMPLE_MODEL, USE_GRU, RNN_DROPOUT, RNN_LAYERS, DROPOUT, LEARN_HIDDEN_STATES, \
     FEED_MODEL_DISTANCES_IN_METERS, LINEAR_CFG, TRAIN_FOR_WHOLE_CLASS, TRAIN_CLASS_FOR_WHOLE, VAL_CLASS_FOR_WHOLE, \
-    TRAIN_VIDEOS_TO_SKIP, VAL_VIDEOS_TO_SKIP, SCHEDULER_PATIENCE, SCHEDULER_FACTOR, AMS_GRAD
+    TRAIN_VIDEOS_TO_SKIP, VAL_VIDEOS_TO_SKIP, SCHEDULER_PATIENCE, SCHEDULER_FACTOR, AMS_GRAD, \
+    RESUME_CUSTOM_TRAINING_PATH, RESUME_CUSTOM_HPARAM_PATH, RESUME_ADDITIONAL_EPOCH, RESUME_FROM_LAST_EPOCH
 from baselinev2.constants import NetworkMode, SDDVideoClassAndNumbers
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.models import BaselineRNNStacked, BaselineRNNStackedSimple
@@ -196,7 +197,8 @@ def train(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAndNumbers
           use_social_lstm_model=True, pass_final_pos=True, relative_velocities=False, get_generated: bool = False,
           use_simple_model: bool = False, use_gru: bool = False, dropout=None, rnn_dropout=0, num_rnn_layers=1,
           learn_hidden_states=False, drop_last=True, feed_model_distances_in_meters=True, arch_config=LINEAR_CFG,
-          train_for_class=False, train_videos_to_skip=(), val_videos_to_skip=()):
+          train_for_class=False, train_videos_to_skip=(), val_videos_to_skip=(), resume_custom_from_last_epoch=True,
+          resume_custom_path=None, resume_hparam_path=None, resume_additional_epochs=1000):
     if train_for_class:
         dataset_train, dataset_val = get_train_validation_dataset_for_class(
             train_video_class=train_video_class, train_meta_label=train_meta_label, val_video_class=val_video_class,
@@ -250,7 +252,8 @@ def train_custom(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAnd
                  use_social_lstm_model=True, pass_final_pos=True, relative_velocities=False, drop_last=True,
                  use_simple_model: bool = False, use_gru: bool = False, dropout=None, rnn_dropout=0, num_rnn_layers=1,
                  feed_model_distances_in_meters=False, arch_config=LINEAR_CFG, train_for_class=False,
-                 train_videos_to_skip=(), val_videos_to_skip=()):
+                 train_videos_to_skip=(), val_videos_to_skip=(), resume_custom_path=None, resume_hparam_path=None,
+                 resume_additional_epochs=1000, resume_custom_from_last_epoch=True):
     if train_for_class:
         dataset_train, dataset_val = get_train_validation_dataset_for_class(
             train_video_class=train_video_class, train_meta_label=train_meta_label, val_video_class=val_video_class,
@@ -306,10 +309,37 @@ def train_custom(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAnd
     resume_dict_save_folder.sort()
     resume_dict_save_folder = resume_dict_save_folder[-1]
 
+    start_epoch = 0
+
+    if resume_custom_path is not None:
+        resume_checkpoint = torch.load(resume_custom_path)
+
+        with open(resume_hparam_path, 'r+') as hparam_file:
+            resume_hyperparameters = yaml.load(hparam_file)
+
+        if resume_custom_from_last_epoch:
+            m_key = 'last_model_state_dict'
+            o_key = 'last_optimizer_state_dict'
+            s_key = 'last_scheduler_state_dict'
+        else:
+            m_key = 'model_state_dict'
+            o_key = 'optimizer_state_dict'
+            s_key = 'scheduler_state_dict'
+
+        model.load_state_dict(resume_checkpoint[m_key])
+        optimizer.load_state_dict(resume_checkpoint[o_key])
+        scheduler.load_state_dict(resume_checkpoint[s_key])
+
+        start_epoch = resume_hyperparameters['epoch']
+        max_epochs += resume_additional_epochs
+        best_val_loss = resume_hyperparameters['val_loss']
+
+        # resume_dict_save_folder = os.path.split(os.path.split(resume_custom_path)[0])[-1]
+
     epoch_t_loss, epoch_t_ade, epoch_t_fde, epoch_v_loss, epoch_v_ade, epoch_v_fde = None, None, None, None, None, None
 
     try:
-        for epoch in range(max_epochs):
+        for epoch in range(start_epoch, max_epochs):
             model.train()
             running_t_loss, running_t_ade, running_t_fde = [], [], []
             with tqdm(loader_train, position=0) as t:
@@ -433,8 +463,13 @@ def train_custom(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAnd
             'last_scheduler_state_dict': scheduler.state_dict(),
         })
         final_path = f'{resume_dict_save_root_path}{resume_dict_save_folder}/'
-        torch.save(resume_dict, f'{final_path}{resume_dict_save_folder}_checkpoint.ckpt')
-        hparam_file = f'{final_path}{resume_dict_save_folder}_hparams.yaml'
+        checkpoint_file_name = f'{final_path}{resume_dict_save_folder}_checkpoint.ckpt' \
+            if resume_custom_path is None else f'{final_path}{resume_dict_save_folder}_checkpoint_resumed.ckpt'
+        torch.save(resume_dict, checkpoint_file_name)
+
+        hparam_file = f'{final_path}{resume_dict_save_folder}_hparams.yaml' \
+            if resume_custom_path is None else f'{final_path}{resume_dict_save_folder}_hparams_resumed.yaml'
+
         hparam_dict = {'epoch': epoch,
                        'val_loss': epoch_v_loss,
                        'lr': lr,
@@ -470,7 +505,10 @@ def train_custom(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAnd
                        }
         # Path(hparam_file).mkdir(parents=True, exist_ok=True)
         with open(hparam_file, 'w+') as f:
+            if resume_custom_path is not None:
+                hparam_dict.update({'resumed_from': [resume_custom_path, resume_hparam_path]})
             yaml.dump(hparam_dict, f)
+
         logger.info('Saving and exiting gracefully.')
         logger.info(f"Best model at epoch: {resume_dict['epoch']}")
 
@@ -517,5 +555,9 @@ if __name__ == '__main__':
         arch_config=LINEAR_CFG,
         train_for_class=TRAIN_FOR_WHOLE_CLASS,
         train_videos_to_skip=TRAIN_VIDEOS_TO_SKIP,
-        val_videos_to_skip=VAL_VIDEOS_TO_SKIP
+        val_videos_to_skip=VAL_VIDEOS_TO_SKIP,
+        resume_custom_path=RESUME_CUSTOM_TRAINING_PATH,
+        resume_hparam_path=RESUME_CUSTOM_HPARAM_PATH,
+        resume_additional_epochs=RESUME_ADDITIONAL_EPOCH,
+        resume_custom_from_last_epoch=RESUME_FROM_LAST_EPOCH
     )

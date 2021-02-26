@@ -405,8 +405,10 @@ if __name__ == '__main__':
             generated_dataset = False
             dataset = get_dataset(video_clazz=sdd_video_class, video_number=sdd_video_number, mode=network_mode,
                                   meta_label=sdd_meta_class, get_generated=generated_dataset)
-            checkpoint_path = f'../baselinev2/runs/Feb25_00-30-05_rishabh-Precision-5540baseline/' \
-                              f'Feb25_00-30-05_rishabh-Precision-5540baseline_checkpoint.ckpt'
+            # checkpoint_path = f'../baselinev2/runs/Feb25_00-30-05_rishabh-Precision-5540baseline/' \
+            #                   f'Feb25_00-30-05_rishabh-Precision-5540baseline_checkpoint.ckpt'
+            checkpoint_path = f'../baselinev2/runs/Feb25_17-18-46_rishabh-Precision-5540baseline/' \
+                              f'Feb25_17-18-46_rishabh-Precision-5540baseline_checkpoint.ckpt'
             experiment_name = os.path.split(checkpoint_path)[-1][:-5]
             plot_save_path = f'{ROOT_PATH}Plots/baseline_v2/nn/EVAL_CUSTOM/{sdd_video_class.value}{sdd_video_number}/' \
                              f'{network_mode.value}/{experiment_name}/'

@@ -75,12 +75,12 @@ if __name__ == '__main__':
     vid_clz = SDDVideoClasses.LITTLE
     vid_clz_meta = SDDVideoDatasets.LITTLE
     vid_number = 3
-    split = NetworkMode.TRAIN
+    split = NetworkMode.VALIDATION
     mem_mode = None
 
-    plot_path = f'{ROOT_PATH}Plots/baseline_v2/nn/STATS/{vid_clz.value}{vid_number}/'
+    plot_path = f'{ROOT_PATH}Plots/baseline_v2/nn/STATS/{vid_clz.value}{vid_number}/{split.name}/'
 
-    generated_dataset = True
+    generated_dataset = False
 
     plot_path += 'generated/' if generated_dataset else 'gt/'
 
