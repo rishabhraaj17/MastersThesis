@@ -312,6 +312,7 @@ def train_custom(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAnd
     start_epoch = 0
 
     if resume_custom_path is not None:
+        logger.info('Resuming Training!')
         resume_checkpoint = torch.load(resume_custom_path)
 
         with open(resume_hparam_path, 'r+') as hparam_file:
@@ -411,6 +412,10 @@ def train_custom(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAnd
                                           [param_group['lr'] for param_group in optimizer.param_groups][-1],
                                           global_step=epoch)
                 summary_writer.add_scalar('epoch', epoch, global_step=epoch)
+
+                summary_writer.add_scalars(main_tag='loss',
+                                           tag_scalar_dict={'train_loss': epoch_t_loss, 'val_loss': epoch_v_loss},
+                                           global_step=epoch)
 
                 scheduler.step(epoch_v_loss)
 

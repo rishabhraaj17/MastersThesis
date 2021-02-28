@@ -145,12 +145,12 @@ GENERATOR_SEED = torch.Generator().manual_seed(MANUAL_SEED)
 # }
 
 # small network
-LINEAR_CFG = {
-    'encoder': [8],
-    'decoder': [2],
-    'lstm_in': 8,
-    'lstm_encoder': 16
-}
+# LINEAR_CFG = {
+#     'encoder': [8],
+#     'decoder': [2],
+#     'lstm_in': 8,
+#     'lstm_encoder': 16
+# }
 # smaller
 # LINEAR_CFG = {
 #     'encoder': [4],
@@ -165,6 +165,13 @@ LINEAR_CFG = {
 #     'lstm_in': 32,
 #     'lstm_encoder': 64
 # }
+
+LINEAR_CFG = {
+    'encoder': [8, 16, 32, 64],
+    'decoder': [64, 32, 8, 2],
+    'lstm_in': 64,
+    'lstm_encoder': 128
+}
 
 # # Bigger
 # LINEAR_CFG = {
@@ -200,7 +207,7 @@ OVERFIT_BATCHES = 0.0
 LIMIT_BATCHES = (1.0, 1.0)  # (Train, Val)
 # Custom Solver
 SCHEDULER_FACTOR = 0.1
-SCHEDULER_PATIENCE = 500
+SCHEDULER_PATIENCE = 200
 AMS_GRAD = True
 
 
