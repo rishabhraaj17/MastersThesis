@@ -7,7 +7,7 @@ import yaml
 import torch
 import numpy as np
 from pytorch_lightning import Trainer
-from torch.utils.data import DataLoader, ConcatDataset
+from torch.utils.data import DataLoader, ConcatDataset, Subset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
@@ -18,7 +18,8 @@ from baselinev2.config import BATCH_SIZE, NUM_WORKERS, LR, USE_BATCH_NORM, OVERF
     TRAIN_CUSTOM, LOG_HISTOGRAM, USE_SIMPLE_MODEL, USE_GRU, RNN_DROPOUT, RNN_LAYERS, DROPOUT, LEARN_HIDDEN_STATES, \
     FEED_MODEL_DISTANCES_IN_METERS, LINEAR_CFG, TRAIN_FOR_WHOLE_CLASS, TRAIN_CLASS_FOR_WHOLE, VAL_CLASS_FOR_WHOLE, \
     TRAIN_VIDEOS_TO_SKIP, VAL_VIDEOS_TO_SKIP, SCHEDULER_PATIENCE, SCHEDULER_FACTOR, AMS_GRAD, \
-    RESUME_CUSTOM_TRAINING_PATH, RESUME_CUSTOM_HPARAM_PATH, RESUME_ADDITIONAL_EPOCH, RESUME_FROM_LAST_EPOCH
+    RESUME_CUSTOM_TRAINING_PATH, RESUME_CUSTOM_HPARAM_PATH, RESUME_ADDITIONAL_EPOCH, RESUME_FROM_LAST_EPOCH, \
+    OVERFIT_ELEMENT_COUNT, RANDOM_INDICES_IN_OVERFIT_ELEMENTS
 from baselinev2.constants import NetworkMode, SDDVideoClassAndNumbers
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.models import BaselineRNNStacked, BaselineRNNStackedSimple
@@ -198,7 +199,8 @@ def train(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAndNumbers
           use_simple_model: bool = False, use_gru: bool = False, dropout=None, rnn_dropout=0, num_rnn_layers=1,
           learn_hidden_states=False, drop_last=True, feed_model_distances_in_meters=True, arch_config=LINEAR_CFG,
           train_for_class=False, train_videos_to_skip=(), val_videos_to_skip=(), resume_custom_from_last_epoch=True,
-          resume_custom_path=None, resume_hparam_path=None, resume_additional_epochs=1000):
+          resume_custom_path=None, resume_hparam_path=None, resume_additional_epochs=1000,
+          overfit_element_count=None, keep_overfit_elements_random=False):
     if train_for_class:
         dataset_train, dataset_val = get_train_validation_dataset_for_class(
             train_video_class=train_video_class, train_meta_label=train_meta_label, val_video_class=val_video_class,
@@ -253,7 +255,8 @@ def train_custom(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAnd
                  use_simple_model: bool = False, use_gru: bool = False, dropout=None, rnn_dropout=0, num_rnn_layers=1,
                  feed_model_distances_in_meters=False, arch_config=LINEAR_CFG, train_for_class=False,
                  train_videos_to_skip=(), val_videos_to_skip=(), resume_custom_path=None, resume_hparam_path=None,
-                 resume_additional_epochs=1000, resume_custom_from_last_epoch=True):
+                 resume_additional_epochs=1000, resume_custom_from_last_epoch=True, overfit_element_count=None, 
+                 keep_overfit_elements_random=False):
     if train_for_class:
         dataset_train, dataset_val = get_train_validation_dataset_for_class(
             train_video_class=train_video_class, train_meta_label=train_meta_label, val_video_class=val_video_class,
@@ -264,6 +267,17 @@ def train_custom(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAnd
             train_video_class=train_video_class, train_video_number=train_video_number, train_mode=train_mode,
             train_meta_label=train_meta_label, val_video_class=val_video_class, val_video_number=val_video_number,
             val_mode=val_mode, val_meta_label=val_meta_label, get_generated=get_generated)
+        
+    if overfit_element_count is not None:
+        train_indices = np.random.choice(len(dataset_train), size=overfit_element_count, replace=False) \
+            if keep_overfit_elements_random else [i for i in range(overfit_element_count)]
+        val_indices = np.random.choice(len(dataset_val), size=overfit_element_count // 2, replace=False) \
+            if keep_overfit_elements_random else [i for i in range(overfit_element_count // 2)]
+        subset_dataset_train = Subset(dataset=dataset_train, indices=train_indices)
+        subset_dataset_val = Subset(dataset=dataset_val, indices=val_indices)
+
+        dataset_train = subset_dataset_train
+        dataset_val = subset_dataset_val
 
     loader_train = DataLoader(dataset_train, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle,
                               pin_memory=pin_memory, drop_last=drop_last)
@@ -506,7 +520,9 @@ def train_custom(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAnd
                        'arch_config': arch_config,
                        'train_for_class': train_for_class,
                        'train_videos_to_skip': train_videos_to_skip,
-                       'val_videos_to_skip': val_videos_to_skip
+                       'val_videos_to_skip': val_videos_to_skip,
+                       'overfit_element_count': overfit_element_count,
+                       'keep_overfit_elements_random': keep_overfit_elements_random
                        }
         # Path(hparam_file).mkdir(parents=True, exist_ok=True)
         with open(hparam_file, 'w+') as f:
@@ -564,5 +580,7 @@ if __name__ == '__main__':
         resume_custom_path=RESUME_CUSTOM_TRAINING_PATH,
         resume_hparam_path=RESUME_CUSTOM_HPARAM_PATH,
         resume_additional_epochs=RESUME_ADDITIONAL_EPOCH,
-        resume_custom_from_last_epoch=RESUME_FROM_LAST_EPOCH
+        resume_custom_from_last_epoch=RESUME_FROM_LAST_EPOCH,
+        overfit_element_count=OVERFIT_ELEMENT_COUNT,
+        keep_overfit_elements_random=RANDOM_INDICES_IN_OVERFIT_ELEMENTS
     )
