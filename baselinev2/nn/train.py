@@ -271,8 +271,8 @@ def train_custom(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAnd
     if overfit_element_count is not None:
         train_indices = np.random.choice(len(dataset_train), size=overfit_element_count, replace=False) \
             if keep_overfit_elements_random else [i for i in range(overfit_element_count)]
-        val_indices = np.random.choice(len(dataset_val), size=overfit_element_count // 2, replace=False) \
-            if keep_overfit_elements_random else [i for i in range(overfit_element_count // 2)]
+        val_indices = np.random.choice(len(dataset_val), size=overfit_element_count, replace=False) \
+            if keep_overfit_elements_random else [i for i in range(overfit_element_count)]
         subset_dataset_train = Subset(dataset=dataset_train, indices=train_indices)
         subset_dataset_val = Subset(dataset=dataset_val, indices=val_indices)
 
