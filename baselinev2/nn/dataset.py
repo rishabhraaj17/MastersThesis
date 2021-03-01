@@ -178,4 +178,3 @@ if __name__ == '__main__':
         plot_trajectories_with_frame(current_frame, obs_trajectory, true_trajectory, pred_trajectory,
                                      frame_number=frame_num, track_id=track_id)
         print()
-
