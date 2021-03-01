@@ -10,7 +10,7 @@ from baselinev2.config import ROOT_PATH
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import BaselineDataset, BaselineGeneratedDataset
 from baselinev2.nn.models import BaselineRNNStacked, BaselineRNNStackedSimple
-from baselinev2.nn.overfit import social_lstm_parser
+from baselinev2.utils import social_lstm_parser
 from baselinev2.nn.social_lstm.model import BaselineLSTM
 
 DEVICE = torch.device("cuda")

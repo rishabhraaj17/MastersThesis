@@ -1,3 +1,6 @@
+import bisect
+from typing import Iterable
+
 import numpy as np
 import torch
 from torch.utils.data import Dataset, ConcatDataset, DataLoader
@@ -14,6 +17,23 @@ from log import initialize_logging, get_logger
 
 initialize_logging()
 logger = get_logger('baselinev2.nn.dataset')
+
+
+class ConcatenateDataset(ConcatDataset):
+    def __init__(self, datasets: Iterable[Dataset]):
+        super(ConcatenateDataset, self).__init__(datasets=datasets)
+
+    def __getitem__(self, idx):
+        if idx < 0:
+            if -idx > len(self):
+                raise ValueError("absolute value of index should not exceed dataset length")
+            idx = len(self) + idx
+        dataset_idx = bisect.bisect_right(self.cumulative_sizes, idx)
+        if dataset_idx == 0:
+            sample_idx = idx
+        else:
+            sample_idx = idx - self.cumulative_sizes[dataset_idx - 1]
+        return self.datasets[dataset_idx][sample_idx], dataset_idx
 
 
 class BaselineDataset(Dataset):
@@ -36,6 +56,11 @@ class BaselineDataset(Dataset):
         self.prediction_length = prediction_length
         self.observation_length = observation_length
         self.relative_velocities = relative_velocities
+
+        self.video_class = video_class
+        self.video_number = video_number
+        self.meta_label = meta_label
+        self.split = split
 
     def __len__(self):
         return len(self.relative_distances)
@@ -77,6 +102,11 @@ class BaselineGeneratedDataset(Dataset):
         self.prediction_length = prediction_length
         self.observation_length = observation_length
         self.relative_velocities = relative_velocities
+
+        self.video_class = video_class
+        self.video_number = video_number
+        self.meta_label = meta_label
+        self.split = split
 
     def __len__(self):
         return len(self.relative_distances)

@@ -23,7 +23,7 @@ from baselinev2.config import BATCH_SIZE, NUM_WORKERS, LR, USE_BATCH_NORM, OVERF
 from baselinev2.constants import NetworkMode, SDDVideoClassAndNumbers
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.models import BaselineRNNStacked, BaselineRNNStackedSimple
-from baselinev2.nn.overfit import social_lstm_parser
+from baselinev2.utils import social_lstm_parser
 from baselinev2.nn.social_lstm.model import BaselineLSTM
 from log import initialize_logging, get_logger
 
@@ -155,7 +155,7 @@ def get_dataset_for_one_class(video_class: SDDVideoClassAndNumbers, meta_label: 
 
 def get_dataset_for_class(video_class: List[SDDVideoClassAndNumbers], meta_label: List[SDDVideoDatasets],
                           mode: NetworkMode, get_generated: bool = False,
-                          videos_to_skip: Union[List, Tuple] = ()):
+                          videos_to_skip: Union[List, Tuple] = (), return_dataset_list: bool = False):
     datasets = []
     for v_class, v_meta, skip_videos in zip(video_class, meta_label, videos_to_skip):
         all_videos = v_class.value[-1]
@@ -163,6 +163,8 @@ def get_dataset_for_class(video_class: List[SDDVideoClassAndNumbers], meta_label
         for v_num in videos_to_consider:
             datasets.append(get_dataset(video_clazz=v_class.value[0], video_number=v_num, mode=mode,
                                         meta_label=v_meta, get_generated=get_generated))
+    if return_dataset_list:
+        return datasets
     return ConcatDataset(datasets=datasets)
 
 
@@ -171,13 +173,16 @@ def get_train_validation_dataset_for_class(train_video_class: List[SDDVideoClass
                                            val_video_class: List[SDDVideoClassAndNumbers] = None,
                                            val_meta_label: List[SDDVideoDatasets] = None, get_generated: bool = False,
                                            videos_to_skip_for_train: Union[List, Tuple] = (),
-                                           videos_to_skip_for_val: Union[List, Tuple] = ()):
+                                           videos_to_skip_for_val: Union[List, Tuple] = (),
+                                           return_dataset_list: bool = False):
     train_dataset = get_dataset_for_class(video_class=train_video_class, meta_label=train_meta_label,
                                           mode=NetworkMode.TRAIN, get_generated=get_generated,
-                                          videos_to_skip=videos_to_skip_for_train)
+                                          videos_to_skip=videos_to_skip_for_train,
+                                          return_dataset_list=return_dataset_list)
     val_dataset = get_dataset_for_class(video_class=val_video_class, meta_label=val_meta_label,
                                         mode=NetworkMode.VALIDATION, get_generated=get_generated,
-                                        videos_to_skip=videos_to_skip_for_val)
+                                        videos_to_skip=videos_to_skip_for_val,
+                                        return_dataset_list=return_dataset_list)
     return train_dataset, val_dataset
 
 

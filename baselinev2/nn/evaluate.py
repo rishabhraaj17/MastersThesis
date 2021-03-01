@@ -20,7 +20,7 @@ from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.models import BaselineRNN, BaselineRNNStacked, BaselineRNNStackedSimple
-from baselinev2.nn.overfit import social_lstm_parser
+from baselinev2.utils import social_lstm_parser
 from baselinev2.nn.social_lstm.model import BaselineLSTM
 from baselinev2.plot_utils import plot_trajectory_alongside_frame, plot_and_compare_trajectory_four_way, \
     plot_and_compare_trajectory_alongside_frame
