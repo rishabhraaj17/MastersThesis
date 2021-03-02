@@ -182,7 +182,7 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
                               resume_hparam_path=None,
                               resume_additional_epochs=1000, resume_custom_from_last_epoch=True,
                               overfit_element_count=None,
-                              keep_overfit_elements_random=False):
+                              keep_overfit_elements_random=False, do_validation=False):
     if train_for_class:
         dataset_train, dataset_val = get_train_validation_dataset_for_class(
             train_video_class=train_video_class, train_meta_label=train_meta_label, val_video_class=val_video_class,
@@ -255,6 +255,7 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
     # resume_dict_save_folder = resume_dict_save_folder[-1]
 
     start_epoch = 0
+    epoch = 0
 
     if resume_custom_path is not None:
         logger.info('Resuming Training!')
@@ -282,7 +283,7 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
 
         # resume_dict_save_folder = os.path.split(os.path.split(resume_custom_path)[0])[-1]
 
-    epoch_t_loss, epoch_t_ade, epoch_t_fde, epoch_v_loss, epoch_v_ade, epoch_v_fde = None, None, None, None, None, None
+    epoch_t_loss, epoch_t_ade, epoch_t_fde, epoch_v_loss, epoch_v_ade, epoch_v_fde = [], [], [], [], [], []
 
     try:
         for epoch in range(start_epoch, max_epochs):
@@ -297,7 +298,9 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
                     loss, ade, fde, ratio, pred_trajectory = network(data)
 
                     t.set_postfix(loss=loss.item(), ade=ade, fde=fde,
-                                  epoch_loss=epoch_t_loss, epoch_ade=epoch_t_ade, epoch_fde=epoch_t_fde)
+                                  epoch_loss=torch.tensor(epoch_t_loss).mean().item(),
+                                  epoch_ade=torch.tensor(epoch_t_ade).mean().item(),
+                                  epoch_fde=torch.tensor(epoch_t_fde).mean().item())
                     t.update()
 
                     loss.backward()
@@ -316,9 +319,10 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
                     #         summary_writer.add_histogram(name, weight, epoch)
                     #         summary_writer.add_histogram(f'{name}.grad', weight.grad, epoch)
 
-                epoch_t_loss = torch.tensor(running_t_loss).mean().item()
-                epoch_t_ade = torch.tensor(running_t_ade).mean().item()
-                epoch_t_fde = torch.tensor(running_t_fde).mean().item()
+                epoch_t_loss_value = torch.tensor(running_t_loss).mean().item()
+                epoch_t_loss.append(epoch_t_loss_value)
+                epoch_t_ade.append(torch.tensor(running_t_ade).mean().item())
+                epoch_t_fde.append(torch.tensor(running_t_fde).mean().item())
 
                 if epoch % 1500 == 0:
                     im_idx = np.random.choice(batch_size, 1).item()
@@ -349,78 +353,85 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
                 # summary_writer.add_scalar('train/ade_epoch', epoch_t_ade, global_step=epoch)
                 # summary_writer.add_scalar('train/fde_epoch', epoch_t_fde, global_step=epoch)
 
-            model.eval()
-            running_v_loss, running_v_ade, running_v_fde = [], [], []
-            with tqdm(loader_val, colour='green', position=1) as v:
-                v.set_description('Epoch %i' % epoch)
-                with torch.no_grad():
-                    for idx, (data, dataset_idx) in enumerate(tqdm(loader_val)):
-                        data = [d.to(DEVICE) for d in data]
-                        v_loss, v_ade, v_fde, ratio, pred_trajectory = network(data)
+            if do_validation:
+                model.eval()
+                running_v_loss, running_v_ade, running_v_fde = [], [], []
+                with tqdm(loader_val, colour='green', position=1) as v:
+                    v.set_description('Epoch %i' % epoch)
+                    with torch.no_grad():
+                        for idx, (data, dataset_idx) in enumerate(tqdm(loader_val)):
+                            data = [d.to(DEVICE) for d in data]
+                            v_loss, v_ade, v_fde, ratio, pred_trajectory = network(data)
 
-                        v.set_postfix(loss=v_loss.item(), ade=v_ade, fde=v_fde,
-                                      epoch_loss=epoch_v_loss, epoch_ade=epoch_v_ade, epoch_fde=epoch_v_fde)
-                        v.update()
+                            v.set_postfix(loss=v_loss.item(), ade=v_ade, fde=v_fde,
+                                          epoch_loss=torch.tensor(epoch_v_loss).mean().item(),
+                                          epoch_ade=torch.tensor(epoch_v_ade).mean().item(),
+                                          epoch_fde=torch.tensor(epoch_v_fde).mean().item())
+                            v.update()
 
-                        # summary_writer.add_scalar('val/loss', v_loss.item(), global_step=idx)
-                        # summary_writer.add_scalar('val/ade', v_ade, global_step=idx)
-                        # summary_writer.add_scalar('val/fde', v_fde, global_step=idx)
+                            # summary_writer.add_scalar('val/loss', v_loss.item(), global_step=idx)
+                            # summary_writer.add_scalar('val/ade', v_ade, global_step=idx)
+                            # summary_writer.add_scalar('val/fde', v_fde, global_step=idx)
 
-                        running_v_loss.append(v_loss.item())
-                        running_v_ade.append(v_ade)
-                        running_v_fde.append(v_fde)
+                            running_v_loss.append(v_loss.item())
+                            running_v_ade.append(v_ade)
+                            running_v_fde.append(v_fde)
 
-                epoch_v_loss = torch.tensor(running_v_loss).mean().item()
-                epoch_v_ade = torch.tensor(running_v_ade).mean().item()
-                epoch_v_fde = torch.tensor(running_v_fde).mean().item()
+                    epoch_v_loss_value = torch.tensor(running_v_loss).mean().item()
+                    epoch_v_loss.append(epoch_v_loss_value)
+                    epoch_v_ade.append(torch.tensor(running_v_ade).mean().item())
+                    epoch_v_fde.append(torch.tensor(running_v_fde).mean().item())
 
-                if epoch % 1500 == 0:
-                    im_idx = np.random.choice(batch_size, 1).item()
-                    video_dataset = dataset_val_superset.datasets[dataset_idx[im_idx].item()]
-                    video_path = f'{BASE_PATH}videos/{video_dataset.video_class.value}/' \
-                                 f'video{video_dataset.video_number}/video.mov'
-                    plot_trajectory_alongside_frame(
-                            frame=extract_frame_from_video(
-                                video_path=video_path, frame_number=data[6][im_idx].cpu().squeeze()[0].item()),
-                            obs_trajectory=data[0][im_idx].cpu().squeeze().numpy(),
-                            gt_trajectory=data[1][im_idx].cpu().squeeze().numpy(),
-                            pred_trajectory=pred_trajectory[:, im_idx, ...].squeeze(),
-                            frame_number=data[6][im_idx].cpu().squeeze()[0].item(),
-                            track_id=data[4][im_idx].cpu().squeeze()[0].item(), save_path=final_path + 'train/')
-                if epoch == list(range(max_epochs))[-1]:
-                    for im_idx in range(batch_size):
+                    if epoch % 1500 == 0:
+                        im_idx = np.random.choice(batch_size, 1).item()
+                        video_dataset = dataset_val_superset.datasets[dataset_idx[im_idx].item()]
+                        video_path = f'{BASE_PATH}videos/{video_dataset.video_class.value}/' \
+                                     f'video{video_dataset.video_number}/video.mov'
                         plot_trajectory_alongside_frame(
-                            frame=extract_frame_from_video(
-                                video_path=video_path, frame_number=data[6][im_idx].cpu().squeeze()[0].item()),
-                            obs_trajectory=data[0][im_idx].cpu().squeeze().numpy(),
-                            gt_trajectory=data[1][im_idx].cpu().squeeze().numpy(),
-                            pred_trajectory=pred_trajectory[:, im_idx, ...].squeeze(),
-                            frame_number=data[6][im_idx].cpu().squeeze()[0].item(),
-                            track_id=data[4][im_idx].cpu().squeeze()[0].item(),
-                            save_path=final_path + 'validation/' + 'last_epoch/')
+                                frame=extract_frame_from_video(
+                                    video_path=video_path, frame_number=data[6][im_idx].cpu().squeeze()[0].item()),
+                                obs_trajectory=data[0][im_idx].cpu().squeeze().numpy(),
+                                gt_trajectory=data[1][im_idx].cpu().squeeze().numpy(),
+                                pred_trajectory=pred_trajectory[:, im_idx, ...].squeeze(),
+                                frame_number=data[6][im_idx].cpu().squeeze()[0].item(),
+                                track_id=data[4][im_idx].cpu().squeeze()[0].item(), save_path=final_path + 'train/')
+                    if epoch == list(range(max_epochs))[-1]:
+                        for im_idx in range(batch_size):
+                            plot_trajectory_alongside_frame(
+                                frame=extract_frame_from_video(
+                                    video_path=video_path, frame_number=data[6][im_idx].cpu().squeeze()[0].item()),
+                                obs_trajectory=data[0][im_idx].cpu().squeeze().numpy(),
+                                gt_trajectory=data[1][im_idx].cpu().squeeze().numpy(),
+                                pred_trajectory=pred_trajectory[:, im_idx, ...].squeeze(),
+                                frame_number=data[6][im_idx].cpu().squeeze()[0].item(),
+                                track_id=data[4][im_idx].cpu().squeeze()[0].item(),
+                                save_path=final_path + 'validation/' + 'last_epoch/')
 
-                # summary_writer.add_scalar('val/loss_epoch', epoch_v_loss, global_step=epoch)
-                # summary_writer.add_scalar('val/ade_epoch', epoch_v_ade, global_step=epoch)
-                # summary_writer.add_scalar('val/fde_epoch', epoch_v_fde, global_step=epoch)
-                #
-                # summary_writer.add_scalar('lr',
-                #                           [param_group['lr'] for param_group in optimizer.param_groups][-1],
-                #                           global_step=epoch)
-                # summary_writer.add_scalar('epoch', epoch, global_step=epoch)
-                #
-                # summary_writer.add_scalars(main_tag='loss',
-                #                            tag_scalar_dict={'train_loss': epoch_t_loss, 'val_loss': epoch_v_loss},
-                #                            global_step=epoch)
+                    # summary_writer.add_scalar('val/loss_epoch', epoch_v_loss, global_step=epoch)
+                    # summary_writer.add_scalar('val/ade_epoch', epoch_v_ade, global_step=epoch)
+                    # summary_writer.add_scalar('val/fde_epoch', epoch_v_fde, global_step=epoch)
+                    #
+                    # summary_writer.add_scalar('lr',
+                    #                           [param_group['lr'] for param_group in optimizer.param_groups][-1],
+                    #                           global_step=epoch)
+                    # summary_writer.add_scalar('epoch', epoch, global_step=epoch)
+                    #
+                    # summary_writer.add_scalars(main_tag='loss',
+                    #                            tag_scalar_dict={'train_loss': epoch_t_loss, 'val_loss': epoch_v_loss},
+                    #                            global_step=epoch)
 
-                scheduler.step(epoch_v_loss)
+                    scheduler.step(epoch_v_loss_value)
 
-                if epoch_v_loss < best_val_loss:
-                    best_val_loss = epoch_v_loss
+                if not do_validation:
+                    scheduler.step(epoch_t_loss_value)
+
+                if epoch_v_loss_value < best_val_loss:
+                    best_val_loss = epoch_v_loss_value
                     resume_dict = {'model_state_dict': model.state_dict(),
                                    'optimizer_state_dict': optimizer.state_dict(),
                                    'scheduler_state_dict': scheduler.state_dict(),
                                    'epoch': epoch,
-                                   'val_loss': epoch_v_loss,
+                                   'val_loss': epoch_v_loss_value,
                                    'lr': lr,
                                    'batch_size': batch_size,
                                    'model_name': 'social_lstm' if use_social_lstm_model else 'baseline',
@@ -449,7 +460,7 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
                                    'feed_model_distances_in_meters': feed_model_distances_in_meters,
                                    'arch_config': arch_config
                                    }
-                    logger.info(f'Checkpoint Updated at epoch {epoch}, loss {epoch_v_loss}')
+                    logger.info(f'Checkpoint Updated at epoch {epoch}, loss {epoch_v_loss_value}')
     except KeyboardInterrupt:
         logger.warning('Keyboard Interrupt: Saving and exiting gracefully.')
     finally:
@@ -471,7 +482,7 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
             if resume_custom_path is None else f'{final_path}{resume_dict_save_folder}_hparams_resumed.yaml'
 
         hparam_dict = {'epoch': epoch,
-                       'val_loss': epoch_v_loss,
+                       'val_loss': epoch_v_loss_value if do_validation else epoch_t_loss_value,
                        'lr': lr,
                        'batch_size': batch_size,
                        'model_name': 'social_lstm' if use_social_lstm_model else 'baseline',
@@ -503,7 +514,10 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
                        'train_videos_to_skip': train_videos_to_skip,
                        'val_videos_to_skip': val_videos_to_skip,
                        'overfit_element_count': overfit_element_count,
-                       'keep_overfit_elements_random': keep_overfit_elements_random
+                       'keep_overfit_elements_random': keep_overfit_elements_random,
+                       'do_validation': do_validation,
+                       'train_indices': train_indices,
+                       'val_indices': val_indices
                        }
         # Path(hparam_file).mkdir(parents=True, exist_ok=True)
         with open(hparam_file, 'w+') as f:
@@ -512,7 +526,7 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
             yaml.dump(hparam_dict, f)
 
         logger.info('Saving and exiting gracefully.')
-        logger.info(f"Best model at epoch: {resume_dict['epoch']}")
+        logger.info(f"Best model at epoch: {hparam_dict['epoch']}")
 
         plot_array(epoch_t_loss, 'Train Loss', 'epoch', 'loss', save_path=final_path + 'curves/')
         plot_array(epoch_t_ade, 'Train ADE', 'epoch', 'ade', save_path=final_path + 'curves/')
@@ -609,7 +623,8 @@ if __name__ == '__main__':
             resume_additional_epochs=RESUME_ADDITIONAL_EPOCH,
             resume_custom_from_last_epoch=RESUME_FROM_LAST_EPOCH,
             overfit_element_count=OVERFIT_ELEMENT_COUNT,
-            keep_overfit_elements_random=RANDOM_INDICES_IN_OVERFIT_ELEMENTS
+            keep_overfit_elements_random=RANDOM_INDICES_IN_OVERFIT_ELEMENTS,
+            do_validation=DO_VALIDATION
         )
     else:
         single_chunk_fit = False

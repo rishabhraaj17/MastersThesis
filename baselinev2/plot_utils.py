@@ -1,6 +1,7 @@
 from itertools import cycle
 from pathlib import Path
 
+import numpy as np
 from matplotlib import pyplot as plt, patches, lines as mlines
 
 
@@ -983,6 +984,59 @@ def plot_and_compare_trajectory_four_way(
     if save_path is not None:
         Path(save_path).mkdir(parents=True, exist_ok=True)
         fig.savefig(save_path + f"frame_{frame_number}_track_{track_id}.png")
+        plt.close()
+    else:
+        plt.show()
+
+    return fig
+
+
+def plot_trajectory_with_relative_data(trajectory, relative_distances_l2, relative_distances, additional_text='',
+                                       return_figure_only=False, save_path=None):
+    fig, ax = plt.subplots(2, 2, sharex='none', sharey='none', figsize=(16, 14))
+    ax_combined, ax_real, ax_l2, ax_simple = ax[0, 0], ax[0, 1], ax[1, 0], ax[1, 1]
+    add_line_to_axis(ax=ax_combined, features=trajectory[:, -2:])
+    start_point = trajectory[0, -2:]
+    trajectory_l2, trajectory_simple = [start_point], [start_point]
+    last_pos_l2, last_pos_simple = start_point, start_point
+    for rel_l2, rel_simple in zip(relative_distances_l2, relative_distances):
+        new_pos_l2 = last_pos_l2 + rel_l2
+        new_pos_simple = last_pos_simple + rel_simple
+        trajectory_l2.append(new_pos_l2)
+        trajectory_simple.append(new_pos_simple.squeeze())
+
+        last_pos_l2 = new_pos_l2
+        last_pos_simple = new_pos_simple
+
+    trajectory_l2 = np.stack(trajectory_l2)
+    trajectory_simple = np.stack(trajectory_simple)
+
+    add_line_to_axis(ax=ax_combined, features=trajectory_l2, marker_color='r')
+    add_line_to_axis(ax=ax_combined, features=trajectory_simple, marker_color='g')
+
+    add_line_to_axis(ax=ax_real, features=trajectory[:, -2:])
+    add_line_to_axis(ax=ax_l2, features=trajectory_l2, marker_color='r')
+    add_line_to_axis(ax=ax_simple, features=trajectory_simple, marker_color='g')
+
+    ax_combined.set_title('Combined Trajectories')
+    ax_real.set_title('Real Trajectory')
+    ax_l2.set_title('L2 Trajectory')
+    ax_simple.set_title('Simple Trajectory')
+
+    fig.suptitle(f'Trajectory Analysis\n{additional_text}')
+
+    legends_dict = {'b': 'Observed', 'r': 'L2 moved', 'g': 'Simple Subtraction'}
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
+    if return_figure_only:
+        plt.close()
+        return fig
+
+    if save_path is not None:
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path + f"frame.png")
         plt.close()
     else:
         plt.show()

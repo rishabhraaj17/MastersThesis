@@ -86,13 +86,13 @@ SDD_PER_CLASS_VIDEOS_LIST_FOR_NN = [[0, 1, 2, 3, 4, 5, 6], [0, 1, 2, 3], [0, 1, 
 #                                     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], [0, 1, 2, 3],
 #                                     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [0, 1, 2, 3]]
 
-SDD_VIDEO_CLASSES_RESUME_LIST = [SDDVideoClasses.DEATH_CIRCLE,
+SDD_VIDEO_CLASSES_RESUME_LIST = [SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.DEATH_CIRCLE,
                                  SDDVideoClasses.GATES, SDDVideoClasses.HYANG, SDDVideoClasses.LITTLE,
                                  SDDVideoClasses.NEXUS,
                                  SDDVideoClasses.QUAD]
-SDD_PER_CLASS_VIDEOS_RESUME_LIST = [[2, 3, 4], [0, 1, 2, 3, 4, 5, 6, 7, 8],
+SDD_PER_CLASS_VIDEOS_RESUME_LIST = [[0, 1, 2, 3, 4, 5, 6], [0, 1, 2, 3], [0, 1, 2, 3, 4], [0, 1, 2, 3, 4, 5, 6, 7, 8],
                                     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], [0, 1, 2, 3],
-                                    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], [0, 1, 2, 3]]
+                                    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [0, 1, 2, 3]]
 
 GENERATE_BUNDLED_ANNOTATIONS = False
 BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST = \

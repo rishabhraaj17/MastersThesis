@@ -16,7 +16,7 @@ from baselinev2.config import SPLIT_ANNOTATION_SAVE_PATH, TRAIN_SPLIT_PERCENTAGE
     TEST_SPLIT_PERCENTAGE, VIDEO_SAVE_PATH, SDD_VIDEO_CLASSES_RESUME_LIST, SDD_PER_CLASS_VIDEOS_RESUME_LIST, \
     SDD_ANNOTATIONS_ROOT_PATH, SAVE_BASE_PATH, BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST, \
     BUNDLED_ANNOTATIONS_PER_CLASSES_VIDEO_LIST, ROOT_PATH, version
-from baselinev2.plot_utils import plot_for_video_image_and_box
+from baselinev2.plot_utils import plot_for_video_image_and_box, plot_trajectory_with_relative_data
 from baselinev2.structures import TracksDataset, SingleTrack
 from log import initialize_logging, get_logger
 
@@ -530,22 +530,55 @@ def split_annotations_and_save_as_generated_track_datasets_by_length_for_one(ann
     logger.info(f'Saved track datasets at {path_to_save}')
 
 
-def get_relative_distances(arr):
+def get_relative_distances(arr, use_l2=False):
     relative_distances = []
     for idx in range(len(arr) - 1):
-        dist = np.linalg.norm((np.expand_dims(arr[idx + 1, -2:], axis=0).astype(np.float32) -
-                               np.expand_dims(arr[idx, -2:], axis=0).astype(np.float32)),
-                              ord=2, axis=0)
+        if use_l2:
+            dist = np.linalg.norm((np.expand_dims(arr[idx + 1, -2:], axis=0).astype(np.float32) -
+                                   np.expand_dims(arr[idx, -2:], axis=0).astype(np.float32)),
+                                  ord=2, axis=0)
+        else:
+            dist = (np.expand_dims(arr[idx + 1, -2:], axis=0).astype(np.float32) -
+                    np.expand_dims(arr[idx, -2:], axis=0).astype(np.float32)).squeeze()
         relative_distances.append(dist)
+    # plot_trajectory_with_relative_data(arr, relative_distances, relative_distances)
     return np.array(relative_distances)
 
 
-def get_relative_distances_generated_track(arr):
+def get_relative_distances_debug(arr, use_l2=False):
+    relative_distances = []
+    rel_dist_l2, rel_dist_simple = [], []
+    for idx in range(len(arr) - 1):
+        # if use_l2:
+        #     dist = np.linalg.norm((np.expand_dims(arr[idx + 1, -2:], axis=0).astype(np.float32) -
+        #                            np.expand_dims(arr[idx, -2:], axis=0).astype(np.float32)),
+        #                           ord=2, axis=0)
+        # else:
+        #     dist = (np.expand_dims(arr[idx + 1, -2:], axis=0).astype(np.float32) -
+        #             np.expand_dims(arr[idx, -2:], axis=0).astype(np.float32))
+        dist1 = np.linalg.norm((np.expand_dims(arr[idx + 1, -2:], axis=0).astype(np.float32) -
+                                np.expand_dims(arr[idx, -2:], axis=0).astype(np.float32)),
+                               ord=2, axis=0)
+        dist_simple = (np.expand_dims(arr[idx + 1, -2:], axis=0).astype(np.float32) -
+                       np.expand_dims(arr[idx, -2:], axis=0).astype(np.float32))
+        dist = dist_simple
+        rel_dist_l2.append(dist1)
+        rel_dist_simple.append(dist_simple)
+        relative_distances.append(dist)
+    plot_trajectory_with_relative_data(arr, rel_dist_l2, rel_dist_simple)
+    return np.array(relative_distances)
+
+
+def get_relative_distances_generated_track(arr, use_l2=False):
     relative_distances = []
     for idx in range(len(arr) - 1):
-        dist = np.linalg.norm((np.expand_dims(arr[idx + 1, 7:9], axis=0).astype(np.float32) -
-                               np.expand_dims(arr[idx, 7:9], axis=0).astype(np.float32)),
-                              ord=2, axis=0)
+        if use_l2:
+            dist = np.linalg.norm((np.expand_dims(arr[idx + 1, 7:9], axis=0).astype(np.float32) -
+                                   np.expand_dims(arr[idx, 7:9], axis=0).astype(np.float32)),
+                                  ord=2, axis=0)
+        else:
+            dist = (np.expand_dims(arr[idx + 1, 7:9], axis=0).astype(np.float32) -
+                    np.expand_dims(arr[idx, 7:9], axis=0).astype(np.float32)).squeeze()
         relative_distances.append(dist)
     return np.array(relative_distances)
 
@@ -568,7 +601,7 @@ def generate_annotation_for_all():
             split_annotations_and_save_as_track_datasets_by_length_for_one(
                 annotation_path=f'{SDD_ANNOTATIONS_ROOT_PATH}{video_class.value}/video{video_number}/'
                                 f'annotation_augmented.csv',
-                path_to_save=f'{SAVE_BASE_PATH}{video_class.value}/video{video_number}/splits/',
+                path_to_save=f'{SAVE_BASE_PATH}{video_class.value}/video{video_number}/splits_v1/',
                 by_track=False)
     logger.info('Finished generating all annotations!')
 
@@ -587,7 +620,8 @@ def generate_annotation_for_all_generated_tracks():
 
 
 if __name__ == '__main__':
-    generate_annotation_for_all_generated_tracks()
+    generate_annotation_for_all()
+    # generate_annotation_for_all_generated_tracks()
     # ff = np.load('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/'
     #              'SDD_Features/nexus/video11/splits/train_distances.npy', allow_pickle=True, mmap_mode='r')
     # print()
