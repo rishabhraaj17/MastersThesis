@@ -580,6 +580,7 @@ def get_relative_distances_generated_track(arr, use_l2=False):
             dist = (np.expand_dims(arr[idx + 1, 7:9], axis=0).astype(np.float32) -
                     np.expand_dims(arr[idx, 7:9], axis=0).astype(np.float32)).squeeze()
         relative_distances.append(dist)
+    # plot_trajectory_with_relative_data(arr, relative_distances, relative_distances, generated=True)
     return np.array(relative_distances)
 
 
@@ -614,14 +615,14 @@ def generate_annotation_for_all_generated_tracks():
             split_annotations_and_save_as_generated_track_datasets_by_length_for_one(
                 annotation_path=f'{ROOT_PATH}Plots/baseline_v2/v{version}/{video_class.value}{video_number}/'
                                 f'csv_annotation/generated_annotations.csv',
-                path_to_save=f'{ROOT_PATH}Plots/baseline_v2/v{version}/{video_class.value}{video_number}/splits/',
+                path_to_save=f'{ROOT_PATH}Plots/baseline_v2/v{version}/{video_class.value}{video_number}/splits_v1/',
                 by_track=False)
     logger.info('Finished generating all annotations!')
 
 
 if __name__ == '__main__':
-    generate_annotation_for_all()
-    # generate_annotation_for_all_generated_tracks()
+    # generate_annotation_for_all()
+    generate_annotation_for_all_generated_tracks()
     # ff = np.load('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/'
     #              'SDD_Features/nexus/video11/splits/train_distances.npy', allow_pickle=True, mmap_mode='r')
     # print()

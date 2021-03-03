@@ -47,7 +47,7 @@ class BaselineDataset(Dataset):
         except IndexError:
             # Homography not known!
             self.ratio = 1
-        path_to_dataset = f'{root}{video_class.value}/video{video_number}/splits/'
+        path_to_dataset = f'{root}{video_class.value}/video{video_number}/splits_v1/'
 
         self.tracks = np.load(f'{path_to_dataset}{split.value}_tracks.npy', allow_pickle=True, mmap_mode='r+')
         self.relative_distances = np.load(f'{path_to_dataset}{split.value}_distances.npy', allow_pickle=True,
@@ -93,7 +93,7 @@ class BaselineGeneratedDataset(Dataset):
         except IndexError:
             # Homography not known!
             self.ratio = 1
-        path_to_dataset = f'{root}{video_class.value}{video_number}/splits/'
+        path_to_dataset = f'{root}{video_class.value}{video_number}/splits_v1/'
 
         self.tracks = np.load(f'{path_to_dataset}{split.value}_tracks.npy', allow_pickle=True, mmap_mode='r+')
         self.relative_distances = np.load(f'{path_to_dataset}{split.value}_distances.npy', allow_pickle=True,

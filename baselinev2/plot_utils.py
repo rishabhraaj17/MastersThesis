@@ -992,11 +992,11 @@ def plot_and_compare_trajectory_four_way(
 
 
 def plot_trajectory_with_relative_data(trajectory, relative_distances_l2, relative_distances, additional_text='',
-                                       return_figure_only=False, save_path=None):
+                                       return_figure_only=False, save_path=None, generated=False):
     fig, ax = plt.subplots(2, 2, sharex='none', sharey='none', figsize=(16, 14))
     ax_combined, ax_real, ax_l2, ax_simple = ax[0, 0], ax[0, 1], ax[1, 0], ax[1, 1]
-    add_line_to_axis(ax=ax_combined, features=trajectory[:, -2:])
-    start_point = trajectory[0, -2:]
+    add_line_to_axis(ax=ax_combined, features=trajectory[:, -2:] if not generated else trajectory[:, 7:9])
+    start_point = trajectory[0, -2:] if not generated else trajectory[0, 7:9]
     trajectory_l2, trajectory_simple = [start_point], [start_point]
     last_pos_l2, last_pos_simple = start_point, start_point
     for rel_l2, rel_simple in zip(relative_distances_l2, relative_distances):
@@ -1014,7 +1014,7 @@ def plot_trajectory_with_relative_data(trajectory, relative_distances_l2, relati
     add_line_to_axis(ax=ax_combined, features=trajectory_l2, marker_color='r')
     add_line_to_axis(ax=ax_combined, features=trajectory_simple, marker_color='g')
 
-    add_line_to_axis(ax=ax_real, features=trajectory[:, -2:])
+    add_line_to_axis(ax=ax_real, features=trajectory[:, -2:] if not generated else trajectory[:, 7:9])
     add_line_to_axis(ax=ax_l2, features=trajectory_l2, marker_color='r')
     add_line_to_axis(ax=ax_simple, features=trajectory_simple, marker_color='g')
 
