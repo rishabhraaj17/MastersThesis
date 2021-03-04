@@ -16,7 +16,7 @@ from baselinev2.nn.models import BaselineRNNStackedSimple
 from baselinev2.nn.social_lstm.model import BaselineLSTM
 from baselinev2.nn.train import get_train_validation_dataset_for_class, get_social_model, get_simple_model, get_model, \
     get_train_validation_dataset
-from baselinev2.plot_utils import plot_trajectories, plot_trajectory_alongside_frame
+from baselinev2.plot_utils import plot_trajectories, plot_trajectory_alongside_frame, plot_trajectory_with_relative_data
 from baselinev2.utils import social_lstm_parser
 from log import initialize_logging, get_logger
 
@@ -207,6 +207,10 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
         dataset_train = subset_dataset_train
         dataset_val = subset_dataset_val
 
+    if overfit_element_count is None:
+        dataset_train = dataset_train_superset
+        dataset_val = dataset_val_superset
+
     loader_train = DataLoader(dataset_train, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle,
                               pin_memory=pin_memory, drop_last=drop_last)
     loader_val = DataLoader(dataset_val, batch_size=batch_size, num_workers=num_workers, shuffle=False,
@@ -245,9 +249,12 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
 
     best_val_loss = 10e7
     resume_dict = {}
-    resume_dict_save_root_path = 'runs/overfit_experiments/'
+    resume_dict_save_root_path = 'runs/Maar_overfit_experiments/' if overfit_element_count is not None else \
+        'runs/Maar_overfit_experiments/full_train/'
 
-    resume_dict_save_folder = f'element_size_{overfit_element_count}_random_{keep_overfit_elements_random}_lr_{lr}'
+    resume_dict_save_folder = f'element_size_{overfit_element_count}_random_{keep_overfit_elements_random}_lr_{lr}' \
+                              f'_generated_{get_generated}_learn_hidden_{learn_hidden_states}' \
+                              f'_rnn_layers_{num_rnn_layers}_{datetime.now()}'
     final_path = f'{resume_dict_save_root_path}{resume_dict_save_folder}/'
 
     # resume_dict_save_folder = os.listdir(resume_dict_save_root_path)
@@ -256,6 +263,7 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
 
     start_epoch = 0
     epoch = 0
+    per_epoch_to_save_plot = 20 if get_generated else 2
 
     if resume_custom_path is not None:
         logger.info('Resuming Training!')
@@ -324,18 +332,24 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
                 epoch_t_ade.append(torch.tensor(running_t_ade).mean().item())
                 epoch_t_fde.append(torch.tensor(running_t_fde).mean().item())
 
-                if epoch % 1500 == 0:
+                if epoch % per_epoch_to_save_plot == 0:
                     im_idx = np.random.choice(batch_size, 1).item()
                     video_dataset = dataset_train_superset.datasets[dataset_idx[im_idx].item()]
                     video_path = f'{BASE_PATH}videos/{video_dataset.video_class.value}/' \
                                  f'video{video_dataset.video_number}/video.mov'
+                    # plot_trajectory_with_relative_data(np.concatenate((data[0][im_idx].cpu().squeeze().numpy(),
+                    #                                                   data[1][im_idx].cpu().squeeze().numpy())),
+                    #                                    np.concatenate((data[2][im_idx].cpu().squeeze().numpy(),
+                    #                                                   data[3][im_idx].cpu().squeeze().numpy())),
+                    #                                    np.concatenate((data[2][im_idx].cpu().squeeze().numpy(),
+                    #                                                   data[3][im_idx].cpu().squeeze().numpy())))
                     plot_trajectory_alongside_frame(
                             frame=extract_frame_from_video(
                                 video_path=video_path, frame_number=data[6][im_idx].cpu().squeeze()[0].item()),
                             obs_trajectory=data[0][im_idx].cpu().squeeze().numpy(),
                             gt_trajectory=data[1][im_idx].cpu().squeeze().numpy(),
                             pred_trajectory=pred_trajectory[:, im_idx, ...].squeeze(),
-                            frame_number=data[6][im_idx].cpu().squeeze()[0].item(),
+                            frame_number=data[6][im_idx].cpu().squeeze()[0].item(), epoch=epoch,
                             track_id=data[4][im_idx].cpu().squeeze()[0].item(), save_path=final_path + 'train/')
                 if epoch == list(range(max_epochs))[-1]:
                     for im_idx in range(batch_size):
@@ -346,7 +360,7 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
                             gt_trajectory=data[1][im_idx].cpu().squeeze().numpy(),
                             pred_trajectory=pred_trajectory[:, im_idx, ...].squeeze(),
                             frame_number=data[6][im_idx].cpu().squeeze()[0].item(),
-                            track_id=data[4][im_idx].cpu().squeeze()[0].item(),
+                            track_id=data[4][im_idx].cpu().squeeze()[0].item(), epoch=epoch,
                             save_path=final_path + 'train/' + 'last_epoch/')
 
                 # summary_writer.add_scalar('train/loss_epoch', epoch_t_loss, global_step=epoch)
@@ -382,7 +396,7 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
                     epoch_v_ade.append(torch.tensor(running_v_ade).mean().item())
                     epoch_v_fde.append(torch.tensor(running_v_fde).mean().item())
 
-                    if epoch % 1500 == 0:
+                    if epoch % per_epoch_to_save_plot == 0:
                         im_idx = np.random.choice(batch_size, 1).item()
                         video_dataset = dataset_val_superset.datasets[dataset_idx[im_idx].item()]
                         video_path = f'{BASE_PATH}videos/{video_dataset.video_class.value}/' \
@@ -393,8 +407,8 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
                                 obs_trajectory=data[0][im_idx].cpu().squeeze().numpy(),
                                 gt_trajectory=data[1][im_idx].cpu().squeeze().numpy(),
                                 pred_trajectory=pred_trajectory[:, im_idx, ...].squeeze(),
-                                frame_number=data[6][im_idx].cpu().squeeze()[0].item(),
-                                track_id=data[4][im_idx].cpu().squeeze()[0].item(), save_path=final_path + 'train/')
+                                frame_number=data[6][im_idx].cpu().squeeze()[0].item(), epoch=epoch,
+                                track_id=data[4][im_idx].cpu().squeeze()[0].item(), save_path=final_path + 'val/')
                     if epoch == list(range(max_epochs))[-1]:
                         for im_idx in range(batch_size):
                             plot_trajectory_alongside_frame(
@@ -404,8 +418,8 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
                                 gt_trajectory=data[1][im_idx].cpu().squeeze().numpy(),
                                 pred_trajectory=pred_trajectory[:, im_idx, ...].squeeze(),
                                 frame_number=data[6][im_idx].cpu().squeeze()[0].item(),
-                                track_id=data[4][im_idx].cpu().squeeze()[0].item(),
-                                save_path=final_path + 'validation/' + 'last_epoch/')
+                                track_id=data[4][im_idx].cpu().squeeze()[0].item(), epoch=epoch,
+                                save_path=final_path + 'val/' + 'last_epoch/')
 
                     # summary_writer.add_scalar('val/loss_epoch', epoch_v_loss, global_step=epoch)
                     # summary_writer.add_scalar('val/ade_epoch', epoch_v_ade, global_step=epoch)
@@ -516,8 +530,8 @@ def overfit_on_dataset_chunks(train_video_class: Union[SDDVideoClasses, List[SDD
                        'overfit_element_count': overfit_element_count,
                        'keep_overfit_elements_random': keep_overfit_elements_random,
                        'do_validation': do_validation,
-                       'train_indices': train_indices,
-                       'val_indices': val_indices
+                       'train_indices': train_indices if overfit_element_count is not None else [],
+                       'val_indices': val_indices if overfit_element_count is not None else []
                        }
         # Path(hparam_file).mkdir(parents=True, exist_ok=True)
         with open(hparam_file, 'w+') as f:

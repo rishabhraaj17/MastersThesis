@@ -33,7 +33,7 @@ def define_model(trial: optuna.Trial):
     #                     use_batch_norm=use_batch_norm)
     return BaselineRNNStackedSimple(use_batch_norm=bool(use_batch_norm), use_gru=bool(use_gru), return_pred=True,
                                     learn_hidden_states=False, encoder_lstm_num_layers=rnn_layers,
-                                    decoder_lstm_num_layers=rnn_layers, generated_dataset=False)
+                                    decoder_lstm_num_layers=rnn_layers, generated_dataset=True)
 
 
 def get_loaders(trial):
@@ -52,11 +52,11 @@ def get_loaders(trial):
         val_video_class=[SDDVideoClassAndNumbers.LITTLE, SDDVideoClassAndNumbers.DEATH_CIRCLE,
                          SDDVideoClassAndNumbers.HYANG],
         val_meta_label=[SDDVideoDatasets.LITTLE, SDDVideoDatasets.DEATH_CIRCLE, SDDVideoDatasets.HYANG]
-        , get_generated=False, videos_to_skip_for_train=[()],
+        , get_generated=True, videos_to_skip_for_train=[()],
         videos_to_skip_for_val=[()])
 
-    # batch_size = trial.suggest_int("batch_size", 64, 1024, step=64)
-    batch_size = 3072
+    batch_size = trial.suggest_int("batch_size", 64, 1024, step=64)
+    # batch_size = 3072
     # Load MNIST dataset.
     train_loader = torch.utils.data.DataLoader(
         dataset_train,
@@ -89,6 +89,7 @@ def objective(trial: optuna.Trial):
     # Get the MNIST dataset.
     train_loader, valid_loader = get_loaders(trial)
 
+    all_epoch_loss = []
     # Training of the model.
     for epoch in range(EPOCHS):
         model.train()
@@ -119,13 +120,14 @@ def objective(trial: optuna.Trial):
                 running_loss.append(loss.item())
 
         running_loss = torch.tensor(running_loss).mean()
+        all_epoch_loss.append(running_loss)
         trial.report(running_loss, epoch)
 
         # Handle pruning based on the intermediate value.
         if trial.should_prune():
             raise optuna.exceptions.TrialPruned()
 
-    return running_loss
+    return torch.tensor(all_epoch_loss).mean()
 
 
 if __name__ == "__main__":

@@ -12,9 +12,9 @@ VALIDATION_SPLIT_PERCENTAGE = 0.15
 TEST_SPLIT_PERCENTAGE = 0.25
 
 TIME_STEPS = 5
-NUM_WORKERS = 0
-BATCH_SIZE = 512 // 8  # 32  # 1024  # 2048
-LR = 1e-3  # 0.0014462413062537917  # 2e-3
+NUM_WORKERS = 12
+BATCH_SIZE = 32  # 32  # 1024  # 2048
+LR = 1e-3  # 1e-3  # 3e-2  # 0.0014462413062537917  # 2e-3
 NUM_EPOCHS = 1000
 OVERFIT = False
 
@@ -58,8 +58,8 @@ GENERATOR_SEED = torch.Generator().manual_seed(MANUAL_SEED)
 # }
 #
 LINEAR_CFG = {
-    'encoder': [32],
-    'decoder': [32, 2],
+    'encoder': [8, 16, 32],
+    'decoder': [32, 16, 2],
     'lstm_in': 32,
     'lstm_encoder': 64
 }

@@ -20,6 +20,7 @@ from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.models import BaselineRNN, BaselineRNNStacked, BaselineRNNStackedSimple
+from baselinev2.overfit_config import LINEAR_CFG
 from baselinev2.utils import social_lstm_parser
 from baselinev2.nn.social_lstm.model import BaselineLSTM
 from baselinev2.plot_utils import plot_trajectory_alongside_frame, plot_and_compare_trajectory_four_way, \
@@ -137,14 +138,22 @@ def evaluate_simple_v2_model(model: Optional[nn.Module], data_loader: DataLoader
     checkpoint = torch.load(checkpoint_path)
     model_state_dict = checkpoint['model_state_dict']
     last_model_state_dict = checkpoint['last_model_state_dict']
-    model = BaselineRNNStackedSimple(use_batch_norm=checkpoint['use_batch_norm'],
-                                     encoder_lstm_num_layers=4,
-                                     decoder_lstm_num_layers=4,
+    # model = BaselineRNNStackedSimple(use_batch_norm=checkpoint['use_batch_norm'],
+    #                                  encoder_lstm_num_layers=checkpoint['num_rnn_layers'],
+    #                                  decoder_lstm_num_layers=checkpoint['num_rnn_layers'],
+    #                                  return_pred=True,
+    #                                  generated_dataset=generated,
+    #                                  relative_velocities=False,
+    #                                  dropout=None, rnn_dropout=0, batch_size=checkpoint['batch_size'],
+    #                                  use_gru=checkpoint['use_gru'], learn_hidden_states=True)
+    model = BaselineRNNStackedSimple(use_batch_norm=False, arch_config=LINEAR_CFG,
+                                     encoder_lstm_num_layers=1,
+                                     decoder_lstm_num_layers=1,
                                      return_pred=True,
                                      generated_dataset=generated,
                                      relative_velocities=False,
                                      dropout=None, rnn_dropout=0, batch_size=32,
-                                     use_gru=False, learn_hidden_states=True)
+                                     use_gru=False, learn_hidden_states=False)
     model.load_state_dict(model_state_dict)
 
     model.eval()
@@ -159,23 +168,24 @@ def evaluate_simple_v2_model(model: Optional[nn.Module], data_loader: DataLoader
 
         loss, ade, fde, ratio, pred_trajectory = model.one_step(data)
 
-        im_idx = np.random.choice(32, 1).item()
+        for i in range(1):
+            im_idx = np.random.choice(checkpoint['batch_size'] - 1, 1).item()
 
-        plot_frame_number = in_frame_numbers.squeeze()[im_idx][0].item()
-        plot_track_id = in_track_ids.squeeze()[im_idx][0].item()
-        obs_trajectory = in_xy.squeeze().numpy()[im_idx]
-        gt_trajectory = gt_xy.squeeze().numpy()[im_idx]
-        pred_trajectory = pred_trajectory.squeeze()[:, im_idx, ...]
-        all_frame_numbers = torch.cat((in_frame_numbers.squeeze()[im_idx], gt_frame_numbers.squeeze()[im_idx])).tolist()
+            plot_frame_number = in_frame_numbers.squeeze()[im_idx][0].item()
+            plot_track_id = in_track_ids.squeeze()[im_idx][0].item()
+            obs_trajectory = in_xy.squeeze().numpy()[im_idx]
+            gt_trajectory = gt_xy.squeeze().numpy()[im_idx]
+            pred_trajectory_in = pred_trajectory.squeeze()[:, im_idx, ...]
+            all_frame_numbers = torch.cat((in_frame_numbers.squeeze()[im_idx], gt_frame_numbers.squeeze()[im_idx])).tolist()
 
-        plot_trajectory_alongside_frame(
-            frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
-            obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
-            pred_trajectory=pred_trajectory, frame_number=plot_frame_number,
-            track_id=plot_track_id, additional_text=f'Frame Numbers: {all_frame_numbers}\nADE: {ade} | FDE: {fde}',
-            save_path=f'{plot_path}'
-        )
-        print()
+            plot_trajectory_alongside_frame(
+                frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
+                obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
+                pred_trajectory=pred_trajectory_in, frame_number=plot_frame_number,
+                track_id=plot_track_id, additional_text=f'Frame Numbers: {all_frame_numbers}\nADE: {ade} | FDE: {fde}',
+                save_path=f'{plot_path}'
+            )
+            print()
 
 
 def get_models(social_lstm, supervised_checkpoint_root_path, unsupervised_checkpoint_root_path, use_batch_norm,
@@ -402,19 +412,29 @@ if __name__ == '__main__':
                 checkpoint_root_path=checkpoint_root_path, video_path=path_to_video,
                 plot_path=plot_save_path)
         elif use_simple_v2_model:
-            generated_dataset = False
+            generated_dataset = True
             dataset = get_dataset(video_clazz=sdd_video_class, video_number=sdd_video_number, mode=network_mode,
                                   meta_label=sdd_meta_class, get_generated=generated_dataset)
             # checkpoint_path = f'../baselinev2/runs/Feb25_00-30-05_rishabh-Precision-5540baseline/' \
             #                   f'Feb25_00-30-05_rishabh-Precision-5540baseline_checkpoint.ckpt'
-            checkpoint_path = f'../baselinev2/runs/Feb25_17-18-46_rishabh-Precision-5540baseline/' \
-                              f'Feb25_17-18-46_rishabh-Precision-5540baseline_checkpoint.ckpt'
+            # checkpoint_path = f'../baselinev2/runs/Maar_overfit_experiments/full_train/' \
+            #                   f'element_size_None_random_True_lr_0.001_generated_True/' \
+            #                   f'element_size_None_random_True_lr_0.001_generated_True_checkpoint.ckpt'
+            # checkpoint_path = f'../baselinev2/runs/Maar_overfit_experiments/full_train/' \
+            #                   f'element_size_None_random_True_lr_0.002_generated_True/' \
+            #                   f'element_size_None_random_True_lr_0.002_generated_True_checkpoint.ckpt'
+            checkpoint_path = f'../baselinev2/runs/Maar_overfit_experiments/full_train/' \
+                              f'element_size_None_random_True_lr_0.001_generated_True_learn_hidden_False' \
+                              f'_rnn_layers_1_2021-03-04 13:37:06.911715/element_size_None_random_True_lr_0.001_' \
+                              f'generated_True_learn_hidden_False_rnn_layers_1_2021-03-04 13:37:06.911715' \
+                              f'_checkpoint.ckpt'
             experiment_name = os.path.split(checkpoint_path)[-1][:-5]
             plot_save_path = f'{ROOT_PATH}Plots/baseline_v2/nn/EVAL_CUSTOM/{sdd_video_class.value}{sdd_video_number}/' \
                              f'{network_mode.value}/{experiment_name}/'
             evaluate_simple_v2_model(
                 model=None,
-                data_loader=DataLoader(dataset, batch_size=32, num_workers=num_workers, shuffle=shuffle),
+                data_loader=DataLoader(dataset, batch_size=32, num_workers=num_workers, shuffle=shuffle,
+                                       drop_last=True),
                 checkpoint_path=checkpoint_path, video_path=path_to_video,
                 plot_path=plot_save_path, generated=generated_dataset)
         else:

@@ -72,8 +72,8 @@ class BaselineDataset(Dataset):
         gt_xy = tracks[..., self.observation_length:, -2:]
         in_velocities = relative_distances[..., :self.observation_length - 1, :] / 0.4 \
             if self.relative_velocities else relative_distances[..., :self.observation_length - 1, :]
-        gt_velocities = relative_distances[..., self.observation_length:, :] / 0.4 \
-            if self.relative_velocities else relative_distances[..., self.observation_length:, :]
+        gt_velocities = relative_distances[..., self.observation_length - 1:, :] / 0.4 \
+            if self.relative_velocities else relative_distances[..., self.observation_length - 1:, :]
         in_track_ids = tracks[..., :self.observation_length, 0].int()
         gt_track_ids = tracks[..., self.observation_length:, 0].int()
         in_frame_numbers = tracks[..., :self.observation_length, 5].int()
@@ -118,8 +118,8 @@ class BaselineGeneratedDataset(Dataset):
         gt_xy = tracks[self.observation_length:, 6:8]
         in_velocities = relative_distances[:self.observation_length - 1, :] / 0.4 \
             if self.relative_velocities else relative_distances[:self.observation_length - 1, :]
-        gt_velocities = relative_distances[self.observation_length:, :] / 0.4 \
-            if self.relative_velocities else relative_distances[self.observation_length:, :]
+        gt_velocities = relative_distances[self.observation_length - 1:, :] / 0.4 \
+            if self.relative_velocities else relative_distances[self.observation_length - 1:, :]
         in_track_ids = tracks[:self.observation_length, 0].int()
         gt_track_ids = tracks[self.observation_length:, 0].int()
         in_frame_numbers = tracks[:self.observation_length, 5].int()
