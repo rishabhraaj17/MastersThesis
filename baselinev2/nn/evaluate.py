@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Optional
 
 import matplotlib
@@ -19,7 +20,8 @@ from baselinev2.config import BASE_PATH, ROOT_PATH, DEBUG_MODE, EVAL_USE_SOCIAL_
     EVAL_USE_FINAL_POSITIONS_SUPERVISED, EVAL_USE_FINAL_POSITIONS_UNSUPERVISED, EVAL_USE_SIMPLE_MODEL, \
     EVAL_SIMPLE_MODEL_CONFIG_DICT_GT, EVAL_SIMPLE_MODEL_CONFIG_DICT_UNSUPERVISED, SIMPLE_GT_CHECKPOINT_ROOT_PATH, \
     SIMPLE_UNSUPERVISED_CHECKPOINT_ROOT_PATH, EVAL_FOR_WHOLE_CLASS, EVAL_TRAIN_VIDEOS_TO_SKIP, EVAL_VAL_VIDEOS_TO_SKIP, \
-    EVAL_TEST_VIDEOS_TO_SKIP, SIMPLE_GT_CHECKPOINT_PATH, SIMPLE_UNSUPERVISED_CHECKPOINT_PATH, DEVICE, BEST_MODEL
+    EVAL_TEST_VIDEOS_TO_SKIP, SIMPLE_GT_CHECKPOINT_PATH, SIMPLE_UNSUPERVISED_CHECKPOINT_PATH, DEVICE, BEST_MODEL, \
+    EVAL_SINGLE_MODEL, SINGLE_MODEL_CHECKPOINT_PATH
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset, ConcatenateDataset
 from baselinev2.nn.data_utils import extract_frame_from_video
@@ -230,7 +232,7 @@ def get_models(social_lstm, supervised_checkpoint_root_path, unsupervised_checkp
         except FileNotFoundError:
             supervised_hyperparameter_file = EVAL_SIMPLE_MODEL_CONFIG_DICT_GT
 
-        # if supervised_hyperparameter_file['generated_data']:
+        # if supervised_hyperparameter_file['generated_data']:  # fixme- remove comment
         #     logger.error('Trying to load model trained on unsupervised data!!')
         #     raise RuntimeError()
 
@@ -371,7 +373,7 @@ def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loade
                     additional_text=f'Frame Numbers: {all_frame_numbers}'
                                     f'\nGround Truth -> ADE: {supervised_ade} | FDE: {supervised_fde}'
                                     f'\nUnsupervised -> ADE: {unsupervised_ade} | FDE: {unsupervised_fde}',
-                    save_path=f'{plot_path}{split_name}/'
+                    save_path=f'{plot_path}/{split_name}/model/'
                 )
                 plot_trajectories(obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
                                   pred_trajectory=constant_linear_baseline_pred_trajectory.squeeze(),
@@ -379,7 +381,7 @@ def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loade
                                   additional_text=f'Frame Numbers: {all_frame_numbers}'
                                                   f'\nGround Truth -> ADE: {constant_linear_baseline_ade.item()} | '
                                                   f'FDE: {constant_linear_baseline_fde.item()}',
-                                  save_path=f'{plot_path}{split_name}/constant_linear_baseline/'
+                                  save_path=f'{plot_path}/{split_name}/constant_linear_baseline/'
                                   )
             else:
                 plot_and_compare_trajectory_alongside_frame(
@@ -395,7 +397,7 @@ def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loade
                     additional_text=f'Frame Numbers: {all_frame_numbers}'
                                     f'\nGround Truth -> ADE: {supervised_ade} | FDE: {supervised_fde}'
                                     f'\nUnsupervised -> ADE: {unsupervised_ade} | FDE: {unsupervised_fde}',
-                    save_path=f'{plot_path}{split_name}/',
+                    save_path=f'{plot_path}/{split_name}/model/',
                     include_frame=True
                 )
 
@@ -403,8 +405,8 @@ def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loade
         supervised_fde_list.append(supervised_fde)
         unsupervised_ade_list.append(unsupervised_ade)
         unsupervised_fde_list.append(unsupervised_fde)
-        constant_linear_baseline_ade_list.append(constant_linear_baseline_ade.item())
-        constant_linear_baseline_fde_list.append(constant_linear_baseline_fde.item())
+        constant_linear_baseline_ade_list.append(constant_linear_baseline_ade.mean().item())
+        constant_linear_baseline_fde_list.append(constant_linear_baseline_fde.mean().item())
 
     return supervised_ade_list, supervised_fde_list, unsupervised_ade_list, unsupervised_fde_list, \
            constant_linear_baseline_ade_list, constant_linear_baseline_fde_list
@@ -419,8 +421,8 @@ def get_metrics(supervised_ade_list, supervised_fde_list, unsupervised_ade_list,
 def eval_models(supervised_checkpoint_root_path: str, unsupervised_checkpoint_root_path: str, train_loader: DataLoader,
                 val_loader: DataLoader, test_loader: DataLoader, social_lstm: bool = True, plot: bool = False,
                 use_batch_norm: bool = False, video_path: str = None, plot_path: Optional[str] = None,
-                plot_four_way: bool = False, supervised_pass_final_pos: bool = True, use_simple_model_version=False,
-                unsupervised_pass_final_pos: bool = True, metrics_in_meters: bool = True):
+                plot_four_way: bool = False, supervised_pass_final_pos: bool = False, use_simple_model_version=False,
+                unsupervised_pass_final_pos: bool = False, metrics_in_meters: bool = True):
     supervised_net, unsupervised_net = get_models(social_lstm, supervised_checkpoint_root_path,
                                                   unsupervised_checkpoint_root_path, use_batch_norm,
                                                   supervised_pass_final_pos=supervised_pass_final_pos,
@@ -476,6 +478,45 @@ def eval_models(supervised_checkpoint_root_path: str, unsupervised_checkpoint_ro
         np.array(train_constant_linear_baseline_ade_list).mean(), \
         np.array(train_constant_linear_baseline_fde_list).mean()
 
+    eval_results = {
+        'supervised_checkpoint_root_path': supervised_checkpoint_root_path,
+        'unsupervised_checkpoint_root_path': unsupervised_checkpoint_root_path,
+        'social_lstm': social_lstm,
+        'use_batch_norm': use_batch_norm,
+        'use_simple_model_version': use_simple_model_version,
+        'EVAL_TRAIN_CLASS': EVAL_TRAIN_CLASS,
+        'EVAL_VAL_CLASS': EVAL_VAL_CLASS,
+        'EVAL_TEST_CLASS': EVAL_TEST_CLASS,
+        'EVAL_TRAIN_VIDEO_NUMBER': EVAL_TRAIN_VIDEO_NUMBER,
+        'EVAL_VAL_VIDEO_NUMBER': EVAL_VAL_VIDEO_NUMBER,
+        'EVAL_TEST_VIDEO_NUMBER': EVAL_TEST_VIDEO_NUMBER,
+        'EVAL_TRAIN_VIDEOS_TO_SKIP': EVAL_TRAIN_VIDEOS_TO_SKIP,
+        'EVAL_VAL_VIDEOS_TO_SKIP': EVAL_VAL_VIDEOS_TO_SKIP,
+        'EVAL_TEST_VIDEOS_TO_SKIP': EVAL_TEST_VIDEOS_TO_SKIP,
+        'train':
+            {'ade': {'supervised': train_supervised_ade.item(), 'unsupervised': train_unsupervised_ade.item(),
+                     'linear': train_constant_linear_baseline_ade.item()},
+             'fde': {'supervised': train_supervised_fde.item(), 'unsupervised': train_unsupervised_fde.item(),
+                     'linear': train_constant_linear_baseline_fde.item()},
+             'num_trajectories': len(train_loader.dataset)},
+        'val':
+            {'ade': {'supervised': val_supervised_ade.item(), 'unsupervised': val_unsupervised_ade.item(),
+                     'linear': val_constant_linear_baseline_ade.item()},
+             'fde': {'supervised': val_supervised_fde.item(), 'unsupervised': val_unsupervised_fde.item(),
+                     'linear': val_constant_linear_baseline_fde.item()},
+             'num_trajectories': len(val_loader.dataset)},
+        'test':
+            {'ade': {'supervised': test_supervised_ade.item(), 'unsupervised': test_unsupervised_ade.item(),
+                     'linear': test_constant_linear_baseline_ade.item()},
+             'fde': {'supervised': test_supervised_fde.item(), 'unsupervised': test_unsupervised_fde.item(),
+                     'linear': test_constant_linear_baseline_fde.item()},
+             'num_trajectories': len(test_loader.dataset)}}
+
+    results_dump_path = f'{plot_path}/eval_results.yaml'
+    Path(plot_path).mkdir(parents=True, exist_ok=True)
+    with open(results_dump_path, 'w+') as f:
+        yaml.dump(eval_results, f)
+
     logger.info('Train Set')
     logger.info(f'ADE - GT: {train_supervised_ade} | Unsupervised: {train_unsupervised_ade} | '
                 f'Linear: {train_constant_linear_baseline_ade}')
@@ -492,6 +533,243 @@ def eval_models(supervised_checkpoint_root_path: str, unsupervised_checkpoint_ro
     logger.info(f'ADE - GT: {test_supervised_ade} | Unsupervised: {test_unsupervised_ade} | '
                 f'Linear: {test_constant_linear_baseline_ade}')
     logger.info(f'FDE - GT: {test_supervised_fde} | Unsupervised: {test_unsupervised_fde} | '
+                f'Linear: {test_constant_linear_baseline_fde}')
+
+
+def get_model(social_lstm, model_checkpoint_root_path, use_batch_norm,
+              model_pass_final_pos=True, use_simple_model_version=False):
+    if social_lstm:
+        model_checkpoint_path = model_checkpoint_root_path + 'checkpoints/'
+        model_checkpoint_file = os.listdir(model_checkpoint_path)[-1]
+
+        model_net = BaselineLSTM.load_from_checkpoint(
+            checkpoint_path=model_checkpoint_path + model_checkpoint_file,
+            hparams_file=f'{model_checkpoint_root_path}hparams.yaml',
+            map_location=None,
+            args=social_lstm_parser(pass_final_pos=model_pass_final_pos),
+            use_batch_norm=use_batch_norm
+        )
+    elif use_simple_model_version:
+        # root path is the full path
+        model_checkpoint_path = model_checkpoint_root_path
+
+        model_hyperparameter_path = model_checkpoint_root_path[:-15] + 'hparams.yaml'
+
+        try:
+            with open(model_hyperparameter_path, 'r+') as sup_f:
+                model_hyperparameter_file = yaml.full_load(sup_f)
+        except FileNotFoundError:
+            model_hyperparameter_file = EVAL_SIMPLE_MODEL_CONFIG_DICT_GT
+
+        # if model_hyperparameter_file['generated_data']:  # fixme- remove comment
+        #     logger.error('Trying to load model trained on unmodel data!!')
+        #     raise RuntimeError()
+
+        if not model_hyperparameter_file['use_simple_model']:
+            logger.error('Model to load is not an instance of BaselineRNNStackedSimple!')
+            raise RuntimeError()
+
+        model_net = BaselineRNNStackedSimple(
+            arch_config=model_hyperparameter_file['arch_config'],
+            batch_size=model_hyperparameter_file['batch_size'],
+            use_batch_norm=model_hyperparameter_file['use_batch_norm'],
+            encoder_lstm_num_layers=model_hyperparameter_file['num_rnn_layers'],
+            decoder_lstm_num_layers=model_hyperparameter_file['num_rnn_layers'],
+            generated_dataset=False,  # model_hyperparameter_file['generated_data'],
+            dropout=model_hyperparameter_file['dropout'],
+            rnn_dropout=model_hyperparameter_file['rnn_dropout'],
+            use_gru=model_hyperparameter_file['use_gru'],
+            learn_hidden_states=model_hyperparameter_file['learn_hidden_states'],
+            feed_model_distances_in_meters=model_hyperparameter_file['feed_model_distances_in_meters'],
+            relative_velocities=model_hyperparameter_file['relative_velocities'])
+
+        key = 'model_state_dict' if BEST_MODEL else 'last_model_state_dict'
+
+        model_net.load_state_dict(torch.load(model_checkpoint_path, map_location=DEVICE)[key])
+    else:
+        model_checkpoint_path = model_checkpoint_root_path + 'checkpoints/'
+        model_checkpoint_file = os.listdir(model_checkpoint_path)[-1]
+
+        NET = BaselineRNNStackedSimple if use_simple_model_version else BaselineRNNStacked
+        model_net = NET.load_from_checkpoint(
+            checkpoint_path=model_checkpoint_path + model_checkpoint_file,
+            hparams_file=f'{model_checkpoint_root_path}hparams.yaml',
+            map_location=None,
+            use_batch_norm=use_batch_norm,
+            return_pred=True
+        )
+
+    model_net.eval()
+    return model_net
+
+
+def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, video_path, split_name,
+                                     metrics_in_meters=True, use_simple_model_version=False):
+    constant_linear_baseline_caller = ConstantLinearBaseline()
+
+    model_ade_list, model_fde_list = [], []
+    constant_linear_baseline_ade_list, constant_linear_baseline_fde_list = [], []
+
+    for idx, data in enumerate(tqdm(loader)):
+        if use_simple_model_version and EVAL_FOR_WHOLE_CLASS:
+            data, dataset_idx = data
+        in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = data
+
+        model_loss, model_ade, model_fde, model_ratio, model_pred_trajectory = \
+            model_caller(data)
+        constant_linear_baseline_pred_trajectory, constant_linear_baseline_ade, constant_linear_baseline_fde = \
+            constant_linear_baseline_caller.eval(obs_trajectory=in_xy, obs_distances=in_uv,
+                                                 gt_trajectory=gt_xy, ratio=ratio)
+
+        if plot:
+            plot_frame_number = in_frame_numbers.squeeze()[0].item()
+            plot_track_id = in_track_ids.squeeze()[0].item()
+            all_frame_numbers = torch.cat((in_frame_numbers.squeeze(), gt_frame_numbers.squeeze())).tolist()
+
+            obs_trajectory = in_xy.squeeze().numpy()
+            gt_trajectory = gt_xy.squeeze().numpy()
+
+            model_pred_trajectory = model_pred_trajectory.squeeze().numpy() \
+                if not use_simple_model_version else model_pred_trajectory.squeeze()
+
+            if use_simple_model_version and EVAL_FOR_WHOLE_CLASS:
+                video_dataset = loader.dataset.datasets[dataset_idx.item()]
+                video_path = f'{BASE_PATH}videos/{video_dataset.video_class.value}/' \
+                             f'video{video_dataset.video_number}/video.mov'
+
+            plot_trajectory_alongside_frame(
+                frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
+                obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
+                pred_trajectory=constant_linear_baseline_pred_trajectory.squeeze(),
+                frame_number=plot_frame_number, track_id=plot_track_id,
+                additional_text=f'Frame Numbers: {all_frame_numbers}'
+                                f'\nGround Truth -> ADE: {constant_linear_baseline_ade.item()} | '
+                                f'FDE: {constant_linear_baseline_fde.item()}',
+                save_path=f'{plot_path}/{split_name}/constant_linear_baseline/'
+            )
+            plot_trajectory_alongside_frame(
+                frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
+                obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
+                pred_trajectory=model_pred_trajectory,
+                frame_number=plot_frame_number, track_id=plot_track_id,
+                additional_text=f'Frame Numbers: {all_frame_numbers}'
+                                f'\nGround Truth -> ADE: {model_ade} | '
+                                f'FDE: {model_fde}',
+                save_path=f'{plot_path}/{split_name}/model/'
+            )
+
+        model_ade_list.append(model_ade)
+        model_fde_list.append(model_fde)
+        constant_linear_baseline_ade_list.append(constant_linear_baseline_ade.mean().item())
+        constant_linear_baseline_fde_list.append(constant_linear_baseline_fde.mean().item())
+
+    return model_ade_list, model_fde_list, \
+           constant_linear_baseline_ade_list, constant_linear_baseline_fde_list
+
+
+@torch.no_grad()
+def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_loader: DataLoader,
+               test_loader: DataLoader, social_lstm: bool = True, plot: bool = False,
+               use_batch_norm: bool = False, video_path: str = None, plot_path: Optional[str] = None,
+               model_pass_final_pos: bool = False, use_simple_model_version=False,
+               metrics_in_meters: bool = True):
+    model_net = get_model(social_lstm, model_checkpoint_root_path, use_batch_norm,
+                          model_pass_final_pos=model_pass_final_pos,
+                          use_simple_model_version=use_simple_model_version)
+
+    model_caller = model_net.one_step if social_lstm else model_net
+
+    logger.info('Evaluating for Test Set')
+    test_model_ade_list, test_model_fde_list, \
+    test_constant_linear_baseline_ade_list, test_constant_linear_baseline_fde_list = \
+        evaluate_per_loader_single_model(
+            plot, plot_path, model_caller, test_loader, video_path,
+            split_name=NetworkMode.TEST.name, metrics_in_meters=metrics_in_meters,
+            use_simple_model_version=use_simple_model_version)
+
+    logger.info('Evaluating for Validation Set')
+    val_model_ade_list, val_model_fde_list, \
+    val_constant_linear_baseline_ade_list, val_constant_linear_baseline_fde_list = \
+        evaluate_per_loader_single_model(
+            plot, plot_path, model_caller, val_loader, video_path,
+            split_name=NetworkMode.VALIDATION.name, metrics_in_meters=metrics_in_meters,
+            use_simple_model_version=use_simple_model_version)
+
+    logger.info('Evaluating for Train Set')
+    train_model_ade_list, train_model_fde_list, \
+    train_constant_linear_baseline_ade_list, train_constant_linear_baseline_fde_list = \
+        evaluate_per_loader_single_model(
+            plot, plot_path, model_caller, train_loader, video_path,
+            split_name=NetworkMode.TRAIN.name, metrics_in_meters=metrics_in_meters,
+            use_simple_model_version=use_simple_model_version)
+
+    train_model_ade, train_model_fde = \
+        np.array(train_model_ade_list).mean(), np.array(train_model_fde_list).mean()
+
+    val_model_ade, val_model_fde = \
+        np.array(val_model_ade_list).mean(), np.array(val_model_fde_list).mean()
+
+    test_model_ade, test_model_fde = \
+        np.array(test_model_ade_list).mean(), np.array(test_model_fde_list).mean()
+
+    test_constant_linear_baseline_ade, test_constant_linear_baseline_fde = \
+        np.array(test_constant_linear_baseline_ade_list).mean(), np.array(test_constant_linear_baseline_fde_list).mean()
+
+    val_constant_linear_baseline_ade, val_constant_linear_baseline_fde = \
+        np.array(val_constant_linear_baseline_ade_list).mean(), np.array(val_constant_linear_baseline_fde_list).mean()
+
+    train_constant_linear_baseline_ade, train_constant_linear_baseline_fde = \
+        np.array(train_constant_linear_baseline_ade_list).mean(), \
+        np.array(train_constant_linear_baseline_fde_list).mean()
+
+    eval_results = {
+        'model_checkpoint_root_path': model_checkpoint_root_path,
+        'social_lstm': social_lstm,
+        'use_batch_norm': use_batch_norm,
+        'use_simple_model_version': use_simple_model_version,
+        'EVAL_TRAIN_CLASS': EVAL_TRAIN_CLASS,
+        'EVAL_VAL_CLASS': EVAL_VAL_CLASS,
+        'EVAL_TEST_CLASS': EVAL_TEST_CLASS,
+        'EVAL_TRAIN_VIDEO_NUMBER': EVAL_TRAIN_VIDEO_NUMBER,
+        'EVAL_VAL_VIDEO_NUMBER': EVAL_VAL_VIDEO_NUMBER,
+        'EVAL_TEST_VIDEO_NUMBER': EVAL_TEST_VIDEO_NUMBER,
+        'EVAL_TRAIN_VIDEOS_TO_SKIP': EVAL_TRAIN_VIDEOS_TO_SKIP,
+        'EVAL_VAL_VIDEOS_TO_SKIP': EVAL_VAL_VIDEOS_TO_SKIP,
+        'EVAL_TEST_VIDEOS_TO_SKIP': EVAL_TEST_VIDEOS_TO_SKIP,
+        'train':
+            {'ade': {'model': train_model_ade.item(), 'linear': train_constant_linear_baseline_ade.item()},
+             'fde': {'model': train_model_fde.item(), 'linear': train_constant_linear_baseline_fde.item()},
+             'num_trajectories': len(train_loader.dataset)},
+        'val':
+            {'ade': {'model': val_model_ade.item(), 'linear': val_constant_linear_baseline_ade.item()},
+             'fde': {'model': val_model_fde.item(), 'linear': val_constant_linear_baseline_fde.item()},
+             'num_trajectories': len(val_loader.dataset)},
+        'test':
+            {'ade': {'model': test_model_ade.item(), 'linear': test_constant_linear_baseline_ade.item()},
+             'fde': {'model': test_model_fde.item(), 'linear': test_constant_linear_baseline_fde.item()},
+             'num_trajectories': len(test_loader.dataset)}}
+
+    results_dump_path = f'{plot_path}/eval_results.yaml'
+    Path(plot_path).mkdir(parents=True, exist_ok=True)
+    with open(results_dump_path, 'w+') as f:
+        yaml.dump(eval_results, f)
+
+    logger.info('Train Set')
+    logger.info(f'ADE - GT: {train_model_ade} | '
+                f'Linear: {train_constant_linear_baseline_ade}')
+    logger.info(f'FDE - GT: {train_model_fde} | '
+                f'Linear: {train_constant_linear_baseline_fde}')
+
+    logger.info('Validation Set')
+    logger.info(f'ADE - GT: {val_model_ade} | '
+                f'Linear: {val_constant_linear_baseline_ade}')
+    logger.info(f'FDE - GT: {val_model_fde} | '
+                f'Linear: {val_constant_linear_baseline_fde}')
+
+    logger.info('Test Set')
+    logger.info(f'ADE - GT: {test_model_ade} | '
+                f'Linear: {test_constant_linear_baseline_ade}')
+    logger.info(f'FDE - GT: {test_model_fde} | '
                 f'Linear: {test_constant_linear_baseline_fde}')
 
 
@@ -591,22 +869,38 @@ if __name__ == '__main__':
     else:
         train_loader, val_loader, test_loader = get_eval_loaders()
 
-        eval_models(
-            supervised_checkpoint_root_path=GT_CHECKPOINT_ROOT_PATH
-            if not EVAL_USE_SIMPLE_MODEL else SIMPLE_GT_CHECKPOINT_PATH,
-            unsupervised_checkpoint_root_path=UNSUPERVISED_CHECKPOINT_ROOT_PATH
-            if not EVAL_USE_SIMPLE_MODEL else SIMPLE_UNSUPERVISED_CHECKPOINT_PATH,
-            train_loader=train_loader,
-            val_loader=val_loader,
-            test_loader=test_loader,
-            social_lstm=EVAL_USE_SOCIAL_LSTM_MODEL,
-            plot=PLOT_MODE,
-            use_batch_norm=EVAL_USE_BATCH_NORM,
-            video_path=EVAL_PATH_TO_VIDEO,
-            plot_path=EVAL_PLOT_PATH,
-            plot_four_way=True,
-            supervised_pass_final_pos=EVAL_USE_FINAL_POSITIONS_SUPERVISED,
-            unsupervised_pass_final_pos=EVAL_USE_FINAL_POSITIONS_UNSUPERVISED,
-            metrics_in_meters=True,
-            use_simple_model_version=EVAL_USE_SIMPLE_MODEL
-        )
+        if EVAL_SINGLE_MODEL:
+            eval_model(
+                model_checkpoint_root_path=SINGLE_MODEL_CHECKPOINT_PATH,
+                train_loader=train_loader,
+                val_loader=val_loader,
+                test_loader=test_loader,
+                social_lstm=EVAL_USE_SOCIAL_LSTM_MODEL,
+                plot=PLOT_MODE,
+                use_batch_norm=EVAL_USE_BATCH_NORM,
+                video_path=EVAL_PATH_TO_VIDEO,
+                plot_path=EVAL_PLOT_PATH,
+                model_pass_final_pos=False,
+                use_simple_model_version=EVAL_USE_SIMPLE_MODEL,
+                metrics_in_meters=True
+            )
+        else:
+            eval_models(
+                supervised_checkpoint_root_path=GT_CHECKPOINT_ROOT_PATH
+                if not EVAL_USE_SIMPLE_MODEL else SIMPLE_GT_CHECKPOINT_PATH,
+                unsupervised_checkpoint_root_path=UNSUPERVISED_CHECKPOINT_ROOT_PATH
+                if not EVAL_USE_SIMPLE_MODEL else SIMPLE_UNSUPERVISED_CHECKPOINT_PATH,
+                train_loader=train_loader,
+                val_loader=val_loader,
+                test_loader=test_loader,
+                social_lstm=EVAL_USE_SOCIAL_LSTM_MODEL,
+                plot=PLOT_MODE,
+                use_batch_norm=EVAL_USE_BATCH_NORM,
+                video_path=EVAL_PATH_TO_VIDEO,
+                plot_path=EVAL_PLOT_PATH,
+                plot_four_way=True,
+                supervised_pass_final_pos=EVAL_USE_FINAL_POSITIONS_SUPERVISED,
+                unsupervised_pass_final_pos=EVAL_USE_FINAL_POSITIONS_UNSUPERVISED,
+                metrics_in_meters=True,
+                use_simple_model_version=EVAL_USE_SIMPLE_MODEL
+            )
