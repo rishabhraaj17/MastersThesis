@@ -627,7 +627,7 @@ class BaselineRNNStackedSimple(BaselineRNN):
 
 
 class ConstantLinearBaseline(object):
-    def __init__(self, xy, uv, prediction_length=12, relative_velocities=False):
+    def __init__(self, xy=None, uv=None, prediction_length=12, relative_velocities=False):
         super(ConstantLinearBaseline, self).__init__()
         self.xy = xy
         self.uv = uv
@@ -639,13 +639,26 @@ class ConstantLinearBaseline(object):
             self.uv *= 0.4
 
     def __call__(self, *args, **kwargs):
+        if self.xy is None or self.uv is None:
+            logger.error('xy or uv is missing!')
+            raise RuntimeError()
         last_xy = self.xy
         for idx in range(self.prediction_length):
             new_xy = last_xy + self.uv
-            self.trajectories.append(new_xy)
+            self.trajectories.append(new_xy.tolist())
             last_xy = new_xy
 
-        return np.stack(self.trajectories)
+        return np.stack(self.trajectories, axis=1)
+
+    def eval(self, obs_trajectory, obs_distances, gt_trajectory, ratio):
+        self.reset(xy=obs_trajectory[:, -1, ...], uv=obs_distances[:, -1, ...])
+
+        pred_trajectory = self()
+
+        ade = compute_ade(np.stack(pred_trajectory), np.stack(gt_trajectory)).item() * ratio
+        fde = compute_fde(np.stack(pred_trajectory), np.stack(gt_trajectory)).item() * ratio
+
+        return pred_trajectory, ade, fde
 
     def reset(self, xy=None, uv=None):
         self.xy = xy if xy is not None else self.xy

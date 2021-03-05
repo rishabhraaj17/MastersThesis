@@ -23,13 +23,13 @@ from baselinev2.config import BASE_PATH, ROOT_PATH, DEBUG_MODE, EVAL_USE_SOCIAL_
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset, ConcatenateDataset
 from baselinev2.nn.data_utils import extract_frame_from_video
-from baselinev2.nn.models import BaselineRNN, BaselineRNNStacked, BaselineRNNStackedSimple
+from baselinev2.nn.models import BaselineRNN, BaselineRNNStacked, BaselineRNNStackedSimple, ConstantLinearBaseline
 from baselinev2.nn.train import get_dataset_for_class
 from baselinev2.overfit_config import LINEAR_CFG
 from baselinev2.utils import social_lstm_parser
 from baselinev2.nn.social_lstm.model import BaselineLSTM
 from baselinev2.plot_utils import plot_trajectory_alongside_frame, plot_and_compare_trajectory_four_way, \
-    plot_and_compare_trajectory_alongside_frame
+    plot_and_compare_trajectory_alongside_frame, plot_trajectories
 from log import initialize_logging, get_logger
 
 matplotlib.style.use('ggplot')
@@ -314,8 +314,12 @@ def get_models(social_lstm, supervised_checkpoint_root_path, unsupervised_checkp
 
 def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loader, unsupervised_caller,
                         video_path, split_name, metrics_in_meters=True, use_simple_model_version=False):
+    constant_linear_baseline_caller = ConstantLinearBaseline()
+
     supervised_ade_list, supervised_fde_list = [], []
     unsupervised_ade_list, unsupervised_fde_list = [], []
+    constant_linear_baseline_ade_list, constant_linear_baseline_fde_list = [], []
+
     for idx, data in enumerate(tqdm(loader)):
         if use_simple_model_version and EVAL_FOR_WHOLE_CLASS:
             data, dataset_idx = data
@@ -325,6 +329,9 @@ def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loade
             supervised_caller(data)
         unsupervised_loss, unsupervised_ade, unsupervised_fde, unsupervised_ratio, unsupervised_pred_trajectory = \
             unsupervised_caller(data)
+        constant_linear_baseline_pred_trajectory, constant_linear_baseline_ade, constant_linear_baseline_fde = \
+            constant_linear_baseline_caller.eval(obs_trajectory=in_xy, obs_distances=in_uv,
+                                                 gt_trajectory=gt_xy, ratio=ratio)
 
         # if metrics_in_meters:  # Added in model itself
         #     supervised_ade *= supervised_ratio
@@ -366,6 +373,14 @@ def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loade
                                     f'\nUnsupervised -> ADE: {unsupervised_ade} | FDE: {unsupervised_fde}',
                     save_path=f'{plot_path}{split_name}/'
                 )
+                plot_trajectories(obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
+                                  pred_trajectory=constant_linear_baseline_pred_trajectory.squeeze(),
+                                  frame_number=plot_frame_number, track_id=plot_track_id,
+                                  additional_text=f'Frame Numbers: {all_frame_numbers}'
+                                                  f'\nGround Truth -> ADE: {constant_linear_baseline_ade.item()} | '
+                                                  f'FDE: {constant_linear_baseline_fde.item()}',
+                                  save_path=f'{plot_path}{split_name}/constant_linear_baseline/'
+                                  )
             else:
                 plot_and_compare_trajectory_alongside_frame(
                     frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
@@ -388,8 +403,11 @@ def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loade
         supervised_fde_list.append(supervised_fde)
         unsupervised_ade_list.append(unsupervised_ade)
         unsupervised_fde_list.append(unsupervised_fde)
+        constant_linear_baseline_ade_list.append(constant_linear_baseline_ade.item())
+        constant_linear_baseline_fde_list.append(constant_linear_baseline_fde.item())
 
-    return supervised_ade_list, supervised_fde_list, unsupervised_ade_list, unsupervised_fde_list
+    return supervised_ade_list, supervised_fde_list, unsupervised_ade_list, unsupervised_fde_list, \
+           constant_linear_baseline_ade_list, constant_linear_baseline_fde_list
 
 
 def get_metrics(supervised_ade_list, supervised_fde_list, unsupervised_ade_list, unsupervised_fde_list):
@@ -413,21 +431,24 @@ def eval_models(supervised_checkpoint_root_path: str, unsupervised_checkpoint_ro
     unsupervised_caller = unsupervised_net.one_step if social_lstm else unsupervised_net
 
     logger.info('Evaluating for Test Set')
-    test_supervised_ade_list, test_supervised_fde_list, test_unsupervised_ade_list, test_unsupervised_fde_list = \
+    test_supervised_ade_list, test_supervised_fde_list, test_unsupervised_ade_list, test_unsupervised_fde_list, \
+    test_constant_linear_baseline_ade_list, test_constant_linear_baseline_fde_list = \
         evaluate_per_loader(
             plot, plot_four_way, plot_path, supervised_caller, test_loader, unsupervised_caller, video_path,
             split_name=NetworkMode.TEST.name, metrics_in_meters=metrics_in_meters,
             use_simple_model_version=use_simple_model_version)
 
     logger.info('Evaluating for Validation Set')
-    val_supervised_ade_list, val_supervised_fde_list, val_unsupervised_ade_list, val_unsupervised_fde_list = \
+    val_supervised_ade_list, val_supervised_fde_list, val_unsupervised_ade_list, val_unsupervised_fde_list, \
+    val_constant_linear_baseline_ade_list, val_constant_linear_baseline_fde_list = \
         evaluate_per_loader(
             plot, plot_four_way, plot_path, supervised_caller, val_loader, unsupervised_caller, video_path,
             split_name=NetworkMode.VALIDATION.name, metrics_in_meters=metrics_in_meters,
             use_simple_model_version=use_simple_model_version)
 
     logger.info('Evaluating for Train Set')
-    train_supervised_ade_list, train_supervised_fde_list, train_unsupervised_ade_list, train_unsupervised_fde_list = \
+    train_supervised_ade_list, train_supervised_fde_list, train_unsupervised_ade_list, train_unsupervised_fde_list, \
+    train_constant_linear_baseline_ade_list, train_constant_linear_baseline_fde_list = \
         evaluate_per_loader(
             plot, plot_four_way, plot_path, supervised_caller, train_loader, unsupervised_caller, video_path,
             split_name=NetworkMode.TRAIN.name, metrics_in_meters=metrics_in_meters,
@@ -445,17 +466,33 @@ def eval_models(supervised_checkpoint_root_path: str, unsupervised_checkpoint_ro
         test_supervised_ade_list, test_supervised_fde_list, test_unsupervised_ade_list, test_unsupervised_fde_list
     )
 
+    test_constant_linear_baseline_ade, test_constant_linear_baseline_fde = \
+        np.array(test_constant_linear_baseline_ade_list).mean(), np.array(test_constant_linear_baseline_fde_list).mean()
+
+    val_constant_linear_baseline_ade, val_constant_linear_baseline_fde = \
+        np.array(val_constant_linear_baseline_ade_list).mean(), np.array(val_constant_linear_baseline_fde_list).mean()
+
+    train_constant_linear_baseline_ade, train_constant_linear_baseline_fde = \
+        np.array(train_constant_linear_baseline_ade_list).mean(), \
+        np.array(train_constant_linear_baseline_fde_list).mean()
+
     logger.info('Train Set')
-    logger.info(f'ADE - GT: {train_supervised_ade} | Unsupervised: {train_unsupervised_ade}')
-    logger.info(f'FDE - GT: {train_supervised_fde} | Unsupervised: {train_unsupervised_fde}')
+    logger.info(f'ADE - GT: {train_supervised_ade} | Unsupervised: {train_unsupervised_ade} | '
+                f'Linear: {train_constant_linear_baseline_ade}')
+    logger.info(f'FDE - GT: {train_supervised_fde} | Unsupervised: {train_unsupervised_fde} | '
+                f'Linear: {train_constant_linear_baseline_fde}')
 
     logger.info('Validation Set')
-    logger.info(f'ADE - GT: {val_supervised_ade} | Unsupervised: {val_unsupervised_ade}')
-    logger.info(f'FDE - GT: {val_supervised_fde} | Unsupervised: {val_unsupervised_fde}')
+    logger.info(f'ADE - GT: {val_supervised_ade} | Unsupervised: {val_unsupervised_ade} | '
+                f'Linear: {val_constant_linear_baseline_ade}')
+    logger.info(f'FDE - GT: {val_supervised_fde} | Unsupervised: {val_unsupervised_fde} | '
+                f'Linear: {val_constant_linear_baseline_fde}')
 
     logger.info('Test Set')
-    logger.info(f'ADE - GT: {test_supervised_ade} | Unsupervised: {test_unsupervised_ade}')
-    logger.info(f'FDE - GT: {test_supervised_fde} | Unsupervised: {test_unsupervised_fde}')
+    logger.info(f'ADE - GT: {test_supervised_ade} | Unsupervised: {test_unsupervised_ade} | '
+                f'Linear: {test_constant_linear_baseline_ade}')
+    logger.info(f'FDE - GT: {test_supervised_fde} | Unsupervised: {test_unsupervised_fde} | '
+                f'Linear: {test_constant_linear_baseline_fde}')
 
 
 def get_eval_loaders():
