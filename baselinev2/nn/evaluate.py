@@ -4,6 +4,7 @@ from typing import Optional
 import matplotlib
 import torch
 import numpy as np
+import yaml
 from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -15,11 +16,15 @@ from baselinev2.config import BASE_PATH, ROOT_PATH, DEBUG_MODE, EVAL_USE_SOCIAL_
     EVAL_PATH_TO_VIDEO, EVAL_PLOT_PATH, GT_CHECKPOINT_ROOT_PATH, UNSUPERVISED_CHECKPOINT_ROOT_PATH, EVAL_TRAIN_CLASS, \
     EVAL_TRAIN_VIDEO_NUMBER, EVAL_TRAIN_META, EVAL_VAL_CLASS, EVAL_VAL_VIDEO_NUMBER, EVAL_VAL_META, EVAL_TEST_CLASS, \
     EVAL_TEST_VIDEO_NUMBER, EVAL_TEST_META, EVAL_BATCH_SIZE, EVAL_SHUFFLE, EVAL_WORKERS, PLOT_MODE, \
-    EVAL_USE_FINAL_POSITIONS_SUPERVISED, EVAL_USE_FINAL_POSITIONS_UNSUPERVISED, EVAL_USE_SIMPLE_MODEL
+    EVAL_USE_FINAL_POSITIONS_SUPERVISED, EVAL_USE_FINAL_POSITIONS_UNSUPERVISED, EVAL_USE_SIMPLE_MODEL, \
+    EVAL_SIMPLE_MODEL_CONFIG_DICT_GT, EVAL_SIMPLE_MODEL_CONFIG_DICT_UNSUPERVISED, SIMPLE_GT_CHECKPOINT_ROOT_PATH, \
+    SIMPLE_UNSUPERVISED_CHECKPOINT_ROOT_PATH, EVAL_FOR_WHOLE_CLASS, EVAL_TRAIN_VIDEOS_TO_SKIP, EVAL_VAL_VIDEOS_TO_SKIP, \
+    EVAL_TEST_VIDEOS_TO_SKIP, SIMPLE_GT_CHECKPOINT_PATH, SIMPLE_UNSUPERVISED_CHECKPOINT_PATH, DEVICE, BEST_MODEL
 from baselinev2.constants import NetworkMode
-from baselinev2.nn.dataset import get_dataset
+from baselinev2.nn.dataset import get_dataset, ConcatenateDataset
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.models import BaselineRNN, BaselineRNNStacked, BaselineRNNStackedSimple
+from baselinev2.nn.train import get_dataset_for_class
 from baselinev2.overfit_config import LINEAR_CFG
 from baselinev2.utils import social_lstm_parser
 from baselinev2.nn.social_lstm.model import BaselineLSTM
@@ -165,7 +170,6 @@ def evaluate_simple_v2_model(model: Optional[nn.Module], data_loader: DataLoader
         else:
             in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = data
 
-
         loss, ade, fde, ratio, pred_trajectory = model.one_step(data)
 
         for i in range(1):
@@ -176,7 +180,8 @@ def evaluate_simple_v2_model(model: Optional[nn.Module], data_loader: DataLoader
             obs_trajectory = in_xy.squeeze().numpy()[im_idx]
             gt_trajectory = gt_xy.squeeze().numpy()[im_idx]
             pred_trajectory_in = pred_trajectory.squeeze()[:, im_idx, ...]
-            all_frame_numbers = torch.cat((in_frame_numbers.squeeze()[im_idx], gt_frame_numbers.squeeze()[im_idx])).tolist()
+            all_frame_numbers = torch.cat(
+                (in_frame_numbers.squeeze()[im_idx], gt_frame_numbers.squeeze()[im_idx])).tolist()
 
             plot_trajectory_alongside_frame(
                 frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
@@ -190,11 +195,12 @@ def evaluate_simple_v2_model(model: Optional[nn.Module], data_loader: DataLoader
 
 def get_models(social_lstm, supervised_checkpoint_root_path, unsupervised_checkpoint_root_path, use_batch_norm,
                supervised_pass_final_pos=True, unsupervised_pass_final_pos=True, use_simple_model_version=False):
-    supervised_checkpoint_path = supervised_checkpoint_root_path + 'checkpoints/'
-    supervised_checkpoint_file = os.listdir(supervised_checkpoint_path)[-1]
-    unsupervised_checkpoint_path = unsupervised_checkpoint_root_path + 'checkpoints/'
-    unsupervised_checkpoint_file = os.listdir(unsupervised_checkpoint_path)[-1]
     if social_lstm:
+        supervised_checkpoint_path = supervised_checkpoint_root_path + 'checkpoints/'
+        supervised_checkpoint_file = os.listdir(supervised_checkpoint_path)[-1]
+        unsupervised_checkpoint_path = unsupervised_checkpoint_root_path + 'checkpoints/'
+        unsupervised_checkpoint_file = os.listdir(unsupervised_checkpoint_path)[-1]
+
         supervised_net = BaselineLSTM.load_from_checkpoint(
             checkpoint_path=supervised_checkpoint_path + supervised_checkpoint_file,
             hparams_file=f'{supervised_checkpoint_root_path}hparams.yaml',
@@ -210,7 +216,81 @@ def get_models(social_lstm, supervised_checkpoint_root_path, unsupervised_checkp
             generated_dataset=False,  # we evaluate on ground-truth trajectories
             use_batch_norm=use_batch_norm
         )
+    elif use_simple_model_version:
+        # root path is the full path
+        supervised_checkpoint_path = supervised_checkpoint_root_path
+        unsupervised_checkpoint_path = unsupervised_checkpoint_root_path
+
+        supervised_hyperparameter_path = supervised_checkpoint_root_path[:-15] + 'hparams.yaml'
+        unsupervised_hyperparameter_path = unsupervised_checkpoint_root_path[:-15] + 'hparams.yaml'
+
+        try:
+            with open(supervised_hyperparameter_path, 'r+') as sup_f:
+                supervised_hyperparameter_file = yaml.full_load(sup_f)
+        except FileNotFoundError:
+            supervised_hyperparameter_file = EVAL_SIMPLE_MODEL_CONFIG_DICT_GT
+
+        # if supervised_hyperparameter_file['generated_data']:
+        #     logger.error('Trying to load model trained on unsupervised data!!')
+        #     raise RuntimeError()
+
+        if not supervised_hyperparameter_file['use_simple_model']:
+            logger.error('Model to load is not an instance of BaselineRNNStackedSimple!')
+            raise RuntimeError()
+
+        supervised_net = BaselineRNNStackedSimple(
+            arch_config=supervised_hyperparameter_file['arch_config'],
+            batch_size=supervised_hyperparameter_file['batch_size'],
+            use_batch_norm=supervised_hyperparameter_file['use_batch_norm'],
+            encoder_lstm_num_layers=supervised_hyperparameter_file['num_rnn_layers'],
+            decoder_lstm_num_layers=supervised_hyperparameter_file['num_rnn_layers'],
+            generated_dataset=False,  # supervised_hyperparameter_file['generated_data'],
+            dropout=supervised_hyperparameter_file['dropout'],
+            rnn_dropout=supervised_hyperparameter_file['rnn_dropout'],
+            use_gru=supervised_hyperparameter_file['use_gru'],
+            learn_hidden_states=supervised_hyperparameter_file['learn_hidden_states'],
+            feed_model_distances_in_meters=supervised_hyperparameter_file['feed_model_distances_in_meters'],
+            relative_velocities=supervised_hyperparameter_file['relative_velocities'])
+
+        try:
+            with open(unsupervised_hyperparameter_path, 'r+') as unsup_f:
+                unsupervised_hyperparameter_file = yaml.full_load(unsup_f)
+        except FileNotFoundError:
+            unsupervised_hyperparameter_file = EVAL_SIMPLE_MODEL_CONFIG_DICT_UNSUPERVISED
+
+        if not unsupervised_hyperparameter_file['generated_data']:
+            logger.error('Trying to load model trained on supervised data!!')
+            raise RuntimeError()
+
+        if not unsupervised_hyperparameter_file['use_simple_model']:
+            logger.error('Model to load is not an instance of BaselineRNNStackedSimple!')
+            raise RuntimeError()
+
+        unsupervised_net = BaselineRNNStackedSimple(
+            arch_config=unsupervised_hyperparameter_file['arch_config'],
+            batch_size=unsupervised_hyperparameter_file['batch_size'],
+            use_batch_norm=unsupervised_hyperparameter_file['use_batch_norm'],
+            encoder_lstm_num_layers=unsupervised_hyperparameter_file['num_rnn_layers'],
+            decoder_lstm_num_layers=unsupervised_hyperparameter_file['num_rnn_layers'],
+            generated_dataset=False,  # unsupervised_hyperparameter_file['generated_data'],
+            dropout=unsupervised_hyperparameter_file['dropout'],
+            rnn_dropout=unsupervised_hyperparameter_file['rnn_dropout'],
+            use_gru=unsupervised_hyperparameter_file['use_gru'],
+            learn_hidden_states=unsupervised_hyperparameter_file['learn_hidden_states'],
+            feed_model_distances_in_meters=unsupervised_hyperparameter_file['feed_model_distances_in_meters'],
+            relative_velocities=unsupervised_hyperparameter_file['relative_velocities'])
+
+        key = 'model_state_dict' if BEST_MODEL else 'last_model_state_dict'
+
+        supervised_net.load_state_dict(torch.load(supervised_checkpoint_path, map_location=DEVICE)[key])
+        unsupervised_net.load_state_dict(torch.load(unsupervised_checkpoint_path, map_location=DEVICE)[key])
+
     else:
+        supervised_checkpoint_path = supervised_checkpoint_root_path + 'checkpoints/'
+        supervised_checkpoint_file = os.listdir(supervised_checkpoint_path)[-1]
+        unsupervised_checkpoint_path = unsupervised_checkpoint_root_path + 'checkpoints/'
+        unsupervised_checkpoint_file = os.listdir(unsupervised_checkpoint_path)[-1]
+
         NET = BaselineRNNStackedSimple if use_simple_model_version else BaselineRNNStacked
         supervised_net = NET.load_from_checkpoint(
             checkpoint_path=supervised_checkpoint_path + supervised_checkpoint_file,
@@ -233,10 +313,12 @@ def get_models(social_lstm, supervised_checkpoint_root_path, unsupervised_checkp
 
 
 def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loader, unsupervised_caller,
-                        video_path, split_name, metrics_in_meters=True):
+                        video_path, split_name, metrics_in_meters=True, use_simple_model_version=False):
     supervised_ade_list, supervised_fde_list = [], []
     unsupervised_ade_list, unsupervised_fde_list = [], []
     for idx, data in enumerate(tqdm(loader)):
+        if use_simple_model_version and EVAL_FOR_WHOLE_CLASS:
+            data, dataset_idx = data
         in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = data
 
         supervised_loss, supervised_ade, supervised_fde, supervised_ratio, supervised_pred_trajectory = \
@@ -258,8 +340,15 @@ def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loade
             obs_trajectory = in_xy.squeeze().numpy()
             gt_trajectory = gt_xy.squeeze().numpy()
 
-            supervised_pred_trajectory = supervised_pred_trajectory.squeeze().numpy()
-            unsupervised_pred_trajectory = unsupervised_pred_trajectory.squeeze().numpy()
+            supervised_pred_trajectory = supervised_pred_trajectory.squeeze().numpy() \
+                if not use_simple_model_version else supervised_pred_trajectory.squeeze()
+            unsupervised_pred_trajectory = unsupervised_pred_trajectory.squeeze().numpy() \
+                if not use_simple_model_version else unsupervised_pred_trajectory.squeeze()
+
+            if use_simple_model_version and EVAL_FOR_WHOLE_CLASS:
+                video_dataset = loader.dataset.datasets[dataset_idx.item()]
+                video_path = f'{BASE_PATH}videos/{video_dataset.video_class.value}/' \
+                             f'video{video_dataset.video_number}/video.mov'
 
             if plot_four_way:
                 plot_and_compare_trajectory_four_way(
@@ -327,19 +416,22 @@ def eval_models(supervised_checkpoint_root_path: str, unsupervised_checkpoint_ro
     test_supervised_ade_list, test_supervised_fde_list, test_unsupervised_ade_list, test_unsupervised_fde_list = \
         evaluate_per_loader(
             plot, plot_four_way, plot_path, supervised_caller, test_loader, unsupervised_caller, video_path,
-            split_name=NetworkMode.TEST.name, metrics_in_meters=metrics_in_meters)
+            split_name=NetworkMode.TEST.name, metrics_in_meters=metrics_in_meters,
+            use_simple_model_version=use_simple_model_version)
 
     logger.info('Evaluating for Validation Set')
     val_supervised_ade_list, val_supervised_fde_list, val_unsupervised_ade_list, val_unsupervised_fde_list = \
         evaluate_per_loader(
             plot, plot_four_way, plot_path, supervised_caller, val_loader, unsupervised_caller, video_path,
-            split_name=NetworkMode.VALIDATION.name, metrics_in_meters=metrics_in_meters)
+            split_name=NetworkMode.VALIDATION.name, metrics_in_meters=metrics_in_meters,
+            use_simple_model_version=use_simple_model_version)
 
     logger.info('Evaluating for Train Set')
     train_supervised_ade_list, train_supervised_fde_list, train_unsupervised_ade_list, train_unsupervised_fde_list = \
         evaluate_per_loader(
             plot, plot_four_way, plot_path, supervised_caller, train_loader, unsupervised_caller, video_path,
-            split_name=NetworkMode.TRAIN.name, metrics_in_meters=metrics_in_meters)
+            split_name=NetworkMode.TRAIN.name, metrics_in_meters=metrics_in_meters,
+            use_simple_model_version=use_simple_model_version)
 
     train_supervised_ade, train_supervised_fde, train_unsupervised_ade, train_unsupervised_fde = get_metrics(
         train_supervised_ade_list, train_supervised_fde_list, train_unsupervised_ade_list, train_unsupervised_fde_list
@@ -367,12 +459,29 @@ def eval_models(supervised_checkpoint_root_path: str, unsupervised_checkpoint_ro
 
 
 def get_eval_loaders():
-    train_set = get_dataset(video_clazz=EVAL_TRAIN_CLASS, video_number=EVAL_TRAIN_VIDEO_NUMBER,
-                            mode=NetworkMode.TRAIN, meta_label=EVAL_TRAIN_META, get_generated=False)
-    val_set = get_dataset(video_clazz=EVAL_VAL_CLASS, video_number=EVAL_VAL_VIDEO_NUMBER,
-                          mode=NetworkMode.VALIDATION, meta_label=EVAL_VAL_META, get_generated=False)
-    test_set = get_dataset(video_clazz=EVAL_TEST_CLASS, video_number=EVAL_TEST_VIDEO_NUMBER,
-                           mode=NetworkMode.TEST, meta_label=EVAL_TEST_META, get_generated=False)
+    if EVAL_FOR_WHOLE_CLASS:
+        train_set = get_dataset_for_class(video_class=EVAL_TRAIN_CLASS, meta_label=EVAL_TRAIN_META,
+                                          mode=NetworkMode.TRAIN, get_generated=False,
+                                          videos_to_skip=EVAL_TRAIN_VIDEOS_TO_SKIP,
+                                          return_dataset_list=True)
+        val_set = get_dataset_for_class(video_class=EVAL_VAL_CLASS, meta_label=EVAL_VAL_META,
+                                        mode=NetworkMode.VALIDATION, get_generated=False,
+                                        videos_to_skip=EVAL_VAL_VIDEOS_TO_SKIP,
+                                        return_dataset_list=True)
+        test_set = get_dataset_for_class(video_class=EVAL_TEST_CLASS, meta_label=EVAL_TEST_META,
+                                         mode=NetworkMode.TEST, get_generated=False,
+                                         videos_to_skip=EVAL_TEST_VIDEOS_TO_SKIP,
+                                         return_dataset_list=True)
+        train_set = ConcatenateDataset(train_set)
+        val_set = ConcatenateDataset(val_set)
+        test_set = ConcatenateDataset(test_set)
+    else:
+        train_set = get_dataset(video_clazz=EVAL_TRAIN_CLASS, video_number=EVAL_TRAIN_VIDEO_NUMBER,
+                                mode=NetworkMode.TRAIN, meta_label=EVAL_TRAIN_META, get_generated=False)
+        val_set = get_dataset(video_clazz=EVAL_VAL_CLASS, video_number=EVAL_VAL_VIDEO_NUMBER,
+                              mode=NetworkMode.VALIDATION, meta_label=EVAL_VAL_META, get_generated=False)
+        test_set = get_dataset(video_clazz=EVAL_TEST_CLASS, video_number=EVAL_TEST_VIDEO_NUMBER,
+                               mode=NetworkMode.TEST, meta_label=EVAL_TEST_META, get_generated=False)
 
     train_loader = DataLoader(train_set, batch_size=EVAL_BATCH_SIZE, shuffle=EVAL_SHUFFLE, num_workers=EVAL_WORKERS)
     val_loader = DataLoader(val_set, batch_size=EVAL_BATCH_SIZE, shuffle=EVAL_SHUFFLE, num_workers=EVAL_WORKERS)
@@ -446,8 +555,10 @@ if __name__ == '__main__':
         train_loader, val_loader, test_loader = get_eval_loaders()
 
         eval_models(
-            supervised_checkpoint_root_path=GT_CHECKPOINT_ROOT_PATH,
-            unsupervised_checkpoint_root_path=UNSUPERVISED_CHECKPOINT_ROOT_PATH,
+            supervised_checkpoint_root_path=GT_CHECKPOINT_ROOT_PATH
+            if not EVAL_USE_SIMPLE_MODEL else SIMPLE_GT_CHECKPOINT_PATH,
+            unsupervised_checkpoint_root_path=UNSUPERVISED_CHECKPOINT_ROOT_PATH
+            if not EVAL_USE_SIMPLE_MODEL else SIMPLE_UNSUPERVISED_CHECKPOINT_PATH,
             train_loader=train_loader,
             val_loader=val_loader,
             test_loader=test_loader,

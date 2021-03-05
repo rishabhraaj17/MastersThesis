@@ -102,9 +102,9 @@ GENERATE_BUNDLED_ANNOTATIONS = False
 #     [[0, 1, 2, 3, 4, 5, 6], [0, 1, 2, 3], [0, 1, 2, 3, 4], [0, 1, 2, 3, 4, 5, 6, 7, 8],
 #      [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], [0, 1, 2, 3], [0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11], [0, 1, 2, 3]]
 BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST = \
-    [SDDVideoClasses.NEXUS, SDDVideoClasses.QUAD]
+    [SDDVideoClasses.NEXUS]
 BUNDLED_ANNOTATIONS_PER_CLASSES_VIDEO_LIST = \
-    [[6, 7, 8, 9, 10, 11], [0, 1, 2, 3]]
+    [[3]]
 # BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST = [SDDVideoClasses.HYANG, SDDVideoClasses.NEXUS]
 # BUNDLED_ANNOTATIONS_PER_CLASSES_VIDEO_LIST = [[0, 2], [3]]
 
@@ -119,9 +119,9 @@ TEST_SPLIT_PERCENTAGE = 0.25
 
 TIME_STEPS = 5
 NUM_WORKERS = 12
-BATCH_SIZE = 256
-LR = 1e-3
-NUM_EPOCHS = 500
+BATCH_SIZE = 32  # 4096  # * 2  # 32  # 1024  # 2048
+LR = 1e-3  # 0.0014462413062537917  # 2e-3
+NUM_EPOCHS = 1000
 OVERFIT = False
 
 USE_BATCH_NORM = False
@@ -163,9 +163,15 @@ GENERATOR_SEED = torch.Generator().manual_seed(MANUAL_SEED)
 #     'lstm_encoder': 8
 # }
 #
+# LINEAR_CFG = {
+#     'encoder': [32],
+#     'decoder': [32, 2],
+#     'lstm_in': 32,
+#     'lstm_encoder': 64
+# }
 LINEAR_CFG = {
-    'encoder': [32],
-    'decoder': [32, 2],
+    'encoder': [8, 16, 32],
+    'decoder': [32, 16, 2],
     'lstm_in': 32,
     'lstm_encoder': 64
 }
@@ -188,19 +194,32 @@ LINEAR_CFG = {
 TRAIN_FOR_WHOLE_CLASS = True
 
 TRAIN_CLASS = SDDVideoClasses.LITTLE
-TRAIN_CLASS_FOR_WHOLE = [SDDVideoClassAndNumbers.LITTLE, SDDVideoClassAndNumbers.DEATH_CIRCLE]
+TRAIN_CLASS_FOR_WHOLE = [SDDVideoClassAndNumbers.LITTLE, SDDVideoClassAndNumbers.DEATH_CIRCLE,
+                         SDDVideoClassAndNumbers.BOOKSTORE, SDDVideoClassAndNumbers.COUPA,
+                         SDDVideoClassAndNumbers.GATES, SDDVideoClassAndNumbers.HYANG,
+                         SDDVideoClassAndNumbers.NEXUS, SDDVideoClassAndNumbers.QUAD]
 VAL_CLASS = TRAIN_CLASS
-VAL_CLASS_FOR_WHOLE = TRAIN_CLASS_FOR_WHOLE
+VAL_CLASS_FOR_WHOLE = [SDDVideoClassAndNumbers.LITTLE, SDDVideoClassAndNumbers.DEATH_CIRCLE,
+                       SDDVideoClassAndNumbers.HYANG,
+                       SDDVideoClassAndNumbers.BOOKSTORE, SDDVideoClassAndNumbers.COUPA,
+                       SDDVideoClassAndNumbers.GATES, SDDVideoClassAndNumbers.NEXUS, SDDVideoClassAndNumbers.QUAD]
 
 TRAIN_VIDEO_NUMBER = 3
 VAL_VIDEO_NUMBER = TRAIN_VIDEO_NUMBER
 
 TRAIN_META = SDDVideoDatasets.LITTLE if not TRAIN_FOR_WHOLE_CLASS else \
-    [SDDVideoDatasets.LITTLE, SDDVideoDatasets.DEATH_CIRCLE]
-VAL_META = TRAIN_META
+    [SDDVideoDatasets.LITTLE, SDDVideoDatasets.DEATH_CIRCLE,
+     SDDVideoDatasets.BOOKSTORE, SDDVideoDatasets.COUPA,
+     SDDVideoDatasets.GATES, SDDVideoDatasets.HYANG,
+     SDDVideoDatasets.NEXUS, SDDVideoDatasets.QUAD]
+VAL_META = SDDVideoDatasets.LITTLE if not TRAIN_FOR_WHOLE_CLASS else \
+    [SDDVideoDatasets.LITTLE, SDDVideoDatasets.DEATH_CIRCLE, SDDVideoDatasets.HYANG,
+     SDDVideoDatasets.BOOKSTORE, SDDVideoDatasets.COUPA,
+     SDDVideoDatasets.GATES, SDDVideoDatasets.NEXUS, SDDVideoDatasets.QUAD
+     ]
 
-TRAIN_VIDEOS_TO_SKIP = [()]
-VAL_VIDEOS_TO_SKIP = [()]
+TRAIN_VIDEOS_TO_SKIP = [(), (), (), (), (), (), (), ()]
+VAL_VIDEOS_TO_SKIP = [(), (), (), (), (), (), (), ()]
 
 USE_GENERATED_DATA = True  # Use unsupervised trajectories or not
 RESUME_TRAINING = False
@@ -211,7 +230,7 @@ OVERFIT_BATCHES = 0.0
 LIMIT_BATCHES = (1.0, 1.0)  # (Train, Val)
 # Custom Solver
 SCHEDULER_FACTOR = 0.1
-SCHEDULER_PATIENCE = 200
+SCHEDULER_PATIENCE = 300
 AMS_GRAD = True
 
 OVERFIT_ELEMENT_COUNT = None
@@ -219,7 +238,7 @@ RANDOM_INDICES_IN_OVERFIT_ELEMENTS = True
 BATCH_SIZE = OVERFIT_ELEMENT_COUNT if OVERFIT_ELEMENT_COUNT is not None else BATCH_SIZE
 
 USE_SOCIAL_LSTM_MODEL = False
-USE_SIMPLE_MODEL = False
+USE_SIMPLE_MODEL = True
 USE_GRU = False
 USE_FINAL_POSITIONS = False
 
@@ -227,12 +246,12 @@ DROPOUT = None
 RNN_DROPOUT = 0
 RNN_LAYERS = 1
 LEARN_HIDDEN_STATES = False
+FEED_MODEL_DISTANCES_IN_METERS = False
 
 USE_RELATIVE_VELOCITIES = False
 
 TRAIN_CUSTOM = True
-RESUME_CUSTOM_TRAINING_PATH = f'runs/Feb26_00-37-11_rishabh-Precision-5540baseline/' \
-                              f'Feb26_00-37-11_rishabh-Precision-5540baseline_checkpoint.ckpt'
+RESUME_CUSTOM_TRAINING_PATH = None
 RESUME_CUSTOM_HPARAM_PATH = f'runs/Feb26_00-37-11_rishabh-Precision-5540baseline/' \
                             f'Feb26_00-37-11_rishabh-Precision-5540baseline_hparams.yaml'
 RESUME_ADDITIONAL_EPOCH = 1000
@@ -245,8 +264,8 @@ LOG_HISTOGRAM = False
 DEBUG_MODE = False
 PLOT_MODE = False
 
-EVAL_USE_SOCIAL_LSTM_MODEL = True
-EVAL_USE_SIMPLE_MODEL = False
+EVAL_USE_SOCIAL_LSTM_MODEL = False
+EVAL_USE_SIMPLE_MODEL = True
 EVAL_USE_BATCH_NORM = False
 
 EVAL_USE_FINAL_POSITIONS_SUPERVISED = True
@@ -254,9 +273,15 @@ EVAL_USE_FINAL_POSITIONS_UNSUPERVISED = True
 
 EVAL_BATCH_SIZE = 1 if PLOT_MODE else 512
 EVAL_WORKERS = 0 if PLOT_MODE else 12
-EVAL_SHUFFLE = True
+EVAL_SHUFFLE = False
 
-EVAL_TRAIN_CLASS = SDDVideoClasses.LITTLE
+EVAL_FOR_WHOLE_CLASS = False
+
+EVAL_TRAIN_CLASS = SDDVideoClasses.LITTLE if not EVAL_FOR_WHOLE_CLASS else \
+    [SDDVideoClassAndNumbers.LITTLE, SDDVideoClassAndNumbers.DEATH_CIRCLE,
+     SDDVideoClassAndNumbers.BOOKSTORE, SDDVideoClassAndNumbers.COUPA,
+     SDDVideoClassAndNumbers.GATES, SDDVideoClassAndNumbers.HYANG,
+     SDDVideoClassAndNumbers.NEXUS, SDDVideoClassAndNumbers.QUAD]
 EVAL_VAL_CLASS = EVAL_TRAIN_CLASS
 EVAL_TEST_CLASS = EVAL_TRAIN_CLASS
 
@@ -264,9 +289,17 @@ EVAL_TRAIN_VIDEO_NUMBER = 3
 EVAL_VAL_VIDEO_NUMBER = EVAL_TRAIN_VIDEO_NUMBER
 EVAL_TEST_VIDEO_NUMBER = EVAL_TRAIN_VIDEO_NUMBER
 
-EVAL_TRAIN_META = SDDVideoDatasets.LITTLE
+EVAL_TRAIN_META = SDDVideoDatasets.LITTLE if not EVAL_FOR_WHOLE_CLASS else \
+    [SDDVideoDatasets.LITTLE, SDDVideoDatasets.DEATH_CIRCLE,
+     SDDVideoDatasets.BOOKSTORE, SDDVideoDatasets.COUPA,
+     SDDVideoDatasets.GATES, SDDVideoDatasets.HYANG,
+     SDDVideoDatasets.NEXUS, SDDVideoDatasets.QUAD]
 EVAL_VAL_META = EVAL_TRAIN_META
 EVAL_TEST_META = EVAL_TRAIN_META
+
+EVAL_TRAIN_VIDEOS_TO_SKIP = [(), (), (), (), (), (), (), ()]
+EVAL_VAL_VIDEOS_TO_SKIP = [(), (), (), (), (), (), (), ()]
+EVAL_TEST_VIDEOS_TO_SKIP = [(), (), (), (), (), (), (), ()]
 
 GT_CHECKPOINT_VERSION = 14
 GT_CHECKPOINT_ROOT_PATH = f'lightning_logs/version_{GT_CHECKPOINT_VERSION}/'
@@ -274,6 +307,80 @@ GT_CHECKPOINT_ROOT_PATH = f'lightning_logs/version_{GT_CHECKPOINT_VERSION}/'
 UNSUPERVISED_CHECKPOINT_VERSION = 15
 UNSUPERVISED_CHECKPOINT_ROOT_PATH = f'lightning_logs/version_{UNSUPERVISED_CHECKPOINT_VERSION}/'
 
-EVAL_PATH_TO_VIDEO = f'{BASE_PATH}videos/{EVAL_TRAIN_CLASS.value}/video{EVAL_TRAIN_VIDEO_NUMBER}/video.mov'
-EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/{EVAL_TRAIN_CLASS.value}{EVAL_TRAIN_VIDEO_NUMBER}/' \
+SIMPLE_GT_CHECKPOINT_ROOT_PATH = f'runs/Maar_overfit_experiments/full_train/'
+SIMPLE_UNSUPERVISED_CHECKPOINT_ROOT_PATH = f'runs/Maar_overfit_experiments/full_train/'
+
+SIMPLE_GT_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.001_generated_True_learn_hidden_False' \
+                                 '_rnn_layers_1_2021-03-04 13:37:06.911715/element_size_None_random_True_' \
+                                 'lr_0.001_generated_True_learn_hidden_False_rnn_layers_1_2021-03-04 13:37:06.911715' \
+                                 '_checkpoint.ckpt'
+SIMPLE_UNSUPERVISED_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.001_generated_True_learn_hidden_False' \
+                                 '_rnn_layers_1_2021-03-04 13:37:06.911715/element_size_None_random_True_' \
+                                 'lr_0.001_generated_True_learn_hidden_False_rnn_layers_1_2021-03-04 13:37:06.911715' \
+                                 '_checkpoint.ckpt'
+
+if USE_SIMPLE_MODEL and EVAL_FOR_WHOLE_CLASS:
+    EVAL_PATH_TO_VIDEO = ''
+    EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/' \
+                     f'{"_".join([e.value[0].value for e in EVAL_TRAIN_CLASS])}/final_eval/' \
+                     f'supervised_{SIMPLE_GT_CHECKPOINT_FILE_PATH[-40:-16]}_' \
+                     f'unsupervised_{SIMPLE_UNSUPERVISED_CHECKPOINT_FILE_PATH[-40:-16]}'
+elif USE_SIMPLE_MODEL and not EVAL_FOR_WHOLE_CLASS:
+    EVAL_PATH_TO_VIDEO = f'{BASE_PATH}videos/{EVAL_TRAIN_CLASS.value}/video{EVAL_TRAIN_VIDEO_NUMBER}/video.mov'
+    EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/' \
+                     f'{EVAL_TRAIN_CLASS.value}{EVAL_TRAIN_VIDEO_NUMBER}/final_eval/' \
+                     f'supervised_{SIMPLE_GT_CHECKPOINT_FILE_PATH[-40:-16]}_' \
+                     f'unsupervised_{SIMPLE_UNSUPERVISED_CHECKPOINT_FILE_PATH[-40:-16]}'
+elif not USE_SIMPLE_MODEL and EVAL_FOR_WHOLE_CLASS:
+    EVAL_PATH_TO_VIDEO = ''
+    EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/' \
+                     f'{"_".join([e.value[0].value for e in EVAL_TRAIN_CLASS])}/final_eval/' \
+                     f'supervised_{SIMPLE_GT_CHECKPOINT_FILE_PATH[-40:-16]}_' \
+                     f'unsupervised_{SIMPLE_UNSUPERVISED_CHECKPOINT_FILE_PATH[-40:-16]}'
+else:
+    EVAL_PATH_TO_VIDEO = f'{BASE_PATH}videos/{EVAL_TRAIN_CLASS.value}/video{EVAL_TRAIN_VIDEO_NUMBER}/video.mov'
+    EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/{EVAL_TRAIN_CLASS.value}{EVAL_TRAIN_VIDEO_NUMBER}/' \
                      f'final_eval/gt_{GT_CHECKPOINT_VERSION}_unsupervised_{UNSUPERVISED_CHECKPOINT_VERSION}/'
+
+
+# EVAL_PATH_TO_VIDEO = f'{BASE_PATH}videos/{EVAL_TRAIN_CLASS.value}/video{EVAL_TRAIN_VIDEO_NUMBER}/video.mov' \
+#     if not EVAL_FOR_WHOLE_CLASS else ''
+# EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/{EVAL_TRAIN_CLASS.value}{EVAL_TRAIN_VIDEO_NUMBER}/' \
+#                  f'final_eval/gt_{GT_CHECKPOINT_VERSION}_unsupervised_{UNSUPERVISED_CHECKPOINT_VERSION}/' \
+#     if not EVAL_FOR_WHOLE_CLASS else f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/' \
+#                                      f'{"_".join([e.value[0].value for e in EVAL_TRAIN_CLASS])}/final_eval/'
+
+
+SIMPLE_GT_CHECKPOINT_PATH = SIMPLE_GT_CHECKPOINT_ROOT_PATH + SIMPLE_GT_CHECKPOINT_FILE_PATH
+SIMPLE_UNSUPERVISED_CHECKPOINT_PATH = SIMPLE_UNSUPERVISED_CHECKPOINT_ROOT_PATH + \
+                                      SIMPLE_UNSUPERVISED_CHECKPOINT_FILE_PATH
+
+EVAL_SIMPLE_MODEL_CONFIG_DICT_GT = {
+    'arch_config': LINEAR_CFG,
+    'batch_size': 1 if PLOT_MODE else 512,
+    'use_batch_norm': False,
+    'encoder_lstm_num_layers': 1,
+    'decoder_lstm_num_layers': 1,
+    'generated_dataset': False,
+    'dropout': None,
+    'rnn_dropout': 0,
+    'use_gru': False,
+    'learn_hidden_states': False,
+    'feed_model_distances_in_meters': False,
+    'relative_velocities': False
+}
+
+EVAL_SIMPLE_MODEL_CONFIG_DICT_UNSUPERVISED = {
+    'arch_config': LINEAR_CFG,
+    'batch_size': 1 if PLOT_MODE else 512,
+    'use_batch_norm': False,
+    'encoder_lstm_num_layers': 1,
+    'decoder_lstm_num_layers': 1,
+    'generated_dataset': True,
+    'dropout': None,
+    'rnn_dropout': 0,
+    'use_gru': False,
+    'learn_hidden_states': False,
+    'feed_model_distances_in_meters': False,
+    'relative_velocities': False
+}

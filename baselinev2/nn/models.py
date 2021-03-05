@@ -626,6 +626,34 @@ class BaselineRNNStackedSimple(BaselineRNN):
         return self(batch)
 
 
+class ConstantLinearBaseline(object):
+    def __init__(self, xy, uv, prediction_length=12, relative_velocities=False):
+        super(ConstantLinearBaseline, self).__init__()
+        self.xy = xy
+        self.uv = uv
+        self.prediction_length = prediction_length
+
+        self.trajectories = []
+
+        if relative_velocities:
+            self.uv *= 0.4
+
+    def __call__(self, *args, **kwargs):
+        last_xy = self.xy
+        for idx in range(self.prediction_length):
+            new_xy = last_xy + self.uv
+            self.trajectories.append(new_xy)
+            last_xy = new_xy
+
+        return np.stack(self.trajectories)
+
+    def reset(self, xy=None, uv=None):
+        self.xy = xy if xy is not None else self.xy
+        self.uv = uv if uv is not None else self.uv
+
+        self.trajectories = []
+
+
 if __name__ == '__main__':
     if OVERFIT:
         overfit_batches = 2
