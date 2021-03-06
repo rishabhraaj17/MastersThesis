@@ -474,6 +474,11 @@ def train_custom(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAnd
                                    'arch_config': arch_config
                                    }
                     logger.info(f'Checkpoint Updated at epoch {epoch}, loss {epoch_v_loss}')
+                    final_path = f'{resume_dict_save_root_path}{resume_dict_save_folder}/'
+                    checkpoint_file_name = f'{final_path}{resume_dict_save_folder}_checkpoint_epoch_{epoch}.ckpt' \
+                        if resume_custom_path is None else f'{final_path}{resume_dict_save_folder}' \
+                                                           f'_checkpoint_resumed_epoch_{epoch}.ckpt'
+                    torch.save(resume_dict, checkpoint_file_name)
     except KeyboardInterrupt:
         logger.warning('Keyboard Interrupt: Saving and exiting gracefully.')
     finally:
