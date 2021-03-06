@@ -543,8 +543,9 @@ class BaselineRNNStackedSimple(BaselineRNN):
                 pred_uv *= ratio[0].item()
             last_uv = pred_uv
 
-        ade = compute_ade(np.stack(predicted_xy), np.stack(true_xy)).item()
-        fde = compute_fde(np.stack(predicted_xy), np.stack(true_xy)).item()
+        ade = compute_ade(np.stack(predicted_xy, axis=1), np.stack(true_xy, axis=1)).item()
+        fde = compute_fde(np.stack(predicted_xy, axis=1), np.stack(true_xy, axis=1),
+                          batched_v2=True, batched=False).item()
 
         ade *= ratio[0].item()
         fde *= ratio[0].item()
@@ -607,8 +608,9 @@ class BaselineRNNStackedSimple(BaselineRNN):
                 pred_uv *= ratio[0].item()
             last_uv = pred_uv
 
-        ade = compute_ade(np.stack(predicted_xy), np.stack(true_xy)).item()
-        fde = compute_fde(np.stack(predicted_xy), np.stack(true_xy)).item()
+        ade = compute_ade(np.stack(predicted_xy, axis=1), np.stack(true_xy, axis=1)).item()
+        fde = compute_fde(np.stack(predicted_xy, axis=1), np.stack(true_xy, axis=1),
+                          batched_v2=True, batched=False).item()
 
         ade *= ratio[0].item()
         fde *= ratio[0].item()
@@ -655,8 +657,9 @@ class ConstantLinearBaseline(object):
 
         pred_trajectory = self()
 
-        ade = compute_ade(np.stack(pred_trajectory), np.stack(gt_trajectory)).item() * ratio
-        fde = compute_fde(np.stack(pred_trajectory), np.stack(gt_trajectory)).item() * ratio
+        ade = compute_ade(np.stack(pred_trajectory), np.stack(gt_trajectory)).item() * ratio[0]
+        fde = compute_fde(np.stack(pred_trajectory), np.stack(gt_trajectory),
+                          batched_v2=True, batched=False).item() * ratio[0]
 
         return pred_trajectory, ade, fde
 

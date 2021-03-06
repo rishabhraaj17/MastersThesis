@@ -6,6 +6,7 @@ import matplotlib
 import torch
 import numpy as np
 import yaml
+import pandas as pd
 from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -27,6 +28,7 @@ from baselinev2.nn.dataset import get_dataset, ConcatenateDataset
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.models import BaselineRNN, BaselineRNNStacked, BaselineRNNStackedSimple, ConstantLinearBaseline
 from baselinev2.nn.train import get_dataset_for_class
+from baselinev2.notebooks.utils import get_trajectory_length
 from baselinev2.overfit_config import LINEAR_CFG
 from baselinev2.utils import social_lstm_parser
 from baselinev2.nn.social_lstm.model import BaselineLSTM
@@ -610,6 +612,8 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
     model_ade_list, model_fde_list = [], []
     constant_linear_baseline_ade_list, constant_linear_baseline_fde_list = [], []
 
+    stat_dict = []
+
     for idx, data in enumerate(tqdm(loader)):
         if use_simple_model_version and EVAL_FOR_WHOLE_CLASS:
             data, dataset_idx = data
@@ -620,6 +624,81 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
         constant_linear_baseline_pred_trajectory, constant_linear_baseline_ade, constant_linear_baseline_fde = \
             constant_linear_baseline_caller.eval(obs_trajectory=in_xy, obs_distances=in_uv,
                                                  gt_trajectory=gt_xy, ratio=ratio)
+
+        obs_trajectory_length, obs_trajectory_length_summed = get_trajectory_length(in_xy)
+        gt_trajectory_length, gt_trajectory_length_summed = get_trajectory_length(gt_xy)
+        model_pred_trajectory_length, model_pred_trajectory_length_summed = get_trajectory_length(
+            model_pred_trajectory.reshape(*gt_xy.shape))
+        linear_trajectory_length, linear_trajectory_length_summed = get_trajectory_length(
+            constant_linear_baseline_pred_trajectory)
+
+        trajectory_length_stacked = np.stack((np.abs(obs_trajectory_length_summed.sum(-1)),
+                                              np.abs(gt_trajectory_length_summed.sum(-1)),
+                                              np.abs(model_pred_trajectory_length_summed.sum(-1)),
+                                              np.abs(linear_trajectory_length_summed.sum(-1))),
+                                             axis=-1)
+        stat_dict.append(trajectory_length_stacked)
+
+        # plot always
+        im_idx = np.random.choice(EVAL_BATCH_SIZE, 1).item()
+        plot_frame_number = in_frame_numbers.squeeze()[im_idx][0].item()
+        plot_track_id = in_track_ids.squeeze()[im_idx][0].item()
+        all_frame_numbers = torch.cat((in_frame_numbers.squeeze()[im_idx], gt_frame_numbers.squeeze()[im_idx])).tolist()
+
+        obs_trajectory = in_xy.squeeze()[im_idx].numpy()
+        gt_trajectory = gt_xy.squeeze()[im_idx].numpy()
+
+        # model_pred_trajectory = model_pred_trajectory.reshape(*gt_xy.shape).squeeze()[im_idx].numpy() \
+        #     if not use_simple_model_version else model_pred_trajectory.reshape(*gt_xy.shape).squeeze()[im_idx]
+        model_pred_trajectory_instance = model_pred_trajectory.squeeze()[:, im_idx, ...].numpy() \
+            if not use_simple_model_version else model_pred_trajectory.squeeze()[:, im_idx, ...]
+        
+        if use_simple_model_version and EVAL_FOR_WHOLE_CLASS:
+            video_dataset = loader.dataset.datasets[dataset_idx.item()]
+            video_path = f'{BASE_PATH}videos/{video_dataset.video_class.value}/' \
+                         f'video{video_dataset.video_number}/video.mov'
+
+        # plot_trajectory_alongside_frame(
+        #     frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
+        #     obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
+        #     pred_trajectory=constant_linear_baseline_pred_trajectory.squeeze()[im_idx],
+        #     frame_number=plot_frame_number, track_id=plot_track_id,
+        #     additional_text=f'Frame Numbers: {all_frame_numbers}'
+        #                     f'\nGround Truth -> ADE: {constant_linear_baseline_ade[im_idx].item()} | '
+        #                     f'FDE: {constant_linear_baseline_fde[im_idx].item()}',
+        #     save_path=f'{plot_path}/{split_name}/constant_linear_baseline/'
+        # )
+        # plot_trajectory_alongside_frame(
+        #     frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
+        #     obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
+        #     pred_trajectory=model_pred_trajectory,
+        #     frame_number=plot_frame_number, track_id=plot_track_id,
+        #     additional_text=f'Frame Numbers: {all_frame_numbers}'
+        #                     f'\nGround Truth -> ADE: {model_ade} | '
+        #                     f'FDE: {model_fde}',
+        #     save_path=f'{plot_path}/{split_name}/model/'
+        # )
+        plot_and_compare_trajectory_four_way(
+            frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
+            supervised_obs_trajectory=obs_trajectory,
+            supervised_gt_trajectory=gt_trajectory,
+            supervised_pred_trajectory=model_pred_trajectory_instance,
+            unsupervised_obs_trajectory=obs_trajectory,
+            unsupervised_gt_trajectory=gt_trajectory,
+            unsupervised_pred_trajectory=constant_linear_baseline_pred_trajectory.squeeze()[im_idx],
+            frame_number=plot_frame_number,
+            track_id=plot_track_id,
+            additional_text=
+            f'Frame Numbers: {all_frame_numbers}'
+            f'\nModel -> ADE: {compute_ade(model_pred_trajectory_instance, gt_trajectory) * ratio[0].item()} | '
+            f'FDE: {compute_fde(model_pred_trajectory_instance, gt_trajectory) * ratio[0].item()}'
+            f'\nLinear -> ADE: '
+            f'{compute_ade(constant_linear_baseline_pred_trajectory.squeeze()[im_idx], gt_trajectory) * ratio[0].item()} |'
+            f' FDE: '
+            f'{compute_fde(constant_linear_baseline_pred_trajectory.squeeze()[im_idx], gt_trajectory) * ratio[0].item()}',
+            save_path=f'{plot_path}/{split_name}/model4way/',
+            with_linear=True
+        )
 
         if plot:
             plot_frame_number = in_frame_numbers.squeeze()[0].item()
@@ -663,6 +742,8 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
         constant_linear_baseline_ade_list.append(constant_linear_baseline_ade.mean().item())
         constant_linear_baseline_fde_list.append(constant_linear_baseline_fde.mean().item())
 
+    stat_dict = np.concatenate(stat_dict, axis=0)
+    stat_dict = pd.DataFrame(data=stat_dict, columns=['Observed', 'GT', 'Model', 'Linear'])
     return model_ade_list, model_fde_list, \
            constant_linear_baseline_ade_list, constant_linear_baseline_fde_list
 

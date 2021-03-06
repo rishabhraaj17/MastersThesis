@@ -262,7 +262,10 @@ LOG_HISTOGRAM = False
 
 # Evaluation
 DEBUG_MODE = False
+EVAL_SINGLE_MODEL = True
+
 PLOT_MODE = False
+BEST_MODEL = True  # if False then last epoch model
 
 EVAL_USE_SOCIAL_LSTM_MODEL = False
 EVAL_USE_SIMPLE_MODEL = True
@@ -271,9 +274,9 @@ EVAL_USE_BATCH_NORM = False
 EVAL_USE_FINAL_POSITIONS_SUPERVISED = True
 EVAL_USE_FINAL_POSITIONS_UNSUPERVISED = True
 
-EVAL_BATCH_SIZE = 1 if PLOT_MODE else 512
+EVAL_BATCH_SIZE = 1 if PLOT_MODE else 32
 EVAL_WORKERS = 0 if PLOT_MODE else 12
-EVAL_SHUFFLE = False
+EVAL_SHUFFLE = True
 
 EVAL_FOR_WHOLE_CLASS = False
 
@@ -319,7 +322,23 @@ SIMPLE_UNSUPERVISED_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.0
                                  'lr_0.001_generated_True_learn_hidden_False_rnn_layers_1_2021-03-04 13:37:06.911715' \
                                  '_checkpoint.ckpt'
 
-if USE_SIMPLE_MODEL and EVAL_FOR_WHOLE_CLASS:
+SINGLE_MODEL_CHECKPOINT_ROOT_PATH = f'runs/Maar_overfit_experiments/full_train/'
+SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.001_generated_True_learn_hidden_False' \
+                                 '_rnn_layers_1_2021-03-04 13:37:06.911715/element_size_None_random_True_' \
+                                 'lr_0.001_generated_True_learn_hidden_False_rnn_layers_1_2021-03-04 13:37:06.911715' \
+                                 '_checkpoint.ckpt'
+
+if EVAL_SINGLE_MODEL and USE_SIMPLE_MODEL and not EVAL_FOR_WHOLE_CLASS:
+    EVAL_PATH_TO_VIDEO = f'{BASE_PATH}videos/{EVAL_TRAIN_CLASS.value}/video{EVAL_TRAIN_VIDEO_NUMBER}/video.mov'
+    EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/' \
+                     f'{EVAL_TRAIN_CLASS.value}{EVAL_TRAIN_VIDEO_NUMBER}/final_eval/' \
+                     f'single_model_{SIMPLE_GT_CHECKPOINT_FILE_PATH[-40:-16]}_'
+elif EVAL_SINGLE_MODEL and (not USE_SIMPLE_MODEL or USE_SIMPLE_MODEL) and EVAL_FOR_WHOLE_CLASS:
+    EVAL_PATH_TO_VIDEO = ''
+    EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/' \
+                     f'{"_".join([e.value[0].value for e in EVAL_TRAIN_CLASS])}/final_eval/' \
+                     f'single_model_{SIMPLE_GT_CHECKPOINT_FILE_PATH[-40:-16]}_'
+elif USE_SIMPLE_MODEL and EVAL_FOR_WHOLE_CLASS:
     EVAL_PATH_TO_VIDEO = ''
     EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/' \
                      f'{"_".join([e.value[0].value for e in EVAL_TRAIN_CLASS])}/final_eval/' \
@@ -354,6 +373,7 @@ else:
 SIMPLE_GT_CHECKPOINT_PATH = SIMPLE_GT_CHECKPOINT_ROOT_PATH + SIMPLE_GT_CHECKPOINT_FILE_PATH
 SIMPLE_UNSUPERVISED_CHECKPOINT_PATH = SIMPLE_UNSUPERVISED_CHECKPOINT_ROOT_PATH + \
                                       SIMPLE_UNSUPERVISED_CHECKPOINT_FILE_PATH
+SINGLE_MODEL_CHECKPOINT_PATH = SINGLE_MODEL_CHECKPOINT_ROOT_PATH + SINGLE_MODEL_CHECKPOINT_FILE_PATH
 
 EVAL_SIMPLE_MODEL_CONFIG_DICT_GT = {
     'arch_config': LINEAR_CFG,

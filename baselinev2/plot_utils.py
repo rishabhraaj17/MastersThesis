@@ -941,7 +941,7 @@ def plot_and_compare_trajectory_alongside_frame(
 def plot_and_compare_trajectory_four_way(
         frame, supervised_obs_trajectory, supervised_gt_trajectory, supervised_pred_trajectory,
         unsupervised_obs_trajectory, unsupervised_gt_trajectory, unsupervised_pred_trajectory, frame_number, track_id,
-        additional_text='', return_figure_only=False, save_path=None):
+        additional_text='', return_figure_only=False, save_path=None, with_linear=False):
     fig, ax = plt.subplots(2, 2, sharex='none', sharey='none', figsize=(22, 20))
     supervised_axis, unsupervised_axis, supervised_trajectory_axis, unsupervised_trajectory_axis = \
         ax[0, 0], ax[0, 1], ax[1, 0], ax[1, 1]
@@ -965,10 +965,10 @@ def plot_and_compare_trajectory_four_way(
     add_line_to_axis(ax=unsupervised_trajectory_axis, features=unsupervised_gt_trajectory, marker_color='r')
     add_line_to_axis(ax=unsupervised_trajectory_axis, features=unsupervised_pred_trajectory, marker_color='g')
 
-    supervised_axis.set_title('GT Trajectories')
-    supervised_trajectory_axis.set_title('GT Trajectories')
-    unsupervised_axis.set_title('Unsupervised Trajectories')
-    unsupervised_trajectory_axis.set_title('Unsupervised Trajectories')
+    supervised_axis.set_title('GT Trajectories' if not with_linear else 'Model Trajectories')
+    supervised_trajectory_axis.set_title('GT Trajectories' if not with_linear else 'Model Trajectories')
+    unsupervised_axis.set_title('Unsupervised Trajectories' if not with_linear else 'Linear Trajectories')
+    unsupervised_trajectory_axis.set_title('Unsupervised Trajectories' if not with_linear else 'Linear Trajectories')
 
     fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}\n{additional_text}')
 

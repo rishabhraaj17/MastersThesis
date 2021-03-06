@@ -52,10 +52,13 @@ def get_trajectory_splits(video_class: SDDVideoClasses, video_number: int,
     return observed_trajectory, prediction_trajectory, observed_relative_distances, prediction_relative_distances, ratio
 
 
-def get_trajectory_length(trajectory):
+def get_trajectory_length(trajectory, use_l2=False):
     length = []
     for idx in range(trajectory.shape[1] - 1):
-        part_length = np.linalg.norm((trajectory[:, idx + 1, ...] - trajectory[:, idx, ...]), ord=2, axis=-1)
+        if use_l2:
+            part_length = np.linalg.norm((trajectory[:, idx + 1, ...] - trajectory[:, idx, ...]), ord=2, axis=-1)
+        else:
+            part_length = trajectory[:, idx + 1, ...] - trajectory[:, idx, ...]
         length.append(part_length)
     length = np.stack(length, axis=-1)
     return length, length.sum(axis=-1)
