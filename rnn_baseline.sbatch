@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name="RecurrentBaseline"
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=12
+#SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1,VRAM:4G
 #SBATCH --mem=12G
 #SBATCH --time=120:00:00
