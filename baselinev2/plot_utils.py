@@ -991,6 +991,71 @@ def plot_and_compare_trajectory_four_way(
     return fig
 
 
+def plot_and_compare_trajectory_six_way(
+        frame, obs_trajectory, gt_trajectory, supervised_pred_trajectory,
+        unsupervised_pred_trajectory, linear_pred_trajectory, frame_number, track_id,
+        additional_text='', return_figure_only=False, save_path=None):
+    fig, ax = plt.subplots(3, 3, sharex='none', sharey='none', figsize=(22, 20))
+    supervised_axis, unsupervised_axis, linear_axis, \
+    supervised_trajectory_axis, unsupervised_trajectory_axis, linear_trajectory_axis = \
+        ax[0, 0], ax[0, 1], ax[0, 2], ax[1, 0], ax[1, 1], ax[1, 2]
+
+    supervised_axis.imshow(frame)
+    unsupervised_axis.imshow(frame)
+    linear_axis.imshow(frame)
+
+    add_line_to_axis(ax=supervised_axis, features=obs_trajectory)
+    add_line_to_axis(ax=supervised_axis, features=gt_trajectory, marker_color='r')
+    add_line_to_axis(ax=supervised_axis, features=supervised_pred_trajectory, marker_color='g')
+
+    add_line_to_axis(ax=unsupervised_axis, features=obs_trajectory)
+    add_line_to_axis(ax=unsupervised_axis, features=gt_trajectory, marker_color='r')
+    add_line_to_axis(ax=unsupervised_axis, features=unsupervised_pred_trajectory, marker_color='g')
+
+    add_line_to_axis(ax=linear_axis, features=obs_trajectory)
+    add_line_to_axis(ax=linear_axis, features=gt_trajectory, marker_color='r')
+    add_line_to_axis(ax=linear_axis, features=linear_pred_trajectory, marker_color='g')
+
+    add_line_to_axis(ax=supervised_trajectory_axis, features=obs_trajectory)
+    add_line_to_axis(ax=supervised_trajectory_axis, features=gt_trajectory, marker_color='r')
+    add_line_to_axis(ax=supervised_trajectory_axis, features=supervised_pred_trajectory, marker_color='g')
+
+    add_line_to_axis(ax=unsupervised_trajectory_axis, features=obs_trajectory)
+    add_line_to_axis(ax=unsupervised_trajectory_axis, features=gt_trajectory, marker_color='r')
+    add_line_to_axis(ax=unsupervised_trajectory_axis, features=unsupervised_pred_trajectory, marker_color='g')
+
+    add_line_to_axis(ax=linear_trajectory_axis, features=obs_trajectory)
+    add_line_to_axis(ax=linear_trajectory_axis, features=gt_trajectory, marker_color='r')
+    add_line_to_axis(ax=linear_trajectory_axis, features=linear_pred_trajectory, marker_color='g')
+
+    supervised_axis.set_title('GT Trajectories')
+    supervised_trajectory_axis.set_title('GT Trajectories')
+    unsupervised_axis.set_title('Unsupervised Trajectories')
+    unsupervised_trajectory_axis.set_title('Unsupervised Trajectories')
+    linear_axis.set_title('Linear Trajectories')
+    linear_trajectory_axis.set_title('Linear Trajectories')
+
+    fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}\n{additional_text}')
+
+    legends_dict = {'b': 'Observed - [0 - 7]', 'r': 'True - [8 - 19]', 'g': 'Predicted - [8 - 19]'}
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
+    if return_figure_only:
+        plt.close()
+        return fig
+
+    if save_path is not None:
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path + f"frame_{frame_number}_track_{track_id}.png")
+        plt.close()
+    else:
+        plt.show()
+
+    return fig
+
+
 def plot_trajectory_with_relative_data(trajectory, relative_distances_l2, relative_distances, additional_text='',
                                        return_figure_only=False, save_path=None, generated=False):
     fig, ax = plt.subplots(2, 2, sharex='none', sharey='none', figsize=(16, 14))
