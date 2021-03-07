@@ -640,45 +640,46 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
         stat_dict.append(trajectory_length_stacked)
 
         # plot always
-        im_idx = np.random.choice(EVAL_BATCH_SIZE, 1).item()
-        plot_frame_number = in_frame_numbers.squeeze()[im_idx][0].item()
-        plot_track_id = in_track_ids.squeeze()[im_idx][0].item()
-        all_frame_numbers = torch.cat((in_frame_numbers.squeeze()[im_idx], gt_frame_numbers.squeeze()[im_idx])).tolist()
-
-        obs_trajectory = in_xy.squeeze()[im_idx].numpy()
-        gt_trajectory = gt_xy.squeeze()[im_idx].numpy()
-
-        # model_pred_trajectory = model_pred_trajectory.reshape(*gt_xy.shape).squeeze()[im_idx].numpy() \
-        #     if not use_simple_model_version else model_pred_trajectory.reshape(*gt_xy.shape).squeeze()[im_idx]
-        model_pred_trajectory_instance = model_pred_trajectory.squeeze()[:, im_idx, ...].numpy() \
-            if not use_simple_model_version else model_pred_trajectory.squeeze()[:, im_idx, ...]
-        
-        if use_simple_model_version and EVAL_FOR_WHOLE_CLASS:
-            video_dataset = loader.dataset.datasets[dataset_idx.item()]
-            video_path = f'{BASE_PATH}videos/{video_dataset.video_class.value}/' \
-                         f'video{video_dataset.video_number}/video.mov'
-
-        # plot_trajectory_alongside_frame(
-        #     frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
-        #     obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
-        #     pred_trajectory=constant_linear_baseline_pred_trajectory.squeeze()[im_idx],
-        #     frame_number=plot_frame_number, track_id=plot_track_id,
-        #     additional_text=f'Frame Numbers: {all_frame_numbers}'
-        #                     f'\nGround Truth -> ADE: {constant_linear_baseline_ade[im_idx].item()} | '
-        #                     f'FDE: {constant_linear_baseline_fde[im_idx].item()}',
-        #     save_path=f'{plot_path}/{split_name}/constant_linear_baseline/'
-        # )
-        # plot_trajectory_alongside_frame(
-        #     frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
-        #     obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
-        #     pred_trajectory=model_pred_trajectory,
-        #     frame_number=plot_frame_number, track_id=plot_track_id,
-        #     additional_text=f'Frame Numbers: {all_frame_numbers}'
-        #                     f'\nGround Truth -> ADE: {model_ade} | '
-        #                     f'FDE: {model_fde}',
-        #     save_path=f'{plot_path}/{split_name}/model/'
-        # )
         if BATCH_PLOT_MODE:
+            im_idx = np.random.choice(EVAL_BATCH_SIZE, 1).item()
+            plot_frame_number = in_frame_numbers.squeeze()[im_idx][0].item()
+            plot_track_id = in_track_ids.squeeze()[im_idx][0].item()
+            all_frame_numbers = torch.cat((in_frame_numbers.squeeze()[im_idx], gt_frame_numbers.squeeze()[im_idx])).tolist()
+
+            obs_trajectory = in_xy.squeeze()[im_idx].numpy()
+            gt_trajectory = gt_xy.squeeze()[im_idx].numpy()
+
+            # model_pred_trajectory = model_pred_trajectory.reshape(*gt_xy.shape).squeeze()[im_idx].numpy() \
+            #     if not use_simple_model_version else model_pred_trajectory.reshape(*gt_xy.shape).squeeze()[im_idx]
+            model_pred_trajectory_instance = model_pred_trajectory.squeeze()[:, im_idx, ...].numpy() \
+                if not use_simple_model_version else model_pred_trajectory.squeeze()[:, im_idx, ...]
+
+            if use_simple_model_version and EVAL_FOR_WHOLE_CLASS:
+                video_dataset = loader.dataset.datasets[dataset_idx.item()]
+                video_path = f'{BASE_PATH}videos/{video_dataset.video_class.value}/' \
+                             f'video{video_dataset.video_number}/video.mov'
+
+            # plot_trajectory_alongside_frame(
+            #     frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
+            #     obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
+            #     pred_trajectory=constant_linear_baseline_pred_trajectory.squeeze()[im_idx],
+            #     frame_number=plot_frame_number, track_id=plot_track_id,
+            #     additional_text=f'Frame Numbers: {all_frame_numbers}'
+            #                     f'\nGround Truth -> ADE: {constant_linear_baseline_ade[im_idx].item()} | '
+            #                     f'FDE: {constant_linear_baseline_fde[im_idx].item()}',
+            #     save_path=f'{plot_path}/{split_name}/constant_linear_baseline/'
+            # )
+            # plot_trajectory_alongside_frame(
+            #     frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
+            #     obs_trajectory=obs_trajectory, gt_trajectory=gt_trajectory,
+            #     pred_trajectory=model_pred_trajectory,
+            #     frame_number=plot_frame_number, track_id=plot_track_id,
+            #     additional_text=f'Frame Numbers: {all_frame_numbers}'
+            #                     f'\nGround Truth -> ADE: {model_ade} | '
+            #                     f'FDE: {model_fde}',
+            #     save_path=f'{plot_path}/{split_name}/model/'
+            # )
+
             plot_and_compare_trajectory_four_way(
                 frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
                 supervised_obs_trajectory=obs_trajectory,
