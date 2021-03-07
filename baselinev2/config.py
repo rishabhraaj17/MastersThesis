@@ -265,6 +265,7 @@ DEBUG_MODE = False
 EVAL_SINGLE_MODEL = True
 
 PLOT_MODE = False
+BATCH_PLOT_MODE = False
 BEST_MODEL = True  # if False then last epoch model
 
 EVAL_USE_SOCIAL_LSTM_MODEL = False
@@ -323,21 +324,25 @@ SIMPLE_UNSUPERVISED_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.0
                                  '_checkpoint.ckpt'
 
 SINGLE_MODEL_CHECKPOINT_ROOT_PATH = f'runs/Maar_overfit_experiments/full_train/'
-SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.001_generated_True_learn_hidden_False' \
-                                 '_rnn_layers_1_2021-03-04 13:37:06.911715/element_size_None_random_True_' \
-                                 'lr_0.001_generated_True_learn_hidden_False_rnn_layers_1_2021-03-04 13:37:06.911715' \
-                                 '_checkpoint.ckpt'
+# SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.001_generated_True_learn_hidden_False' \
+#                                  '_rnn_layers_1_2021-03-04 13:37:06.911715/element_size_None_random_True_' \
+#                                  'lr_0.001_generated_True_learn_hidden_False_rnn_layers_1_' \
+#                                     '2021-03-04 13:37:06.911715_checkpoint.ckpt'
+SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.001_generated_False_learn_hidden_False_' \
+                                    'rnn_layers_1_2021-03-04 16:12:22.860279/element_size_None_random_True' \
+                                    '_lr_0.001_generated_False_learn_hidden_False_rnn_layers_' \
+                                    '1_2021-03-04 16:12:22.860279_checkpoint.ckpt'
 
 if EVAL_SINGLE_MODEL and USE_SIMPLE_MODEL and not EVAL_FOR_WHOLE_CLASS:
     EVAL_PATH_TO_VIDEO = f'{BASE_PATH}videos/{EVAL_TRAIN_CLASS.value}/video{EVAL_TRAIN_VIDEO_NUMBER}/video.mov'
     EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/' \
                      f'{EVAL_TRAIN_CLASS.value}{EVAL_TRAIN_VIDEO_NUMBER}/final_eval/' \
-                     f'single_model_{SIMPLE_GT_CHECKPOINT_FILE_PATH[-40:-16]}_'
+                     f'single_model_{SINGLE_MODEL_CHECKPOINT_FILE_PATH[-40:-16]}_'
 elif EVAL_SINGLE_MODEL and (not USE_SIMPLE_MODEL or USE_SIMPLE_MODEL) and EVAL_FOR_WHOLE_CLASS:
     EVAL_PATH_TO_VIDEO = ''
     EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/' \
                      f'{"_".join([e.value[0].value for e in EVAL_TRAIN_CLASS])}/final_eval/' \
-                     f'single_model_{SIMPLE_GT_CHECKPOINT_FILE_PATH[-40:-16]}_'
+                     f'single_model_{SINGLE_MODEL_CHECKPOINT_FILE_PATH[-40:-16]}_'
 elif USE_SIMPLE_MODEL and EVAL_FOR_WHOLE_CLASS:
     EVAL_PATH_TO_VIDEO = ''
     EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/' \

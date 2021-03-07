@@ -22,7 +22,7 @@ from baselinev2.config import BASE_PATH, ROOT_PATH, DEBUG_MODE, EVAL_USE_SOCIAL_
     EVAL_SIMPLE_MODEL_CONFIG_DICT_GT, EVAL_SIMPLE_MODEL_CONFIG_DICT_UNSUPERVISED, SIMPLE_GT_CHECKPOINT_ROOT_PATH, \
     SIMPLE_UNSUPERVISED_CHECKPOINT_ROOT_PATH, EVAL_FOR_WHOLE_CLASS, EVAL_TRAIN_VIDEOS_TO_SKIP, EVAL_VAL_VIDEOS_TO_SKIP, \
     EVAL_TEST_VIDEOS_TO_SKIP, SIMPLE_GT_CHECKPOINT_PATH, SIMPLE_UNSUPERVISED_CHECKPOINT_PATH, DEVICE, BEST_MODEL, \
-    EVAL_SINGLE_MODEL, SINGLE_MODEL_CHECKPOINT_PATH
+    EVAL_SINGLE_MODEL, SINGLE_MODEL_CHECKPOINT_PATH, BATCH_PLOT_MODE
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset, ConcatenateDataset
 from baselinev2.nn.data_utils import extract_frame_from_video
@@ -678,27 +678,28 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
         #                     f'FDE: {model_fde}',
         #     save_path=f'{plot_path}/{split_name}/model/'
         # )
-        plot_and_compare_trajectory_four_way(
-            frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
-            supervised_obs_trajectory=obs_trajectory,
-            supervised_gt_trajectory=gt_trajectory,
-            supervised_pred_trajectory=model_pred_trajectory_instance,
-            unsupervised_obs_trajectory=obs_trajectory,
-            unsupervised_gt_trajectory=gt_trajectory,
-            unsupervised_pred_trajectory=constant_linear_baseline_pred_trajectory.squeeze()[im_idx],
-            frame_number=plot_frame_number,
-            track_id=plot_track_id,
-            additional_text=
-            f'Frame Numbers: {all_frame_numbers}'
-            f'\nModel -> ADE: {compute_ade(model_pred_trajectory_instance, gt_trajectory) * ratio[0].item()} | '
-            f'FDE: {compute_fde(model_pred_trajectory_instance, gt_trajectory) * ratio[0].item()}'
-            f'\nLinear -> ADE: '
-            f'{compute_ade(constant_linear_baseline_pred_trajectory.squeeze()[im_idx], gt_trajectory) * ratio[0].item()} |'
-            f' FDE: '
-            f'{compute_fde(constant_linear_baseline_pred_trajectory.squeeze()[im_idx], gt_trajectory) * ratio[0].item()}',
-            save_path=f'{plot_path}/{split_name}/model4way/',
-            with_linear=True
-        )
+        if BATCH_PLOT_MODE:
+            plot_and_compare_trajectory_four_way(
+                frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
+                supervised_obs_trajectory=obs_trajectory,
+                supervised_gt_trajectory=gt_trajectory,
+                supervised_pred_trajectory=model_pred_trajectory_instance,
+                unsupervised_obs_trajectory=obs_trajectory,
+                unsupervised_gt_trajectory=gt_trajectory,
+                unsupervised_pred_trajectory=constant_linear_baseline_pred_trajectory.squeeze()[im_idx],
+                frame_number=plot_frame_number,
+                track_id=plot_track_id,
+                additional_text=
+                f'Frame Numbers: {all_frame_numbers}'
+                f'\nModel -> ADE: {compute_ade(model_pred_trajectory_instance, gt_trajectory) * ratio[0].item()} | '
+                f'FDE: {compute_fde(model_pred_trajectory_instance, gt_trajectory) * ratio[0].item()}'
+                f'\nLinear -> ADE: '
+                f'{compute_ade(constant_linear_baseline_pred_trajectory.squeeze()[im_idx], gt_trajectory) * ratio[0].item()} |'
+                f' FDE: '
+                f'{compute_fde(constant_linear_baseline_pred_trajectory.squeeze()[im_idx], gt_trajectory) * ratio[0].item()}',
+                save_path=f'{plot_path}/{split_name}/model4way/',
+                with_linear=True
+            )
 
         if plot:
             plot_frame_number = in_frame_numbers.squeeze()[0].item()
