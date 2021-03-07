@@ -268,6 +268,8 @@ PLOT_MODE = False
 BATCH_PLOT_MODE = False
 BEST_MODEL = True  # if False then last epoch model
 
+EVAL_USE_GENERATED = False  # Default: False
+
 EVAL_USE_SOCIAL_LSTM_MODEL = False
 EVAL_USE_SIMPLE_MODEL = True
 EVAL_USE_BATCH_NORM = False
@@ -324,14 +326,14 @@ SIMPLE_UNSUPERVISED_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.0
                                  '_checkpoint.ckpt'
 
 SINGLE_MODEL_CHECKPOINT_ROOT_PATH = f'runs/Maar_overfit_experiments/full_train/'
-# SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.001_generated_True_learn_hidden_False' \
-#                                  '_rnn_layers_1_2021-03-04 13:37:06.911715/element_size_None_random_True_' \
-#                                  'lr_0.001_generated_True_learn_hidden_False_rnn_layers_1_' \
-#                                     '2021-03-04 13:37:06.911715_checkpoint.ckpt'
-SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.001_generated_False_learn_hidden_False_' \
-                                    'rnn_layers_1_2021-03-04 16:12:22.860279/element_size_None_random_True' \
-                                    '_lr_0.001_generated_False_learn_hidden_False_rnn_layers_' \
-                                    '1_2021-03-04 16:12:22.860279_checkpoint.ckpt'
+SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.001_generated_True_learn_hidden_False' \
+                                 '_rnn_layers_1_2021-03-04 13:37:06.911715/element_size_None_random_True_' \
+                                 'lr_0.001_generated_True_learn_hidden_False_rnn_layers_1_' \
+                                    '2021-03-04 13:37:06.911715_checkpoint.ckpt'
+# SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.001_generated_False_learn_hidden_False_' \
+#                                     'rnn_layers_1_2021-03-04 16:12:22.860279/element_size_None_random_True' \
+#                                     '_lr_0.001_generated_False_learn_hidden_False_rnn_layers_' \
+#                                     '1_2021-03-04 16:12:22.860279_checkpoint.ckpt'
 
 if EVAL_SINGLE_MODEL and USE_SIMPLE_MODEL and not EVAL_FOR_WHOLE_CLASS:
     EVAL_PATH_TO_VIDEO = f'{BASE_PATH}videos/{EVAL_TRAIN_CLASS.value}/video{EVAL_TRAIN_VIDEO_NUMBER}/video.mov'

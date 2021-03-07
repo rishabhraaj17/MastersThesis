@@ -22,7 +22,7 @@ from baselinev2.config import BASE_PATH, ROOT_PATH, DEBUG_MODE, EVAL_USE_SOCIAL_
     EVAL_SIMPLE_MODEL_CONFIG_DICT_GT, EVAL_SIMPLE_MODEL_CONFIG_DICT_UNSUPERVISED, SIMPLE_GT_CHECKPOINT_ROOT_PATH, \
     SIMPLE_UNSUPERVISED_CHECKPOINT_ROOT_PATH, EVAL_FOR_WHOLE_CLASS, EVAL_TRAIN_VIDEOS_TO_SKIP, EVAL_VAL_VIDEOS_TO_SKIP, \
     EVAL_TEST_VIDEOS_TO_SKIP, SIMPLE_GT_CHECKPOINT_PATH, SIMPLE_UNSUPERVISED_CHECKPOINT_PATH, DEVICE, BEST_MODEL, \
-    EVAL_SINGLE_MODEL, SINGLE_MODEL_CHECKPOINT_PATH, BATCH_PLOT_MODE
+    EVAL_SINGLE_MODEL, SINGLE_MODEL_CHECKPOINT_PATH, BATCH_PLOT_MODE, EVAL_USE_GENERATED
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset, ConcatenateDataset
 from baselinev2.nn.data_utils import extract_frame_from_video
@@ -248,7 +248,7 @@ def get_models(social_lstm, supervised_checkpoint_root_path, unsupervised_checkp
             use_batch_norm=supervised_hyperparameter_file['use_batch_norm'],
             encoder_lstm_num_layers=supervised_hyperparameter_file['num_rnn_layers'],
             decoder_lstm_num_layers=supervised_hyperparameter_file['num_rnn_layers'],
-            generated_dataset=False,  # supervised_hyperparameter_file['generated_data'],
+            generated_dataset=EVAL_USE_GENERATED,  # supervised_hyperparameter_file['generated_data'],
             dropout=supervised_hyperparameter_file['dropout'],
             rnn_dropout=supervised_hyperparameter_file['rnn_dropout'],
             use_gru=supervised_hyperparameter_file['use_gru'],
@@ -276,7 +276,7 @@ def get_models(social_lstm, supervised_checkpoint_root_path, unsupervised_checkp
             use_batch_norm=unsupervised_hyperparameter_file['use_batch_norm'],
             encoder_lstm_num_layers=unsupervised_hyperparameter_file['num_rnn_layers'],
             decoder_lstm_num_layers=unsupervised_hyperparameter_file['num_rnn_layers'],
-            generated_dataset=False,  # unsupervised_hyperparameter_file['generated_data'],
+            generated_dataset=EVAL_USE_GENERATED,  # unsupervised_hyperparameter_file['generated_data'],
             dropout=unsupervised_hyperparameter_file['dropout'],
             rnn_dropout=unsupervised_hyperparameter_file['rnn_dropout'],
             use_gru=unsupervised_hyperparameter_file['use_gru'],
@@ -327,7 +327,11 @@ def evaluate_per_loader(plot, plot_four_way, plot_path, supervised_caller, loade
     for idx, data in enumerate(tqdm(loader)):
         if use_simple_model_version and EVAL_FOR_WHOLE_CLASS:
             data, dataset_idx = data
-        in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = data
+        if EVAL_USE_GENERATED:
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, _, _, ratio = \
+                data
+        else:
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = data
 
         supervised_loss, supervised_ade, supervised_fde, supervised_ratio, supervised_pred_trajectory = \
             supervised_caller(data)
@@ -577,7 +581,7 @@ def get_model(social_lstm, model_checkpoint_root_path, use_batch_norm,
             use_batch_norm=model_hyperparameter_file['use_batch_norm'],
             encoder_lstm_num_layers=model_hyperparameter_file['num_rnn_layers'],
             decoder_lstm_num_layers=model_hyperparameter_file['num_rnn_layers'],
-            generated_dataset=False,  # model_hyperparameter_file['generated_data'],
+            generated_dataset=EVAL_USE_GENERATED,  # model_hyperparameter_file['generated_data'],
             dropout=model_hyperparameter_file['dropout'],
             rnn_dropout=model_hyperparameter_file['rnn_dropout'],
             use_gru=model_hyperparameter_file['use_gru'],
@@ -617,7 +621,11 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
     for idx, data in enumerate(tqdm(loader)):
         if use_simple_model_version and EVAL_FOR_WHOLE_CLASS:
             data, dataset_idx = data
-        in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = data
+        if EVAL_USE_GENERATED:
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, _, _, ratio = \
+                data
+        else:
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = data
 
         model_loss, model_ade, model_fde, model_ratio, model_pred_trajectory = \
             model_caller(data)
@@ -859,15 +867,15 @@ def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_lo
 def get_eval_loaders():
     if EVAL_FOR_WHOLE_CLASS:
         train_set = get_dataset_for_class(video_class=EVAL_TRAIN_CLASS, meta_label=EVAL_TRAIN_META,
-                                          mode=NetworkMode.TRAIN, get_generated=False,
+                                          mode=NetworkMode.TRAIN, get_generated=EVAL_USE_GENERATED,
                                           videos_to_skip=EVAL_TRAIN_VIDEOS_TO_SKIP,
                                           return_dataset_list=True)
         val_set = get_dataset_for_class(video_class=EVAL_VAL_CLASS, meta_label=EVAL_VAL_META,
-                                        mode=NetworkMode.VALIDATION, get_generated=False,
+                                        mode=NetworkMode.VALIDATION, get_generated=EVAL_USE_GENERATED,
                                         videos_to_skip=EVAL_VAL_VIDEOS_TO_SKIP,
                                         return_dataset_list=True)
         test_set = get_dataset_for_class(video_class=EVAL_TEST_CLASS, meta_label=EVAL_TEST_META,
-                                         mode=NetworkMode.TEST, get_generated=False,
+                                         mode=NetworkMode.TEST, get_generated=EVAL_USE_GENERATED,
                                          videos_to_skip=EVAL_TEST_VIDEOS_TO_SKIP,
                                          return_dataset_list=True)
         train_set = ConcatenateDataset(train_set)
@@ -875,11 +883,11 @@ def get_eval_loaders():
         test_set = ConcatenateDataset(test_set)
     else:
         train_set = get_dataset(video_clazz=EVAL_TRAIN_CLASS, video_number=EVAL_TRAIN_VIDEO_NUMBER,
-                                mode=NetworkMode.TRAIN, meta_label=EVAL_TRAIN_META, get_generated=False)
+                                mode=NetworkMode.TRAIN, meta_label=EVAL_TRAIN_META, get_generated=EVAL_USE_GENERATED)
         val_set = get_dataset(video_clazz=EVAL_VAL_CLASS, video_number=EVAL_VAL_VIDEO_NUMBER,
-                              mode=NetworkMode.VALIDATION, meta_label=EVAL_VAL_META, get_generated=False)
+                              mode=NetworkMode.VALIDATION, meta_label=EVAL_VAL_META, get_generated=EVAL_USE_GENERATED)
         test_set = get_dataset(video_clazz=EVAL_TEST_CLASS, video_number=EVAL_TEST_VIDEO_NUMBER,
-                               mode=NetworkMode.TEST, meta_label=EVAL_TEST_META, get_generated=False)
+                               mode=NetworkMode.TEST, meta_label=EVAL_TEST_META, get_generated=EVAL_USE_GENERATED)
 
     train_loader = DataLoader(train_set, batch_size=EVAL_BATCH_SIZE, shuffle=EVAL_SHUFFLE, num_workers=EVAL_WORKERS)
     val_loader = DataLoader(val_set, batch_size=EVAL_BATCH_SIZE, shuffle=EVAL_SHUFFLE, num_workers=EVAL_WORKERS)
