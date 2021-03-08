@@ -754,8 +754,9 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
         constant_linear_baseline_ade_list.append(constant_linear_baseline_ade.mean().item())
         constant_linear_baseline_fde_list.append(constant_linear_baseline_fde.mean().item())
 
-    stat_dict = np.concatenate(stat_dict, axis=0)
-    stat_dict = pd.DataFrame(data=stat_dict, columns=['Observed', 'GT', 'Model', 'Linear'])
+    if EVAL_EXTRACT_STATS:
+        stat_dict = np.concatenate(stat_dict, axis=0)
+        stat_dict = pd.DataFrame(data=stat_dict, columns=['Observed', 'GT', 'Model', 'Linear'])
     return model_ade_list, model_fde_list, \
            constant_linear_baseline_ade_list, constant_linear_baseline_fde_list
 
