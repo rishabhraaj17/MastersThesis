@@ -52,11 +52,11 @@ def get_loaders(trial):
         val_video_class=[SDDVideoClassAndNumbers.LITTLE, SDDVideoClassAndNumbers.DEATH_CIRCLE,
                          SDDVideoClassAndNumbers.HYANG],
         val_meta_label=[SDDVideoDatasets.LITTLE, SDDVideoDatasets.DEATH_CIRCLE, SDDVideoDatasets.HYANG]
-        , get_generated=True, videos_to_skip_for_train=[()],
-        videos_to_skip_for_val=[()])
+        , get_generated=True, videos_to_skip_for_train=[(), (), ()],
+        videos_to_skip_for_val=[(), (), ()])
 
-    batch_size = trial.suggest_int("batch_size", 64, 1024, step=64)
-    # batch_size = 3072
+    # batch_size = trial.suggest_int("batch_size", 64, 1024, step=64)
+    batch_size = 32
     # Load MNIST dataset.
     train_loader = torch.utils.data.DataLoader(
         dataset_train,
@@ -132,7 +132,7 @@ def objective(trial: optuna.Trial):
 
 if __name__ == "__main__":
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=200, timeout=1000, n_jobs=12, show_progress_bar=True)
+    study.optimize(objective, n_trials=200, timeout=1800, n_jobs=12, show_progress_bar=True)
 
     pruned_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED]
     complete_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]

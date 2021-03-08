@@ -22,7 +22,8 @@ from baselinev2.config import BASE_PATH, ROOT_PATH, DEBUG_MODE, EVAL_USE_SOCIAL_
     EVAL_SIMPLE_MODEL_CONFIG_DICT_GT, EVAL_SIMPLE_MODEL_CONFIG_DICT_UNSUPERVISED, SIMPLE_GT_CHECKPOINT_ROOT_PATH, \
     SIMPLE_UNSUPERVISED_CHECKPOINT_ROOT_PATH, EVAL_FOR_WHOLE_CLASS, EVAL_TRAIN_VIDEOS_TO_SKIP, EVAL_VAL_VIDEOS_TO_SKIP, \
     EVAL_TEST_VIDEOS_TO_SKIP, SIMPLE_GT_CHECKPOINT_PATH, SIMPLE_UNSUPERVISED_CHECKPOINT_PATH, DEVICE, BEST_MODEL, \
-    EVAL_SINGLE_MODEL, SINGLE_MODEL_CHECKPOINT_PATH, BATCH_PLOT_MODE, EVAL_USE_GENERATED
+    EVAL_SINGLE_MODEL, SINGLE_MODEL_CHECKPOINT_PATH, BATCH_PLOT_MODE, EVAL_USE_GENERATED, EVAL_FROM_OVERFIT, \
+    EVAL_EXTRACT_STATS
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset, ConcatenateDataset
 from baselinev2.nn.data_utils import extract_frame_from_video
@@ -518,7 +519,7 @@ def eval_models(supervised_checkpoint_root_path: str, unsupervised_checkpoint_ro
                      'linear': test_constant_linear_baseline_fde.item()},
              'num_trajectories': len(test_loader.dataset)}}
 
-    results_dump_path = f'{plot_path}/eval_results.yaml'
+    results_dump_path = f'{plot_path}/eval_results{"_generated" if EVAL_USE_GENERATED else ""}.yaml'
     Path(plot_path).mkdir(parents=True, exist_ok=True)
     with open(results_dump_path, 'w+') as f:
         yaml.dump(eval_results, f)
@@ -633,19 +634,20 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
             constant_linear_baseline_caller.eval(obs_trajectory=in_xy, obs_distances=in_uv,
                                                  gt_trajectory=gt_xy, ratio=ratio)
 
-        obs_trajectory_length, obs_trajectory_length_summed = get_trajectory_length(in_xy)
-        gt_trajectory_length, gt_trajectory_length_summed = get_trajectory_length(gt_xy)
-        model_pred_trajectory_length, model_pred_trajectory_length_summed = get_trajectory_length(
-            model_pred_trajectory.reshape(*gt_xy.shape))
-        linear_trajectory_length, linear_trajectory_length_summed = get_trajectory_length(
-            constant_linear_baseline_pred_trajectory)
+        if EVAL_EXTRACT_STATS:
+            obs_trajectory_length, obs_trajectory_length_summed = get_trajectory_length(in_xy)
+            gt_trajectory_length, gt_trajectory_length_summed = get_trajectory_length(gt_xy)
+            model_pred_trajectory_length, model_pred_trajectory_length_summed = get_trajectory_length(
+                model_pred_trajectory.reshape(*gt_xy.shape))
+            linear_trajectory_length, linear_trajectory_length_summed = get_trajectory_length(
+                constant_linear_baseline_pred_trajectory)
 
-        trajectory_length_stacked = np.stack((np.abs(obs_trajectory_length_summed.sum(-1)),
-                                              np.abs(gt_trajectory_length_summed.sum(-1)),
-                                              np.abs(model_pred_trajectory_length_summed.sum(-1)),
-                                              np.abs(linear_trajectory_length_summed.sum(-1))),
-                                             axis=-1)
-        stat_dict.append(trajectory_length_stacked)
+            trajectory_length_stacked = np.stack((np.abs(obs_trajectory_length_summed.sum(-1)),
+                                                  np.abs(gt_trajectory_length_summed.sum(-1)),
+                                                  np.abs(model_pred_trajectory_length_summed.sum(-1)),
+                                                  np.abs(linear_trajectory_length_summed.sum(-1))),
+                                                 axis=-1)
+            stat_dict.append(trajectory_length_stacked)
 
         # plot always
         if BATCH_PLOT_MODE:
@@ -663,7 +665,7 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
                 if not use_simple_model_version else model_pred_trajectory.squeeze()[:, im_idx, ...]
 
             if use_simple_model_version and EVAL_FOR_WHOLE_CLASS:
-                video_dataset = loader.dataset.datasets[dataset_idx.item()]
+                video_dataset = loader.dataset.datasets[dataset_idx[im_idx].item()]
                 video_path = f'{BASE_PATH}videos/{video_dataset.video_class.value}/' \
                              f'video{video_dataset.video_number}/video.mov'
 
@@ -840,7 +842,7 @@ def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_lo
              'fde': {'model': test_model_fde.item(), 'linear': test_constant_linear_baseline_fde.item()},
              'num_trajectories': len(test_loader.dataset)}}
 
-    results_dump_path = f'{plot_path}/eval_results.yaml'
+    results_dump_path = f'{plot_path}/eval_results{"_generated" if EVAL_USE_GENERATED else ""}.yaml'
     Path(plot_path).mkdir(parents=True, exist_ok=True)
     with open(results_dump_path, 'w+') as f:
         yaml.dump(eval_results, f)

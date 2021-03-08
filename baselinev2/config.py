@@ -281,7 +281,7 @@ EVAL_BATCH_SIZE = 1 if PLOT_MODE else 32
 EVAL_WORKERS = 0 if PLOT_MODE else 12
 EVAL_SHUFFLE = True
 
-EVAL_FOR_WHOLE_CLASS = False
+EVAL_FOR_WHOLE_CLASS = True
 
 EVAL_TRAIN_CLASS = SDDVideoClasses.LITTLE if not EVAL_FOR_WHOLE_CLASS else \
     [SDDVideoClassAndNumbers.LITTLE, SDDVideoClassAndNumbers.DEATH_CIRCLE,
@@ -313,6 +313,9 @@ GT_CHECKPOINT_ROOT_PATH = f'lightning_logs/version_{GT_CHECKPOINT_VERSION}/'
 UNSUPERVISED_CHECKPOINT_VERSION = 15
 UNSUPERVISED_CHECKPOINT_ROOT_PATH = f'lightning_logs/version_{UNSUPERVISED_CHECKPOINT_VERSION}/'
 
+EVAL_FROM_OVERFIT = False
+EVAL_EXTRACT_STATS = False
+
 SIMPLE_GT_CHECKPOINT_ROOT_PATH = f'runs/Maar_overfit_experiments/full_train/'
 SIMPLE_UNSUPERVISED_CHECKPOINT_ROOT_PATH = f'runs/Maar_overfit_experiments/full_train/'
 
@@ -321,19 +324,22 @@ SIMPLE_GT_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.001_generat
                                  'lr_0.001_generated_True_learn_hidden_False_rnn_layers_1_2021-03-04 13:37:06.911715' \
                                  '_checkpoint.ckpt'
 SIMPLE_UNSUPERVISED_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.001_generated_True_learn_hidden_False' \
-                                 '_rnn_layers_1_2021-03-04 13:37:06.911715/element_size_None_random_True_' \
-                                 'lr_0.001_generated_True_learn_hidden_False_rnn_layers_1_2021-03-04 13:37:06.911715' \
-                                 '_checkpoint.ckpt'
+                                           '_rnn_layers_1_2021-03-04 13:37:06.911715/element_size_None_random_True_' \
+                                           'lr_0.001_generated_True_learn_hidden_False_rnn_layers_1_' \
+                                           '2021-03-04 13:37:06.911715' \
+                                           '_checkpoint.ckpt'
 
-SINGLE_MODEL_CHECKPOINT_ROOT_PATH = f'runs/Maar_overfit_experiments/full_train/'
-SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.001_generated_True_learn_hidden_False' \
-                                 '_rnn_layers_1_2021-03-04 13:37:06.911715/element_size_None_random_True_' \
-                                 'lr_0.001_generated_True_learn_hidden_False_rnn_layers_1_' \
-                                    '2021-03-04 13:37:06.911715_checkpoint.ckpt'
+SINGLE_MODEL_CHECKPOINT_ROOT_PATH = f'runs/Maar_overfit_experiments/full_train/' if EVAL_FROM_OVERFIT else f'runs/'
+# SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.001_generated_True_learn_hidden_False' \
+#                                  '_rnn_layers_1_2021-03-04 13:37:06.911715/element_size_None_random_True_' \
+#                                  'lr_0.001_generated_True_learn_hidden_False_rnn_layers_1_' \
+#                                     '2021-03-04 13:37:06.911715_checkpoint.ckpt'
 # SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'element_size_None_random_True_lr_0.001_generated_False_learn_hidden_False_' \
 #                                     'rnn_layers_1_2021-03-04 16:12:22.860279/element_size_None_random_True' \
 #                                     '_lr_0.001_generated_False_learn_hidden_False_rnn_layers_' \
 #                                     '1_2021-03-04 16:12:22.860279_checkpoint.ckpt'
+SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'Mar05_00-34-42_rishabh-Precision-5540baseline/' \
+                                    'Mar05_00-34-42_rishabh-Precision-5540baseline_checkpoint.ckpt'
 
 if EVAL_SINGLE_MODEL and USE_SIMPLE_MODEL and not EVAL_FOR_WHOLE_CLASS:
     EVAL_PATH_TO_VIDEO = f'{BASE_PATH}videos/{EVAL_TRAIN_CLASS.value}/video{EVAL_TRAIN_VIDEO_NUMBER}/video.mov'
@@ -368,7 +374,6 @@ else:
     EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/{EVAL_TRAIN_CLASS.value}{EVAL_TRAIN_VIDEO_NUMBER}/' \
                      f'final_eval/gt_{GT_CHECKPOINT_VERSION}_unsupervised_{UNSUPERVISED_CHECKPOINT_VERSION}/'
 
-
 # EVAL_PATH_TO_VIDEO = f'{BASE_PATH}videos/{EVAL_TRAIN_CLASS.value}/video{EVAL_TRAIN_VIDEO_NUMBER}/video.mov' \
 #     if not EVAL_FOR_WHOLE_CLASS else ''
 # EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/{EVAL_TRAIN_CLASS.value}{EVAL_TRAIN_VIDEO_NUMBER}/' \
@@ -394,7 +399,9 @@ EVAL_SIMPLE_MODEL_CONFIG_DICT_GT = {
     'use_gru': False,
     'learn_hidden_states': False,
     'feed_model_distances_in_meters': False,
-    'relative_velocities': False
+    'relative_velocities': False,
+    'use_simple_model': True,
+    'num_rnn_layers': 1
 }
 
 EVAL_SIMPLE_MODEL_CONFIG_DICT_UNSUPERVISED = {
@@ -409,5 +416,7 @@ EVAL_SIMPLE_MODEL_CONFIG_DICT_UNSUPERVISED = {
     'use_gru': False,
     'learn_hidden_states': False,
     'feed_model_distances_in_meters': False,
-    'relative_velocities': False
+    'relative_velocities': False,
+    'use_simple_model': True,
+    'num_rnn_layers': 1
 }
