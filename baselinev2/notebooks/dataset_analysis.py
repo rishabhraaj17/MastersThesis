@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
-from baselinev2.config import GENERATED_DATASET_ROOT, SAVE_BASE_PATH, ROOT_PATH
+from baselinev2.config import GENERATED_DATASET_ROOT, SAVE_BASE_PATH, ROOT_PATH, TRAIN_CLASS_FOR_WHOLE, TRAIN_META
 from baselinev2.constants import NetworkMode
 from baselinev2.notebooks.utils import get_trajectory_splits, get_trajectory_length
 from log import initialize_logging, get_logger
@@ -72,44 +72,100 @@ def plot_relative_distances_line_plot(distances, title, save_path=None):
 
 
 if __name__ == '__main__':
-    vid_clz = SDDVideoClasses.LITTLE
-    vid_clz_meta = SDDVideoDatasets.LITTLE
-    vid_number = 3
-    split = NetworkMode.VALIDATION
+    analyze_whole_dataset = False
+
     mem_mode = None
-
-    plot_path = f'{ROOT_PATH}Plots/baseline_v2/nn/STATS/{vid_clz.value}{vid_number}/{split.name}/'
-
+    split = NetworkMode.VALIDATION
     generated_dataset = False
-
-    plot_path += 'generated/' if generated_dataset else 'gt/'
 
     root_path = GENERATED_DATASET_ROOT if generated_dataset else SAVE_BASE_PATH
 
-    obs_trajectory, pred_trajectory, obs_relative_distances, pred_relative_distances, to_meter = \
-        get_trajectory_splits(video_class=vid_clz, video_number=vid_number, split=split, root=root_path,
-                              meta_label=vid_clz_meta, mmap_mode=mem_mode, generated=generated_dataset)
+    if analyze_whole_dataset:
+        obs_trajectories, pred_trajectories, obs_relative_distances_list, \
+        pred_relative_distances_list, to_meter_list = \
+            [], [], [], [], []
 
-    full_length_trajectory = np.concatenate((obs_trajectory, pred_trajectory), axis=1)
-    full_length_distances = np.concatenate((obs_relative_distances, pred_relative_distances), axis=1)
+        for clz_and_videos, meta in zip(TRAIN_CLASS_FOR_WHOLE, TRAIN_META):
+            clz = clz_and_videos.value[0]
+            videos = clz_and_videos.value[1]
+            for vid in videos:
+                plot_path = f'{ROOT_PATH}Plots/baseline_v2/nn/STATS/{clz.value}{vid}/{split.name}/'
 
-    plot_trajectory_length_histogram(obs_trajectory, to_meter, 'Observed Trajectory - Len:8',
-                                     save_path=plot_path + 'histogram/')
-    plot_trajectory_length_histogram(pred_trajectory, to_meter, 'Prediction Trajectory - Len:12',
-                                     save_path=plot_path + 'histogram/')
-    plot_trajectory_length_histogram(full_length_trajectory, to_meter, 'Full Length Trajectory - Len:20',
-                                     save_path=plot_path + 'histogram/')
+                obs_trajectory, pred_trajectory, obs_relative_distances, pred_relative_distances, to_meter = \
+                    get_trajectory_splits(video_class=clz, video_number=vid, split=split, root=root_path,
+                                          meta_label=meta, mmap_mode=mem_mode, generated=generated_dataset)
 
-    plot_trajectory_length_bar(obs_trajectory, to_meter, 'Observed Trajectory - Len:8',
-                               save_path=plot_path + 'bar/', in_meters=True)
-    plot_trajectory_length_bar(pred_trajectory, to_meter, 'Prediction Trajectory - Len:12',
-                               save_path=plot_path + 'bar/', in_meters=True)
-    plot_trajectory_length_bar(full_length_trajectory, to_meter, 'Full Length Trajectory - Len:20',
-                               save_path=plot_path + 'bar/', in_meters=True)
+                full_length_trajectory = np.concatenate((obs_trajectory, pred_trajectory), axis=1)
+                full_length_distances = np.concatenate((obs_relative_distances, pred_relative_distances), axis=1)
 
-    plot_relative_distances_line_plot(obs_relative_distances.reshape(-1, 2), 'Observed:8',
-                                      save_path=plot_path + 'distances/')
-    plot_relative_distances_line_plot(pred_relative_distances.reshape(-1, 2), 'Prediction:12',
-                                      save_path=plot_path + 'distances/')
-    plot_relative_distances_line_plot(full_length_distances.reshape(-1, 2), 'Full:20',
-                                      save_path=plot_path + 'distances/')
+                plot_trajectory_length_histogram(obs_trajectory, to_meter, 'Observed Trajectory - Len:8',
+                                                 save_path=plot_path + 'histogram/')
+                plot_trajectory_length_histogram(pred_trajectory, to_meter, 'Prediction Trajectory - Len:12',
+                                                 save_path=plot_path + 'histogram/')
+                plot_trajectory_length_histogram(full_length_trajectory, to_meter, 'Full Length Trajectory - Len:20',
+                                                 save_path=plot_path + 'histogram/')
+
+                plot_trajectory_length_bar(obs_trajectory, to_meter, 'Observed Trajectory - Len:8',
+                                           save_path=plot_path + 'bar/', in_meters=True)
+                plot_trajectory_length_bar(pred_trajectory, to_meter, 'Prediction Trajectory - Len:12',
+                                           save_path=plot_path + 'bar/', in_meters=True)
+                plot_trajectory_length_bar(full_length_trajectory, to_meter, 'Full Length Trajectory - Len:20',
+                                           save_path=plot_path + 'bar/', in_meters=True)
+
+                plot_relative_distances_line_plot(obs_relative_distances.reshape(-1, 2), 'Observed:8',
+                                                  save_path=plot_path + 'distances/')
+                plot_relative_distances_line_plot(pred_relative_distances.reshape(-1, 2), 'Prediction:12',
+                                                  save_path=plot_path + 'distances/')
+                plot_relative_distances_line_plot(full_length_distances.reshape(-1, 2), 'Full:20',
+                                                  save_path=plot_path + 'distances/')
+
+                obs_trajectories.append(obs_trajectory)
+                pred_trajectories.append(pred_trajectory)
+                obs_relative_distances_list.append(obs_relative_distances)
+                pred_relative_distances_list.append(pred_relative_distances)
+                to_meter_list.append(to_meter)
+
+        print()
+
+    else:
+        vid_clz = SDDVideoClasses.LITTLE
+        vid_clz_meta = SDDVideoDatasets.LITTLE
+        vid_number = 3
+        split = NetworkMode.VALIDATION
+        mem_mode = None
+
+        plot_path = f'{ROOT_PATH}Plots/baseline_v2/nn/STATS/{vid_clz.value}{vid_number}/{split.name}/'
+
+        generated_dataset = False
+
+        plot_path += 'generated/' if generated_dataset else 'gt/'
+
+        root_path = GENERATED_DATASET_ROOT if generated_dataset else SAVE_BASE_PATH
+
+        obs_trajectory, pred_trajectory, obs_relative_distances, pred_relative_distances, to_meter = \
+            get_trajectory_splits(video_class=vid_clz, video_number=vid_number, split=split, root=root_path,
+                                  meta_label=vid_clz_meta, mmap_mode=mem_mode, generated=generated_dataset)
+
+        full_length_trajectory = np.concatenate((obs_trajectory, pred_trajectory), axis=1)
+        full_length_distances = np.concatenate((obs_relative_distances, pred_relative_distances), axis=1)
+
+        plot_trajectory_length_histogram(obs_trajectory, to_meter, 'Observed Trajectory - Len:8',
+                                         save_path=plot_path + 'histogram/')
+        plot_trajectory_length_histogram(pred_trajectory, to_meter, 'Prediction Trajectory - Len:12',
+                                         save_path=plot_path + 'histogram/')
+        plot_trajectory_length_histogram(full_length_trajectory, to_meter, 'Full Length Trajectory - Len:20',
+                                         save_path=plot_path + 'histogram/')
+
+        plot_trajectory_length_bar(obs_trajectory, to_meter, 'Observed Trajectory - Len:8',
+                                   save_path=plot_path + 'bar/', in_meters=True)
+        plot_trajectory_length_bar(pred_trajectory, to_meter, 'Prediction Trajectory - Len:12',
+                                   save_path=plot_path + 'bar/', in_meters=True)
+        plot_trajectory_length_bar(full_length_trajectory, to_meter, 'Full Length Trajectory - Len:20',
+                                   save_path=plot_path + 'bar/', in_meters=True)
+
+        plot_relative_distances_line_plot(obs_relative_distances.reshape(-1, 2), 'Observed:8',
+                                          save_path=plot_path + 'distances/')
+        plot_relative_distances_line_plot(pred_relative_distances.reshape(-1, 2), 'Prediction:12',
+                                          save_path=plot_path + 'distances/')
+        plot_relative_distances_line_plot(full_length_distances.reshape(-1, 2), 'Full:20',
+                                          save_path=plot_path + 'distances/')

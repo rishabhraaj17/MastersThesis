@@ -24,8 +24,8 @@ def get_tracks_and_relative_distances_for_video_sequence(video_class: SDDVideoCl
                                                          root: str = SAVE_BASE_PATH, generated: bool = False,
                                                          mmap_mode: Optional[str] = 'r+'):
     ratio = float(DATASET_META.get_meta(meta_label, video_number)[0]['Ratio'].to_numpy()[0])
-    path_to_dataset = f'{root}{video_class.value}{video_number}/splits/' if generated else \
-        f'{root}{video_class.value}/video{video_number}/splits/'
+    path_to_dataset = f'{root}{video_class.value}{video_number}/splits_v1/' if generated else \
+        f'{root}{video_class.value}/video{video_number}/splits_v1/'
     return read_tracks_and_relative_distances(path_to_dataset=path_to_dataset, split=split, mmap_mode=mmap_mode), ratio
 
 
