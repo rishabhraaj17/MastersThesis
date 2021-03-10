@@ -1,3 +1,5 @@
+import os
+
 import torch
 
 from average_image.constants import SDDVideoDatasets, SDDVideoClasses
@@ -345,12 +347,12 @@ if EVAL_SINGLE_MODEL and USE_SIMPLE_MODEL and not EVAL_FOR_WHOLE_CLASS:
     EVAL_PATH_TO_VIDEO = f'{BASE_PATH}videos/{EVAL_TRAIN_CLASS.value}/video{EVAL_TRAIN_VIDEO_NUMBER}/video.mov'
     EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/' \
                      f'{EVAL_TRAIN_CLASS.value}{EVAL_TRAIN_VIDEO_NUMBER}/final_eval/' \
-                     f'single_model_{SINGLE_MODEL_CHECKPOINT_FILE_PATH[-40:-16]}_'
+                     f'single_model_{os.path.split(SINGLE_MODEL_CHECKPOINT_FILE_PATH)[-1][:-5]}_'
 elif EVAL_SINGLE_MODEL and (not USE_SIMPLE_MODEL or USE_SIMPLE_MODEL) and EVAL_FOR_WHOLE_CLASS:
     EVAL_PATH_TO_VIDEO = ''
     EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/' \
                      f'{"_".join([e.value[0].value for e in EVAL_TRAIN_CLASS])}/final_eval/' \
-                     f'single_model_{SINGLE_MODEL_CHECKPOINT_FILE_PATH[-40:-16]}_'
+                     f'single_model_{os.path.split(SINGLE_MODEL_CHECKPOINT_FILE_PATH)[-1][:-5]}_'
 elif USE_SIMPLE_MODEL and EVAL_FOR_WHOLE_CLASS:
     EVAL_PATH_TO_VIDEO = ''
     EVAL_PLOT_PATH = f'{ROOT_PATH}Plots/baseline_v2/nn/COMPARE/' \

@@ -3,7 +3,7 @@ from typing import Iterable
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset, ConcatDataset, DataLoader
+from torch.utils.data import Dataset, ConcatDataset, DataLoader, Subset
 
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from baselinev2.config import SAVE_BASE_PATH, \
@@ -131,6 +131,78 @@ class BaselineGeneratedDataset(Dataset):
                gt_frame_numbers, mapped_in_xy, mapped_gt_xy, self.ratio
 
 
+class SyntheticDataset(Dataset):
+    def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode,
+                 meta_label: SDDVideoDatasets, root: str = GENERATED_DATASET_ROOT,
+                 observation_length: int = 8, prediction_length: int = 12, relative_velocities: bool = False,
+                 proportion_percent=0.2):
+        super(SyntheticDataset, self).__init__()
+        self.proportion_percent = proportion_percent
+        self.baseline_generated_dataset = BaselineGeneratedDataset(
+            video_class=video_class, video_number=video_number, split=split, meta_label=meta_label, root=root,
+            observation_length=observation_length, prediction_length=prediction_length,
+            relative_velocities=relative_velocities)
+        self.indices = np.random.choice(np.arange(0, len(self.baseline_generated_dataset)),
+                                        size=int(len(self.baseline_generated_dataset) * proportion_percent),
+                                        replace=False)
+        self.dataset = Subset(self.baseline_generated_dataset, self.indices)
+
+        self.states = {
+            0: self.zero_velocity_xy,
+            1: 'small_x',
+            2: 'small_y',
+            3: 'small_x_and_y',
+            4: 'small_x_before_y',
+            5: 'small_x_after_y',
+            6: 'obs_constant',
+            7: 'pred_constant',
+        }
+
+    @staticmethod
+    def zero_velocity_xy(in_xy, gt_xy, in_velocities, gt_velocities):
+        start_pos = in_xy[0]
+        out_in_xy = torch.ones_like(in_xy) * start_pos
+        out_gt_xy = torch.ones_like(gt_xy) * start_pos
+        out_in_velocities, out_gt_velocities = torch.zeros_like(in_velocities), torch.zeros_like(gt_velocities)
+        out_mapped_in_xy, out_mapped_gt_xy = None, None
+        return out_in_xy, out_gt_xy, out_in_velocities, out_gt_velocities, out_mapped_in_xy, out_mapped_gt_xy
+
+    @staticmethod
+    def small_constant_x_zero_velocity_y(in_xy, gt_xy, in_velocities, gt_velocities, obs=False, pred=False):
+        start_pos = in_xy[0]
+        velocity = torch.tensor((np.random.uniform(0, 1), 0))
+
+        if obs and pred:
+            out_in_velocities = torch.ones_like(in_velocities) * velocity
+            out_gt_velocities = torch.ones_like(gt_velocities) * velocity
+        elif obs:
+            out_in_velocities = torch.ones_like(in_velocities) * velocity
+            out_gt_velocities = torch.zeros_like(gt_velocities)
+        elif pred:
+            out_in_velocities = torch.zeros_like(in_velocities)
+            out_gt_velocities = torch.ones_like(gt_velocities) * velocity
+        else:
+            out_in_velocities = torch.zeros_like(in_velocities)
+            out_gt_velocities = torch.zeros_like(gt_velocities)
+
+        # fixme
+        out_in_xy = torch.ones_like(in_xy) * start_pos
+        out_gt_xy = torch.ones_like(gt_xy) * start_pos
+
+        out_mapped_in_xy, out_mapped_gt_xy = None, None
+        return out_in_xy, out_gt_xy, out_in_velocities, out_gt_velocities, out_mapped_in_xy, out_mapped_gt_xy
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, item):
+        in_xy, gt_xy, in_velocities, gt_velocities, in_track_ids, gt_track_ids, in_frame_numbers, \
+        gt_frame_numbers, mapped_in_xy, mapped_gt_xy, ratio = self.dataset[item]
+        current_state = np.random.choice(np.arange(0, len(self.states)), size=1, replace=False)[0]
+        self.small_constant_x_zero_velocity_y(in_xy, gt_xy, in_velocities, gt_velocities, obs=True, pred=True)
+        return None
+
+
 def get_dataset(video_clazz: SDDVideoClasses, video_number: int, mode: NetworkMode, meta_label: SDDVideoDatasets,
                 get_generated: bool = False):
     return BaselineGeneratedDataset(video_clazz, video_number, mode, meta_label=meta_label) if get_generated else \
@@ -158,6 +230,8 @@ if __name__ == '__main__':
     video_num = 3
     meta_labelz = SDDVideoDatasets.LITTLE
     d1 = BaselineGeneratedDataset(video_class, video_num, NetworkMode.TRAIN, meta_label=meta_labelz)
+    d2 = SyntheticDataset(video_class, video_num, NetworkMode.TRAIN, meta_label=meta_labelz)
+    res = d2[0]
     # d2 = BaselineDataset(SDDVideoClasses.COUPA, 0, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.COUPA)
     # d = ConcatDataset([d1, d2])
     d = ConcatDataset([d1])
