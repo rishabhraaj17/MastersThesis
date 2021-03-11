@@ -41,13 +41,13 @@ def get_trajectory_splits(video_class: SDDVideoClasses, video_number: int,
         prediction_trajectory = tracks[..., observation_length:, 6:8]
 
         observed_relative_distances = relative_distances[..., :observation_length - 1, :]
-        prediction_relative_distances = relative_distances[..., observation_length:, :]
+        prediction_relative_distances = relative_distances[..., observation_length - 1:, :]
     else:
         observed_trajectory = tracks[..., :observation_length, -2:]
         prediction_trajectory = tracks[..., observation_length:, -2:]
 
         observed_relative_distances = relative_distances[..., :observation_length - 1, :]
-        prediction_relative_distances = relative_distances[..., observation_length:, :]
+        prediction_relative_distances = relative_distances[..., observation_length - 1:, :]
 
     return observed_trajectory, prediction_trajectory, observed_relative_distances, prediction_relative_distances, ratio
 
