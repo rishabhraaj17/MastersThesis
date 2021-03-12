@@ -23,8 +23,9 @@ from baselinev2.config import BASE_PATH, ROOT_PATH, DEBUG_MODE, EVAL_USE_SOCIAL_
     SIMPLE_UNSUPERVISED_CHECKPOINT_ROOT_PATH, EVAL_FOR_WHOLE_CLASS, EVAL_TRAIN_VIDEOS_TO_SKIP, EVAL_VAL_VIDEOS_TO_SKIP, \
     EVAL_TEST_VIDEOS_TO_SKIP, SIMPLE_GT_CHECKPOINT_PATH, SIMPLE_UNSUPERVISED_CHECKPOINT_PATH, DEVICE, BEST_MODEL, \
     EVAL_SINGLE_MODEL, SINGLE_MODEL_CHECKPOINT_PATH, BATCH_PLOT_MODE, EVAL_USE_GENERATED, EVAL_FROM_OVERFIT, \
-    EVAL_EXTRACT_STATS
+    EVAL_EXTRACT_STATS, TRAJECTORY_LENGTH_THRESHOLD, STATIONARY_ONLY, MOVING_ONLY, EVAL_TRAIN_SPLIT
 from baselinev2.constants import NetworkMode
+from baselinev2.exceptions import InvalidFrameException
 from baselinev2.nn.dataset import get_dataset, ConcatenateDataset
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.models import BaselineRNN, BaselineRNNStacked, BaselineRNNStackedSimple, ConstantLinearBaseline
@@ -702,7 +703,8 @@ def get_model(social_lstm, model_checkpoint_root_path, use_batch_norm,
 
 
 def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, video_path, split_name,
-                                     metrics_in_meters=True, use_simple_model_version=False):
+                                     metrics_in_meters=True, use_simple_model_version=False, moving_only=False,
+                                     stationary_only=False, threshold=1.0):
     constant_linear_baseline_caller = ConstantLinearBaseline()
 
     model_ade_list, model_fde_list = [], []
@@ -718,6 +720,50 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
                 data
         else:
             in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = data
+
+        full_xy = torch.cat((in_xy, gt_xy), dim=1)
+        full_length_per_step, full_length = get_trajectory_length(full_xy, use_l2=True)
+        obs_trajectory_length, obs_trajectory_length_summed = get_trajectory_length(in_xy, use_l2=True)
+        gt_trajectory_length, gt_trajectory_length_summed = get_trajectory_length(gt_xy, use_l2=True)
+
+        full_length *= ratio.numpy()
+        obs_trajectory_length_summed *= ratio.numpy()
+        gt_trajectory_length_summed *= ratio.numpy()
+
+        if moving_only:
+            # feasible_idx = np.where(length > threshold)[0]
+            obs_feasible_idx = np.where(obs_trajectory_length_summed > threshold)[0]
+            gt_feasible_idx = np.where(gt_trajectory_length_summed > threshold)[0]
+            # feasible_idx = np.union1d(obs_feasible_idx, gt_feasible_idx)
+            feasible_idx = np.intersect1d(obs_feasible_idx, gt_feasible_idx)
+
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = \
+                in_xy[feasible_idx], gt_xy[feasible_idx], in_uv[feasible_idx], gt_uv[feasible_idx], \
+                in_track_ids[feasible_idx], gt_track_ids[feasible_idx], in_frame_numbers[feasible_idx], \
+                gt_frame_numbers[feasible_idx], ratio[feasible_idx]
+            if EVAL_USE_GENERATED:
+                data = [in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers,
+                        gt_frame_numbers, [], [], ratio]
+            else:
+                data = [in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers,
+                        gt_frame_numbers, ratio]
+        if stationary_only:
+            # feasible_idx = np.where(length < threshold)[0]
+            obs_feasible_idx = np.where(obs_trajectory_length_summed < threshold)[0]
+            gt_feasible_idx = np.where(gt_trajectory_length_summed < threshold)[0]
+            # feasible_idx = np.union1d(obs_feasible_idx, gt_feasible_idx)
+            feasible_idx = np.intersect1d(obs_feasible_idx, gt_feasible_idx)
+
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = \
+                in_xy[feasible_idx], gt_xy[feasible_idx], in_uv[feasible_idx], gt_uv[feasible_idx], \
+                in_track_ids[feasible_idx], gt_track_ids[feasible_idx], in_frame_numbers[feasible_idx], \
+                gt_frame_numbers[feasible_idx], ratio[feasible_idx]
+            if EVAL_USE_GENERATED:
+                data = [in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers,
+                        gt_frame_numbers, [], [], ratio]
+            else:
+                data = [in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers,
+                        gt_frame_numbers, ratio]
 
         model_loss, model_ade, model_fde, model_ratio, model_pred_trajectory = \
             model_caller(data)
@@ -742,7 +788,8 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
 
         # plot always
         if BATCH_PLOT_MODE:
-            im_idx = np.random.choice(EVAL_BATCH_SIZE, 1).item()
+            batch_size = EVAL_BATCH_SIZE if not moving_only and not stationary_only else in_xy.shape[0]
+            im_idx = np.random.choice(batch_size, 1).item()
             plot_frame_number = in_frame_numbers.squeeze()[im_idx][0].item()
             plot_track_id = in_track_ids.squeeze()[im_idx][0].item()
             all_frame_numbers = torch.cat(
@@ -782,27 +829,53 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
             #     save_path=f'{plot_path}/{split_name}/model/'
             # )
 
-            plot_and_compare_trajectory_four_way(
-                frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
-                supervised_obs_trajectory=obs_trajectory,
-                supervised_gt_trajectory=gt_trajectory,
-                supervised_pred_trajectory=model_pred_trajectory_instance,
-                unsupervised_obs_trajectory=obs_trajectory,
-                unsupervised_gt_trajectory=gt_trajectory,
-                unsupervised_pred_trajectory=constant_linear_baseline_pred_trajectory.squeeze()[im_idx],
-                frame_number=plot_frame_number,
-                track_id=plot_track_id,
-                additional_text=
-                f'Frame Numbers: {all_frame_numbers}'
-                f'\nModel -> ADE: {compute_ade(model_pred_trajectory_instance, gt_trajectory) * ratio[0].item()} | '
-                f'FDE: {compute_fde(model_pred_trajectory_instance, gt_trajectory) * ratio[0].item()}'
-                f'\nLinear -> ADE: '
-                f'{compute_ade(constant_linear_baseline_pred_trajectory.squeeze()[im_idx], gt_trajectory) * ratio[0].item()} |'
-                f' FDE: '
-                f'{compute_fde(constant_linear_baseline_pred_trajectory.squeeze()[im_idx], gt_trajectory) * ratio[0].item()}',
-                save_path=f'{plot_path}/{split_name}/model4way/',
-                with_linear=True
-            )
+            save_path = f'{plot_path}/{split_name}/model4way/'
+
+            if moving_only:
+                save_path = f'{plot_path}/{split_name}/model4way_moving_only_threshold_{threshold}/'
+            if stationary_only:
+                save_path = f'{plot_path}/{split_name}/model4way_stationary_only_threshold_{threshold}/'
+
+            # for per frame analysis
+            model_pred_trajectory_length, model_pred_trajectory_length_summed = get_trajectory_length(
+                np.swapaxes(model_pred_trajectory, 0, 1), use_l2=True)
+            linear_trajectory_length, linear_trajectory_length_summed = get_trajectory_length(
+                constant_linear_baseline_pred_trajectory, use_l2=True)
+
+            model_pred_trajectory_length_summed *= ratio.numpy()
+            linear_trajectory_length_summed *= ratio.numpy()
+
+            obs_trajectory_length_summed = obs_trajectory_length_summed[feasible_idx]
+            gt_trajectory_length_summed = gt_trajectory_length_summed[feasible_idx]
+
+            try:
+                plot_and_compare_trajectory_four_way(
+                    frame=extract_frame_from_video(video_path=video_path, frame_number=plot_frame_number),
+                    supervised_obs_trajectory=obs_trajectory,
+                    supervised_gt_trajectory=gt_trajectory,
+                    supervised_pred_trajectory=model_pred_trajectory_instance,
+                    unsupervised_obs_trajectory=obs_trajectory,
+                    unsupervised_gt_trajectory=gt_trajectory,
+                    unsupervised_pred_trajectory=constant_linear_baseline_pred_trajectory.squeeze()[im_idx],
+                    frame_number=plot_frame_number,
+                    track_id=plot_track_id,
+                    additional_text=
+                    f'Frame Numbers: {all_frame_numbers}'
+                    f'\nModel -> ADE: {compute_ade(model_pred_trajectory_instance, gt_trajectory) * ratio[0].item()} | '
+                    f'FDE: {compute_fde(model_pred_trajectory_instance, gt_trajectory) * ratio[0].item()}'
+                    f'\nLinear -> ADE: '
+                    f'{compute_ade(constant_linear_baseline_pred_trajectory.squeeze()[im_idx], gt_trajectory) * ratio[0].item()} |'
+                    f' FDE: '
+                    f'{compute_fde(constant_linear_baseline_pred_trajectory.squeeze()[im_idx], gt_trajectory) * ratio[0].item()}'
+                    f'\n Obs L2: {obs_trajectory_length_summed[im_idx]} | '
+                    f'Pred L2: {gt_trajectory_length_summed[im_idx]}'
+                    f'\n Model L2: {model_pred_trajectory_length_summed[im_idx]} | '
+                    f'Linear L2: {linear_trajectory_length_summed[im_idx]}',
+                    save_path=save_path,
+                    with_linear=True
+                )
+            except InvalidFrameException:
+                logger.error('Skipping plot due to InvalidFrameException!')
 
         if plot:
             plot_frame_number = in_frame_numbers.squeeze()[0].item()
@@ -858,7 +931,8 @@ def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_lo
                test_loader: DataLoader, social_lstm: bool = True, plot: bool = False,
                use_batch_norm: bool = False, video_path: str = None, plot_path: Optional[str] = None,
                model_pass_final_pos: bool = False, use_simple_model_version=False,
-               metrics_in_meters: bool = True):
+               metrics_in_meters: bool = True, moving_only: bool = False, stationary_only: bool = False,
+               threshold: float = 1.0, eval_for_train: bool = False):
     model_net = get_model(social_lstm, model_checkpoint_root_path, use_batch_norm,
                           model_pass_final_pos=model_pass_final_pos,
                           use_simple_model_version=use_simple_model_version)
@@ -871,7 +945,8 @@ def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_lo
         evaluate_per_loader_single_model(
             plot, plot_path, model_caller, test_loader, video_path,
             split_name=NetworkMode.TEST.name, metrics_in_meters=metrics_in_meters,
-            use_simple_model_version=use_simple_model_version)
+            use_simple_model_version=use_simple_model_version, moving_only=moving_only,
+            stationary_only=stationary_only, threshold=threshold)
 
     logger.info('Evaluating for Validation Set')
     val_model_ade_list, val_model_fde_list, \
@@ -879,18 +954,25 @@ def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_lo
         evaluate_per_loader_single_model(
             plot, plot_path, model_caller, val_loader, video_path,
             split_name=NetworkMode.VALIDATION.name, metrics_in_meters=metrics_in_meters,
-            use_simple_model_version=use_simple_model_version)
+            use_simple_model_version=use_simple_model_version, moving_only=moving_only,
+            stationary_only=stationary_only, threshold=threshold)
 
-    logger.info('Evaluating for Train Set')
-    train_model_ade_list, train_model_fde_list, \
-    train_constant_linear_baseline_ade_list, train_constant_linear_baseline_fde_list = \
-        evaluate_per_loader_single_model(
-            plot, plot_path, model_caller, train_loader, video_path,
-            split_name=NetworkMode.TRAIN.name, metrics_in_meters=metrics_in_meters,
-            use_simple_model_version=use_simple_model_version)
+    if eval_for_train:
+        logger.info('Evaluating for Train Set')
+        train_model_ade_list, train_model_fde_list, \
+        train_constant_linear_baseline_ade_list, train_constant_linear_baseline_fde_list = \
+            evaluate_per_loader_single_model(
+                plot, plot_path, model_caller, train_loader, video_path,
+                split_name=NetworkMode.TRAIN.name, metrics_in_meters=metrics_in_meters,
+                use_simple_model_version=use_simple_model_version, moving_only=moving_only,
+                stationary_only=stationary_only, threshold=threshold)
 
-    train_model_ade, train_model_fde = \
-        np.array(train_model_ade_list).mean(), np.array(train_model_fde_list).mean()
+        train_model_ade, train_model_fde = \
+            np.array(train_model_ade_list).mean(), np.array(train_model_fde_list).mean()
+
+        train_constant_linear_baseline_ade, train_constant_linear_baseline_fde = \
+            np.array(train_constant_linear_baseline_ade_list).mean(), \
+            np.array(train_constant_linear_baseline_fde_list).mean()
 
     val_model_ade, val_model_fde = \
         np.array(val_model_ade_list).mean(), np.array(val_model_fde_list).mean()
@@ -903,10 +985,6 @@ def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_lo
 
     val_constant_linear_baseline_ade, val_constant_linear_baseline_fde = \
         np.array(val_constant_linear_baseline_ade_list).mean(), np.array(val_constant_linear_baseline_fde_list).mean()
-
-    train_constant_linear_baseline_ade, train_constant_linear_baseline_fde = \
-        np.array(train_constant_linear_baseline_ade_list).mean(), \
-        np.array(train_constant_linear_baseline_fde_list).mean()
 
     eval_results = {
         'model_checkpoint_root_path': model_checkpoint_root_path,
@@ -922,10 +1000,13 @@ def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_lo
         'EVAL_TRAIN_VIDEOS_TO_SKIP': EVAL_TRAIN_VIDEOS_TO_SKIP,
         'EVAL_VAL_VIDEOS_TO_SKIP': EVAL_VAL_VIDEOS_TO_SKIP,
         'EVAL_TEST_VIDEOS_TO_SKIP': EVAL_TEST_VIDEOS_TO_SKIP,
+        'moving_only': moving_only,
+        'stationary_only': stationary_only,
+        'threshold': threshold,
         'train':
             {'ade': {'model': train_model_ade.item(), 'linear': train_constant_linear_baseline_ade.item()},
              'fde': {'model': train_model_fde.item(), 'linear': train_constant_linear_baseline_fde.item()},
-             'num_trajectories': len(train_loader.dataset)},
+             'num_trajectories': len(train_loader.dataset)} if eval_for_train else {},
         'val':
             {'ade': {'model': val_model_ade.item(), 'linear': val_constant_linear_baseline_ade.item()},
              'fde': {'model': val_model_fde.item(), 'linear': val_constant_linear_baseline_fde.item()},
@@ -935,16 +1016,23 @@ def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_lo
              'fde': {'model': test_model_fde.item(), 'linear': test_constant_linear_baseline_fde.item()},
              'num_trajectories': len(test_loader.dataset)}}
 
-    results_dump_path = f'{plot_path}/eval_results{"_generated" if EVAL_USE_GENERATED else ""}.yaml'
+    results_dump_path = f'{plot_path}/eval_results{"_generated" if EVAL_USE_GENERATED else ""}' \
+                        f'_{"moving_only" if moving_only else ""}' \
+                        f'_{"stationary_only" if stationary_only else ""}' \
+                        f'_{"threshold_" + str(threshold) + "_" if moving_only or stationary_only else ""}' \
+                        f'_{"all_trajectories" if not moving_only and not stationary_only else ""}.yaml'
     Path(plot_path).mkdir(parents=True, exist_ok=True)
     with open(results_dump_path, 'w+') as f:
         yaml.dump(eval_results, f)
 
     logger.info('Train Set')
-    logger.info(f'ADE - GT: {train_model_ade} | '
-                f'Linear: {train_constant_linear_baseline_ade}')
-    logger.info(f'FDE - GT: {train_model_fde} | '
-                f'Linear: {train_constant_linear_baseline_fde}')
+    if eval_for_train:
+        logger.info(f'ADE - GT: {train_model_ade} | '
+                    f'Linear: {train_constant_linear_baseline_ade}')
+        logger.info(f'FDE - GT: {train_model_fde} | '
+                    f'Linear: {train_constant_linear_baseline_fde}')
+    else:
+        logger.info('Skipped for train!')
 
     logger.info('Validation Set')
     logger.info(f'ADE - GT: {val_model_ade} | '
@@ -1068,7 +1156,11 @@ if __name__ == '__main__':
                 plot_path=EVAL_PLOT_PATH,
                 model_pass_final_pos=False,
                 use_simple_model_version=EVAL_USE_SIMPLE_MODEL,
-                metrics_in_meters=True
+                metrics_in_meters=True,
+                moving_only=MOVING_ONLY,
+                stationary_only=STATIONARY_ONLY,
+                threshold=TRAJECTORY_LENGTH_THRESHOLD,
+                eval_for_train=EVAL_TRAIN_SPLIT
             )
         else:
             eval_models(

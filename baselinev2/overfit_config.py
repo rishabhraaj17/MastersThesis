@@ -98,7 +98,7 @@ VAL_META = TRAIN_META
 TRAIN_VIDEOS_TO_SKIP = [(), (), ()]
 VAL_VIDEOS_TO_SKIP = [(), (), ()]
 
-USE_GENERATED_DATA = True  # Use unsupervised trajectories or not
+USE_GENERATED_DATA = False  # Use unsupervised trajectories or not
 RESUME_TRAINING = False
 RESUME_VERSION = 9
 CHECKPOINT_ROOT = f'lightning_logs/version_{RESUME_VERSION}/'

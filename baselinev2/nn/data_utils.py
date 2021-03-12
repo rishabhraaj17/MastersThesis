@@ -16,6 +16,7 @@ from baselinev2.config import SPLIT_ANNOTATION_SAVE_PATH, TRAIN_SPLIT_PERCENTAGE
     TEST_SPLIT_PERCENTAGE, VIDEO_SAVE_PATH, SDD_VIDEO_CLASSES_RESUME_LIST, SDD_PER_CLASS_VIDEOS_RESUME_LIST, \
     SDD_ANNOTATIONS_ROOT_PATH, SAVE_BASE_PATH, BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST, \
     BUNDLED_ANNOTATIONS_PER_CLASSES_VIDEO_LIST, ROOT_PATH, version
+from baselinev2.exceptions import InvalidFrameException
 from baselinev2.plot_utils import plot_for_video_image_and_box, plot_trajectory_with_relative_data
 from baselinev2.structures import TracksDataset, SingleTrack
 from log import initialize_logging, get_logger
@@ -49,9 +50,10 @@ def extract_frame_from_video(video_path, frame_number):
         res, frame = video.read()
         video.release()
         return frame if res else None
-    logger.error('Frame Number out of range!')
-    video.release()
-    return None
+    else:
+        logger.error('Frame Number out of range!')
+        video.release()
+        raise InvalidFrameException()
 
 
 def sort_annotations_by_frame_numbers(annotation_path):
