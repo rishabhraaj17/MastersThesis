@@ -356,6 +356,9 @@ def train_custom(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAnd
 
         # resume_dict_save_folder = os.path.split(os.path.split(resume_custom_path)[0])[-1]
 
+    total_train_iter_in_one_epoch = len(dataset_train) // batch_size
+    total_val_iter_in_one_epoch = len(dataset_val) // batch_size
+
     epoch_t_loss, epoch_t_ade, epoch_t_fde, epoch_v_loss, epoch_v_ade, epoch_v_fde = None, None, None, None, None, None
 
     try:
@@ -377,9 +380,12 @@ def train_custom(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAnd
                     loss.backward()
                     optimizer.step()
 
-                    summary_writer.add_scalar('train/loss', loss.item(), global_step=idx)
-                    summary_writer.add_scalar('train/ade', ade, global_step=idx)
-                    summary_writer.add_scalar('train/fde', fde, global_step=idx)
+                    summary_writer.add_scalar('train/loss', loss.item(),
+                                              global_step=((total_train_iter_in_one_epoch * epoch) + idx))
+                    summary_writer.add_scalar('train/ade', ade,
+                                              global_step=((total_train_iter_in_one_epoch * epoch) + idx))
+                    summary_writer.add_scalar('train/fde', fde,
+                                              global_step=((total_train_iter_in_one_epoch * epoch) + idx))
 
                     running_t_loss.append(loss.item())
                     running_t_ade.append(ade)
@@ -411,9 +417,12 @@ def train_custom(train_video_class: Union[SDDVideoClasses, List[SDDVideoClassAnd
                                       epoch_loss=epoch_v_loss, epoch_ade=epoch_v_ade, epoch_fde=epoch_v_fde)
                         v.update()
 
-                        summary_writer.add_scalar('val/loss', v_loss.item(), global_step=idx)
-                        summary_writer.add_scalar('val/ade', v_ade, global_step=idx)
-                        summary_writer.add_scalar('val/fde', v_fde, global_step=idx)
+                        summary_writer.add_scalar('val/loss', v_loss.item(),
+                                                  global_step=((total_val_iter_in_one_epoch * epoch) + idx))
+                        summary_writer.add_scalar('val/ade', v_ade,
+                                                  global_step=((total_val_iter_in_one_epoch * epoch) + idx))
+                        summary_writer.add_scalar('val/fde', v_fde,
+                                                  global_step=((total_val_iter_in_one_epoch * epoch) + idx))
 
                         running_v_loss.append(v_loss.item())
                         running_v_ade.append(v_ade)
