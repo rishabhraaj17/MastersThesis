@@ -23,7 +23,8 @@ from baselinev2.config import BASE_PATH, ROOT_PATH, DEBUG_MODE, EVAL_USE_SOCIAL_
     SIMPLE_UNSUPERVISED_CHECKPOINT_ROOT_PATH, EVAL_FOR_WHOLE_CLASS, EVAL_TRAIN_VIDEOS_TO_SKIP, EVAL_VAL_VIDEOS_TO_SKIP, \
     EVAL_TEST_VIDEOS_TO_SKIP, SIMPLE_GT_CHECKPOINT_PATH, SIMPLE_UNSUPERVISED_CHECKPOINT_PATH, DEVICE, BEST_MODEL, \
     EVAL_SINGLE_MODEL, SINGLE_MODEL_CHECKPOINT_PATH, BATCH_PLOT_MODE, EVAL_USE_GENERATED, EVAL_FROM_OVERFIT, \
-    EVAL_EXTRACT_STATS, TRAJECTORY_LENGTH_THRESHOLD, STATIONARY_ONLY, MOVING_ONLY, EVAL_TRAIN_SPLIT
+    EVAL_EXTRACT_STATS, TRAJECTORY_LENGTH_THRESHOLD, STATIONARY_ONLY, MOVING_ONLY, EVAL_TRAIN_SPLIT, \
+    RELATIVE_DISTANCE_OUTLIER_FILTER_THRESHOLD
 from baselinev2.constants import NetworkMode
 from baselinev2.exceptions import InvalidFrameException
 from baselinev2.nn.dataset import get_dataset, ConcatenateDataset
@@ -704,7 +705,7 @@ def get_model(social_lstm, model_checkpoint_root_path, use_batch_norm,
 
 def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, video_path, split_name,
                                      metrics_in_meters=True, use_simple_model_version=False, moving_only=False,
-                                     stationary_only=False, threshold=1.0):
+                                     stationary_only=False, threshold=1.0, relative_distance_filter_threshold=100.):
     constant_linear_baseline_caller = ConstantLinearBaseline()
 
     model_ade_list, model_fde_list = [], []
@@ -737,6 +738,10 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
             # feasible_idx = np.union1d(obs_feasible_idx, gt_feasible_idx)
             feasible_idx = np.intersect1d(obs_feasible_idx, gt_feasible_idx)
 
+            if relative_distance_filter_threshold is not None:
+                feasible_idx = filter_on_relative_distances(feasible_idx, gt_uv, in_uv,
+                                                            relative_distance_filter_threshold)
+
             in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = \
                 in_xy[feasible_idx], gt_xy[feasible_idx], in_uv[feasible_idx], gt_uv[feasible_idx], \
                 in_track_ids[feasible_idx], gt_track_ids[feasible_idx], in_frame_numbers[feasible_idx], \
@@ -753,6 +758,10 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
             gt_feasible_idx = np.where(gt_trajectory_length_summed < threshold)[0]
             # feasible_idx = np.union1d(obs_feasible_idx, gt_feasible_idx)
             feasible_idx = np.intersect1d(obs_feasible_idx, gt_feasible_idx)
+
+            if relative_distance_filter_threshold is not None:
+                feasible_idx = filter_on_relative_distances(feasible_idx, gt_uv, in_uv,
+                                                            relative_distance_filter_threshold)
 
             in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = \
                 in_xy[feasible_idx], gt_xy[feasible_idx], in_uv[feasible_idx], gt_uv[feasible_idx], \
@@ -926,13 +935,27 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
            constant_linear_baseline_ade_list, constant_linear_baseline_fde_list
 
 
+def filter_on_relative_distances(feasible_idx, gt_uv, in_uv, relative_distance_filter_threshold):
+    full_uv = torch.cat((in_uv, gt_uv), dim=1)
+    all_idx = np.arange(full_uv.shape[0])
+    positive_outlier_idx = np.where(full_uv.numpy() > relative_distance_filter_threshold)[0]
+    positive_outlier_idx = np.unique(positive_outlier_idx)
+    negative_outlier_idx = np.where(full_uv.numpy() < -relative_distance_filter_threshold)[0]
+    negative_outlier_idx = np.unique(negative_outlier_idx)
+    outlier_idx = np.union1d(positive_outlier_idx, negative_outlier_idx)
+    inlier_idx = np.setdiff1d(all_idx, outlier_idx)
+    feasible_idx = np.intersect1d(feasible_idx, inlier_idx)
+    return feasible_idx
+
+
 @torch.no_grad()
 def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_loader: DataLoader,
                test_loader: DataLoader, social_lstm: bool = True, plot: bool = False,
                use_batch_norm: bool = False, video_path: str = None, plot_path: Optional[str] = None,
                model_pass_final_pos: bool = False, use_simple_model_version=False,
                metrics_in_meters: bool = True, moving_only: bool = False, stationary_only: bool = False,
-               threshold: float = 1.0, eval_for_train: bool = False):
+               threshold: float = 1.0, eval_for_train: bool = False,
+               relative_distance_filter_threshold: Optional[float] = 100.):
     model_net = get_model(social_lstm, model_checkpoint_root_path, use_batch_norm,
                           model_pass_final_pos=model_pass_final_pos,
                           use_simple_model_version=use_simple_model_version)
@@ -946,7 +969,8 @@ def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_lo
             plot, plot_path, model_caller, test_loader, video_path,
             split_name=NetworkMode.TEST.name, metrics_in_meters=metrics_in_meters,
             use_simple_model_version=use_simple_model_version, moving_only=moving_only,
-            stationary_only=stationary_only, threshold=threshold)
+            stationary_only=stationary_only, threshold=threshold,
+            relative_distance_filter_threshold=relative_distance_filter_threshold)
 
     logger.info('Evaluating for Validation Set')
     val_model_ade_list, val_model_fde_list, \
@@ -955,7 +979,8 @@ def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_lo
             plot, plot_path, model_caller, val_loader, video_path,
             split_name=NetworkMode.VALIDATION.name, metrics_in_meters=metrics_in_meters,
             use_simple_model_version=use_simple_model_version, moving_only=moving_only,
-            stationary_only=stationary_only, threshold=threshold)
+            stationary_only=stationary_only, threshold=threshold,
+            relative_distance_filter_threshold=relative_distance_filter_threshold)
 
     if eval_for_train:
         logger.info('Evaluating for Train Set')
@@ -965,7 +990,8 @@ def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_lo
                 plot, plot_path, model_caller, train_loader, video_path,
                 split_name=NetworkMode.TRAIN.name, metrics_in_meters=metrics_in_meters,
                 use_simple_model_version=use_simple_model_version, moving_only=moving_only,
-                stationary_only=stationary_only, threshold=threshold)
+                stationary_only=stationary_only, threshold=threshold,
+                relative_distance_filter_threshold=relative_distance_filter_threshold)
 
         train_model_ade, train_model_fde = \
             np.array(train_model_ade_list).mean(), np.array(train_model_fde_list).mean()
@@ -1003,6 +1029,7 @@ def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_lo
         'moving_only': moving_only,
         'stationary_only': stationary_only,
         'threshold': threshold,
+        'relative_distance_filter_threshold': relative_distance_filter_threshold,
         'train':
             {'ade': {'model': train_model_ade.item(), 'linear': train_constant_linear_baseline_ade.item()},
              'fde': {'model': train_model_fde.item(), 'linear': train_constant_linear_baseline_fde.item()},
@@ -1016,11 +1043,13 @@ def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_lo
              'fde': {'model': test_model_fde.item(), 'linear': test_constant_linear_baseline_fde.item()},
              'num_trajectories': len(test_loader.dataset)}}
 
-    results_dump_path = f'{plot_path}/eval_results{"_generated" if EVAL_USE_GENERATED else ""}' \
-                        f'_{"moving_only" if moving_only else ""}' \
-                        f'_{"stationary_only" if stationary_only else ""}' \
-                        f'_{"threshold_" + str(threshold) + "_" if moving_only or stationary_only else ""}' \
-                        f'_{"all_trajectories" if not moving_only and not stationary_only else ""}.yaml'
+    results_dump_path = \
+        f'{plot_path}/eval_results{"_generated" if EVAL_USE_GENERATED else ""}' \
+        f'_{"moving_only" if moving_only else ""}' \
+        f'_{"stationary_only" if stationary_only else ""}' \
+        f'_{"threshold_" + str(threshold) + "_" if moving_only or stationary_only else ""}' \
+        f'_{"all_trajectories" if not moving_only and not stationary_only else ""}' \
+        f'_{relative_distance_filter_threshold if relative_distance_filter_threshold is not None else ""}.yaml'
     Path(plot_path).mkdir(parents=True, exist_ok=True)
     with open(results_dump_path, 'w+') as f:
         yaml.dump(eval_results, f)
@@ -1160,7 +1189,8 @@ if __name__ == '__main__':
                 moving_only=MOVING_ONLY,
                 stationary_only=STATIONARY_ONLY,
                 threshold=TRAJECTORY_LENGTH_THRESHOLD,
-                eval_for_train=EVAL_TRAIN_SPLIT
+                eval_for_train=EVAL_TRAIN_SPLIT,
+                relative_distance_filter_threshold=RELATIVE_DISTANCE_OUTLIER_FILTER_THRESHOLD
             )
         else:
             eval_models(

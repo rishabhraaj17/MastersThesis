@@ -319,8 +319,8 @@ EVAL_FROM_OVERFIT = False
 EVAL_EXTRACT_STATS = False
 
 # Filtering
-MOVING_ONLY = False
-STATIONARY_ONLY = True
+MOVING_ONLY = True
+STATIONARY_ONLY = False
 TRAJECTORY_LENGTH_THRESHOLD = 1.0
 EVAL_TRAIN_SPLIT = False
 
@@ -346,8 +346,17 @@ SINGLE_MODEL_CHECKPOINT_ROOT_PATH = f'runs/Maar_overfit_experiments/full_train/'
 #                                     'rnn_layers_1_2021-03-04 16:12:22.860279/element_size_None_random_True' \
 #                                     '_lr_0.001_generated_False_learn_hidden_False_rnn_layers_' \
 #                                     '1_2021-03-04 16:12:22.860279_checkpoint.ckpt'
+# Unsupervised #############################################
 SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'Mar05_00-34-42_rishabh-Precision-5540baseline/' \
                                     'Mar05_00-34-42_rishabh-Precision-5540baseline_checkpoint.ckpt'
+# GRU - 2
+# SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'Mar12_23-45-29_rishabh-Precision-5540baseline/old_checkpoint.ckpt'
+# LSTM - 3
+# SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'Mar14_11-11-22_rishabh-Precision-5540baseline/' \
+#                                     'Mar14_11-11-22_rishabh-Precision-5540baseline_checkpoint.ckpt'
+# Supervised #############################################
+# SINGLE_MODEL_CHECKPOINT_FILE_PATH = 'Mar08_19-53-31_rishabh-Precision-5540baseline/' \
+#                                     'Mar08_19-53-31_rishabh-Precision-5540baseline_checkpoint_epoch_2.ckpt'
 
 if EVAL_SINGLE_MODEL and USE_SIMPLE_MODEL and not EVAL_FOR_WHOLE_CLASS:
     EVAL_PATH_TO_VIDEO = f'{BASE_PATH}videos/{EVAL_TRAIN_CLASS.value}/video{EVAL_TRAIN_VIDEO_NUMBER}/video.mov'
@@ -428,3 +437,5 @@ EVAL_SIMPLE_MODEL_CONFIG_DICT_UNSUPERVISED = {
     'use_simple_model': True,
     'num_rnn_layers': 1
 }
+
+RELATIVE_DISTANCE_OUTLIER_FILTER_THRESHOLD = 100.  # None

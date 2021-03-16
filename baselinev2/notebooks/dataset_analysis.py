@@ -163,11 +163,13 @@ def whole_dataset_analysis(generated_dataset, split, mem_mode, root_path):
                                       save_path=plot_path + 'distances/')
 
 
-def whole_dataset_distribution_analysis(generated_dataset, split, mem_mode, root_path):
+def whole_dataset_distribution_analysis(generated_dataset, split, mem_mode, root_path, outlier_threshold=150.):
     obs_trajectories, pred_trajectories, obs_relative_distances_list, \
     pred_relative_distances_list, to_meter_list = \
         [], [], [], [], []
     full_length_trajectory_list, full_length_distances_list = [], []
+
+    full_length_distances_without_outliers = []
 
     for clz_and_videos, meta in zip(TRAIN_CLASS_FOR_WHOLE, TRAIN_META):
         clz = clz_and_videos.value[0]
@@ -181,6 +183,21 @@ def whole_dataset_distribution_analysis(generated_dataset, split, mem_mode, root
             full_length_trajectory = np.concatenate((obs_trajectory, pred_trajectory), axis=1)
             full_length_distances = np.concatenate((obs_relative_distances, pred_relative_distances), axis=1)
 
+            all_idx = np.arange(full_length_distances.shape[0])
+
+            positive_outlier_idx = np.where(full_length_distances > outlier_threshold)[0]
+            positive_outlier_idx = np.unique(positive_outlier_idx)
+            negative_outlier_idx = np.where(full_length_distances < -outlier_threshold)[0]
+            negative_outlier_idx = np.unique(negative_outlier_idx)
+
+            outlier_idx = np.union1d(positive_outlier_idx, negative_outlier_idx)
+
+            inlier_idx = np.setdiff1d(all_idx, outlier_idx)
+
+            full_length_distances_inliers = full_length_distances[inlier_idx]
+
+            if full_length_distances_inliers.size != 0:
+                full_length_distances_without_outliers.append(full_length_distances_inliers)
             if obs_trajectory.size != 0:
                 obs_trajectories.append(obs_trajectory * to_meter)
             if pred_trajectory.size != 0:
@@ -201,6 +218,14 @@ def whole_dataset_distribution_analysis(generated_dataset, split, mem_mode, root
     pred_relative_distances_list = np.concatenate(pred_relative_distances_list, axis=0)
     full_length_trajectory_list = np.concatenate(full_length_trajectory_list, axis=0)
     full_length_distances_list = np.concatenate(full_length_distances_list, axis=0)
+    full_length_distances_without_outliers = np.concatenate(full_length_distances_without_outliers, axis=0)
+
+    plot_path = f"{ROOT_PATH}Plots/baseline_v2/nn/STATS/full_dataset/" \
+                f"{'generated/' if generated_dataset else 'gt/'}{split.name}/"
+
+    plot_relative_distances_line_plot(full_length_distances_without_outliers.reshape(-1, 2),
+                                      f'Filtered_Full:20_{outlier_threshold}',
+                                      save_path=plot_path + 'distances/')
 
     per_step_length, length = get_trajectory_length(full_length_trajectory_list, use_l2=True)
 
@@ -225,8 +250,8 @@ if __name__ == '__main__':
     find_distribution_whole_dataset = True
 
     mem_mode = None
-    split = NetworkMode.VALIDATION
-    generated_dataset = False
+    split = NetworkMode.TEST
+    generated_dataset = True
 
     root_path = GENERATED_DATASET_ROOT if generated_dataset else SAVE_BASE_PATH
 
@@ -236,7 +261,7 @@ if __name__ == '__main__':
     elif find_distribution_whole_dataset:
         logger.info('Distribution Analysis')
         whole_dataset_distribution_analysis(generated_dataset=generated_dataset, split=split,
-                                            mem_mode=mem_mode, root_path=root_path)
+                                            mem_mode=mem_mode, root_path=root_path, outlier_threshold=1000)
     else:
         logger.info('Single sequence Analysis')
         vid_clz = SDDVideoClasses.LITTLE
