@@ -225,6 +225,38 @@ def get_all_dataset(get_generated: bool = False):
     return dataset_train, dataset_val
 
 
+def get_all_dataset_all_splits(get_generated: bool = False):
+    dataset = BaselineGeneratedDataset if get_generated else BaselineDataset
+
+    train_datasets, val_datasets, test_datasets = [], [], []
+    for v_idx, (video_clazz, meta) in enumerate(zip(SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_VIDEO_META_CLASSES_LIST_FOR_NN)):
+        for video_number in SDD_PER_CLASS_VIDEOS_LIST_FOR_NN[v_idx]:
+            train_datasets.append(dataset(video_class=video_clazz, video_number=video_number,
+                                          split=NetworkMode.TRAIN, meta_label=meta))
+            val_datasets.append(dataset(video_class=video_clazz, video_number=video_number,
+                                        split=NetworkMode.VALIDATION, meta_label=meta))
+            test_datasets.append(dataset(video_class=video_clazz, video_number=video_number,
+                                         split=NetworkMode.TEST, meta_label=meta))
+    dataset_train = ConcatDataset(datasets=train_datasets)
+    dataset_val = ConcatDataset(datasets=val_datasets)
+    dataset_test = ConcatDataset(datasets=test_datasets)
+
+    return dataset_train, dataset_val, dataset_test
+
+
+def get_all_dataset_test_split(get_generated: bool = False):
+    dataset = BaselineGeneratedDataset if get_generated else BaselineDataset
+
+    test_datasets = []
+    for v_idx, (video_clazz, meta) in enumerate(zip(SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_VIDEO_META_CLASSES_LIST_FOR_NN)):
+        for video_number in SDD_PER_CLASS_VIDEOS_LIST_FOR_NN[v_idx]:
+            test_datasets.append(dataset(video_class=video_clazz, video_number=video_number,
+                                         split=NetworkMode.TEST, meta_label=meta))
+    dataset_test = ConcatDataset(datasets=test_datasets)
+
+    return dataset_test
+
+
 if __name__ == '__main__':
     video_class = SDDVideoClasses.LITTLE
     video_num = 3
