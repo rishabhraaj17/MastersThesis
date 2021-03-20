@@ -1049,7 +1049,7 @@ def eval_model(model_checkpoint_root_path: str, train_loader: DataLoader, val_lo
         f'_{"stationary_only" if stationary_only else ""}' \
         f'_{"threshold_" + str(threshold) + "_" if moving_only or stationary_only else ""}' \
         f'_{"all_trajectories" if not moving_only and not stationary_only else ""}' \
-        f'_{relative_distance_filter_threshold if relative_distance_filter_threshold is not None else ""}.yaml'
+        f'_rel_dist_{relative_distance_filter_threshold if relative_distance_filter_threshold is not None else ""}.yaml'
     Path(plot_path).mkdir(parents=True, exist_ok=True)
     with open(results_dump_path, 'w+') as f:
         yaml.dump(eval_results, f)
