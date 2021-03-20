@@ -690,7 +690,7 @@ if __name__ == '__main__':
     m = BaselineRNNStackedSimple(train_dataset=dataset_train, val_dataset=dataset_val, batch_size=BATCH_SIZE,
                                  num_workers=0, lr=LR, use_batch_norm=USE_BATCH_NORM, overfit_mode=OVERFIT,
                                  shuffle=True, pin_memory=True, generated_dataset=True, dropout=None, rnn_dropout=0,
-                                 encoder_lstm_num_layers=2)
+                                 encoder_lstm_num_layers=1, return_pred=False)
 
     trainer = Trainer(gpus=1, max_epochs=NUM_EPOCHS)
     trainer.fit(model=m)
