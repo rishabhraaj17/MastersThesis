@@ -69,6 +69,9 @@ class BaselineGAN(pl.LightningModule):
         #     self.batch_size = self.hparams.batch_size
         self.batch_size = self.hparams.batch_size
 
+        self.gsteps_yet = 0
+        self.dsteps_yet = 0
+
     def setup_datasets(self):
         root = self.hparams.unsupervised_root if self.hparams.use_generated_dataset else self.hparams.supervised_root
         self.train_dset, self.val_dset = get_all_dataset(get_generated=self.hparams.use_generated_dataset, root=root)
@@ -126,6 +129,7 @@ class BaselineGAN(pl.LightningModule):
             output = self.generator_step(batch)
 
             self.output = output
+            self.gsteps_yet += 1
             # return output
         elif self.dsteps and self.current_batch_idx != batch_idx:
         # elif self.dsteps and optimizer_idx == 1 and self.current_batch_idx != batch_idx:
@@ -133,7 +137,8 @@ class BaselineGAN(pl.LightningModule):
             output = self.discriminator_step(batch)
 
             self.output = output
-            # return output
+            self.dsteps_yet += 1
+        # return output
         # else:
         #     return self.output
 
@@ -201,10 +206,11 @@ class BaselineGAN(pl.LightningModule):
 
         # ade_sum, fde_sum = [], []
         # ade_sum_pixel, fde_sum_pixel = [], []
-        # get k times batch
-        # batch = get_batch_k(batch, self.hparams.best_k)
 
-        # batch_size = batch["size"].item()
+        # get k times batch
+        batch = get_batch_k(batch, self.hparams.best_k)
+
+        batch_size = batch["size"]
 
         generator_out = self.generator(batch)
 
@@ -229,9 +235,9 @@ class BaselineGAN(pl.LightningModule):
             batch["gt_xy"], generator_out["out_xy"], mode='raw'
         )
 
-        # ade_error = ade_error.view(self.hparams.best_k, batch_size)
-        #
-        # fde_error = fde_error.view(self.hparams.best_k, batch_size)
+        ade_error = ade_error.view(self.hparams.best_k, batch_size)
+
+        fde_error = fde_error.view(self.hparams.best_k, batch_size)
 
         # get pixel ratios
         # ratios = []
@@ -271,7 +277,7 @@ class BaselineGAN(pl.LightningModule):
         #     wall_crashes = [0]
         # tqdm_dict["feasibility_train"] = torch.tensor(1 - np.mean(wall_crashes))
 
-        # l2 = l2.view(self.hparams.best_k, -1)
+        l2 = l2.view(self.hparams.best_k, -1)
 
         loss_l2, _ = l2.min(dim=0, keepdim=True)
         loss_l2 = torch.mean(loss_l2)
@@ -314,28 +320,29 @@ class BaselineGAN(pl.LightningModule):
         #     total_loss += loss_G
         #     tqdm_dict["G_train"] = loss_G
 
-        # traj_fake = generator_out["out_xy"][:, :batch_size]
-        # traj_fake_rel = generator_out["out_dxdy"][:, :batch_size]
+        traj_fake = generator_out["out_xy"][:, :batch_size]
+        traj_fake_rel = generator_out["out_dxdy"][:, :batch_size]
 
-        traj_fake = generator_out["out_xy"]
-        traj_fake_rel = generator_out["out_dxdy"]
+        # traj_fake = generator_out["out_xy"]
+        # traj_fake_rel = generator_out["out_dxdy"]
 
         # if self.generator.rm_vis_type == "attention":
         #     image_patches = generator_out["image_patches"][:, :batch_size]
         # else:
         #     image_patches = None
 
-        # fake_scores = self.discriminator(in_xy=batch["in_xy"][:, :batch_size],
-        #                                  in_dxdy=batch["in_dxdy"][:, :batch_size],
-        #                                  out_xy=traj_fake,
-        #                                  out_dxdy=traj_fake_rel,
-        #                                  images_patches=image_patches)
-
-        fake_scores = self.discriminator(in_xy=batch["in_xy"],
-                                         in_dxdy=batch["in_dxdy"],
+        image_patches = None
+        fake_scores = self.discriminator(in_xy=batch["in_xy"][:, :batch_size],
+                                         in_dxdy=batch["in_dxdy"][:, :batch_size],
                                          out_xy=traj_fake,
                                          out_dxdy=traj_fake_rel,
-                                         images_patches=None)
+                                         images_patches=image_patches)
+
+        # fake_scores = self.discriminator(in_xy=batch["in_xy"],
+        #                                  in_dxdy=batch["in_dxdy"],
+        #                                  out_xy=traj_fake,
+        #                                  out_dxdy=traj_fake_rel,
+        #                                  images_patches=None)
 
         loss_adv = self.loss_weights["ADV"] * self.loss_fns["ADV"](fake_scores, True).clamp(min=0)
 
@@ -449,8 +456,8 @@ class BaselineGAN(pl.LightningModule):
     def eval_step(self, batch, best_k=10):
         batch = preprocess_dataset_elements(batch, batch_first=False, is_generated=self.hparams.use_generated_dataset)
 
-        ade_sum, fde_sum = [], []
-        ade_sum_pixel, fde_sum_pixel = [], []
+        # ade_sum, fde_sum = [], []
+        # ade_sum_pixel, fde_sum_pixel = [], []
 
         # get pixel ratios
         # ratios = []
@@ -458,8 +465,8 @@ class BaselineGAN(pl.LightningModule):
         #     ratios.append(torch.tensor(img["ratio"]))
         # ratios = torch.stack(ratios).to(self.device)
 
-        # batch = get_batch_k(batch, best_k)
-        # batch_size = batch["size"]
+        batch = get_batch_k(batch, best_k)
+        batch_size = batch["size"]
 
         out = self.test(batch)
 
@@ -476,9 +483,9 @@ class BaselineGAN(pl.LightningModule):
             batch["gt_xy"], out["out_xy"], mode='raw'
         )
 
-        # ade_error = ade_error.view(best_k, batch_size)
-        #
-        # fde_error = fde_error.view(best_k, batch_size)
+        ade_error = ade_error.view(best_k, batch_size)
+
+        fde_error = fde_error.view(best_k, batch_size)
 
         # for idx, (start, end) in enumerate(batch["seq_start_end"]):
         #     ade_error_sum = torch.sum(ade_error[:, start:end], dim=1)
@@ -494,8 +501,8 @@ class BaselineGAN(pl.LightningModule):
         #     fde_sum_pixel.append(fde_sum_scene / (ratios[idx] * (end - start)))
 
         # compute Mode Caughts metrics
-        # fde_min, _ = fde_error.min(dim=0)
-        # modes_caught = (fde_min < self.hparams.mode_dist_threshold).float()
+        fde_min, _ = fde_error.min(dim=0)
+        modes_caught = (fde_min < self.hparams.mode_dist_threshold).float()
 
         # if any(batch["occupancy"]):
         #
@@ -504,7 +511,7 @@ class BaselineGAN(pl.LightningModule):
         #     wall_crashes = [0]
         # return {"ade": ade_sum, "fde": fde_sum, "ade_pixel": ade_sum_pixel, "fde_pixel": fde_sum_pixel,
         #         "wall_crashes": wall_crashes, "modes_caught": modes_caught}
-        return {'ade_pixel': ade_error, 'fde_pixel': fde_error,
+        return {'ade_pixel': ade_error, 'fde_pixel': fde_error, "modes_caught": modes_caught,
                 'ade': ade_error * batch['ratio'], 'fde': fde_error * batch['ratio']}
 
     def collect_losses(self, outputs, mode="val", plot=True):
@@ -513,11 +520,13 @@ class BaselineGAN(pl.LightningModule):
         fde = torch.stack(list(itertools.chain(*[x['fde'] for x in outputs]))).mean()
         ade_pixel = torch.stack(list(itertools.chain(*[x['ade_pixel'] for x in outputs]))).mean()
         fde_pixel = torch.stack(list(itertools.chain(*[x['fde_pixel'] for x in outputs]))).mean()
+        mc_metric = torch.stack(list(itertools.chain(*[x["modes_caught"] for x in outputs]))).mean()
 
-        loss = ((fde + ade) / 2.)
+        # loss = ((fde + ade) / 2.)
+        loss = torch.add(fde, ade).div(2.)
         logs = {'{}_loss'.format(mode): loss, 'ade_{}'.format(mode): ade.item(),
                 "fde_{}".format(mode): fde.item(), "ade_pixel_{}".format(mode): ade_pixel.item(),
-                "fde_pixel_{}".format(mode): fde_pixel.item()}
+                "fde_pixel_{}".format(mode): fde_pixel.item(), "modes_c_{}".format(mode): mc_metric}
         # plot val
         if plot:
             for key, loss in logs.items():
