@@ -244,7 +244,7 @@ def get_all_dataset_all_splits(get_generated: bool = False, root: str = SAVE_BAS
     return dataset_train, dataset_val, dataset_test
 
 
-def get_all_dataset_test_split(get_generated: bool = False, root: str = SAVE_BASE_PATH):
+def get_all_dataset_test_split(get_generated: bool = False, root: str = SAVE_BASE_PATH, with_dataset_idx=True):
     dataset = BaselineGeneratedDataset if get_generated else BaselineDataset
 
     test_datasets = []
@@ -252,7 +252,10 @@ def get_all_dataset_test_split(get_generated: bool = False, root: str = SAVE_BAS
         for video_number in SDD_PER_CLASS_VIDEOS_LIST_FOR_NN[v_idx]:
             test_datasets.append(dataset(video_class=video_clazz, video_number=video_number,
                                          split=NetworkMode.TEST, meta_label=meta, root=root))
-    dataset_test = ConcatDataset(datasets=test_datasets)
+    if with_dataset_idx:
+        dataset_test = ConcatenateDataset(datasets=test_datasets)
+    else:
+        dataset_test = ConcatDataset(datasets=test_datasets)
 
     return dataset_test
 

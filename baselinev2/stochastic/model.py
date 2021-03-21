@@ -8,6 +8,7 @@ import psutil
 import torch
 import numpy as np
 from omegaconf import DictConfig
+from pytorch_lightning import seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from torch import Tensor
@@ -16,11 +17,16 @@ import pytorch_lightning as pl
 from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
 
+from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.dataset import get_all_dataset, get_all_dataset_test_split
+from baselinev2.plot_utils import plot_trajectory_alongside_frame, plot_trajectories
 from baselinev2.stochastic.losses import l2_loss, GANLoss, cal_ade, cal_fde
 from baselinev2.stochastic.model_modules import BaselineGenerator, Discriminator, preprocess_dataset_elements
 from baselinev2.stochastic.utils import get_batch_k, re_im
 from baselinev2.stochastic.viz import visualize_traj_probabilities
+
+
+seed_everything(42)
 
 
 def init_weights(m):
@@ -89,7 +95,7 @@ class BaselineGAN(pl.LightningModule):
         return DataLoader(
             self.val_dset,
             batch_size=self.hparams.batch_size,
-            shuffle=True,
+            shuffle=False,
             num_workers=self.hparams.num_workers,
             drop_last=True
         )
@@ -132,7 +138,7 @@ class BaselineGAN(pl.LightningModule):
             self.gsteps_yet += 1
             # return output
         elif self.dsteps and self.current_batch_idx != batch_idx:
-        # elif self.dsteps and optimizer_idx == 1 and self.current_batch_idx != batch_idx:
+            # elif self.dsteps and optimizer_idx == 1 and self.current_batch_idx != batch_idx:
 
             output = self.discriminator_step(batch)
 
@@ -374,7 +380,6 @@ class BaselineGAN(pl.LightningModule):
         self.discriminator.grad(True)
 
         with torch.no_grad():
-
             out = self.generator(batch)
 
         traj_fake = out["out_xy"]
@@ -630,12 +635,57 @@ def debug_model(cfg):
 
     m = BaselineGAN(hparams=cfg)
     # m.setup_datasets()
+    # trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
+    #                      callbacks=[checkpoint_callback],
+    #                      fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False)
     trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                          callbacks=[checkpoint_callback],
-                         fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False)
+                         fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
+                         resume_from_checkpoint='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/'
+                                                'stochastic/logs/lightning_logs/version_1/'
+                                                'checkpoints/epoch=17-step=226835.ckpt')
     trainer.fit(m)
     print()
 
 
+@torch.no_grad()
+def quick_eval():
+    version = 1
+    epoch = 17
+    step = 226835
+
+    base_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
+    model_path = 'stochastic/' + f'logs/lightning_logs/version_{version}/checkpoints/' \
+                                 f'epoch={epoch}-step={step}.ckpt'
+    hparam_path = 'stochastic/' + f'logs/lightning_logs/version_{version}/hparams.yaml'
+    m = BaselineGAN.load_from_checkpoint(checkpoint_path=model_path, hparams_file=hparam_path, map_location='cuda:0')
+    m.setup_test_dataset()
+    m.eval()
+    loader = DataLoader(m.test_dset, batch_size=1, shuffle=True, num_workers=0)
+    for data, dataset_idx in loader:
+        batch = preprocess_dataset_elements(data, batch_first=False, is_generated=m.hparams.use_generated_dataset)
+        out = m.test(batch)
+
+        obs_traj = batch['in_xy'].squeeze()
+        gt_traj = batch['gt_xy'].squeeze()
+        pred_traj = out['out_xy'].squeeze()
+
+        frame_num = data[6][0, 0].item()
+        track_id = data[4][0, 0].item()
+
+        video_dataset = loader.dataset.datasets[dataset_idx[0].item()]
+        video_path = f'{base_path}videos/{video_dataset.video_class.value}/' \
+                     f'video{video_dataset.video_number}/video.mov'
+
+        plot_trajectory_alongside_frame(obs_trajectory=obs_traj,
+                                        gt_trajectory=gt_traj,
+                                        pred_trajectory=pred_traj,
+                                        frame_number=frame_num,
+                                        track_id=track_id,
+                                        frame=extract_frame_from_video(video_path, frame_num))
+        print()
+
+
 if __name__ == '__main__':
-    debug_model()
+    # debug_model()
+    quick_eval()
