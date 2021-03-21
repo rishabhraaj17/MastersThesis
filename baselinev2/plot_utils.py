@@ -895,6 +895,46 @@ def plot_trajectory_alongside_frame(frame, obs_trajectory, gt_trajectory, pred_t
     return fig
 
 
+def plot_trajectory_alongside_frame_stochastic(frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_number,
+                                               track_id, epoch='', additional_text='', return_figure_only=False,
+                                               save_path=None):
+    fig, ax = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(16, 10))
+    img_axis, trajectory_axis = ax
+    img_axis.imshow(frame)
+    add_line_to_axis(ax=img_axis, features=obs_trajectory)
+    add_line_to_axis(ax=img_axis, features=gt_trajectory, marker_color='r')
+
+    add_line_to_axis(ax=trajectory_axis, features=obs_trajectory)
+    add_line_to_axis(ax=trajectory_axis, features=gt_trajectory, marker_color='r')
+
+    for p_traj in range(pred_trajectory.shape[1]):
+        add_line_to_axis(ax=img_axis, features=pred_trajectory[:, p_traj, ...], marker_color='g')
+        add_line_to_axis(ax=trajectory_axis, features=pred_trajectory[:, p_traj, ...], marker_color='g')
+
+    img_axis.set_title('Trajectories')
+    trajectory_axis.set_title('Trajectories')
+
+    fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}\n{additional_text}')
+
+    legends_dict = {'b': 'Observed - [0 - 7]', 'r': 'True - [8 - 19]', 'g': 'Predicted - [8 - 19]'}
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
+    if return_figure_only:
+        plt.close()
+        return fig
+
+    if save_path is not None:
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path + f"frame_{epoch}_{frame_number}_track_{track_id}.png")
+        plt.close()
+    else:
+        plt.show()
+
+    return fig
+
+
 def plot_and_compare_trajectory_alongside_frame(
         frame, supervised_obs_trajectory, supervised_gt_trajectory, supervised_pred_trajectory,
         unsupervised_obs_trajectory, unsupervised_gt_trajectory, unsupervised_pred_trajectory, frame_number, track_id,

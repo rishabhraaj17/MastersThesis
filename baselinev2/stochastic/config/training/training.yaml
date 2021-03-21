@@ -12,7 +12,9 @@ trainer:
 
 
 batch_size: 32
-batch_size_scheduler: 10
+batch_size_scheduler: 32
+max_batch_size: 2048
+patience: 5
 
 pretraining:
   batch_size: 32

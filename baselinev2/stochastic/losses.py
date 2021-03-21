@@ -183,6 +183,33 @@ def displacement_error(pred_traj, pred_traj_gt, mode='sum'):
     elif mode == 'raw':
 
         return torch.sum(loss, 1)
+    
+
+def displacement_error_stochastic(pred_traj, pred_traj_gt, mode='sum'):
+    """
+    Input:
+    - pred_traj: Tensor of shape (seq_len, batch, 2). Predicted trajectory.
+    - pred_traj_gt: Tensor of shape (seq_len, batch, 2). Ground truth
+    predictions.
+    - mode: Can be one of sum, average, raw
+    Output:
+    - loss: gives the eculidian displacement error
+    """
+    seq_len, num_traj, _, _ = pred_traj.size()
+
+    loss = pred_traj_gt - pred_traj
+
+    loss = torch.norm(loss, 2, -1).unsqueeze(0)
+    loss, loss_idx = loss.min(-1)
+
+    if mode == 'sum':
+        return torch.sum(loss)
+    elif mode == 'average':
+        return torch.sum(loss) / (seq_len * num_traj)
+    elif mode == 'raw':
+        return torch.sum(loss, 1)
+    elif mode == 'mean':
+        return torch.mean(loss, 1)
 
 
 def final_displacement_error(
@@ -203,6 +230,32 @@ def final_displacement_error(
     loss = torch.norm(loss, 2, 1).unsqueeze(0)
     if mode == 'raw':
 
+        return loss
+    elif mode == 'average':
+        return torch.sum(loss) / num_traj
+    elif mode == 'sum':
+        return torch.sum(loss)
+    
+    
+def final_displacement_error_stochastic(
+        pred_pos, pred_pos_gt, mode='sum'
+):
+    """
+    Input:
+    - pred_pos: Tensor of shape (batch, 2). Predicted last pos.
+    - pred_pos_gt: Tensor of shape (seq_len, batch, 2). Groud truth
+    last pos
+
+    Output:
+    - loss: gives the eculidian displacement error
+    """
+    num_traj, _, _ = pred_pos_gt.size()
+    loss = pred_pos_gt - pred_pos
+
+    loss = torch.norm(loss, 2, -1).unsqueeze(0)
+    loss, loss_idx = loss.min(-1)
+
+    if mode == 'raw' or mode == 'mean':
         return loss
     elif mode == 'average':
         return torch.sum(loss) / num_traj
@@ -229,6 +282,18 @@ def cal_ade(pred_traj_gt, pred_traj_fake, mode="sum"):
 def cal_fde(
         pred_traj_gt, pred_traj_fake, mode="sum"):
     fde = final_displacement_error(pred_traj_fake[-1], pred_traj_gt[-1], mode=mode)
+    return fde
+
+
+def cal_ade_stochastic(pred_traj_gt, pred_traj_fake, mode="sum"):
+    ade = displacement_error_stochastic(pred_traj_fake, pred_traj_gt, mode=mode)
+
+    return ade
+
+
+def cal_fde_stochastic(
+        pred_traj_gt, pred_traj_fake, mode="sum"):
+    fde = final_displacement_error_stochastic(pred_traj_fake[-1], pred_traj_gt[-1], mode=mode)
     return fde
 
 

@@ -16,15 +16,16 @@ from torch.optim import Adam
 import pytorch_lightning as pl
 from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.dataset import get_all_dataset, get_all_dataset_test_split
-from baselinev2.plot_utils import plot_trajectory_alongside_frame, plot_trajectories
-from baselinev2.stochastic.losses import l2_loss, GANLoss, cal_ade, cal_fde
+from baselinev2.plot_utils import plot_trajectory_alongside_frame, plot_trajectories, \
+    plot_trajectory_alongside_frame_stochastic
+from baselinev2.stochastic.losses import l2_loss, GANLoss, cal_ade, cal_fde, cal_ade_stochastic, cal_fde_stochastic
 from baselinev2.stochastic.model_modules import BaselineGenerator, Discriminator, preprocess_dataset_elements
 from baselinev2.stochastic.utils import get_batch_k, re_im
 from baselinev2.stochastic.viz import visualize_traj_probabilities
-
 
 seed_everything(42)
 
@@ -69,11 +70,11 @@ class BaselineGAN(pl.LightningModule):
         self.current_batch_idx = -1
         self.plot_val = hparams.plot_val
 
-        # if self.hparams.batch_size_scheduler:
-        #     self.batch_size = self.hparams.batch_size_scheduler
-        # else:
-        #     self.batch_size = self.hparams.batch_size
-        self.batch_size = self.hparams.batch_size
+        if self.hparams.batch_size_scheduler:
+            self.batch_size = self.hparams.batch_size_scheduler
+        else:
+            self.batch_size = self.hparams.batch_size
+        # self.batch_size = self.hparams.batch_size
 
         self.gsteps_yet = 0
         self.dsteps_yet = 0
@@ -633,17 +634,26 @@ def debug_model(cfg):
         mode='min'
     )
 
+    from utils import BatchSizeScheduler
+    bs_scheduler = BatchSizeScheduler(bs=cfg.batch_size_scheduler,
+                                      max_bs=cfg.max_batch_size,
+                                      patience=cfg.patience)
+
     m = BaselineGAN(hparams=cfg)
     # m.setup_datasets()
+
+    trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
+                         callbacks=[checkpoint_callback, bs_scheduler],
+                         fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False)
+
+    # cfg.batch_size *= 8
     # trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
     #                      callbacks=[checkpoint_callback],
-    #                      fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False)
-    trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
-                         callbacks=[checkpoint_callback],
-                         fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
-                         resume_from_checkpoint='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/'
-                                                'stochastic/logs/lightning_logs/version_1/'
-                                                'checkpoints/epoch=17-step=226835.ckpt')
+    #                      fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
+    #                      resume_from_checkpoint='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/'
+    #                                             'stochastic/logs/lightning_logs/version_4/'
+    #                                             'checkpoints/epoch=47-step=604895.ckpt')
+
     trainer.fit(m)
     print()
 
@@ -686,6 +696,99 @@ def quick_eval():
         print()
 
 
+@torch.no_grad()
+def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False):
+    # version = 2
+    # epoch = 31
+    # step = 403263
+
+    version = 5
+    epoch = 64
+    step = 819129
+
+    # version = 0
+    # epoch = 209
+    # step = 2646419
+
+    base_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
+    model_path = 'stochastic/' + f'logs/lightning_logs/version_{version}/checkpoints/' \
+                                 f'epoch={epoch}-step={step}.ckpt'
+    hparam_path = 'stochastic/' + f'logs/lightning_logs/version_{version}/hparams.yaml'
+
+    m = BaselineGAN.load_from_checkpoint(checkpoint_path=model_path, hparams_file=hparam_path, map_location='cuda:0')
+    m.setup_test_dataset()
+    m.eval()
+    loader = DataLoader(m.test_dset, batch_size=batch_s if multi_batch else 1, shuffle=True, num_workers=0)
+
+    ade_list, fde_list = [], []
+
+    for data, dataset_idx in tqdm(loader):
+        batch = preprocess_dataset_elements(data, batch_first=False, is_generated=m.hparams.use_generated_dataset)
+
+        batch = get_batch_k(batch, k)
+        batch_size = batch["size"]
+
+        out = m.test(batch)
+
+        if multi_batch:
+            im_idx = np.random.choice(batch_size, 1).item()
+
+            obs_traj = batch['in_xy'][:, :batch_size][:, im_idx, ...].squeeze()
+            gt_traj = batch['gt_xy'][:, :batch_size][:, im_idx, ...].squeeze()
+            pred_traj = out['out_xy'].view(out['out_xy'].shape[0], k,
+                                           -1, out['out_xy'].shape[2])[:, :, im_idx, ...].squeeze()
+
+            frame_num = data[6][im_idx, 0].item()
+            track_id = data[4][im_idx, 0].item()
+            ratio = data[10]
+
+            video_dataset = loader.dataset.datasets[dataset_idx[im_idx].item()]
+            video_path = f'{base_path}videos/{video_dataset.video_class.value}/' \
+                         f'video{video_dataset.video_number}/video.mov'
+            # metrics
+            p_traj = batch['gt_xy'].view(batch['gt_xy'].shape[0], -1, k, batch['gt_xy'].shape[2])
+            p_traj_fake = out['out_xy'].view(out['out_xy'].shape[0], -1, k, out['out_xy'].shape[2])
+
+            ade = cal_ade_stochastic(p_traj, p_traj_fake, 'mean')
+            fde = cal_fde_stochastic(p_traj, p_traj_fake, 'mean')
+
+            # meter
+            ade *= ratio
+            fde *= ratio
+
+            plot_ade = ade.squeeze()[im_idx]
+            plot_fde = fde.squeeze()[im_idx]
+
+            ade_list.append(ade.mean().item())
+            fde_list.append(fde.mean().item())
+        else:
+            obs_traj = batch['in_xy'][:, :batch_size].squeeze()
+            gt_traj = batch['gt_xy'][:, :batch_size].squeeze()
+            pred_traj = out['out_xy'].squeeze()
+
+            frame_num = data[6][0, 0].item()
+            track_id = data[4][0, 0].item()
+
+            video_dataset = loader.dataset.datasets[dataset_idx[0].item()]
+            video_path = f'{base_path}videos/{video_dataset.video_class.value}/' \
+                         f'video{video_dataset.video_number}/video.mov'
+
+            # fixme
+            plot_ade = 0.
+            plot_fde = 0.
+
+        if plot:
+            plot_trajectory_alongside_frame_stochastic(obs_trajectory=obs_traj,
+                                                       gt_trajectory=gt_traj,
+                                                       pred_trajectory=pred_traj,
+                                                       frame_number=frame_num,
+                                                       track_id=track_id,
+                                                       frame=extract_frame_from_video(video_path, frame_num),
+                                                       additional_text=f'ADE: {plot_ade} | FDE: {plot_fde}')
+    print(f'ADE: {np.mean(ade_list).item()} | FDE: {np.mean(fde_list).item()}')
+
+
 if __name__ == '__main__':
-    # debug_model()
-    quick_eval()
+    debug_model()
+    # quick_eval_stochastic(plot=True)  # fixme: select one best trajectory!
+    # quick_eval()
