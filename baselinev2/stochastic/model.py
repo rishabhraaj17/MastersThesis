@@ -700,7 +700,7 @@ def quick_eval():
 
 
 @torch.no_grad()
-def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_on_gt=True):
+def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_on_gt=True, speedup_factor=1):
     # version = 2
     # epoch = 31
     # step = 403263
@@ -728,7 +728,7 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
     m.setup_test_dataset()
     m.eval()
     m.hparams.num_workers = 0 if plot else 12
-    loader = DataLoader(m.test_dset, batch_size=batch_s if multi_batch else 1, shuffle=True,
+    loader = DataLoader(m.test_dset, batch_size=batch_s * speedup_factor if multi_batch else 1, shuffle=True,
                         num_workers=m.hparams.num_workers)
 
     constant_linear_baseline_caller = ConstantLinearBaseline()
@@ -768,11 +768,22 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
             video_path = f'{base_path}videos/{video_dataset.video_class.value}/' \
                          f'video{video_dataset.video_number}/video.mov'
             # metrics
-            p_traj = batch['gt_xy'].view(batch['gt_xy'].shape[0], -1, k, batch['gt_xy'].shape[2])
-            p_traj_fake = out['out_xy'].view(out['out_xy'].shape[0], -1, k, out['out_xy'].shape[2])
+            # p_traj = batch['gt_xy'].view(batch['gt_xy'].shape[0], -1, k, batch['gt_xy'].shape[2])
+            # p_traj_fake = out['out_xy'].view(out['out_xy'].shape[0], -1, k, out['out_xy'].shape[2])
+            # constant_linear_p_traj = constant_linear_baseline_pred_trajectory.view(
+            #     constant_linear_baseline_pred_trajectory.shape[0], -1, k,
+            #     constant_linear_baseline_pred_trajectory.shape[2])
+
+            p_traj = batch['gt_xy'].view(batch['gt_xy'].shape[0], k, -1, batch['gt_xy'].shape[2])
+            p_traj_fake = out['out_xy'].view(out['out_xy'].shape[0], k, -1, out['out_xy'].shape[2])
             constant_linear_p_traj = constant_linear_baseline_pred_trajectory.view(
-                constant_linear_baseline_pred_trajectory.shape[0], -1, k,
+                constant_linear_baseline_pred_trajectory.shape[0], k, -1,
                 constant_linear_baseline_pred_trajectory.shape[2])
+            
+            # p_traj = batch['gt_xy'][:, :batch_size].unsqueeze(2).repeat(1, 1, k, 1)
+            # p_traj_fake = out['out_xy'][:, :batch_size].unsqueeze(2).repeat(1, 1, k, 1)
+            # constant_linear_p_traj = \
+            #     constant_linear_baseline_pred_trajectory[:, :batch_size].unsqueeze(2).repeat(1, 1, k, 1)
 
             # ade = cal_ade_stochastic(p_traj, p_traj_fake, 'mean')
             # fde = cal_fde_stochastic(p_traj, p_traj_fake, 'mean')
@@ -838,6 +849,7 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
                 frame_number=frame_num,
                 track_id=track_id,
                 single_mode=k == 1,
+                best_idx=plot_best_idx,
                 additional_text=f'Model: ADE: {plot_ade} | FDE: {plot_fde}\n'
                                 f'Linear: ADE: {plot_linear_ade} | FDE: {plot_linear_fde}',
             )
@@ -847,5 +859,16 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
 
 if __name__ == '__main__':
     # debug_model()
-    quick_eval_stochastic(plot=False, eval_on_gt=False, k=10)  # fixme: select one best trajectory - is it correct now?
+    quick_eval_stochastic(plot=False, eval_on_gt=True, k=10, speedup_factor=32)
     # quick_eval()
+
+    # On unsupervised
+    # k = 10
+    # Model: ADE: 0.9994683927553563 | FDE: 2.0943560366250256
+    # Linear: ADE: 1.8281520602309735 | FDE: 3.9999097130249424
+
+    # k = 1
+    # Model: ADE: 2.7966834577314694 | FDE: 5.77561737130756
+    # Linear: ADE: 1.8281520602309735 | FDE: 3.9999097130249424
+
+    # On supervised
