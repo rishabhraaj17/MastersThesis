@@ -6,6 +6,8 @@ from torch import nn as nn
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset
+from baselinev2.nn.evaluate import filter_on_relative_distances
+from baselinev2.notebooks.utils import get_trajectory_length
 
 
 def rotate(X, center, alpha):
@@ -515,19 +517,75 @@ class EncoderPrediction(nn.Module):
         return dynamic_score
 
 
-def preprocess_dataset_elements(batch, is_generated=False, batch_first=True):
+def preprocess_dataset_elements(batch, is_generated=False, batch_first=True, filter_mode=False, moving_only=False,
+                                stationary_only=False, threshold=1.0, relative_distance_filter_threshold=100.):
     if is_generated:
         in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, _, _, ratio = \
             batch
     else:
         in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = batch
 
+    if filter_mode:
+        full_xy = torch.cat((in_xy, gt_xy), dim=1)
+        full_length_per_step, full_length = get_trajectory_length(full_xy.cpu().numpy(), use_l2=True)
+        obs_trajectory_length, obs_trajectory_length_summed = get_trajectory_length(in_xy.cpu().numpy(), use_l2=True)
+        gt_trajectory_length, gt_trajectory_length_summed = get_trajectory_length(gt_xy.cpu().numpy(), use_l2=True)
+
+        full_length *= ratio.cpu().numpy()
+        obs_trajectory_length_summed *= ratio.cpu().numpy()
+        gt_trajectory_length_summed *= ratio.cpu().numpy()
+
+        if moving_only:
+            # feasible_idx = np.where(length > threshold)[0]
+            obs_feasible_idx = np.where(obs_trajectory_length_summed > threshold)[0]
+            gt_feasible_idx = np.where(gt_trajectory_length_summed > threshold)[0]
+            # feasible_idx = np.union1d(obs_feasible_idx, gt_feasible_idx)
+            feasible_idx = np.intersect1d(obs_feasible_idx, gt_feasible_idx)
+
+            if relative_distance_filter_threshold is not None:
+                feasible_idx = filter_on_relative_distances(feasible_idx, gt_uv.cpu(), in_uv.cpu(),
+                                                            relative_distance_filter_threshold)
+
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = \
+                in_xy[feasible_idx], gt_xy[feasible_idx], in_uv[feasible_idx], gt_uv[feasible_idx], \
+                in_track_ids[feasible_idx], gt_track_ids[feasible_idx], in_frame_numbers[feasible_idx], \
+                gt_frame_numbers[feasible_idx], ratio[feasible_idx]
+
+            if is_generated:
+                batch = [in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers,
+                         gt_frame_numbers, [], [], ratio]
+            else:
+                batch = [in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers,
+                         gt_frame_numbers, ratio]
+
+        if stationary_only:
+            # feasible_idx = np.where(length < threshold)[0]
+            obs_feasible_idx = np.where(obs_trajectory_length_summed < threshold)[0]
+            gt_feasible_idx = np.where(gt_trajectory_length_summed < threshold)[0]
+            # feasible_idx = np.union1d(obs_feasible_idx, gt_feasible_idx)
+            feasible_idx = np.intersect1d(obs_feasible_idx, gt_feasible_idx)
+
+            if relative_distance_filter_threshold is not None:
+                feasible_idx = filter_on_relative_distances(feasible_idx, gt_uv.cpu(), in_uv.cpu(),
+                                                            relative_distance_filter_threshold)
+
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = \
+                in_xy[feasible_idx], gt_xy[feasible_idx], in_uv[feasible_idx], gt_uv[feasible_idx], \
+                in_track_ids[feasible_idx], gt_track_ids[feasible_idx], in_frame_numbers[feasible_idx], \
+                gt_frame_numbers[feasible_idx], ratio[feasible_idx]
+            if is_generated:
+                batch = [in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers,
+                         gt_frame_numbers, [], [], ratio]
+            else:
+                batch = [in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers,
+                         gt_frame_numbers, ratio]
+
     # todo: it has to be fixed - look at how its done for any working dataset, it needs to how many
     #  peds are there in a sequence
     _len = [len(seq) for seq in in_xy.permute(1, 0, 2)]
     # _len = [len(seq) for seq in in_xy]
     cum_start_idx = [0] + np.cumsum(_len).tolist()
-    seq_start_end = torch.LongTensor([[start, end]for start, end in zip(cum_start_idx, cum_start_idx[1:])])
+    seq_start_end = torch.LongTensor([[start, end] for start, end in zip(cum_start_idx, cum_start_idx[1:])])
 
     if not batch_first:
         in_xy, gt_xy, in_uv, gt_uv = \

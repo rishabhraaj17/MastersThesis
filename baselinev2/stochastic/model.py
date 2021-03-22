@@ -700,7 +700,9 @@ def quick_eval():
 
 
 @torch.no_grad()
-def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_on_gt=True, speedup_factor=1):
+def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_on_gt=True, speedup_factor=1,
+                          filter_mode=False, moving_only=False, stationary_only=False, threshold=1.0,
+                          relative_distance_filter_threshold=100., device='cuda:0'):
     # version = 2
     # epoch = 31
     # step = 403263
@@ -727,6 +729,7 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
     m.hparams.use_generated_dataset = False if eval_on_gt else True
     m.setup_test_dataset()
     m.eval()
+    m.to(device)
     m.hparams.num_workers = 0 if plot else 12
     loader = DataLoader(m.test_dset, batch_size=batch_s * speedup_factor if multi_batch else 1, shuffle=True,
                         num_workers=m.hparams.num_workers)
@@ -737,16 +740,21 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
     linear_ade_list, linear_fde_list = [], []
 
     for data, dataset_idx in tqdm(loader):
-        batch = preprocess_dataset_elements(data, batch_first=False, is_generated=m.hparams.use_generated_dataset)
+        data = [d.to(device) for d in data]
+        batch = preprocess_dataset_elements(data, batch_first=False, is_generated=m.hparams.use_generated_dataset,
+                                            filter_mode=filter_mode, moving_only=moving_only,
+                                            stationary_only=stationary_only, threshold=threshold,
+                                            relative_distance_filter_threshold=relative_distance_filter_threshold)
 
         batch = get_batch_k(batch, k)
         batch_size = batch["size"]
 
         out = m.test(batch)
         constant_linear_baseline_pred_trajectory, constant_linear_baseline_ade, constant_linear_baseline_fde = \
-            constant_linear_baseline_caller.eval(obs_trajectory=batch['in_xy'].permute(1, 0, 2),
-                                                 obs_distances=batch['in_dxdy'].permute(1, 0, 2),
-                                                 gt_trajectory=batch['gt_xy'].permute(1, 0, 2), ratio=data[-1])
+            constant_linear_baseline_caller.eval(obs_trajectory=batch['in_xy'].permute(1, 0, 2).cpu().numpy(),
+                                                 obs_distances=batch['in_dxdy'].permute(1, 0, 2).cpu().numpy(),
+                                                 gt_trajectory=batch['gt_xy'].permute(1, 0, 2).cpu().numpy()
+                                                 , ratio=batch['ratio'].squeeze()[0])
 
         constant_linear_baseline_pred_trajectory = \
             torch.from_numpy(constant_linear_baseline_pred_trajectory).permute(1, 0, 2)
@@ -762,7 +770,7 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
 
             frame_num = data[6][im_idx, 0].item()
             track_id = data[4][im_idx, 0].item()
-            ratio = data[-1]
+            ratio = batch['ratio'].squeeze()[0]  # data[-1]
 
             video_dataset = loader.dataset.datasets[dataset_idx[im_idx].item()]
             video_path = f'{base_path}videos/{video_dataset.video_class.value}/' \
@@ -789,7 +797,7 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
             # fde = cal_fde_stochastic(p_traj, p_traj_fake, 'mean')
 
             ade, fde, best_idx = cal_ade_fde_stochastic(p_traj, p_traj_fake)
-            linear_ade, linear_fde, linear_best_idx = cal_ade_fde_stochastic(p_traj, constant_linear_p_traj)
+            linear_ade, linear_fde, linear_best_idx = cal_ade_fde_stochastic(p_traj, constant_linear_p_traj.to(device))
 
             # meter
             ade *= ratio
@@ -842,16 +850,16 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
             #                                            additional_text=f'ADE: {plot_ade} | FDE: {plot_fde}')
             plot_and_compare_trajectory_four_way_stochastic(
                 frame=extract_frame_from_video(video_path, frame_num),
-                obs_trajectory=obs_traj,
-                gt_trajectory=gt_traj,
-                model_pred_trajectory=pred_traj,
+                obs_trajectory=obs_traj.cpu().numpy(),
+                gt_trajectory=gt_traj.cpu().numpy(),
+                model_pred_trajectory=pred_traj.cpu().numpy(),
                 other_pred_trajectory=linear_traj,
                 frame_number=frame_num,
                 track_id=track_id,
                 single_mode=k == 1,
-                best_idx=plot_best_idx,
-                additional_text=f'Model: ADE: {plot_ade} | FDE: {plot_fde}\n'
-                                f'Linear: ADE: {plot_linear_ade} | FDE: {plot_linear_fde}',
+                best_idx=plot_best_idx.item(),
+                additional_text=f'Model: ADE: {plot_ade.item()} | FDE: {plot_fde.item()}\n'
+                                f'Linear: ADE: {plot_linear_ade.item()} | FDE: {plot_linear_fde.item()}',
             )
     print(f'Model: ADE: {np.mean(ade_list).item()} | FDE: {np.mean(fde_list).item()}\n'
           f'Linear: ADE: {np.mean(linear_ade_list).item()} | FDE: {np.mean(linear_fde_list).item()}')
@@ -859,7 +867,7 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
 
 if __name__ == '__main__':
     # debug_model()
-    quick_eval_stochastic(plot=False, eval_on_gt=True, k=10, speedup_factor=32)
+    quick_eval_stochastic(plot=False, eval_on_gt=True, k=10, speedup_factor=32, filter_mode=True, moving_only=True)
     # quick_eval()
 
     # On unsupervised
@@ -872,3 +880,6 @@ if __name__ == '__main__':
     # Linear: ADE: 1.8281520602309735 | FDE: 3.9999097130249424
 
     # On supervised
+    # All Trajectories
+    # Model: ADE: 1.0329569692133145 | FDE: 2.1217076520531304
+    # Linear: ADE: 0.978251020929496 | FDE: 2.1439284148036917
