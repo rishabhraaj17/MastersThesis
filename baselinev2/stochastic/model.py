@@ -644,15 +644,16 @@ def debug_model(cfg):
 
     trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                          callbacks=[checkpoint_callback, bs_scheduler],
-                         fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False)
+                         fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
+                         num_sanity_val_steps=0)
 
     # cfg.batch_size *= 8
     # trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
-    #                      callbacks=[checkpoint_callback],
+    #                      callbacks=[checkpoint_callback], num_sanity_val_steps=0,
     #                      fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
     #                      resume_from_checkpoint='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/'
-    #                                             'stochastic/logs/lightning_logs/version_4/'
-    #                                             'checkpoints/epoch=47-step=604895.ckpt')
+    #                                             'stochastic/logs/lightning_logs/version_6/'
+    #                                             'checkpoints/epoch=1-step=896157.ckpt')
 
     trainer.fit(m)
     print()
@@ -697,7 +698,7 @@ def quick_eval():
 
 
 @torch.no_grad()
-def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False):
+def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_on_gt=True):
     # version = 2
     # epoch = 31
     # step = 403263
@@ -716,6 +717,7 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False):
     hparam_path = 'stochastic/' + f'logs/lightning_logs/version_{version}/hparams.yaml'
 
     m = BaselineGAN.load_from_checkpoint(checkpoint_path=model_path, hparams_file=hparam_path, map_location='cuda:0')
+    m.hparams.use_generated_dataset = False if eval_on_gt else True
     m.setup_test_dataset()
     m.eval()
     loader = DataLoader(m.test_dset, batch_size=batch_s if multi_batch else 1, shuffle=True, num_workers=0)
@@ -740,7 +742,7 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False):
 
             frame_num = data[6][im_idx, 0].item()
             track_id = data[4][im_idx, 0].item()
-            ratio = data[10]
+            ratio = data[-1]
 
             video_dataset = loader.dataset.datasets[dataset_idx[im_idx].item()]
             video_path = f'{base_path}videos/{video_dataset.video_class.value}/' \

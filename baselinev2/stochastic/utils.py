@@ -18,6 +18,11 @@ import random
 import os
 import pytorch_lightning as pl
 
+from log import initialize_logging, get_logger
+
+initialize_logging()
+logger = get_logger(__name__)
+
 
 def normalize(v):
     norm = np.linalg.norm(v)
@@ -209,7 +214,7 @@ class BatchSizeScheduler(pl.callbacks.base.Callback):
         else:
             self.active = False
 
-    def on_validation_end(self, trainer, pl_module):
+    def on_validation_epoch_end(self, trainer, pl_module):
 
         self.cur_bs = int(np.minimum(self.cur_bs * self.factor, self.max_bs))
 
@@ -225,26 +230,28 @@ class BatchSizeScheduler(pl.callbacks.base.Callback):
                 if trainer.callback_metrics[self.monitor_metric] < self.cur_metric:
                     self.cur_metric = trainer.callback_metrics[self.monitor_metric]
                     self.current_count = self.patience * 1
-
+                    logger.info(f'Resetting patience to default value, current patience: {self.current_count}')
                 else:
                     self.current_count -= 1
-
+                    logger.info(f'Decreasing patience by 1, current patience: {self.current_count}')
 
             else:
                 if trainer.callback_metrics[self.monitor_metric] > self.cur_metric:
                     self.cur_metric = trainer.callback_metrics[self.monitor_metric]
                     self.current_count = self.patience * 1
-
+                    logger.info(f'Resetting patience to default value, current patience: {self.current_count}')
                 else:
                     self.current_count -= 1
+                    logger.info(f'Decreasing patience by 1, current patience: {self.current_count}')
 
             if self.current_count == 0:
+                logger.info(f'Increasing batch size from : {self.cur_bs}')
                 self.cur_bs = int(np.minimum(self.cur_bs * self.factor, self.max_bs))
 
                 # set new batch_size
                 pl_module.batch_size = self.cur_bs
                 trainer.reset_train_dataloader(pl_module)
-                print("SET BS TO {}".format(self.cur_bs))
+                logger.info("SET BS TO {}".format(self.cur_bs))
                 self.current_count = self.patience * 1
                 if self.cur_bs >= self.max_bs:
                     self.active = False

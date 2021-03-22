@@ -14,7 +14,7 @@ trainer:
 batch_size: 32
 batch_size_scheduler: 32
 max_batch_size: 2048
-patience: 5
+patience: 4
 
 pretraining:
   batch_size: 32
@@ -48,7 +48,7 @@ d_steps : 1
 
 # dataset
 dataset_name: 'stanford'
-use_generated_dataset: True
+use_generated_dataset: False
 supervised_root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD_Features/"
 unsupervised_root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/baseline_v2/v0/"
 
