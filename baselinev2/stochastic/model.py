@@ -20,8 +20,9 @@ from tqdm import tqdm
 
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.dataset import get_all_dataset, get_all_dataset_test_split
+from baselinev2.nn.models import ConstantLinearBaseline
 from baselinev2.plot_utils import plot_trajectory_alongside_frame, plot_trajectories, \
-    plot_trajectory_alongside_frame_stochastic
+    plot_trajectory_alongside_frame_stochastic, plot_and_compare_trajectory_four_way_stochastic
 from baselinev2.stochastic.losses import l2_loss, GANLoss, cal_ade, cal_fde, cal_ade_stochastic, cal_fde_stochastic, \
     cal_ade_fde_stochastic
 from baselinev2.stochastic.model_modules import BaselineGenerator, Discriminator, preprocess_dataset_elements
@@ -726,9 +727,14 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
     m.hparams.use_generated_dataset = False if eval_on_gt else True
     m.setup_test_dataset()
     m.eval()
-    loader = DataLoader(m.test_dset, batch_size=batch_s if multi_batch else 1, shuffle=True, num_workers=0)
+    m.hparams.num_workers = 0 if plot else 12
+    loader = DataLoader(m.test_dset, batch_size=batch_s if multi_batch else 1, shuffle=True,
+                        num_workers=m.hparams.num_workers)
+
+    constant_linear_baseline_caller = ConstantLinearBaseline()
 
     ade_list, fde_list = [], []
+    linear_ade_list, linear_fde_list = [], []
 
     for data, dataset_idx in tqdm(loader):
         batch = preprocess_dataset_elements(data, batch_first=False, is_generated=m.hparams.use_generated_dataset)
@@ -737,6 +743,13 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
         batch_size = batch["size"]
 
         out = m.test(batch)
+        constant_linear_baseline_pred_trajectory, constant_linear_baseline_ade, constant_linear_baseline_fde = \
+            constant_linear_baseline_caller.eval(obs_trajectory=batch['in_xy'].permute(1, 0, 2),
+                                                 obs_distances=batch['in_dxdy'].permute(1, 0, 2),
+                                                 gt_trajectory=batch['gt_xy'].permute(1, 0, 2), ratio=data[-1])
+
+        constant_linear_baseline_pred_trajectory = \
+            torch.from_numpy(constant_linear_baseline_pred_trajectory).permute(1, 0, 2)
 
         if multi_batch:
             im_idx = np.random.choice(batch_size, 1).item()
@@ -745,6 +758,7 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
             gt_traj = batch['gt_xy'][:, :batch_size][:, im_idx, ...].squeeze()
             pred_traj = out['out_xy'].view(out['out_xy'].shape[0], k,
                                            -1, out['out_xy'].shape[2])[:, :, im_idx, ...].squeeze()
+            linear_traj = constant_linear_baseline_pred_trajectory[:, im_idx, ...].squeeze()
 
             frame_num = data[6][im_idx, 0].item()
             track_id = data[4][im_idx, 0].item()
@@ -756,26 +770,41 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
             # metrics
             p_traj = batch['gt_xy'].view(batch['gt_xy'].shape[0], -1, k, batch['gt_xy'].shape[2])
             p_traj_fake = out['out_xy'].view(out['out_xy'].shape[0], -1, k, out['out_xy'].shape[2])
+            constant_linear_p_traj = constant_linear_baseline_pred_trajectory.view(
+                constant_linear_baseline_pred_trajectory.shape[0], -1, k,
+                constant_linear_baseline_pred_trajectory.shape[2])
 
             # ade = cal_ade_stochastic(p_traj, p_traj_fake, 'mean')
             # fde = cal_fde_stochastic(p_traj, p_traj_fake, 'mean')
 
             ade, fde, best_idx = cal_ade_fde_stochastic(p_traj, p_traj_fake)
+            linear_ade, linear_fde, linear_best_idx = cal_ade_fde_stochastic(p_traj, constant_linear_p_traj)
 
             # meter
             ade *= ratio
             fde *= ratio
+            
+            linear_ade *= ratio
+            linear_fde *= ratio
 
             plot_ade = ade.squeeze()[im_idx]
             plot_fde = fde.squeeze()[im_idx]
             plot_best_idx = best_idx.squeeze()[im_idx]
+            
+            plot_linear_ade = linear_ade.squeeze()[im_idx]
+            plot_linear_fde = linear_fde.squeeze()[im_idx]
+            plot_linear_best_idx = linear_best_idx.squeeze()[im_idx]
 
             ade_list.append(ade.mean().item())
             fde_list.append(fde.mean().item())
+
+            linear_ade_list.append(linear_ade.mean().item())
+            linear_fde_list.append(linear_fde.mean().item())
         else:
             obs_traj = batch['in_xy'][:, :batch_size].squeeze()
             gt_traj = batch['gt_xy'][:, :batch_size].squeeze()
             pred_traj = out['out_xy'].squeeze()
+            linear_traj = constant_linear_baseline_pred_trajectory.squeeze()
 
             frame_num = data[6][0, 0].item()
             track_id = data[4][0, 0].item()
@@ -789,18 +818,34 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
             plot_fde = 0.
             plot_best_idx = 0.
 
+            plot_linear_ade = 0.
+            plot_linear_fde = 0.
         if plot:
-            plot_trajectory_alongside_frame_stochastic(obs_trajectory=obs_traj,
-                                                       gt_trajectory=gt_traj,
-                                                       pred_trajectory=pred_traj,
-                                                       frame_number=frame_num,
-                                                       track_id=track_id,
-                                                       frame=extract_frame_from_video(video_path, frame_num),
-                                                       additional_text=f'ADE: {plot_ade} | FDE: {plot_fde}')
-    print(f'ADE: {np.mean(ade_list).item()} | FDE: {np.mean(fde_list).item()}')
+            # plot_trajectory_alongside_frame_stochastic(obs_trajectory=obs_traj,
+            #                                            gt_trajectory=gt_traj,
+            #                                            pred_trajectory=pred_traj,
+            #                                            frame_number=frame_num,
+            #                                            track_id=track_id,
+            #                                            frame=extract_frame_from_video(video_path, frame_num),
+            #                                            single_mode=k == 1,
+            #                                            additional_text=f'ADE: {plot_ade} | FDE: {plot_fde}')
+            plot_and_compare_trajectory_four_way_stochastic(
+                frame=extract_frame_from_video(video_path, frame_num),
+                obs_trajectory=obs_traj,
+                gt_trajectory=gt_traj,
+                model_pred_trajectory=pred_traj,
+                other_pred_trajectory=linear_traj,
+                frame_number=frame_num,
+                track_id=track_id,
+                single_mode=k == 1,
+                additional_text=f'Model: ADE: {plot_ade} | FDE: {plot_fde}\n'
+                                f'Linear: ADE: {plot_linear_ade} | FDE: {plot_linear_fde}',
+            )
+    print(f'Model: ADE: {np.mean(ade_list).item()} | FDE: {np.mean(fde_list).item()}\n'
+          f'Linear: ADE: {np.mean(linear_ade_list).item()} | FDE: {np.mean(linear_fde_list).item()}')
 
 
 if __name__ == '__main__':
     # debug_model()
-    quick_eval_stochastic(plot=True, eval_on_gt=False)  # fixme: select one best trajectory!
+    quick_eval_stochastic(plot=False, eval_on_gt=False, k=10)  # fixme: select one best trajectory - is it correct now?
     # quick_eval()

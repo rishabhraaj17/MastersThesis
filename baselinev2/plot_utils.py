@@ -897,7 +897,7 @@ def plot_trajectory_alongside_frame(frame, obs_trajectory, gt_trajectory, pred_t
 
 def plot_trajectory_alongside_frame_stochastic(frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_number,
                                                track_id, best_idx=None, epoch='', additional_text='',
-                                               return_figure_only=False, save_path=None):
+                                               return_figure_only=False, save_path=None, single_mode=False):
     fig, ax = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(16, 10))
     img_axis, trajectory_axis = ax
     img_axis.imshow(frame)
@@ -907,10 +907,14 @@ def plot_trajectory_alongside_frame_stochastic(frame, obs_trajectory, gt_traject
     add_line_to_axis(ax=trajectory_axis, features=obs_trajectory)
     add_line_to_axis(ax=trajectory_axis, features=gt_trajectory, marker_color='r')
 
-    for p_traj in range(pred_trajectory.shape[1]):
-        m_clr = ('orange' if p_traj == best_idx else 'g') if best_idx else 'g'
-        add_line_to_axis(ax=img_axis, features=pred_trajectory[:, p_traj, ...], marker_color=m_clr)
-        add_line_to_axis(ax=trajectory_axis, features=pred_trajectory[:, p_traj, ...], marker_color=m_clr)
+    if single_mode:
+        add_line_to_axis(ax=img_axis, features=pred_trajectory, marker_color='g')
+        add_line_to_axis(ax=trajectory_axis, features=pred_trajectory, marker_color='g')
+    else:
+        for p_traj in range(pred_trajectory.shape[1]):
+            m_clr = ('orange' if p_traj == best_idx else 'g') if best_idx else 'g'
+            add_line_to_axis(ax=img_axis, features=pred_trajectory[:, p_traj, ...], marker_color=m_clr)
+            add_line_to_axis(ax=trajectory_axis, features=pred_trajectory[:, p_traj, ...], marker_color=m_clr)
 
     img_axis.set_title('Trajectories')
     trajectory_axis.set_title('Trajectories')
@@ -1010,6 +1014,67 @@ def plot_and_compare_trajectory_four_way(
     supervised_trajectory_axis.set_title('GT Trajectories' if not with_linear else 'Model Trajectories')
     unsupervised_axis.set_title('Unsupervised Trajectories' if not with_linear else 'Linear Trajectories')
     unsupervised_trajectory_axis.set_title('Unsupervised Trajectories' if not with_linear else 'Linear Trajectories')
+
+    fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}\n{additional_text}')
+
+    legends_dict = {'b': 'Observed - [0 - 7]', 'r': 'True - [8 - 19]', 'g': 'Predicted - [8 - 19]'}
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
+    if return_figure_only:
+        plt.close()
+        return fig
+
+    if save_path is not None:
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path + f"frame_{frame_number}_track_{track_id}.png")
+        plt.close()
+    else:
+        plt.show()
+
+    return fig
+
+
+def plot_and_compare_trajectory_four_way_stochastic(
+        frame, obs_trajectory, gt_trajectory, model_pred_trajectory,
+        other_pred_trajectory, frame_number, track_id, best_idx=None, epoch='', single_mode=False,
+        additional_text='', return_figure_only=False, save_path=None, with_linear=True):
+    fig, ax = plt.subplots(2, 2, sharex='none', sharey='none', figsize=(22, 20))
+    model_axis, other_axis, model_trajectory_axis, other_trajectory_axis = \
+        ax[0, 0], ax[0, 1], ax[1, 0], ax[1, 1]
+
+    model_axis.imshow(frame)
+    other_axis.imshow(frame)
+
+    add_line_to_axis(ax=model_axis, features=obs_trajectory)
+    add_line_to_axis(ax=model_axis, features=gt_trajectory, marker_color='r')
+
+    add_line_to_axis(ax=model_trajectory_axis, features=obs_trajectory)
+    add_line_to_axis(ax=model_trajectory_axis, features=gt_trajectory, marker_color='r')
+
+    if single_mode:
+        add_line_to_axis(ax=model_axis, features=model_pred_trajectory, marker_color='g')
+        add_line_to_axis(ax=model_trajectory_axis, features=model_pred_trajectory, marker_color='g')
+    else:
+        for p_traj in range(model_pred_trajectory.shape[1]):
+            m_clr = ('orange' if p_traj == best_idx else 'g') if best_idx else 'g'
+            add_line_to_axis(ax=model_axis, features=model_pred_trajectory[:, p_traj, ...], marker_color=m_clr)
+            add_line_to_axis(ax=model_trajectory_axis, features=model_pred_trajectory[:, p_traj, ...],
+                             marker_color=m_clr)
+
+    add_line_to_axis(ax=other_axis, features=obs_trajectory)
+    add_line_to_axis(ax=other_axis, features=gt_trajectory, marker_color='r')
+    add_line_to_axis(ax=other_axis, features=other_pred_trajectory, marker_color='g')
+
+    add_line_to_axis(ax=other_trajectory_axis, features=obs_trajectory)
+    add_line_to_axis(ax=other_trajectory_axis, features=gt_trajectory, marker_color='r')
+    add_line_to_axis(ax=other_trajectory_axis, features=other_pred_trajectory, marker_color='g')
+
+    model_axis.set_title('GT Trajectories' if not with_linear else 'Model Trajectories')
+    model_trajectory_axis.set_title('GT Trajectories' if not with_linear else 'Model Trajectories')
+    other_axis.set_title('Unsupervised Trajectories' if not with_linear else 'Linear Trajectories')
+    other_trajectory_axis.set_title('Unsupervised Trajectories' if not with_linear else 'Linear Trajectories')
 
     fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}\n{additional_text}')
 
