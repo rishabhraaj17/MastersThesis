@@ -22,7 +22,8 @@ from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.dataset import get_all_dataset, get_all_dataset_test_split
 from baselinev2.plot_utils import plot_trajectory_alongside_frame, plot_trajectories, \
     plot_trajectory_alongside_frame_stochastic
-from baselinev2.stochastic.losses import l2_loss, GANLoss, cal_ade, cal_fde, cal_ade_stochastic, cal_fde_stochastic
+from baselinev2.stochastic.losses import l2_loss, GANLoss, cal_ade, cal_fde, cal_ade_stochastic, cal_fde_stochastic, \
+    cal_ade_fde_stochastic
 from baselinev2.stochastic.model_modules import BaselineGenerator, Discriminator, preprocess_dataset_elements
 from baselinev2.stochastic.utils import get_batch_k, re_im
 from baselinev2.stochastic.viz import visualize_traj_probabilities
@@ -711,6 +712,11 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
     # epoch = 209
     # step = 2646419
 
+    # supervised
+    # version = 6
+    # epoch = 1
+    # step = 896157
+
     base_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
     model_path = 'stochastic/' + f'logs/lightning_logs/version_{version}/checkpoints/' \
                                  f'epoch={epoch}-step={step}.ckpt'
@@ -751,8 +757,10 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
             p_traj = batch['gt_xy'].view(batch['gt_xy'].shape[0], -1, k, batch['gt_xy'].shape[2])
             p_traj_fake = out['out_xy'].view(out['out_xy'].shape[0], -1, k, out['out_xy'].shape[2])
 
-            ade = cal_ade_stochastic(p_traj, p_traj_fake, 'mean')
-            fde = cal_fde_stochastic(p_traj, p_traj_fake, 'mean')
+            # ade = cal_ade_stochastic(p_traj, p_traj_fake, 'mean')
+            # fde = cal_fde_stochastic(p_traj, p_traj_fake, 'mean')
+
+            ade, fde, best_idx = cal_ade_fde_stochastic(p_traj, p_traj_fake)
 
             # meter
             ade *= ratio
@@ -760,6 +768,7 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
 
             plot_ade = ade.squeeze()[im_idx]
             plot_fde = fde.squeeze()[im_idx]
+            plot_best_idx = best_idx.squeeze()[im_idx]
 
             ade_list.append(ade.mean().item())
             fde_list.append(fde.mean().item())
@@ -778,6 +787,7 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
             # fixme
             plot_ade = 0.
             plot_fde = 0.
+            plot_best_idx = 0.
 
         if plot:
             plot_trajectory_alongside_frame_stochastic(obs_trajectory=obs_traj,
@@ -791,6 +801,6 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
 
 
 if __name__ == '__main__':
-    debug_model()
-    # quick_eval_stochastic(plot=True)  # fixme: select one best trajectory!
+    # debug_model()
+    quick_eval_stochastic(plot=True, eval_on_gt=False)  # fixme: select one best trajectory!
     # quick_eval()

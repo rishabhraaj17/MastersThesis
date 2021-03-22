@@ -896,8 +896,8 @@ def plot_trajectory_alongside_frame(frame, obs_trajectory, gt_trajectory, pred_t
 
 
 def plot_trajectory_alongside_frame_stochastic(frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_number,
-                                               track_id, epoch='', additional_text='', return_figure_only=False,
-                                               save_path=None):
+                                               track_id, best_idx=None, epoch='', additional_text='',
+                                               return_figure_only=False, save_path=None):
     fig, ax = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(16, 10))
     img_axis, trajectory_axis = ax
     img_axis.imshow(frame)
@@ -908,8 +908,9 @@ def plot_trajectory_alongside_frame_stochastic(frame, obs_trajectory, gt_traject
     add_line_to_axis(ax=trajectory_axis, features=gt_trajectory, marker_color='r')
 
     for p_traj in range(pred_trajectory.shape[1]):
-        add_line_to_axis(ax=img_axis, features=pred_trajectory[:, p_traj, ...], marker_color='g')
-        add_line_to_axis(ax=trajectory_axis, features=pred_trajectory[:, p_traj, ...], marker_color='g')
+        m_clr = ('orange' if p_traj == best_idx else 'g') if best_idx else 'g'
+        add_line_to_axis(ax=img_axis, features=pred_trajectory[:, p_traj, ...], marker_color=m_clr)
+        add_line_to_axis(ax=trajectory_axis, features=pred_trajectory[:, p_traj, ...], marker_color=m_clr)
 
     img_axis.set_title('Trajectories')
     trajectory_axis.set_title('Trajectories')
