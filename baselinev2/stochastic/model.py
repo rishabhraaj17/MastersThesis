@@ -24,10 +24,14 @@ from baselinev2.nn.models import ConstantLinearBaseline
 from baselinev2.plot_utils import plot_trajectory_alongside_frame, plot_trajectories, \
     plot_trajectory_alongside_frame_stochastic, plot_and_compare_trajectory_four_way_stochastic
 from baselinev2.stochastic.losses import l2_loss, GANLoss, cal_ade, cal_fde, cal_ade_stochastic, cal_fde_stochastic, \
-    cal_ade_fde_stochastic
+    cal_ade_fde_stochastic, cal_ade_fde_stochastic_worse
 from baselinev2.stochastic.model_modules import BaselineGenerator, Discriminator, preprocess_dataset_elements
 from baselinev2.stochastic.utils import get_batch_k, re_im
 from baselinev2.stochastic.viz import visualize_traj_probabilities
+from log import initialize_logging, get_logger
+
+initialize_logging()
+logger = get_logger('baselinev2.stochastic.model')
 
 seed_everything(42)
 
@@ -80,6 +84,33 @@ class BaselineGAN(pl.LightningModule):
 
         self.gsteps_yet = 0
         self.dsteps_yet = 0
+
+        # batch size scheduler
+        self.bs_scheduler_bs = self.hparams.batch_size_scheduler
+        self.bs_scheduler_factor = self.hparams.batch_size_scheduler_factor or 2
+        self.bs_scheduler_patience = self.hparams.patience or 4
+        self.bs_scheduler_max_bs = self.hparams.max_batch_size or 2048
+        self.bs_scheduler_mode = self.hparams.batch_size_scheduler_mode or 'min'
+        self.bs_scheduler_monitor_val = self.hparams.monitor_val or 'val_loss'
+        self.bs_scheduler_cur_metric = False
+        self.current_batch_size = self.hparams.batch_size_scheduler
+
+        if self.hparams.patience and self.hparams.batch_size_scheduler_mode:
+            self.bs_scheduler_current_count = self.hparams.patience * 1.
+            if self.hparams.batch_size_scheduler_mode not in ["min", "max"]:
+                assert False, "Variable for mode '{}' not valid".format(self.hparams.batch_size_scheduler_mode)
+            if self.hparams.max_batch_size > self.hparams.batch_size_scheduler:
+                self.bs_scheduler_active = True
+            else:
+                self.bs_scheduler_active = False
+        else:
+            self.bs_scheduler_current_count = self.bs_scheduler_patience * 1.
+            if self.bs_scheduler_mode not in ["min", "max"]:
+                assert False, "Variable for mode '{}' not valid".format(self.bs_scheduler_mode)
+            if self.bs_scheduler_max_bs > self.hparams.batch_size_scheduler:
+                self.bs_scheduler_active = True
+            else:
+                self.bs_scheduler_active = False
 
     def setup_datasets(self):
         root = self.hparams.unsupervised_root if self.hparams.use_generated_dataset else self.hparams.supervised_root
@@ -544,11 +575,64 @@ class BaselineGAN(pl.LightningModule):
 
     """########## VALIDATION ##########"""
 
+    def bs_scheduler(self, init_val_loss):
+
+        self.current_batch_size = int(np.minimum(self.current_batch_size * self.bs_scheduler_factor,
+                                                 self.bs_scheduler_max_bs))
+
+        # set new batch_size
+        self.batch_size = self.current_batch_size
+        self.trainer.reset_train_dataloader(self)
+
+        if self.bs_scheduler_monitor_val not in self.trainer.callback_metrics:
+            self.trainer.callback_metrics.update({self.bs_scheduler_monitor_val: init_val_loss})
+
+        if not self.bs_scheduler_cur_metric:
+            self.bs_scheduler_cur_metric = self.trainer.callback_metrics[self.bs_scheduler_monitor_val]
+
+        if self.bs_scheduler_active:
+            if self.bs_scheduler_mode == "min":
+                if self.trainer.callback_metrics[self.bs_scheduler_monitor_val] < self.bs_scheduler_cur_metric:
+                    self.bs_scheduler_cur_metric = self.trainer.callback_metrics[self.bs_scheduler_monitor_val]
+                    self.bs_scheduler_current_count = self.bs_scheduler_patience * 1
+                    logger.info(f'Resetting patience to default value, current patience: '
+                                f'{self.bs_scheduler_current_count}')
+                else:
+                    self.bs_scheduler_current_count -= 1
+                    logger.info(f'Decreasing patience by 1, current patience: {self.bs_scheduler_current_count}')
+
+            else:
+                if self.trainer.callback_metrics[self.bs_scheduler_monitor_val] > self.bs_scheduler_cur_metric:
+                    self.bs_scheduler_cur_metric = self.trainer.callback_metrics[self.bs_scheduler_monitor_val]
+                    self.bs_scheduler_current_count = self.bs_scheduler_patience * 1
+                    logger.info(f'Resetting patience to default value, current patience: '
+                                f'{self.bs_scheduler_current_count}')
+                else:
+                    self.bs_scheduler_current_count -= 1
+                    logger.info(f'Decreasing patience by 1, current patience: {self.bs_scheduler_current_count}')
+
+            if self.bs_scheduler_current_count == 0:
+                logger.info(f'Increasing batch size from : {self.current_batch_size}')
+                self.current_batch_size = int(np.minimum(self.current_batch_size * self.bs_scheduler_factor,
+                                                         self.bs_scheduler_max_bs))
+
+                # set new batch_size
+                self.batch_size = self.current_batch_size
+                self.trainer.reset_train_dataloader(self)
+                logger.info("SET BS TO {}".format(self.current_batch_size))
+                self.bs_scheduler_current_count = self.bs_scheduler_patience * 1
+                if self.current_batch_size >= self.bs_scheduler_max_bs:
+                    self.bs_scheduler_active = False
+
     def validation_step(self, batch, batch_idx):
         return self.eval_step(batch, self.hparams.best_k_val)
 
     def validation_epoch_end(self, outputs):
-        return self.collect_losses(outputs, mode="val")
+        collected_losses = self.collect_losses(outputs, mode="val")
+        init_val_loss = collected_losses['val_loss']
+        logger.debug(f'Current val loss in trainer: {self.trainer.callback_metrics[self.bs_scheduler_monitor_val]}')
+        self.bs_scheduler(init_val_loss)
+        return collected_losses
 
     """########## TESTING ##########"""
 
@@ -644,18 +728,18 @@ def debug_model(cfg):
     m = BaselineGAN(hparams=cfg)
     # m.setup_datasets()
 
-    trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
-                         callbacks=[checkpoint_callback, bs_scheduler],
-                         fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
-                         num_sanity_val_steps=0)
+    # trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
+    #                      callbacks=[checkpoint_callback, bs_scheduler],
+    #                      fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
+    #                      num_sanity_val_steps=0)
 
     # cfg.batch_size *= 8
-    # trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
-    #                      callbacks=[checkpoint_callback], num_sanity_val_steps=0,
-    #                      fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
-    #                      resume_from_checkpoint='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/'
-    #                                             'stochastic/logs/lightning_logs/version_6/'
-    #                                             'checkpoints/epoch=1-step=896157.ckpt')
+    trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
+                         callbacks=[checkpoint_callback], num_sanity_val_steps=0,
+                         fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
+                         resume_from_checkpoint='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/'
+                                                'stochastic/logs/lightning_logs/version_7/'
+                                                'checkpoints/epoch=3-step=2091035.ckpt')
 
     trainer.fit(m)
     print()
@@ -702,23 +786,23 @@ def quick_eval():
 @torch.no_grad()
 def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_on_gt=True, speedup_factor=1,
                           filter_mode=False, moving_only=False, stationary_only=False, threshold=1.0,
-                          relative_distance_filter_threshold=100., device='cuda:0'):
+                          relative_distance_filter_threshold=100., device='cuda:0', eval_for_worse=False):
     # version = 2
     # epoch = 31
     # step = 403263
 
-    version = 5
-    epoch = 64
-    step = 819129
+    # version = 5
+    # epoch = 64
+    # step = 819129
 
     # version = 0
     # epoch = 209
     # step = 2646419
 
     # supervised
-    # version = 6
-    # epoch = 1
-    # step = 896157
+    version = 7
+    epoch = 3
+    step = 2091035
 
     base_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
     model_path = 'stochastic/' + f'logs/lightning_logs/version_{version}/checkpoints/' \
@@ -751,10 +835,12 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
 
         out = m.test(batch)
         constant_linear_baseline_pred_trajectory, constant_linear_baseline_ade, constant_linear_baseline_fde = \
-            constant_linear_baseline_caller.eval(obs_trajectory=batch['in_xy'].permute(1, 0, 2).cpu().numpy(),
-                                                 obs_distances=batch['in_dxdy'].permute(1, 0, 2).cpu().numpy(),
-                                                 gt_trajectory=batch['gt_xy'].permute(1, 0, 2).cpu().numpy()
-                                                 , ratio=batch['ratio'].squeeze()[0])
+            constant_linear_baseline_caller.eval(
+                obs_trajectory=batch['in_xy'].permute(1, 0, 2).cpu().numpy(),
+                obs_distances=batch['in_dxdy'].permute(1, 0, 2).cpu().numpy(),
+                gt_trajectory=batch['gt_xy'].permute(1, 0, 2).cpu().numpy()
+                , ratio=batch['ratio'].squeeze()[0].unsqueeze(0)
+                if k == 1 else batch['ratio'].squeeze()[0])
 
         constant_linear_baseline_pred_trajectory = \
             torch.from_numpy(constant_linear_baseline_pred_trajectory).permute(1, 0, 2)
@@ -787,7 +873,7 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
             constant_linear_p_traj = constant_linear_baseline_pred_trajectory.view(
                 constant_linear_baseline_pred_trajectory.shape[0], k, -1,
                 constant_linear_baseline_pred_trajectory.shape[2])
-            
+
             # p_traj = batch['gt_xy'][:, :batch_size].unsqueeze(2).repeat(1, 1, k, 1)
             # p_traj_fake = out['out_xy'][:, :batch_size].unsqueeze(2).repeat(1, 1, k, 1)
             # constant_linear_p_traj = \
@@ -796,20 +882,21 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
             # ade = cal_ade_stochastic(p_traj, p_traj_fake, 'mean')
             # fde = cal_fde_stochastic(p_traj, p_traj_fake, 'mean')
 
-            ade, fde, best_idx = cal_ade_fde_stochastic(p_traj, p_traj_fake)
+            ade, fde, best_idx = cal_ade_fde_stochastic(p_traj, p_traj_fake) \
+                if not eval_for_worse else cal_ade_fde_stochastic_worse(p_traj, p_traj_fake)
             linear_ade, linear_fde, linear_best_idx = cal_ade_fde_stochastic(p_traj, constant_linear_p_traj.to(device))
 
             # meter
             ade *= ratio
             fde *= ratio
-            
+
             linear_ade *= ratio
             linear_fde *= ratio
 
             plot_ade = ade.squeeze()[im_idx]
             plot_fde = fde.squeeze()[im_idx]
             plot_best_idx = best_idx.squeeze()[im_idx]
-            
+
             plot_linear_ade = linear_ade.squeeze()[im_idx]
             plot_linear_fde = linear_fde.squeeze()[im_idx]
             plot_linear_best_idx = linear_best_idx.squeeze()[im_idx]
@@ -866,8 +953,11 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
 
 
 if __name__ == '__main__':
-    # debug_model()
-    quick_eval_stochastic(plot=False, eval_on_gt=True, k=10, speedup_factor=32, filter_mode=True, moving_only=True)
+    debug_model()
+
+    # quick_eval_stochastic(plot=False, eval_on_gt=True, k=1, speedup_factor=32, filter_mode=False, moving_only=False,
+    #                       stationary_only=False, eval_for_worse=False)
+
     # quick_eval()
 
     # On unsupervised
@@ -878,8 +968,37 @@ if __name__ == '__main__':
     # k = 1
     # Model: ADE: 2.7966834577314694 | FDE: 5.77561737130756
     # Linear: ADE: 1.8281520602309735 | FDE: 3.9999097130249424
+    # supervised
+    # Model: ADE: 2.03455348818243 | FDE: 4.0124918072276134
+    # Linear: ADE: 1.028917186095245 | FDE: 2.258435927940385
 
-    # On supervised
+    # On supervised - k=10
     # All Trajectories
     # Model: ADE: 1.0329569692133145 | FDE: 2.1217076520531304
     # Linear: ADE: 0.978251020929496 | FDE: 2.1439284148036917
+    # lower limit
+    # Model: ADE: 4.484831560526955 | FDE: 9.039632317203804
+    # Linear: ADE: 0.978251020929496 | FDE: 2.1439284148036917
+    # supervised
+    # Model: ADE: 0.5593487043471536 | FDE: 1.135262526177534
+    # Linear: ADE: 0.978251020929496 | FDE: 2.1439284148036917
+
+    # moving only - 1.0  + outlier removal
+    # Model: ADE: 0.9641407612558273 | FDE: 2.009607732119232
+    # Linear: ADE: 1.5111766537362 | FDE: 3.332864517927838
+    # worse
+    # Model: ADE: 5.949471143770464 | FDE: 11.776895021153107
+    # Linear: ADE: 1.5111766537362 | FDE: 3.332864517927838
+    # k=1
+    # Model: ADE: 2.6990513349074328 | FDE: 5.464550167791963
+    # Linear: ADE: 1.598343285400214 | FDE: 3.529797207781441
+    # supervised - k=10 + outlier removal
+    # Model: ADE: 0.9099202613776981 | FDE: 1.7845629966815326
+    # Linear: ADE: 1.5111766537362 | FDE: 3.332864517927838
+
+    # stationary only - 1.0  + outlier removal
+    # Model: ADE: 0.8614191488931643 | FDE: 1.7247877094923139
+    # Linear: ADE: 0.10649146886707163 | FDE: 0.19566083160127462
+    # supervised
+    # Model: ADE: 0.05635012733756296 | FDE: 0.0999534727096446
+    # Linear: ADE: 0.10649146886707163 | FDE: 0.19566083160127462

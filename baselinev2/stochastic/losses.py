@@ -4,6 +4,11 @@ from matplotlib.path import Path
 import numpy as np
 import torch.nn as nn
 
+from log import initialize_logging, get_logger
+
+initialize_logging()
+logger = get_logger(__name__)
+
 
 class GANLoss(nn.Module):
     """Define different GAN objectives.
@@ -298,6 +303,7 @@ def cal_fde_stochastic(
 
 
 def cal_ade_fde_stochastic(pred_traj_gt, pred_traj_fake, driver='ade'):
+    # logger.info('Evaluating metric for best!')
     seq_len, num_traj, _, _ = pred_traj_gt.size()
 
     if driver == 'ade':
@@ -341,6 +347,55 @@ def cal_ade_fde_stochastic(pred_traj_gt, pred_traj_fake, driver='ade'):
         # ade, ade_idx = ade.min(-1)
         ade = torch.gather(ade, 1, fde_idx.unsqueeze(1).repeat(1, ade.shape[1], 1))
         ade, ade_idx = ade.min(1)
+
+        return ade, fde, fde_idx
+
+
+def cal_ade_fde_stochastic_worse(pred_traj_gt, pred_traj_fake, driver='ade'):
+    # logger.info('Evaluating metric for worse!')
+    seq_len, num_traj, _, _ = pred_traj_gt.size()
+
+    if driver == 'ade':
+        # ade
+        ade = pred_traj_gt - pred_traj_fake
+        ade = torch.norm(ade, 2, -1).unsqueeze(0)
+
+        ade = ade.mean(1)
+        # ade, ade_idx = ade.min(-1)
+        ade, ade_idx = ade.max(1)
+
+        # not good??
+        # ade, ade_idx = ade.max(-1)
+        # ade, (ade_idx, _) = ade.mean(1), ade_idx.max(1)
+
+        # fde
+        fde = pred_traj_gt[-1] - pred_traj_fake[-1]
+        fde = torch.norm(fde, 2, -1).unsqueeze(0)
+
+        # fde = torch.gather(fde, -1, ade_idx.unsqueeze(-1).repeat(1, 1, fde.shape[-1]))
+        # fde, fde_idx = fde.max(-1)
+
+        fde = torch.gather(fde, 1, ade_idx.unsqueeze(1).repeat(1, fde.shape[1], 1))
+        fde, fde_idx = fde.max(1)
+
+        return ade, fde, ade_idx
+
+    if driver == 'fde':
+        # fde
+        fde = pred_traj_gt[-1] - pred_traj_fake[-1]
+        fde = torch.norm(fde, 2, -1).unsqueeze(0)
+        # fde, fde_idx = fde.max(-1)
+        fde, fde_idx = fde.max(1)
+
+        # ade
+        ade = pred_traj_gt - pred_traj_fake
+        ade = torch.norm(ade, 2, -1).unsqueeze(0)
+        ade = ade.mean(1)
+
+        # ade = torch.gather(ade, -1, fde_idx.unsqueeze(-1).repeat(1, 1, fde.shape[-1]))
+        # ade, ade_idx = ade.max(-1)
+        ade = torch.gather(ade, 1, fde_idx.unsqueeze(1).repeat(1, ade.shape[1], 1))
+        ade, ade_idx = ade.max(1)
 
         return ade, fde, fde_idx
 

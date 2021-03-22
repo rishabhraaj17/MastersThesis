@@ -15,6 +15,9 @@ batch_size: 32
 batch_size_scheduler: 32
 max_batch_size: 2048
 patience: 4
+monitor_val: 'val_loss'
+batch_size_scheduler_mode: 'min'
+batch_size_scheduler_factor: 2
 
 pretraining:
   batch_size: 32
