@@ -629,9 +629,9 @@ class BaselineGAN(pl.LightningModule):
 
     def validation_epoch_end(self, outputs):
         collected_losses = self.collect_losses(outputs, mode="val")
-        init_val_loss = collected_losses['val_loss']
-        logger.debug(f'Current val loss in trainer: {self.trainer.callback_metrics[self.bs_scheduler_monitor_val]}')
-        self.bs_scheduler(init_val_loss)
+        # init_val_loss = collected_losses['val_loss']
+        # # logger.debug(f'Current val loss in trainer: {self.trainer.callback_metrics[self.bs_scheduler_monitor_val]}')
+        # self.bs_scheduler(init_val_loss)
         return collected_losses
 
     """########## TESTING ##########"""
@@ -738,8 +738,8 @@ def debug_model(cfg):
                          callbacks=[checkpoint_callback], num_sanity_val_steps=0,
                          fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
                          resume_from_checkpoint='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/'
-                                                'stochastic/logs/lightning_logs/version_7/'
-                                                'checkpoints/epoch=3-step=2091035.ckpt')
+                                                'stochastic/logs/lightning_logs/version_8/'
+                                                'checkpoints/epoch=4-step=2688474.ckpt')
 
     trainer.fit(m)
     print()
@@ -786,7 +786,8 @@ def quick_eval():
 @torch.no_grad()
 def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_on_gt=True, speedup_factor=1,
                           filter_mode=False, moving_only=False, stationary_only=False, threshold=1.0,
-                          relative_distance_filter_threshold=100., device='cuda:0', eval_for_worse=False):
+                          relative_distance_filter_threshold=100., device='cuda:0', eval_for_worse=False,
+                          plot_4_way=False):
     # version = 2
     # epoch = 31
     # step = 403263
@@ -800,9 +801,13 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
     # step = 2646419
 
     # supervised
-    version = 7
-    epoch = 3
-    step = 2091035
+    # version = 7
+    # epoch = 3
+    # step = 2091035
+
+    version = 8
+    epoch = 4
+    step = 2688474
 
     base_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
     model_path = 'stochastic/' + f'logs/lightning_logs/version_{version}/checkpoints/' \
@@ -927,27 +932,30 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
             plot_linear_ade = 0.
             plot_linear_fde = 0.
         if plot:
-            # plot_trajectory_alongside_frame_stochastic(obs_trajectory=obs_traj,
-            #                                            gt_trajectory=gt_traj,
-            #                                            pred_trajectory=pred_traj,
-            #                                            frame_number=frame_num,
-            #                                            track_id=track_id,
-            #                                            frame=extract_frame_from_video(video_path, frame_num),
-            #                                            single_mode=k == 1,
-            #                                            additional_text=f'ADE: {plot_ade} | FDE: {plot_fde}')
-            plot_and_compare_trajectory_four_way_stochastic(
-                frame=extract_frame_from_video(video_path, frame_num),
-                obs_trajectory=obs_traj.cpu().numpy(),
-                gt_trajectory=gt_traj.cpu().numpy(),
-                model_pred_trajectory=pred_traj.cpu().numpy(),
-                other_pred_trajectory=linear_traj,
-                frame_number=frame_num,
-                track_id=track_id,
-                single_mode=k == 1,
-                best_idx=plot_best_idx.item(),
-                additional_text=f'Model: ADE: {plot_ade.item()} | FDE: {plot_fde.item()}\n'
-                                f'Linear: ADE: {plot_linear_ade.item()} | FDE: {plot_linear_fde.item()}',
-            )
+            if plot_4_way:
+                plot_and_compare_trajectory_four_way_stochastic(
+                    frame=extract_frame_from_video(video_path, frame_num),
+                    obs_trajectory=obs_traj.cpu().numpy(),
+                    gt_trajectory=gt_traj.cpu().numpy(),
+                    model_pred_trajectory=pred_traj.cpu().numpy(),
+                    other_pred_trajectory=linear_traj,
+                    frame_number=frame_num,
+                    track_id=track_id,
+                    single_mode=k == 1,
+                    best_idx=plot_best_idx.item(),
+                    additional_text=f'Model: ADE: {plot_ade.item()} | FDE: {plot_fde.item()}\n'
+                                    f'Linear: ADE: {plot_linear_ade.item()} | FDE: {plot_linear_fde.item()}',
+                )
+            else:
+                plot_trajectory_alongside_frame_stochastic(obs_trajectory=obs_traj.cpu().numpy(),
+                                                           gt_trajectory=gt_traj.cpu().numpy(),
+                                                           pred_trajectory=pred_traj.cpu().numpy(),
+                                                           frame_number=frame_num,
+                                                           track_id=track_id,
+                                                           frame=extract_frame_from_video(video_path, frame_num),
+                                                           single_mode=k == 1,
+                                                           best_idx=plot_best_idx.item(),
+                                                           additional_text=f'ADE: {plot_ade} | FDE: {plot_fde}')
     print(f'Model: ADE: {np.mean(ade_list).item()} | FDE: {np.mean(fde_list).item()}\n'
           f'Linear: ADE: {np.mean(linear_ade_list).item()} | FDE: {np.mean(linear_fde_list).item()}')
 
@@ -955,7 +963,7 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
 if __name__ == '__main__':
     debug_model()
 
-    # quick_eval_stochastic(plot=False, eval_on_gt=True, k=1, speedup_factor=32, filter_mode=False, moving_only=False,
+    # quick_eval_stochastic(plot=False, eval_on_gt=True, k=10, speedup_factor=32, filter_mode=True, moving_only=True,
     #                       stationary_only=False, eval_for_worse=False)
 
     # quick_eval()
@@ -980,7 +988,7 @@ if __name__ == '__main__':
     # Model: ADE: 4.484831560526955 | FDE: 9.039632317203804
     # Linear: ADE: 0.978251020929496 | FDE: 2.1439284148036917
     # supervised
-    # Model: ADE: 0.5593487043471536 | FDE: 1.135262526177534
+    # Model: ADE: 0.541943404247334 | FDE: 1.0914964632178983
     # Linear: ADE: 0.978251020929496 | FDE: 2.1439284148036917
 
     # moving only - 1.0  + outlier removal
@@ -993,7 +1001,7 @@ if __name__ == '__main__':
     # Model: ADE: 2.6990513349074328 | FDE: 5.464550167791963
     # Linear: ADE: 1.598343285400214 | FDE: 3.529797207781441
     # supervised - k=10 + outlier removal
-    # Model: ADE: 0.9099202613776981 | FDE: 1.7845629966815326
+    # Model: ADE: 0.8907297152484545 | FDE: 1.7420249850288165
     # Linear: ADE: 1.5111766537362 | FDE: 3.332864517927838
 
     # stationary only - 1.0  + outlier removal
@@ -1002,3 +1010,5 @@ if __name__ == '__main__':
     # supervised
     # Model: ADE: 0.05635012733756296 | FDE: 0.0999534727096446
     # Linear: ADE: 0.10649146886707163 | FDE: 0.19566083160127462
+    # new
+    # Model: ADE: 0.05652092342092408 | FDE: 0.10063885672264172
