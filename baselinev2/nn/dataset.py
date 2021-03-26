@@ -1,17 +1,20 @@
 import bisect
+import os
+from pathlib import Path
 from typing import Iterable
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset, ConcatDataset, DataLoader, Subset
+import pandas as pd
 
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from baselinev2.config import SAVE_BASE_PATH, \
     DATASET_META, \
     GENERATED_DATASET_ROOT, BASE_PATH, SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_PER_CLASS_VIDEOS_LIST_FOR_NN, \
-    SDD_VIDEO_META_CLASSES_LIST_FOR_NN
+    SDD_VIDEO_META_CLASSES_LIST_FOR_NN, ANNOTATION_BASE_PATH, ANNOTATION_CSV_PATH
 from baselinev2.constants import NetworkMode
-from baselinev2.nn.data_utils import extract_frame_from_video
+from baselinev2.nn.data_utils import extract_frame_from_video, split_annotations_from_df
 from baselinev2.plot_utils import plot_trajectories_with_frame
 from log import initialize_logging, get_logger
 
@@ -260,30 +263,104 @@ def get_all_dataset_test_split(get_generated: bool = False, root: str = SAVE_BAS
     return dataset_test
 
 
+def get_dataset_community_standard(get_generated: bool = False):
+    root: str = GENERATED_DATASET_ROOT if get_generated else BASE_PATH
+
+    for v_idx, video_clazz in enumerate(SDD_VIDEO_CLASSES_LIST_FOR_NN):
+        for video_number in SDD_PER_CLASS_VIDEOS_LIST_FOR_NN[v_idx]:
+            if get_generated:
+                path = f'{root}{video_clazz.value}{video_number}/csv_annotation/generated_annotations.csv'
+                # save_path = f'{SAVE_BASE_PATH}{video_clazz.value}/video{video_number}/standard_annotation/generated/'
+                save_path = f'{SAVE_BASE_PATH}standard_annotation/generated/'
+
+                cols_to_pick = ['frame_number', 'track_id', 'center_x', 'center_y']
+                csv = pd.read_csv(path)
+
+                final_csv = csv[cols_to_pick]
+                final_csv = final_csv.sort_values(by=['frame_number']).reset_index()
+                final_csv = final_csv.drop(columns=['index'])
+
+                train_set, val_set, test_set = split_annotations_from_df(final_csv, is_generated=True)
+
+                train_path = f'{save_path}/train/'
+                val_path = f'{save_path}/val/'
+                test_path = f'{save_path}/test/'
+
+                Path(train_path).mkdir(parents=True, exist_ok=True)
+                Path(val_path).mkdir(parents=True, exist_ok=True)
+                Path(test_path).mkdir(parents=True, exist_ok=True)
+
+                train_path = f'{train_path}{video_clazz.value}_{video_number}.txt'
+                val_path = f'{val_path}{video_clazz.value}_{video_number}.txt'
+                test_path = f'{test_path}{video_clazz.value}_{video_number}.txt'
+
+                train_set.to_csv(train_path, header=None, index=None, sep='\t', mode='a')
+                val_set.to_csv(val_path, header=None, index=None, sep='\t', mode='a')
+                test_set.to_csv(test_path, header=None, index=None, sep='\t', mode='a')
+
+                logger.info(f'Saved annotation : {save_path}{video_clazz.value}_{video_number}')
+            else:
+                path = f'{root}annotations/{video_clazz.value}/video{video_number}/annotation_augmented.csv'
+                # save_path = f'{SAVE_BASE_PATH}{video_clazz.value}/video{video_number}/standard_annotation/gt/'
+                save_path = f'{SAVE_BASE_PATH}standard_annotation/gt/'
+
+                cols_to_pick = ['frame', 'track_id', 'bbox_center_x', 'bbox_center_y']
+                csv = pd.read_csv(path, index_col='Unnamed: 0')
+                # filter out lost
+                csv = csv[csv["lost"] != 1]
+
+                final_csv = csv[cols_to_pick]
+                final_csv = final_csv.sort_values(by=['frame']).reset_index()
+                final_csv = final_csv.drop(columns=['index'])
+
+                train_set, val_set, test_set = split_annotations_from_df(final_csv)
+
+                train_path = f'{save_path}/train/'
+                val_path = f'{save_path}/val/'
+                test_path = f'{save_path}/test/'
+
+                Path(train_path).mkdir(parents=True, exist_ok=True)
+                Path(val_path).mkdir(parents=True, exist_ok=True)
+                Path(test_path).mkdir(parents=True, exist_ok=True)
+
+                train_path = f'{train_path}{video_clazz.value}_{video_number}.txt'
+                val_path = f'{val_path}{video_clazz.value}_{video_number}.txt'
+                test_path = f'{test_path}{video_clazz.value}_{video_number}.txt'
+
+                train_set.to_csv(train_path, header=None, index=None, sep='\t', mode='a')
+                val_set.to_csv(val_path, header=None, index=None, sep='\t', mode='a')
+                test_set.to_csv(test_path, header=None, index=None, sep='\t', mode='a')
+
+                logger.info(f'Saved annotation : {save_path}{video_clazz.value}_{video_number}')
+
+    logger.info(f'All annotations processed!')
+
+
 if __name__ == '__main__':
-    video_class = SDDVideoClasses.LITTLE
-    video_num = 3
-    meta_labelz = SDDVideoDatasets.LITTLE
-    d1 = BaselineGeneratedDataset(video_class, video_num, NetworkMode.TRAIN, meta_label=meta_labelz)
-    d2 = SyntheticDataset(video_class, video_num, NetworkMode.TRAIN, meta_label=meta_labelz)
-    res = d2[0]
-    # d2 = BaselineDataset(SDDVideoClasses.COUPA, 0, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.COUPA)
-    # d = ConcatDataset([d1, d2])
-    d = ConcatDataset([d1])
-    loader = DataLoader(d, batch_size=1, shuffle=True)
-    # iterator = iter(loader)
-    for data in loader:
-        # in_xy, gt_xy, _, _, in_track_ids, _, in_frame_numbers, _, _ = data  # next(iterator)
-        in_xy, gt_xy, _, _, in_track_ids, _, in_frame_numbers, _, _, mapped_gt_xy, _ = data  # next(iterator)
-        frame_num = in_frame_numbers[0, 0].item()
-        track_id = in_track_ids[0, 0].item()
-        obs_trajectory = np.stack(in_xy[0].cpu().numpy())
-        true_trajectory = np.stack(gt_xy[0].cpu().numpy())
-        pred_trajectory = np.stack(mapped_gt_xy[0].cpu().numpy()) \
-            if not torch.isnan(mapped_gt_xy[0]).any().item() else np.zeros((0, 2))
-        # current_frame = extract_frame_from_video(VIDEO_PATH, frame_number=frame_num)
-        current_frame = extract_frame_from_video(f'{BASE_PATH}videos/{video_class.value}/video{video_num}/video.mov',
-                                                 frame_number=frame_num)
-        plot_trajectories_with_frame(current_frame, obs_trajectory, true_trajectory, pred_trajectory,
-                                     frame_number=frame_num, track_id=track_id)
-        print()
+    get_dataset_community_standard(True)
+    # video_class = SDDVideoClasses.LITTLE
+    # video_num = 3
+    # meta_labelz = SDDVideoDatasets.LITTLE
+    # d1 = BaselineGeneratedDataset(video_class, video_num, NetworkMode.TRAIN, meta_label=meta_labelz)
+    # d2 = SyntheticDataset(video_class, video_num, NetworkMode.TRAIN, meta_label=meta_labelz)
+    # res = d2[0]
+    # # d2 = BaselineDataset(SDDVideoClasses.COUPA, 0, NetworkMode.TRAIN, meta_label=SDDVideoDatasets.COUPA)
+    # # d = ConcatDataset([d1, d2])
+    # d = ConcatDataset([d1])
+    # loader = DataLoader(d, batch_size=1, shuffle=True)
+    # # iterator = iter(loader)
+    # for data in loader:
+    #     # in_xy, gt_xy, _, _, in_track_ids, _, in_frame_numbers, _, _ = data  # next(iterator)
+    #     in_xy, gt_xy, _, _, in_track_ids, _, in_frame_numbers, _, _, mapped_gt_xy, _ = data  # next(iterator)
+    #     frame_num = in_frame_numbers[0, 0].item()
+    #     track_id = in_track_ids[0, 0].item()
+    #     obs_trajectory = np.stack(in_xy[0].cpu().numpy())
+    #     true_trajectory = np.stack(gt_xy[0].cpu().numpy())
+    #     pred_trajectory = np.stack(mapped_gt_xy[0].cpu().numpy()) \
+    #         if not torch.isnan(mapped_gt_xy[0]).any().item() else np.zeros((0, 2))
+    #     # current_frame = extract_frame_from_video(VIDEO_PATH, frame_number=frame_num)
+    #     current_frame = extract_frame_from_video(f'{BASE_PATH}videos/{video_class.value}/video{video_num}/video.mov',
+    #                                              frame_number=frame_num)
+    #     plot_trajectories_with_frame(current_frame, obs_trajectory, true_trajectory, pred_trajectory,
+    #                                  frame_number=frame_num, track_id=track_id)
+    #     print()

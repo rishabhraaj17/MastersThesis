@@ -92,6 +92,22 @@ def split_annotations(annotation_path):
     return train_set, val_set, test_set
 
 
+def split_annotations_from_df(annotations, is_generated=False):
+    train_set, test_set = train_test_split(annotations, train_size=TRAIN_SPLIT_PERCENTAGE,
+                                           test_size=VALIDATION_SPLIT_PERCENTAGE + TEST_SPLIT_PERCENTAGE,
+                                           shuffle=False, stratify=None)
+
+    train_set, test_set = adjust_splits_for_frame(larger_set=train_set, smaller_set=test_set,
+                                                  generated_tracks=is_generated)
+
+    test_set, val_set = train_test_split(test_set, train_size=0.3,
+                                         test_size=0.7, shuffle=False, stratify=None)
+
+    val_set, test_set = adjust_splits_for_frame(larger_set=test_set, smaller_set=val_set,
+                                                generated_tracks=is_generated)
+    return train_set, val_set, test_set
+
+
 def split_generated_annotations(annotation_path):
     annotations = sort_generated_annotations_by_frame_numbers(annotation_path)
     train_set, test_set = train_test_split(annotations, train_size=TRAIN_SPLIT_PERCENTAGE,

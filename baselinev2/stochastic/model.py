@@ -18,6 +18,7 @@ from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from baselinev2.exceptions import InvalidFrameException
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.dataset import get_all_dataset, get_all_dataset_test_split
 from baselinev2.nn.models import ConstantLinearBaseline
@@ -733,13 +734,13 @@ def debug_model(cfg):
     #                      fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
     #                      num_sanity_val_steps=0)
 
-    # cfg.batch_size *= 8
+    # cfg.batch_size *= 2
     trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                          callbacks=[checkpoint_callback], num_sanity_val_steps=0,
                          fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
                          resume_from_checkpoint='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/'
-                                                'stochastic/logs/lightning_logs/version_8/'
-                                                'checkpoints/epoch=4-step=2688474.ckpt')
+                                                'stochastic/logs/lightning_logs/version_17/'
+                                                'checkpoints/epoch=108-step=929574.ckpt')
 
     trainer.fit(m)
     print()
@@ -788,26 +789,31 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
                           filter_mode=False, moving_only=False, stationary_only=False, threshold=1.0,
                           relative_distance_filter_threshold=100., device='cuda:0', eval_for_worse=False,
                           plot_4_way=False):
-    # version = 2
-    # epoch = 31
-    # step = 403263
-
+    # UNSUPERVISED
     # version = 5
     # epoch = 64
     # step = 819129
+
+    version = 18
+    epoch = 109
+    step = 929623
 
     # version = 0
     # epoch = 209
     # step = 2646419
 
-    # supervised
+    # SUPERVISED
     # version = 7
     # epoch = 3
     # step = 2091035
 
-    version = 8
-    epoch = 4
-    step = 2688474
+    # version = 9
+    # epoch = 10
+    # step = 6273108
+
+    # version = 12
+    # epoch = 17
+    # step = 7281281
 
     base_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
     model_path = 'stochastic/' + f'logs/lightning_logs/version_{version}/checkpoints/' \
@@ -820,7 +826,14 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
     m.eval()
     m.to(device)
     m.hparams.num_workers = 0 if plot else 12
-    loader = DataLoader(m.test_dset, batch_size=batch_s * speedup_factor if multi_batch else 1, shuffle=True,
+    if multi_batch and not plot:
+        batch_size = batch_s * speedup_factor
+    elif multi_batch and plot:
+        batch_size = batch_s
+        # filter_mode = False
+    else:
+        batch_size = 1
+    loader = DataLoader(m.test_dset, batch_size=batch_size, shuffle=True,
                         num_workers=m.hparams.num_workers)
 
     constant_linear_baseline_caller = ConstantLinearBaseline()
@@ -851,7 +864,7 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
             torch.from_numpy(constant_linear_baseline_pred_trajectory).permute(1, 0, 2)
 
         if multi_batch:
-            im_idx = np.random.choice(batch_size, 1).item()
+            im_idx = np.random.choice(batch_size, 1, replace=False).item()
 
             obs_traj = batch['in_xy'][:, :batch_size][:, im_idx, ...].squeeze()
             gt_traj = batch['gt_xy'][:, :batch_size][:, im_idx, ...].squeeze()
@@ -863,6 +876,9 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
             track_id = data[4][im_idx, 0].item()
             ratio = batch['ratio'].squeeze()[0]  # data[-1]
 
+            if plot:
+                feasible_idx = batch['feasible_idx']
+                dataset_idx = dataset_idx[feasible_idx]
             video_dataset = loader.dataset.datasets[dataset_idx[im_idx].item()]
             video_path = f'{base_path}videos/{video_dataset.video_class.value}/' \
                          f'video{video_dataset.video_number}/video.mov'
@@ -932,39 +948,42 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
             plot_linear_ade = 0.
             plot_linear_fde = 0.
         if plot:
-            if plot_4_way:
-                plot_and_compare_trajectory_four_way_stochastic(
-                    frame=extract_frame_from_video(video_path, frame_num),
-                    obs_trajectory=obs_traj.cpu().numpy(),
-                    gt_trajectory=gt_traj.cpu().numpy(),
-                    model_pred_trajectory=pred_traj.cpu().numpy(),
-                    other_pred_trajectory=linear_traj,
-                    frame_number=frame_num,
-                    track_id=track_id,
-                    single_mode=k == 1,
-                    best_idx=plot_best_idx.item(),
-                    additional_text=f'Model: ADE: {plot_ade.item()} | FDE: {plot_fde.item()}\n'
-                                    f'Linear: ADE: {plot_linear_ade.item()} | FDE: {plot_linear_fde.item()}',
-                )
-            else:
-                plot_trajectory_alongside_frame_stochastic(obs_trajectory=obs_traj.cpu().numpy(),
-                                                           gt_trajectory=gt_traj.cpu().numpy(),
-                                                           pred_trajectory=pred_traj.cpu().numpy(),
-                                                           frame_number=frame_num,
-                                                           track_id=track_id,
-                                                           frame=extract_frame_from_video(video_path, frame_num),
-                                                           single_mode=k == 1,
-                                                           best_idx=plot_best_idx.item(),
-                                                           additional_text=f'ADE: {plot_ade} | FDE: {plot_fde}')
+            try:
+                if plot_4_way:
+                    plot_and_compare_trajectory_four_way_stochastic(
+                        frame=extract_frame_from_video(video_path, frame_num),
+                        obs_trajectory=obs_traj.cpu().numpy(),
+                        gt_trajectory=gt_traj.cpu().numpy(),
+                        model_pred_trajectory=pred_traj.cpu().numpy(),
+                        other_pred_trajectory=linear_traj,
+                        frame_number=frame_num,
+                        track_id=track_id,
+                        single_mode=k == 1,
+                        best_idx=plot_best_idx.item(),
+                        additional_text=f'Model: ADE: {plot_ade.item()} | FDE: {plot_fde.item()}\n'
+                                        f'Linear: ADE: {plot_linear_ade.item()} | FDE: {plot_linear_fde.item()}',
+                    )
+                else:
+                    plot_trajectory_alongside_frame_stochastic(obs_trajectory=obs_traj.cpu().numpy(),
+                                                               gt_trajectory=gt_traj.cpu().numpy(),
+                                                               pred_trajectory=pred_traj.cpu().numpy(),
+                                                               frame_number=frame_num,
+                                                               track_id=track_id,
+                                                               frame=extract_frame_from_video(video_path, frame_num),
+                                                               single_mode=k == 1,
+                                                               best_idx=plot_best_idx.item(),
+                                                               additional_text=f'ADE: {plot_ade} | FDE: {plot_fde}')
+            except InvalidFrameException:
+                logger.error('Frame not found!')
     print(f'Model: ADE: {np.mean(ade_list).item()} | FDE: {np.mean(fde_list).item()}\n'
           f'Linear: ADE: {np.mean(linear_ade_list).item()} | FDE: {np.mean(linear_fde_list).item()}')
 
 
 if __name__ == '__main__':
-    debug_model()
+    # debug_model()
 
-    # quick_eval_stochastic(plot=False, eval_on_gt=True, k=10, speedup_factor=32, filter_mode=True, moving_only=True,
-    #                       stationary_only=False, eval_for_worse=False)
+    quick_eval_stochastic(plot=True, eval_on_gt=True, k=10, speedup_factor=32, filter_mode=True, moving_only=True,
+                          stationary_only=False, eval_for_worse=False)
 
     # quick_eval()
 
@@ -983,16 +1002,21 @@ if __name__ == '__main__':
     # On supervised - k=10
     # All Trajectories
     # Model: ADE: 1.0329569692133145 | FDE: 2.1217076520531304
+    # ver 18: Model: ADE: 1.0106120413302706 | FDE: 2.074660060222275
     # Linear: ADE: 0.978251020929496 | FDE: 2.1439284148036917
     # lower limit
     # Model: ADE: 4.484831560526955 | FDE: 9.039632317203804
     # Linear: ADE: 0.978251020929496 | FDE: 2.1439284148036917
     # supervised
     # Model: ADE: 0.541943404247334 | FDE: 1.0914964632178983
+    # ver 12: Model: ADE: 0.5273425247091686 | FDE: 1.0667414188999012
     # Linear: ADE: 0.978251020929496 | FDE: 2.1439284148036917
 
     # moving only - 1.0  + outlier removal
     # Model: ADE: 0.9641407612558273 | FDE: 2.009607732119232
+    # ver 18: Model: ADE: 0.9417482699733155 | FDE: 1.9596099997154726
+    # ver 18: K=20 - Model: ADE: 0.7974822557212522 | FDE: 1.6561251261760093
+    # ver 18: K=50 - Model: ADE: 0.6664677064058206 | FDE: 1.3757458298407648
     # Linear: ADE: 1.5111766537362 | FDE: 3.332864517927838
     # worse
     # Model: ADE: 5.949471143770464 | FDE: 11.776895021153107
@@ -1000,15 +1024,22 @@ if __name__ == '__main__':
     # k=1
     # Model: ADE: 2.6990513349074328 | FDE: 5.464550167791963
     # Linear: ADE: 1.598343285400214 | FDE: 3.529797207781441
+
     # supervised - k=10 + outlier removal
     # Model: ADE: 0.8907297152484545 | FDE: 1.7420249850288165
+    # ver 9: Model: ADE: 0.9237790072096367 | FDE: 1.8031240094930459
+    # ver 12: Model: ADE: 0.8537704996521618 | FDE: 1.676240554331468
+    # ver 12: K=20: Model: ADE: 0.7161743122533683 | FDE: 1.3945243051053209
+    # ver 12: K=50: Model: ADE: 0.5974900534163404 | FDE: 1.1540122663749628
     # Linear: ADE: 1.5111766537362 | FDE: 3.332864517927838
 
     # stationary only - 1.0  + outlier removal
     # Model: ADE: 0.8614191488931643 | FDE: 1.7247877094923139
+    # ver 18: Model: ADE: 0.8427964557216341 | FDE: 1.6837042595976617
     # Linear: ADE: 0.10649146886707163 | FDE: 0.19566083160127462
     # supervised
     # Model: ADE: 0.05635012733756296 | FDE: 0.0999534727096446
     # Linear: ADE: 0.10649146886707163 | FDE: 0.19566083160127462
     # new
     # Model: ADE: 0.05652092342092408 | FDE: 0.10063885672264172
+    # ver 12: Model: ADE: 0.053335761822049584 | FDE: 0.09534861413238387

@@ -596,7 +596,8 @@ def preprocess_dataset_elements(batch, is_generated=False, batch_first=True, fil
             'in_dxdy': in_uv,
             'gt_dxdy': gt_uv,
             'ratio': ratio,
-            'seq_start_end': seq_start_end
+            'seq_start_end': seq_start_end,
+            'feasible_idx': feasible_idx if (moving_only or stationary_only) and filter_mode else []
             }
 
 

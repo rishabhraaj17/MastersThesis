@@ -143,7 +143,7 @@ def get_batch_k(batch, k):
         elif name in ["scene_img", "occupancy", "walls"]:
 
             new_batch[name] = data * k
-        elif name not in ["size", "scene_nr", "scene", "img", "cropped_img", "seq_start_end"]:
+        elif name not in ["size", "scene_nr", "scene", "img", "cropped_img", "seq_start_end", "feasible_idx"]:
             new_batch[name] = data.repeat(1, k, 1).clone()
 
 
