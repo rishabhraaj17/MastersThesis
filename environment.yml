@@ -1,74 +1,138 @@
 name: TrajectoryPrediction
 channels:
   - pytorch
+  - conda-forge
   - defaults
 dependencies:
-  - _libgcc_mutex=0.1=main
+  - _libgcc_mutex=0.1=conda_forge
+  - _openmp_mutex=4.5=1_gnu
   - blas=1.0=mkl
-  - ca-certificates=2020.7.22=0
-  - certifi=2020.6.20=py38_0
-  - cudatoolkit=10.2.89=hfd86e86_1
-  - freetype=2.10.2=h5ab3b9f_0
+  - bzip2=1.0.8=h7f98852_4
+  - ca-certificates=2020.12.5=ha878542_0
+  - captum=0.3.0=0
+  - certifi=2020.12.5=py38h578d9bd_1
+  - cudatoolkit=11.1.1=h6406543_8
+  - dbus=1.13.18=hb2f20db_0
+  - expat=2.2.10=he6710b0_2
+  - ffmpeg=4.3=hf484d3e_0
+  - fontconfig=2.13.1=h6c09931_0
+  - freetype=2.10.4=h5ab3b9f_0
+  - glib=2.66.1=h92f7085_0
+  - gmp=6.2.1=h58526e2_0
+  - gnutls=3.6.13=h85f3911_1
+  - gst-plugins-base=1.14.0=h8213a91_2
+  - gstreamer=1.14.0=h28cd5cc_2
+  - icu=58.2=he6710b0_3
   - intel-openmp=2020.2=254
   - jpeg=9b=h024ee3a_2
+  - lame=3.100=h7f98852_1001
   - lcms2=2.11=h396b838_0
   - ld_impl_linux-64=2.33.1=h53a641e_7
   - libedit=3.1.20191231=h14c3975_1
   - libffi=3.3=he6710b0_2
-  - libgcc-ng=9.1.0=hdf63c60_0
+  - libgcc-ng=9.3.0=h2828fa1_18
+  - libgfortran-ng=7.3.0=hdf63c60_0
+  - libgomp=9.3.0=h2828fa1_18
+  - libiconv=1.16=h516909a_0
   - libpng=1.6.37=hbc83047_0
-  - libstdcxx-ng=9.1.0=hdf63c60_0
+  - libstdcxx-ng=9.3.0=h6de172a_18
   - libtiff=4.1.0=h2733197_1
-  - lz4-c=1.9.2=he6710b0_1
+  - libuuid=1.0.3=h1bed415_2
+  - libuv=1.40.0=h7b6447c_0
+  - libxcb=1.14=h7b6447c_0
+  - libxml2=2.9.10=hb55368b_3
+  - lz4-c=1.9.3=h2531618_0
+  - matplotlib-base=3.3.2=py38h817c723_0
   - mkl=2020.2=256
   - mkl-service=2.3.0=py38he904b0f_0
-  - mkl_fft=1.1.0=py38h23d657b_0
+  - mkl_fft=1.2.0=py38h23d657b_0
   - mkl_random=1.1.1=py38h0573a6f_0
   - ncurses=6.2=he6710b0_1
-  - ninja=1.10.0=py38hfd86e86_0
-  - numpy-base=1.19.1=py38hfa32c7d_0
+  - nettle=3.6=he412f7d_0
+  - ninja=1.10.2=py38hff7bd54_0
+  - numpy-base=1.19.2=py38hfa32c7d_0
   - olefile=0.46=py_0
-  - openssl=1.1.1g=h7b6447c_0
-  - pandas=1.1.1=py38he6710b0_0
-  - pillow=7.2.0=py38hb39fc2d_0
-  - pip=20.2.2=py38_0
+  - openh264=2.1.1=h780b84a_0
+  - openssl=1.1.1j=h7f98852_0
+  - pandas=1.2.1=py38ha9443f7_0
+  - patsy=0.5.1=py38_0
+  - pcre=8.44=he6710b0_0
+  - pip=20.3.3=py38h06a4308_0
+  - portalocker=2.0.0=py38_0
+  - pyparsing=2.4.7=pyhd3eb1b0_0
+  - pyqt=5.9.2=py38h05f1152_4
   - python=3.8.5=hcff3b4d_0
-  - python-dateutil=2.8.1=py_0
-  - pytorch=1.6.0=py3.8_cuda10.2.89_cudnn7.6.5_0
-  - pytz=2020.1=py_0
-  - readline=8.0=h7b6447c_0
-  - setuptools=49.6.0=py38_0
-  - six=1.15.0=py_0
+  - python-dateutil=2.8.1=pyhd3eb1b0_0
+  - python_abi=3.8=1_cp38
+  - pytorch=1.8.0=py3.8_cuda11.1_cudnn8.0.5_0
+  - pytz=2021.1=pyhd3eb1b0_0
+  - qt=5.9.7=h5867ecd_1
+  - readline=8.1=h27cfd23_0
+  - setuptools=52.0.0=py38h06a4308_0
+  - sip=4.19.13=py38he6710b0_0
+  - six=1.15.0=py38h06a4308_0
   - sqlite=3.33.0=h62c20be_0
+  - statsmodels=0.12.1=py38h27cfd23_0
   - tk=8.6.10=hbc83047_0
-  - torchvision=0.7.0=py38_cu102
-  - wheel=0.35.1=py_0
+  - torchaudio=0.8.0=py38
+  - torchvision=0.9.0=py38_cu111
+  - tornado=6.1=py38h27cfd23_0
+  - typing_extensions=3.7.4.3=pyh06a4308_0
+  - wheel=0.36.2=pyhd3eb1b0_0
   - xz=5.2.5=h7b6447c_0
   - zlib=1.2.11=h7b6447c_3
   - zstd=1.4.5=h9ceee32_0
   - pip:
     - absl-py==0.10.0
+    - aiohttp==3.7.3
+    - aiohttp-cors==0.7.0
+    - aioredis==1.3.1
     - albumentations==0.4.6
+    - alembic==1.5.4
     - argon2-cffi==20.1.0
     - astunparse==1.6.3
+    - async-timeout==3.0.1
+    - atari-py==0.2.6
     - attrs==20.1.0
     - av==8.0.2
     - backcall==0.2.0
+    - beautifulsoup4==4.9.3
     - bleach==3.1.5
+    - blessings==1.7
     - cachetools==4.1.1
     - cffi==1.14.2
     - chardet==3.0.4
+    - click==7.1.2
+    - cliff==3.7.0
+    - cloudpickle==1.6.0
+    - cmaes==0.8.1
+    - cmd2==1.5.0
+    - colorama==0.4.4
+    - colorful==0.5.4
+    - colorlog==4.7.2
     - cycler==0.10.0
+    - dataclasses==0.6
     - decorator==4.4.2
     - defusedxml==0.6.0
+    - dm-tree==0.1.5
     - entrypoints==0.3
+    - filelock==3.0.12
+    - flatbuffers==1.12
+    - fsspec==0.8.4
     - future==0.18.2
     - gast==0.3.3
+    - google==3.0.0
+    - google-api-core==1.24.1
     - google-auth==1.21.1
     - google-auth-oauthlib==0.4.1
     - google-pasta==0.2.0
-    - grpcio==1.31.0
+    - googleapis-common-protos==1.52.0
+    - gpustat==0.6.0
+    - grpcio==1.32.0
+    - gym==0.18.0
     - h5py==2.10.0
+    - hiddenlayer==0.3
+    - hiredis==1.1.0
     - idna==2.10
     - imageio==2.9.0
     - imgaug==0.4.0
@@ -88,43 +152,62 @@ dependencies:
     - jupyter-core==4.6.3
     - keras-preprocessing==1.1.2
     - kiwisolver==1.2.0
+    - lz4==3.1.3
+    - mako==1.1.4
     - markdown==3.2.2
     - markupsafe==1.1.1
     - matplotlib==3.3.1
     - mistune==0.8.4
     - mpmath==1.1.0
+    - msgpack==1.0.2
+    - multidict==5.1.0
     - nbconvert==5.6.1
     - nbformat==5.0.7
     - networkx==2.5
     - nose==1.3.7
     - notebook==6.1.3
     - numpy==1.18.5
+    - nvidia-ml-py3==7.352.0
     - oauthlib==3.1.0
+    - opencensus==0.7.11
+    - opencensus-context==0.1.2
     - opencv-contrib-python==4.4.0.42
     - opencv-python==4.4.0.42
+    - opencv-python-headless==4.3.0.36
     - opt-einsum==3.3.0
+    - optuna==2.5.0
     - packaging==20.4
     - pandocfilters==1.4.2
     - parso==0.7.1
+    - pbr==5.5.1
     - pexpect==4.8.0
     - pickleshare==0.7.5
+    - pillow==8.1.0
+    - prettytable==2.0.0
     - prometheus-client==0.8.0
     - prompt-toolkit==3.0.7
     - protobuf==3.13.0
+    - psutil==5.7.3
     - ptyprocess==0.6.0
+    - py-spy==0.3.3
     - pyasn1==0.4.8
     - pyasn1-modules==0.2.8
     - pycparser==2.20
+    - pyglet==1.5.0
     - pygments==2.6.1
-    - pyparsing==2.4.7
+    - pyperclip==1.8.1
     - pyrsistent==0.16.0
-    - pytorch-lightning==0.9.0
-    - pytorch-lightning-bolts==0.2.2
+    - python-editor==1.0.4
+    - python-graphviz==0.14.2
+    - pytorch-lightning==1.1.7
+    - pytorch-lightning-bolts==0.3.0
     - pywavelets==1.1.1
     - pyyaml==5.3.1
     - pyzmq==19.0.2
     - qtconsole==4.7.7
     - qtpy==1.9.0
+    - ray==1.2.0
+    - redis==3.5.3
     - requests==2.24.0
     - requests-oauthlib==1.3.0
     - rsa==4.6
@@ -133,19 +216,25 @@ dependencies:
     - scipy==1.4.1
     - send2trash==1.5.0
     - shapely==1.7.1
+    - soupsieve==2.1
+    - sqlalchemy==1.3.23
+    - stevedore==3.3.0
     - sympy==1.6.2
-    - tensorboard==2.2.0
+    - tabulate==0.8.8
+    - tensorboard==2.4.0
     - tensorboard-plugin-wit==1.7.0
-    - tensorflow==2.3.0
-    - tensorflow-estimator==2.3.0
+    - tensorboardx==2.1
+    - tensorflow==2.4.0
+    - tensorflow-estimator==2.4.0
     - termcolor==1.1.0
     - terminado==0.8.3
     - testpath==0.4.4
     - threadpoolctl==2.1.0
     - tifffile==2020.9.3
+    - timeout-decorator==0.5.0
     - torchfile==0.1.0
-    - tornado==6.0.4
-    - tqdm==4.48.2
+    - torchsummary==1.5.1
+    - tqdm==4.57.0
     - traitlets==5.0.3
     - urllib3==1.25.10
     - visdom==0.1.8.9
@@ -155,4 +244,5 @@ dependencies:
     - werkzeug==1.0.1
     - widgetsnbextension==3.5.1
     - wrapt==1.12.1
+    - yarl==1.6.3
 prefix: /home/rishabh/anaconda3/envs/TrajectoryPrediction
