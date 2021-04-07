@@ -1,0 +1,14 @@
+defaults:
+  - model : model.yaml
+  - training : training.yaml
+  - eval : eval.yaml
+
+
+general:
+  save_dir: logs
+  project_name: TrajectoryPredictionMastersThesis
+
+
+hydra:
+  run:
+    dir: ./stochastic/logs

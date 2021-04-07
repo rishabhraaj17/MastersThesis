@@ -938,9 +938,11 @@ def compute_per_stop_de(predicted_trajs, gt_traj):
     return error
 
 
-def compute_fde(predicted_trajs, gt_traj, batched=True):
+def compute_fde(predicted_trajs, gt_traj, batched=True, batched_v2=False):
     if batched:
         final_error = np.linalg.norm(predicted_trajs[-1, ...] - gt_traj[-1, ...], axis=-1).mean()
+    elif batched_v2:
+        final_error = np.linalg.norm(predicted_trajs[:, -1, ...] - gt_traj[:, -1, ...], axis=-1).mean()
     else:
         final_error = np.linalg.norm(predicted_trajs[-1] - gt_traj[-1], axis=-1)
     # final_error = np.linalg.norm(predicted_trajs[:, :, -1] - gt_traj[-1], axis=-1)
