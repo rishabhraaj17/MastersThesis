@@ -1,0 +1,40 @@
+# @package _global_
+dropout: 0.0
+batch_norm: False
+input_dim: 2
+
+
+# Generator dim
+generator:
+  embedding_dim_scalars: 8
+  encoder_h_g_scalar: 8
+  decoder_h_g_scalar: 16
+
+  pred_len: 12
+  noise_scalar: 4
+  mlp_vec: 64
+  mlp_scalar: 32
+  POV: False
+  noise_type: "local"
+  social_attention: False
+  social_dim_scalar: 10
+
+mlp_dim: 32
+embedding_dim: 8
+  
+
+# general args
+gan_mode : "vanilla"
+
+
+# discriminator params
+discriminator:
+  encoder_h_dim_d : 64
+  embedding_dim_scalars: 16
+  mlp_scalar: 32
+  social_attention: False
+  social_dim_scalar: 10
+
+  dropout_disc : 0.0
+
+  batch_norm_disc : False

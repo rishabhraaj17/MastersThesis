@@ -1,8 +1,10 @@
+import os
 from typing import Optional, Any, List, Tuple, Union
 
 import pandas as pd
 
 import torch
+import torchvision
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 from torchvision.datasets.vision import VisionDataset
@@ -228,7 +230,10 @@ class SDDSimpleDataset(Dataset):
         self.scale = scale
         self.single_track_mode = single_track_mode
         self.track_id = track_id
-        self.original_shape = None
+
+        ref_image_path = os.path.split(annotation_path)[0] + '/reference.jpg'
+        ref_image = torchvision.io.read_image(ref_image_path)
+        self.original_shape = [ref_image.shape[1], ref_image.shape[2]]
         self.new_scale = None
 
         # self.video_frames = video_frames
@@ -428,6 +433,29 @@ class SDDDataset(VisionDataset):
             video = self.transform(video)
 
         return video, audio, label
+
+
+class SimpleVideoDatasetBase(VisionDataset):
+    def __init__(self, video_path: str, start: int = 0, end: Optional[int] = None, pts_unit: str = 'pts',
+                 transform=None):
+        super(SimpleVideoDatasetBase, self).__init__(root=video_path)
+        self.v_frames, _, self.info = torchvision.io.read_video(filename=video_path, start_pts=start, end_pts=end,
+                                                                pts_unit=pts_unit)
+        self.original_shape = self.v_frames.shape[1], self.v_frames.shape[2]
+        self.transform = transform
+
+    @property
+    def metadata(self):
+        return self.info
+
+    def __len__(self) -> int:
+        return len(self.v_frames)
+
+    def __getitem__(self, index: int) -> Any:
+        out = self.v_frames[index]
+        if self.transform is not None:
+            out = self.transform(out)
+        return out, index
 
 
 if __name__ == '__main__':
