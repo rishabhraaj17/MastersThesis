@@ -16,7 +16,8 @@ import matplotlib.pyplot as plt
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from average_image.utils import is_inside_bbox, compute_ade, compute_fde, \
     compute_per_stop_de, SDDMeta, plot_track_analysis, plot_violin_plot
-from baseline.extract_features import extract_trainable_features_rnn, process_complex_features_rnn
+from baseline.extract_features import extract_trainable_features_rnn, process_complex_features_rnn, \
+    extract_trainable_features_rnn_for_track_id
 from log import initialize_logging, get_logger
 from baseline.extracted_of_optimization import cost_function
 from unsupervised_tp_0.nn_clustering_0 import get_track_info
@@ -414,6 +415,77 @@ def analyze_extracted_features(features_dict: dict, test_mode=False, time_steps=
             #     'per_stop_de': [p * ratio for p in per_stop_de]}})
         else:
             logger.info(f'Found multiple tracks! - {unique_tracks}')
+
+    return of_track_analysis_df
+
+
+def analyze_extracted_features_single_track(features_dict: dict, test_mode=False, time_steps=TIME_STEPS,
+                                            track_id_to_get=262, ratio=1.0, num_frames_to_build_bg_sub_model=12,
+                                            optimized_of=False, top_k=1, alpha=1, weight_points_inside_bbox_more=True):
+    train_data = process_complex_features_rnn(features_dict=features_dict, test_mode=test_mode, time_steps=time_steps,
+                                              num_frames_to_build_bg_sub_model=num_frames_to_build_bg_sub_model)
+
+    x_, y_, frame_info, track_id_info, bbox_center_x, bbox_center_y, bbox_x, bbox_y, gt_velocity_x, gt_velocity_y = \
+        extract_trainable_features_rnn_for_track_id(train_data, track_id_to_get=track_id_to_get)
+    of_track_analysis = {}
+    of_track_analysis_df = None
+    for features_x, features_y, features_f_info, features_t_info, features_b_c_x, features_b_c_y, features_b_x, \
+        features_b_y in tqdm(zip(x_, y_, frame_info, track_id_info, bbox_center_x,
+                                 bbox_center_y, bbox_x, bbox_y), total=len(x_)):
+        if len(features_x) != 0:
+            unique_tracks = np.unique(features_t_info)
+            current_track = unique_tracks[0]
+            of_inside_bbox_list, of_track_list, gt_track_list, of_ade_list, of_fde_list, of_per_stop_de = \
+                [], [], [], [], [], []
+            for feature_x, feature_y, f_info, t_info, b_c_x, b_c_y, b_x, b_y in zip(
+                    features_x, features_y, features_f_info, features_t_info, features_b_c_x, features_b_c_y,
+                    features_b_x, features_b_y):
+                # bug-fix
+                of_displacements = feature_x[:, 2:4]
+                rolled = np.rollaxis(of_displacements, -1).tolist()
+                of_data_x, of_data_y = rolled[1], rolled[0]
+                of_data = np.stack([of_data_x, of_data_y]).T
+                of_data = of_data / 0.4
+                of_flow = feature_x[:, :2] + of_data
+                # of_flow = feature_x[:, :2] + feature_x[:, 2:4]
+                if optimized_of:
+                    _, of_flow_top_k = cost_function(of_flow, b_c_y, top_k=top_k, alpha=alpha, bbox=b_y,
+                                                     weight_points_inside_bbox_more=weight_points_inside_bbox_more)
+                    of_flow_center = of_flow_top_k[0]
+                else:
+                    of_flow_center = of_flow.mean(0)
+                of_inside_bbox = is_inside_bbox(of_flow_center, b_y)
+                of_inside_bbox_list.append(of_inside_bbox)
+
+                of_track_list.append(of_flow_center)
+                gt_track_list.append(b_c_y)
+
+            of_ade = compute_ade(np.stack(of_track_list), np.stack(gt_track_list))
+            of_fde = compute_fde(np.stack(of_track_list), np.stack(gt_track_list))
+            of_ade_list.append(of_ade.item() * ratio)
+            of_fde_list.append(of_fde.item() * ratio)
+
+            per_stop_de = compute_per_stop_de(np.stack(of_track_list), np.stack(gt_track_list))
+            of_per_stop_de.append(per_stop_de)
+
+            if len(unique_tracks) == 1:
+                d = {'track_id': current_track,
+                     'of_inside_bbox_list': of_inside_bbox_list,
+                     'ade': of_ade.item() * ratio,
+                     'fde': of_fde.item() * ratio,
+                     'per_stop_de': [p * ratio for p in per_stop_de]}
+                if of_track_analysis_df is None:
+                    of_track_analysis_df = pd.DataFrame(data=d)
+                else:
+                    temp_df = pd.DataFrame(data=d)
+                    of_track_analysis_df = of_track_analysis_df.append(temp_df, ignore_index=False)
+                # of_track_analysis.update({current_track: {
+                #     'of_inside_bbox_list': of_inside_bbox_list,
+                #     'ade': of_ade.item() * ratio,
+                #     'fde': of_fde.item() * ratio,
+                #     'per_stop_de': [p * ratio for p in per_stop_de]}})
+            else:
+                logger.info(f'Found multiple tracks! - {unique_tracks}')
 
     return of_track_analysis_df
 

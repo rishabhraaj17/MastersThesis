@@ -566,6 +566,64 @@ def extract_trainable_features_rnn(data, return_frame_info=True):
     return x_, y_
 
 
+def extract_trainable_features_rnn_for_track_id(data, track_id_to_get=262, return_frame_info=True):
+    frame_info, track_id_info = [], []
+    x_, y_ = [], []
+    bbox_x, bbox_y, bbox_center_x, bbox_center_y, gt_velocity_x, gt_velocity_y = [], [], [], [], [], []
+
+    for key, value in tqdm(data.items()):
+        num_frames = len(value)
+        t_0 = value[0]
+        t_rest = [value[v] for v in range(1, num_frames)]
+        for fr in t_0:
+            temp_x, temp_y, temp_f_info, temp_track_info = [], [], [], []
+            temp_bbox_x, temp_bbox_y, temp_bbox_center_x, temp_bbox_center_y = [], [], [], []
+            temp_gt_velocity_x, temp_gt_velocity_y = [], []
+
+            if track_id_to_get == fr.track_id:
+                temp_f_info.append(fr.frame)
+                temp_track_info.append(fr.track_id)
+                temp_x.append(fr.pair_0_features)
+                temp_y.append(fr.pair_1_features)
+                temp_bbox_center_x.append(fr.bbox_center_t0)
+                temp_bbox_center_y.append(fr.bbox_center_t1)
+                temp_bbox_x.append(fr.bbox_t0)
+                temp_bbox_y.append(fr.bbox_t1)
+                temp_gt_velocity_x.append(fr.track_gt_velocity_t0)
+                temp_gt_velocity_y.append(fr.track_gt_velocity_t1)
+
+            for t_i in t_rest:
+                for fr_other in t_i:
+                    if track_id_to_get == fr.track_id:
+                        if fr == fr_other:
+                            temp_f_info.append(fr_other.frame)
+                            temp_track_info.append(fr_other.track_id)
+                            temp_x.append(fr_other.pair_0_features)
+                            temp_y.append(fr_other.pair_1_features)
+                            temp_bbox_center_x.append(fr_other.bbox_center_t0)
+                            temp_bbox_center_y.append(fr_other.bbox_center_t1)
+                            temp_bbox_x.append(fr_other.bbox_t0)
+                            temp_bbox_y.append(fr_other.bbox_t1)
+                            temp_gt_velocity_x.append(fr_other.track_gt_velocity_t0)
+                            temp_gt_velocity_y.append(fr_other.track_gt_velocity_t1)
+
+            frame_info.append(temp_f_info)
+            track_id_info.append(temp_track_info)
+            x_.append(temp_x)
+            y_.append(temp_y)
+            bbox_center_x.append(temp_bbox_center_x)
+            bbox_center_y.append(temp_bbox_center_y)
+            bbox_x.append(temp_bbox_x)
+            bbox_y.append(temp_bbox_y)
+            gt_velocity_x.append(temp_gt_velocity_x)
+            gt_velocity_y.append(temp_gt_velocity_y)
+
+    if return_frame_info:
+        return x_, y_, frame_info, track_id_info, bbox_center_x, bbox_center_y, bbox_x, bbox_y, gt_velocity_x, \
+               gt_velocity_y
+    return x_, y_
+
+
 def center_based_dataset(features):
     features_x, features_y, frames, track_ids, center_x, center_y, bbox_x, bbox_y, gt_velocity_x, gt_velocity_y \
         = features['x'], features['y'], features['frames'], features['track_ids'], features['bbox_center_x'], \
