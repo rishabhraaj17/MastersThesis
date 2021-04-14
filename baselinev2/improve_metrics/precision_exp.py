@@ -1,0 +1,514 @@
+import os
+from pathlib import Path
+from typing import Dict, List
+
+import cv2 as cv
+import numpy as np
+import scipy
+import skimage
+import torch
+from matplotlib import pyplot as plt, patches
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+import pandas as pd
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+
+import seaborn as sns
+
+from average_image.bbox_utils import get_frame_annotations_and_skip_lost, scale_annotations
+from average_image.constants import SDDVideoClasses, SDDVideoDatasets
+from baselinev2.config import BASE_PATH, DATASET_META, SERVER_PATH
+from baselinev2.plot_utils import add_box_to_axes, add_box_to_axes_with_annotation, \
+    add_features_to_axis
+from baselinev2.utils import get_generated_frame_annotations
+from log import initialize_logging, get_logger
+from unsupervised_tp_0.dataset import SDDSimpleDataset, resize_frames
+
+# sns.set_theme(style="ticks")
+
+initialize_logging()
+logger = get_logger('improve_metrics.precision_exp')
+
+
+class MetricPerTrack(object):
+    def __init__(self, track_id: int):
+        super(MetricPerTrack, self).__init__()
+        self.track_id = track_id
+        self.tp = []
+        self.fp = []
+        self.frames = []
+        self.track_len = 0
+        self.precision = 0.
+
+
+class PerTrajectoryPR(object):
+    def __init__(self, video_class: SDDVideoClasses, video_number: int, video_meta: SDDVideoDatasets,
+                 gt_annotation_root_path: str = '../Datasets/SDD/annotations/',
+                 generated_annotation_root_path: str = '../Plots/baseline_v2/v0/',
+                 overlap_threshold: float = 2, num_workers: int = 12, batch_size: int = 32,
+                 drop_last_batch: bool = True, custom_video_shape: bool = False,
+                 video_mode: bool = True, save_path_for_video: str = None, desired_fps: int = 5,
+                 plot_scale_factor: int = 1, save_path_for_features: str = None):
+        super(PerTrajectoryPR, self).__init__()
+        self.video_class = video_class
+        self.video_number = video_number
+        self.video_meta = video_meta
+        self.gt_annotation_path = gt_annotation_root_path
+        self.generated_annotation_path = generated_annotation_root_path
+        self.overlap_threshold = overlap_threshold
+
+        self.dataset = SDDSimpleDataset(root=BASE_PATH, video_label=video_class, frames_per_clip=1,
+                                        num_workers=num_workers, num_videos=1, video_number_to_use=video_number,
+                                        step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
+                                        single_track_mode=False, track_id=5, multiple_videos=False)
+
+        self.data_loader = DataLoader(self.dataset, batch_size, drop_last=drop_last_batch)
+        self.gt_annotations = self.dataset.annotations_df
+        self.generated_annotations = pd.read_csv(f'{self.generated_annotation_path}{video_class.value}{video_number}/'
+                                                 f'csv_annotation/generated_annotations.csv')
+
+        frames_shape = self.dataset.original_shape
+        self.video_frame_shape = (1200, 1000) if custom_video_shape else frames_shape
+        self.original_dims = None
+        self.video_mode = video_mode
+
+        _, meta_info = DATASET_META.get_meta(video_meta, video_number)
+        self.ratio = float(meta_info.flatten()[-1])
+
+        self.track_metrics = {}
+        self.save_path_for_features = save_path_for_features
+
+        if video_mode:
+            if frames_shape[0] < frames_shape[1]:
+                self.original_dims = (
+                    frames_shape[1] / 100 * plot_scale_factor, frames_shape[0] / 100 * plot_scale_factor)
+                self.out = cv.VideoWriter(save_path_for_video, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                                          (self.video_frame_shape[1], self.video_frame_shape[0]))
+                self.video_frame_shape[0], self.video_frame_shape[1] = \
+                    self.video_frame_shape[1], self.video_frame_shape[0]
+            else:
+                self.original_dims = (
+                    frames_shape[0] / 100 * plot_scale_factor, frames_shape[1] / 100 * plot_scale_factor)
+                self.out = cv.VideoWriter(save_path_for_video, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), desired_fps,
+                                          (self.video_frame_shape[0], self.video_frame_shape[1]))
+
+    def destroy(self):
+        self.out.release()
+
+    @staticmethod
+    def get_bbox_center(b_box):
+        x_min = b_box[0]
+        y_min = b_box[1]
+        x_max = b_box[2]
+        y_max = b_box[3]
+        x_mid = np.array((x_min + (x_max - x_min) / 2.), dtype=np.int)
+        y_mid = np.array((y_min + (y_max - y_min) / 2.), dtype=np.int)
+
+        return np.vstack((x_mid, y_mid)).T
+
+    def extract_metrics(self):
+        tp_list, fp_list, fn_list = [], [], []
+        try:
+            for p_idx, data in enumerate(tqdm(self.data_loader)):
+                frames, frame_numbers = data
+                frames = frames.squeeze()
+                frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
+                frames_count = frames.shape[0]
+                original_shape = new_shape = [frames.shape[1], frames.shape[2]]
+
+                for frame_idx, (frame, frame_number) in tqdm(enumerate(zip(frames, frame_numbers)),
+                                                             total=len(frame_numbers)):
+                    gt_frame_annotation = get_frame_annotations_and_skip_lost(self.gt_annotations, frame_number.item())
+                    gt_annotations, gt_bbox_centers = scale_annotations(gt_frame_annotation,
+                                                                        original_scale=original_shape,
+                                                                        new_scale=new_shape, return_track_id=False,
+                                                                        tracks_with_annotations=True)
+                    gt_boxes = gt_annotations[:, :-1]
+                    gt_track_idx = gt_annotations[:, -1]
+
+                    generated_frame_annotation = get_generated_frame_annotations(self.generated_annotations,
+                                                                                 frame_number.item())
+                    generated_boxes = generated_frame_annotation[:, 1:5]
+                    generated_track_idx = generated_frame_annotation[:, 0]
+
+                    for generated_t_idx in generated_track_idx:
+                        if generated_t_idx not in self.track_metrics.keys():
+                            self.track_metrics.update({generated_t_idx: MetricPerTrack(track_id=generated_t_idx)})
+
+                    l2_distance_boxes_score_matrix = np.zeros(shape=(len(gt_boxes), len(generated_boxes)))
+                    if generated_boxes.size != 0:
+                        for a_i, a_box in enumerate(gt_boxes):
+                            for r_i, r_box in enumerate(generated_boxes):
+                                dist = np.linalg.norm((self.get_bbox_center(a_box).flatten() -
+                                                       self.get_bbox_center(r_box).flatten()), 2) * self.ratio
+                                l2_distance_boxes_score_matrix[a_i, r_i] = dist
+
+                        l2_distance_boxes_score_matrix = self.overlap_threshold - l2_distance_boxes_score_matrix
+                        l2_distance_boxes_score_matrix[l2_distance_boxes_score_matrix < 0] = 10
+                        # Hungarian
+                        # match_rows, match_cols = scipy.optimize.linear_sum_assignment(-l2_distance_boxes_score_matrix)
+                        match_rows, match_cols = scipy.optimize.linear_sum_assignment(l2_distance_boxes_score_matrix)
+                        actually_matched_mask = l2_distance_boxes_score_matrix[match_rows, match_cols] < 10
+                        match_rows = match_rows[actually_matched_mask]
+                        match_cols = match_cols[actually_matched_mask]
+                        match_rows_tracks_idx = [gt_track_idx[m].item() for m in match_rows]
+                        match_cols_tracks_idx = [generated_track_idx[m] for m in match_cols]
+
+                        for generated_t_idx in generated_track_idx:
+                            if generated_t_idx in match_cols_tracks_idx:
+                                self.track_metrics[generated_t_idx].tp.append(1)
+                            else:
+                                self.track_metrics[generated_t_idx].fp.append(1)
+                            self.track_metrics[generated_t_idx].frames.append(frame_number.item())
+
+                        # gt_track_box_mapping = {a[-1]: a[:-1] for a in gt_annotations}
+                        # for m_c_idx, matched_c in enumerate(match_cols_tracks_idx):
+                        #     gt_t_idx = match_rows_tracks_idx[m_c_idx]
+                        #     # gt_box_idx = np.argwhere(gt_track_idx == gt_t_idx)
+                        #     # track_based_accumulated_features[matched_c].object_features[-1].gt_track_idx = gt_t_idx
+                        #     # track_based_accumulated_features[matched_c].object_features[-1].gt_box = \
+                        #     #     gt_track_box_mapping[gt_t_idx]
+                        #     try:
+                        #         # track_based_accumulated_features[matched_c].object_features[-1].past_gt_box = \
+                        #         #     last_frame_gt_tracks[gt_t_idx]
+                        #         gt_distance = np.linalg.norm(
+                        #             (self.get_bbox_center(gt_track_box_mapping[gt_t_idx]) -
+                        #              self.get_bbox_center(last_frame_gt_tracks[gt_t_idx])), 2, axis=0)
+                        #         # track_based_accumulated_features[matched_c].object_features[-1]. \
+                        #         #     gt_past_current_distance = gt_distance
+                        #     except KeyError:
+                        #         track_based_accumulated_features[matched_c].object_features[-1].past_gt_box = None
+                        #         track_based_accumulated_features[matched_c].object_features[-1]. \
+                        #             gt_past_current_distance = [0, 0]
+
+                        # last_frame_gt_tracks = copy.deepcopy(gt_track_box_mapping)
+
+                        matched_distance_array = [(i, j, l2_distance_boxes_score_matrix[i, j])
+                                                  for i, j in zip(match_rows, match_cols)]
+                    else:
+                        match_rows, match_cols = np.array([]), np.array([])
+                        match_rows_tracks_idx, match_cols_tracks_idx = np.array([]), np.array([])
+
+                    if len(match_rows) != 0:
+                        if len(match_rows) != len(match_cols):
+                            logger.warning('Matching arrays length not same!')
+                        tp = len(match_rows)
+                        fp = len(generated_boxes) - len(match_rows)
+                        fn = len(gt_boxes) - len(match_rows)
+
+                        precision = tp / (tp + fp)
+                        recall = tp / (tp + fn)
+                    else:
+                        tp = 0
+                        fp = 0
+                        fn = len(gt_boxes)
+
+                        precision = 0
+                        recall = 0
+
+                    tp_list.append(tp)
+                    fp_list.append(fp)
+                    fn_list.append(fn)
+
+                    skipped_idx = np.setdiff1d(np.arange(len(generated_track_idx)), match_cols).astype(np.int)
+                    logger.info(f'{self.video_class.name} - {self.video_number} || Precision: {precision} |'
+                                f' Recall: {recall}')
+                    self.plot(frame, frame_number, generated_boxes, generated_track_idx, gt_boxes, gt_track_idx,
+                              precision, recall,
+                              matched_gt_track_idx=gt_track_idx[match_rows] if match_rows.size != 0 else [],
+                              matched_generated_track_idx=
+                              generated_track_idx[match_cols] if match_cols.size != 0 else [],
+                              matched_gt_boxes=gt_boxes[match_rows] if match_rows.size != 0 else [],
+                              matched_generated_boxes=generated_boxes[match_cols] if match_cols.size != 0 else [],
+                              skipped_generated_boxes=generated_boxes[skipped_idx] if skipped_idx.size != 0 else [],
+                              skipped_generated_track_idx=
+                              generated_track_idx[skipped_idx] if skipped_idx.size != 0 else [])
+        except KeyboardInterrupt:
+            if self.video_mode:
+                logger.info('Saving video before exiting!')
+                self.destroy()
+        finally:
+            if self.video_mode:
+                self.destroy()
+            torch.save(self.track_metrics, self.save_path_for_features)
+        logger.info('Finished extracting metrics!')
+
+    @staticmethod
+    def plot_for_video_current_frame(gt_rgb, current_frame_rgb, gt_annotations, current_frame_annotation,
+                                     new_track_annotation, frame_number, additional_text=None, video_mode=False,
+                                     original_dims=None, save_path=None, zero_shot=False, box_annotation=None,
+                                     generated_track_histories=None, gt_track_histories=None, track_marker_size=1,
+                                     return_figure_only=False, plot_gt_bbox_on_generated=False, plot_matched_only=False,
+                                     matched_array=None):
+        fig, ax = plt.subplots(1, 2, sharex='none', sharey='none', figsize=original_dims or (12, 10))
+        ax_gt_rgb, ax_current_frame_rgb = ax[0], ax[1]
+        ax_gt_rgb.imshow(gt_rgb)
+        ax_current_frame_rgb.imshow(current_frame_rgb)
+
+        if box_annotation is None:
+            add_box_to_axes(ax_gt_rgb, gt_annotations)
+            add_box_to_axes(ax_current_frame_rgb, current_frame_annotation)
+            add_box_to_axes(ax_current_frame_rgb, new_track_annotation, 'green')
+        else:
+            add_box_to_axes_with_annotation(ax_gt_rgb, gt_annotations, box_annotation[0])
+            if plot_matched_only:
+                add_box_to_axes_with_annotation(ax_current_frame_rgb, matched_array[1], matched_array[3])
+                add_box_to_axes_with_annotation(ax_current_frame_rgb, matched_array[0], matched_array[2], 'g')
+                add_box_to_axes_with_annotation(ax_current_frame_rgb, matched_array[4], matched_array[5], 'magenta')
+            else:
+                add_box_to_axes_with_annotation(ax_current_frame_rgb, current_frame_annotation, box_annotation[1])
+                if plot_gt_bbox_on_generated:
+                    add_box_to_axes_with_annotation(ax_current_frame_rgb, gt_annotations, box_annotation[0], 'orange')
+            add_box_to_axes_with_annotation(ax_current_frame_rgb, new_track_annotation, [], 'green')
+
+        if gt_track_histories is not None:
+            add_features_to_axis(ax_gt_rgb, gt_track_histories, marker_size=track_marker_size, marker_color='g')
+
+        if generated_track_histories is not None:
+            add_features_to_axis(ax_current_frame_rgb, generated_track_histories, marker_size=track_marker_size,
+                                 marker_color='g')
+
+        ax_gt_rgb.set_title('GT')
+        ax_current_frame_rgb.set_title('Our Method')
+
+        fig.suptitle(f'{"Unsupervised" if zero_shot else "One Shot"} Version\nFrame: {frame_number}\n{additional_text}')
+
+        legends_dict = {'r': 'Bounding Box',
+                        'green': 'New track Box'}
+
+        legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+        fig.legend(handles=legend_patches, loc=2)
+
+        if return_figure_only:
+            plt.close()
+            return fig
+
+        if video_mode:
+            plt.close()
+        else:
+            if save_path is not None:
+                Path(save_path).mkdir(parents=True, exist_ok=True)
+                fig.savefig(save_path + f"frame_{frame_number}.png")
+                plt.close()
+            else:
+                plt.show()
+
+        return fig
+
+    def plot(self, frame, frame_number, generated_boxes, generated_track_idx, gt_boxes, gt_track_idx, precision,
+             recall, matched_generated_track_idx, matched_gt_track_idx, matched_gt_boxes, matched_generated_boxes,
+             skipped_generated_boxes, skipped_generated_track_idx):
+        if self.video_mode:
+            fig = self.plot_for_video_current_frame(
+                gt_rgb=frame, current_frame_rgb=frame,
+                gt_annotations=gt_boxes,
+                current_frame_annotation=generated_boxes,
+                new_track_annotation=[],
+                frame_number=frame_number,
+                box_annotation=[gt_track_idx, generated_track_idx],
+                generated_track_histories=None,
+                gt_track_histories=None,
+                additional_text=f'Precision: {precision} | Recall: {recall}',
+                plot_gt_bbox_on_generated=True,
+                plot_matched_only=True,
+                matched_array=[matched_gt_boxes, matched_generated_boxes,
+                               matched_gt_track_idx, matched_generated_track_idx,
+                               skipped_generated_boxes, skipped_generated_track_idx],
+                video_mode=self.video_mode, original_dims=self.original_dims, zero_shot=True)
+
+            canvas = FigureCanvas(fig)
+            canvas.draw()
+
+            buf = canvas.buffer_rgba()
+            out_frame = np.asarray(buf, dtype=np.uint8)[:, :, :-1]
+            if out_frame.shape[0] != self.video_frame_shape[1] or \
+                    out_frame.shape[1] != self.video_frame_shape[0]:
+                out_frame = skimage.transform.resize(out_frame,
+                                                     (self.video_frame_shape[1], self.video_frame_shape[0]))
+                out_frame = (out_frame * 255).astype(np.uint8)
+            self.out.write(out_frame)
+        else:
+            pass
+            # fig = self.plot_for_video_current_frame(
+            #     gt_rgb=frame, current_frame_rgb=frame,
+            #     gt_annotations=gt_boxes,
+            #     current_frame_annotation=generated_boxes,
+            #     new_track_annotation=[],
+            #     frame_number=frame_number,
+            #     additional_text='',
+            #     video_mode=False, original_dims=self.original_dims, zero_shot=True)
+
+    @staticmethod
+    def analyze_feature(path):
+        features: Dict[int, MetricPerTrack] = torch.load(path)
+        track_len_to_precision = {}
+
+        for key, value in tqdm(features.items()):
+            value.track_length = len(value.frames)
+
+            tp = np.array(value.tp).sum()
+            fp = np.array(value.fp).sum()
+            value.precision = tp / (tp + fp)
+
+            if value.track_length in track_len_to_precision.keys():
+                track_len_to_precision[value.track_length].append(value.precision)
+            else:
+                track_len_to_precision.update({value.track_length: [value.precision]})
+
+        for key, value in tqdm(track_len_to_precision.items()):
+            track_len_to_precision[key] = np.array(value).mean()
+
+        lengths = list(track_len_to_precision.keys())
+        precisions = list(track_len_to_precision.values())
+        plt.bar(lengths, precisions)
+        plt.xlabel('Track Length')
+        plt.ylabel('Precision')
+        plt.title('Precision vs Track Length')
+        plt.suptitle(f'{video_clz.name} - {video_num}')
+        plt.show()
+
+        sns_data = pd.DataFrame.from_dict({'lengths': lengths, 'precision': precisions})
+        # sns.displot(sns_data, x="lengths", y='precision', cbar=True)
+        sns.jointplot(data=sns_data, x="lengths", y='precision')
+        plt.show()
+
+        print()
+
+    @staticmethod
+    def analyze_multiple_features(paths, mode='mean'):
+        features: List[Dict[int, MetricPerTrack]] = [torch.load(path) for path in paths]
+        track_len_to_precision = {}
+
+        for feat in features:
+            for key, value in tqdm(feat.items()):
+                value.track_length = len(value.frames)
+
+                tp = np.array(value.tp).sum()
+                fp = np.array(value.fp).sum()
+                value.precision = tp / (tp + fp)
+
+                if value.track_length in track_len_to_precision.keys():
+                    track_len_to_precision[value.track_length].append(value.precision)
+                else:
+                    track_len_to_precision.update({value.track_length: [value.precision]})
+
+        for key, value in tqdm(track_len_to_precision.items()):
+            if mode == 'mean':
+                track_len_to_precision[key] = np.array(value).mean()
+            else:
+                track_len_to_precision[key] = np.median(np.array(value))
+
+        lengths = list(track_len_to_precision.keys())
+        precisions = list(track_len_to_precision.values())
+        plt.bar(lengths, precisions)
+        plt.xlabel('Track Length')
+        plt.ylabel('Precision')
+        plt.title('Precision vs Track Length')
+        plt.suptitle(f'{video_clz.name}')
+        plt.show()
+
+        sns_data = pd.DataFrame.from_dict({'lengths': lengths, 'precision': precisions})
+        # sns.displot(sns_data, x="lengths", y='precision', cbar=True)
+        sns.jointplot(data=sns_data, x="lengths", y='precision')
+        plt.show()
+
+        print()
+
+    @staticmethod
+    def combine_multiple_features(paths):
+        features: List[Dict[int, MetricPerTrack]] = [torch.load(path) for path in paths]
+        track_len_to_precision = {}
+
+        for feat in features:
+            for key, value in tqdm(feat.items()):
+                value.track_length = len(value.frames)
+
+                tp = np.array(value.tp).sum()
+                fp = np.array(value.fp).sum()
+                value.precision = tp / (tp + fp)
+
+                if value.track_length in track_len_to_precision.keys():
+                    track_len_to_precision[value.track_length].append(value.precision)
+                else:
+                    track_len_to_precision.update({value.track_length: [value.precision]})
+
+        return {'features': features, 'out': track_len_to_precision}
+
+    @staticmethod
+    def just_plot(feat_path, mode='mean'):
+        feat = torch.load(feat_path)
+        track_len_to_precision = feat['out']
+        for key, value in tqdm(track_len_to_precision.items()):
+            if mode == 'mean':
+                track_len_to_precision[key] = np.array(value).mean()
+            else:
+                track_len_to_precision[key] = np.median(np.array(value))
+
+        lengths = list(track_len_to_precision.keys())
+        precisions = list(track_len_to_precision.values())
+        plt.bar(lengths, precisions)
+        plt.xlabel('Track Length')
+        plt.ylabel('Precision')
+        plt.title('Precision vs Track Length')
+        plt.suptitle(f'Whole Dataset')
+        plt.show()
+
+        sns_data = pd.DataFrame.from_dict({'lengths': lengths, 'precision': precisions})
+        # sns.displot(sns_data, x="lengths", y='precision', cbar=True)
+        sns.jointplot(data=sns_data, x="lengths", y='precision')
+        plt.show()
+
+
+if __name__ == '__main__':
+    analyze = False
+    all_dataset = False
+    combine_features = False
+    plot_only = True
+
+    video_clz = SDDVideoClasses.DEATH_CIRCLE
+    video_clz_meta = SDDVideoDatasets.DEATH_CIRCLE
+    video_num = 3
+
+    video_save_path = f'../Plots/baseline_v2/v0/experiments/video_{video_clz.name}_{video_num}.avi'
+    feats_save_path = f'../Plots/baseline_v2/v0/experiments/feats_{video_clz.name}_{video_num}.pt'
+
+    if analyze:
+        # PerTrajectoryPR.analyze_feature(feats_save_path)
+        PerTrajectoryPR.analyze_multiple_features([
+            f'../Plots/baseline_v2/v0/experiments/feats_{video_clz.name}_{i}.pt' for i in range(5)
+        ], mode='median')
+    elif plot_only:
+        feat_path = f'../Plots/baseline_v2/v0/experiments/combined.pt'
+        PerTrajectoryPR.just_plot(feat_path, 'median')
+    elif combine_features:
+        feat_paths = os.listdir(SERVER_PATH + 'Plots/baseline_v2/v0/experiments/')
+        feat_paths = [SERVER_PATH + 'Plots/baseline_v2/v0/experiments/' + p for p in feat_paths]
+        out = PerTrajectoryPR.combine_multiple_features(feat_paths)
+        torch.save(out, SERVER_PATH + 'Plots/baseline_v2/v0/experiments/combined.pt')
+    elif all_dataset:
+        video_clazzes = [SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.GATES,
+                         SDDVideoClasses.HYANG, SDDVideoClasses.NEXUS, SDDVideoClasses.QUAD]
+        video_metas = [SDDVideoDatasets.BOOKSTORE, SDDVideoDatasets.COUPA, SDDVideoDatasets.GATES,
+                       SDDVideoDatasets.HYANG, SDDVideoDatasets.NEXUS, SDDVideoDatasets.QUAD]
+        video_numbers = [[i for i in range(7)], [i for i in range(4)], [i for i in range(9)], [i for i in range(15)],
+                         [i for i in range(12)], [i for i in range(4)]]
+
+        for idx, (v_clz, v_meta) in tqdm(enumerate(zip(video_clazzes, video_metas))):
+            for v_num in video_numbers[idx]:
+                # video_save_path = f'../Plots/baseline_v2/v0/experiments/video_{v_clz.name}_{v_num}.avi'
+                # feats_save_path = f'../Plots/baseline_v2/v0/experiments/feats_{v_clz.name}_{v_num}.pt'
+                video_save_path = f'Plots/baseline_v2/v0/experiments/video_{v_clz.name}_{v_num}.avi'
+                feats_save_path = f'Plots/baseline_v2/v0/experiments/feats_{v_clz.name}_{v_num}.pt'
+                per_trajectory_pr = PerTrajectoryPR(video_class=v_clz, video_number=v_num,
+                                                    video_meta=v_meta,
+                                                    num_workers=4, save_path_for_video=SERVER_PATH + video_save_path,
+                                                    save_path_for_features=SERVER_PATH + feats_save_path,
+                                                    video_mode=False,
+                                                    generated_annotation_root_path=
+                                                    SERVER_PATH + 'Plots/baseline_v2/v0/')
+                per_trajectory_pr.extract_metrics()
+    else:
+        per_trajectory_pr = PerTrajectoryPR(video_class=video_clz, video_number=video_num, video_meta=video_clz_meta,
+                                            num_workers=12, save_path_for_video=video_save_path,
+                                            save_path_for_features=feats_save_path, video_mode=False)
+        per_trajectory_pr.extract_metrics()
