@@ -7,6 +7,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision.datasets.folder import make_dataset
 from torchvision.datasets.utils import list_dir
 from torchvision.datasets.video_utils import VideoClips
+from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
 from average_image.utils import SDDMeta
@@ -23,8 +24,9 @@ class SDDDatasetV0(Dataset):
                  single_track_mode: bool = False, track_id: int = 0, video_number_to_use: int = 0,
                  multiple_videos: bool = False, use_generated: bool = False):
         _mid_path = video_label.value
+        _annotation_decider = "generated_annotations/" if use_generated else "annotations/"
         video_path = root + "videos/" + _mid_path
-        annotation_path = root + "annotations/" + _mid_path
+        annotation_path = root + _annotation_decider + _mid_path
         video_extensions = ('mov',)
         annotation_extension = ('csv',)
 
@@ -52,9 +54,10 @@ class SDDDatasetV0(Dataset):
         self.annotation_list = sort_list(self.annotation_list, self.annotation_list_idx)
         self.annotation_list_idx = sorted(self.annotation_list_idx)
 
+        self.use_generated = use_generated
         if multiple_videos and num_videos == -1:
             annotation_path = self.annotation_list
-            self.annotations_df = [self._read_annotation_file(p) for p in annotation_path]
+            self.annotations_df = [self._read_annotation_file(p, self.use_generated) for p in annotation_path]
 
             video_list_subset = self.video_list
             video_list_idx_subset = self.video_list_idx
@@ -65,7 +68,7 @@ class SDDDatasetV0(Dataset):
         elif multiple_videos:
             # restricted to number of videos
             annotation_path = self.annotation_list[:num_videos]
-            self.annotations_df = [self._read_annotation_file(p) for p in annotation_path]
+            self.annotations_df = [self._read_annotation_file(p, self.use_generated) for p in annotation_path]
 
             video_list_subset = self.video_list[:num_videos]
             video_list_idx_subset = self.video_list_idx[:num_videos]
@@ -78,7 +81,7 @@ class SDDDatasetV0(Dataset):
             video_list_idx_subset = [self.video_list_idx[video_number_to_use]]
 
             annotation_path = [self.annotation_list[video_list_idx_subset[0]]]
-            self.annotations_df = [self._read_annotation_file(p) for p in annotation_path]
+            self.annotations_df = [self._read_annotation_file(p, self.use_generated) for p in annotation_path]
 
             ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
             ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
@@ -123,9 +126,10 @@ class SDDDatasetV0(Dataset):
         return self.video_clips.metadata
 
     @staticmethod
-    def _read_annotation_file(path):
+    def _read_annotation_file(path, use_generated=False):
         dff = pd.read_csv(path)
-        dff = dff.drop(dff.columns[[0]], axis=1)
+        if not use_generated:
+            dff = dff.drop(dff.columns[[0]], axis=1)
         return dff
 
     def __len__(self):
@@ -194,7 +198,28 @@ if __name__ == '__main__':
     dataset = PatchesDataset(root=BASE_PATH, video_label=video_class, frames_per_clip=1,
                              num_workers=n_workers, num_videos=-1, video_number_to_use=video_number,
                              step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
-                             single_track_mode=False, track_id=5, multiple_videos=True)
+                             single_track_mode=False, track_id=5, multiple_videos=True,
+                             use_generated=True)
     loader = DataLoader(dataset, batch_size=8, num_workers=n_workers)
     samples = next(iter(loader))
     print()
+
+    # import shutil
+    # video_clazzes = [SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.DEATH_CIRCLE,
+    #                  SDDVideoClasses.GATES,
+    #                  SDDVideoClasses.HYANG, SDDVideoClasses.LITTLE, SDDVideoClasses.NEXUS, SDDVideoClasses.QUAD]
+    # video_numbers = [[i for i in range(7)], [i for i in range(4)], [i for i in range(5)],
+    #                  [i for i in range(9)], [i for i in range(15)], [i for i in range(4)],
+    #                  [i for i in range(12)], [i for i in range(4)]]
+    # d_root = '../Plots/baseline_v2/v0/'
+    # gen_d_root = '../Datasets/SDD/generated_annotations/'
+    # for idx, v_clz in tqdm(enumerate(video_clazzes)):
+    #     for v_num in video_numbers[idx]:
+    #         d_path = f'{d_root}{v_clz.value}{v_num}/csv_annotation/generated_annotations.csv'
+    #         gen_d_path = f'{gen_d_root}{v_clz.value}/video{v_num}/'
+    #         current_files = os.listdir(gen_d_path)
+    #         current_files.remove('reference.jpg')
+    #         for f in current_files:
+    #             os.remove(os.path.join(gen_d_path, f))
+    #         shutil.copyfile(d_path, gen_d_path + 'generated_annotations.csv')
+
