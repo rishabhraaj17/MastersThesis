@@ -230,7 +230,7 @@ def patches_and_labels_debug(image, bounding_box_size, annotations, frame_number
 
 
 def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_patches=None, new_shape=None,
-                       use_generated=True, radius_elimination=None):
+                       use_generated=True, radius_elimination=None, plot=False):
     original_shape = (image.shape[2], image.shape[3]) if image.ndim == 4 else (image.shape[1], image.shape[2])
     new_shape = original_shape if new_shape is None else original_shape
 
@@ -280,10 +280,11 @@ def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_
 
     overlapping_boxes = [fp_boxes[fp_boxes_match], gt_boxes[gt_box_match]]
 
-    # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes, overlapping_boxes=overlapping_boxes)
-    # gt_crops_grid = torchvision.utils.make_grid(gt_crops_resized)
-    # plt.imshow(gt_crops_grid.permute(1, 2, 0))
-    # plt.show()
+    if plot:
+        show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes, overlapping_boxes=overlapping_boxes)
+        gt_crops_grid = torchvision.utils.make_grid(gt_crops_resized)
+        plt.imshow(gt_crops_grid.permute(1, 2, 0))
+        plt.show()
 
     fp_boxes = fp_boxes[valid_fp_boxes_idx]
     boxes = boxes[valid_fp_boxes_idx]
@@ -331,10 +332,11 @@ def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_
         fp_boxes = torch.cat((fp_boxes, replaceable_fp_boxes))
         crops = torch.cat((crops, replaceable_crops))
 
-    # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes)
-    # fp_crops_grid = torchvision.utils.make_grid(crops)
-    # plt.imshow(fp_crops_grid.permute(1, 2, 0))
-    # plt.show()
+    if plot:
+        show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes)
+        fp_crops_grid = torchvision.utils.make_grid(crops)
+        plt.imshow(fp_crops_grid.permute(1, 2, 0))
+        plt.show()
 
     gt_crops_resized = torch.stack(gt_crops_resized)
     gt_patches_and_labels = {'patches': gt_crops_resized, 'labels': torch.ones(size=(gt_crops_resized.shape[0],))}
