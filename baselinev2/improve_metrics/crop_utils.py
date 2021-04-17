@@ -9,9 +9,10 @@ from matplotlib import pyplot as plt, patches
 
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost, scale_annotations
 from average_image.constants import SDDVideoClasses
+from baseline.extracted_of_optimization import is_point_inside_circle
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import add_box_to_axes
-from baselinev2.utils import get_generated_frame_annotations
+from baselinev2.utils import get_generated_frame_annotations, get_bbox_center
 
 
 class CustomRandomCrop(transforms.RandomCrop):
@@ -229,7 +230,7 @@ def patches_and_labels_debug(image, bounding_box_size, annotations, frame_number
 
 
 def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_patches=None, new_shape=None,
-                       use_generated=True, radius_elimination=True):
+                       use_generated=True, radius_elimination=None):
     original_shape = (image.shape[2], image.shape[3]) if image.ndim == 4 else (image.shape[1], image.shape[2])
     new_shape = original_shape if new_shape is None else original_shape
 
@@ -262,14 +263,27 @@ def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_
     boxes_iou = torchvision.ops.box_iou(gt_boxes, fp_boxes)
     gt_box_match, fp_boxes_match = torch.where(boxes_iou)
 
-    valid_fp_boxes_idx = np.setdiff1d(np.arange(fp_boxes.shape[0]), fp_boxes_match.numpy())
+    fp_boxes_match_numpy = fp_boxes_match.numpy()
+
+    l2_distances_matrix = np.zeros(shape=(fp_boxes.shape[0], fp_boxes.shape[0]))
+    if radius_elimination is not None:
+        fp_boxes_centers = np.stack([get_bbox_center(fp_box) for fp_box in fp_boxes.numpy()]).squeeze()
+
+        for g_idx, gt_center in enumerate(gt_bbox_centers):
+            for f_idx, fp_center in enumerate(fp_boxes_centers):
+                l2_distances_matrix[g_idx, f_idx] = np.linalg.norm((gt_center - fp_center), ord=2, axis=-1)
+
+        gt_r_invalid, fp_r_invalid = np.where(l2_distances_matrix < radius_elimination)
+        fp_boxes_match_numpy = np.union1d(fp_boxes_match.numpy(), fp_r_invalid)
+
+    valid_fp_boxes_idx = np.setdiff1d(np.arange(fp_boxes.shape[0]), fp_boxes_match_numpy)
 
     overlapping_boxes = [fp_boxes[fp_boxes_match], gt_boxes[gt_box_match]]
 
-    show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes, overlapping_boxes=overlapping_boxes)
-    gt_crops_grid = torchvision.utils.make_grid(gt_crops_resized)
-    plt.imshow(gt_crops_grid.permute(1, 2, 0))
-    plt.show()
+    # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes, overlapping_boxes=overlapping_boxes)
+    # gt_crops_grid = torchvision.utils.make_grid(gt_crops_resized)
+    # plt.imshow(gt_crops_grid.permute(1, 2, 0))
+    # plt.show()
 
     fp_boxes = fp_boxes[valid_fp_boxes_idx]
     boxes = boxes[valid_fp_boxes_idx]
@@ -287,7 +301,21 @@ def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_
         temp_boxes_iou = torchvision.ops.box_iou(gt_boxes, temp_fp_boxes)
         temp_gt_box_match, temp_fp_boxes_match = torch.where(temp_boxes_iou)
 
-        temp_valid_fp_boxes_idx = np.setdiff1d(np.arange(temp_fp_boxes.shape[0]), temp_fp_boxes_match.numpy())
+        temp_fp_boxes_match_numpy = temp_fp_boxes_match.numpy()
+        if radius_elimination:
+            temp_l2_distances_matrix = np.zeros(shape=(gt_boxes.shape[0], temp_fp_boxes.shape[0]))
+            temp_fp_boxes_centers = np.stack([get_bbox_center(fp_box) for fp_box in temp_fp_boxes.numpy()]).squeeze()
+
+            for g_idx, gt_center in enumerate(gt_bbox_centers):
+                if temp_fp_boxes_centers.ndim == 1:
+                    temp_fp_boxes_centers = np.expand_dims(temp_fp_boxes_centers, axis=0)
+                for f_idx, fp_center in enumerate(temp_fp_boxes_centers):
+                    temp_l2_distances_matrix[g_idx, f_idx] = np.linalg.norm((gt_center - fp_center), ord=2, axis=-1)
+
+            temp_gt_r_invalid, temp_fp_r_invalid = np.where(temp_l2_distances_matrix < radius_elimination)
+            temp_fp_boxes_match_numpy = np.union1d(temp_fp_boxes_match.numpy(), temp_fp_r_invalid)
+
+        temp_valid_fp_boxes_idx = np.setdiff1d(np.arange(temp_fp_boxes.shape[0]), temp_fp_boxes_match_numpy)
         replaceable_boxes.append(temp_boxes[temp_valid_fp_boxes_idx])
         replaceable_fp_boxes.append(temp_fp_boxes[temp_valid_fp_boxes_idx])
         replaceable_crops.append(temp_crops[temp_valid_fp_boxes_idx])
@@ -303,10 +331,10 @@ def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_
         fp_boxes = torch.cat((fp_boxes, replaceable_fp_boxes))
         crops = torch.cat((crops, replaceable_crops))
 
-    show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes)
-    fp_crops_grid = torchvision.utils.make_grid(crops)
-    plt.imshow(fp_crops_grid.permute(1, 2, 0))
-    plt.show()
+    # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes)
+    # fp_crops_grid = torchvision.utils.make_grid(crops)
+    # plt.imshow(fp_crops_grid.permute(1, 2, 0))
+    # plt.show()
 
     gt_crops_resized = torch.stack(gt_crops_resized)
     gt_patches_and_labels = {'patches': gt_crops_resized, 'labels': torch.ones(size=(gt_crops_resized.shape[0],))}
@@ -320,12 +348,12 @@ def test_patches_and_labels(video_path, frame_number, bounding_box_size, annotat
     frame = extract_frame_from_video(video_path, frame_number)
     frame = torch.from_numpy(frame).permute(2, 0, 1)
     patches_and_labels(frame, bounding_box_size, annotations, frame_number, num_patches,
-                       use_generated=use_generated)
+                       use_generated=use_generated, radius_elimination=100)
     print()
 
 
 if __name__ == '__main__':
-    use_generated_annotations = True
+    use_generated_annotations = False
     box_size = 50
     num_patch = 10
 
@@ -339,7 +367,7 @@ if __name__ == '__main__':
     annotation_path = f'{annotation_root_path}{v_clz.value}/video{v_num}/annotation_augmented.csv'
     generated_annotations = pd.read_csv(f'{generated_annotation_root_path}{v_clz.value}{v_num}/'
                                         f'csv_annotation/generated_annotations.csv')
-    f_num = 368
+    f_num = 508
 
     annotations_df = read_annotation_file(annotation_path)
 
@@ -364,3 +392,16 @@ if __name__ == '__main__':
     #     show_crop(image[0].permute(1, 2, 0), out_crops[crop_idx][0].permute(1, 2, 0), [out_boxes[crop_idx]])
     #     show_crop(image[1].permute(1, 2, 0), out_crops[crop_idx][1].permute(1, 2, 0), [out_boxes[crop_idx]])
     #     print()
+
+    # fp_boxes_numpy = fp_boxes.numpy()
+    # for fp_idx, (fp_box, (c_x, c_y)) in enumerate(zip(fp_boxes_numpy, gt_bbox_centers)):
+    #     is_any_corner_inside = []
+    #     x1, y1, x2, y2 = fp_box
+    #     is_any_corner_inside.append(is_point_inside_circle(c_x, c_y, radius_elimination, x1, y1))
+    #     is_any_corner_inside.append(is_point_inside_circle(c_x, c_y, radius_elimination, x1, y2))
+    #     is_any_corner_inside.append(is_point_inside_circle(c_x, c_y, radius_elimination, x2, y1))
+    #     is_any_corner_inside.append(is_point_inside_circle(c_x, c_y, radius_elimination, x2, y2))
+    #     is_any_corner_inside = np.array(is_any_corner_inside)
+    #
+    #     if is_any_corner_inside.any() and not np.isin(fp_box, fp_boxes_numpy):
+    #         fp_boxes_radius_elimination_idx.append(fp_idx)
