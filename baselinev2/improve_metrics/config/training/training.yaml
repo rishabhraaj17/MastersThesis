@@ -1,0 +1,44 @@
+# @package _global_
+num_workers : 0
+make_checkpoint: True
+data_augmentation: 1
+
+# trainer
+trainer:
+  max_epochs : 400
+  gpus : 1
+  fast_dev_run: True
+
+
+batch_size: 4
+shuffle: False
+pin_memory: True
+lr: 1e-4
+patience: 4
+monitor_val: 'val_loss'
+
+# dataset
+use_generated_dataset: False
+
+dataset:
+  name: 'stanford'
+  num_workers: 12
+  video_to_use: 0
+  num_videos: [0, 1, 2, 4]  # -1
+  val_num_videos: [3]
+  multiple_videos: True
+  merge_annotations: True
+  root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/"
+  # root: "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/"
+
+  ratio:
+    train: 0.8
+    test: 0.2
+    val: 0.2
+
+# plot
+plot_val: False
+
+
+
+

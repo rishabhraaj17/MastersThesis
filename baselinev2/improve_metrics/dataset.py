@@ -1,8 +1,11 @@
 import os
 from typing import Optional, Any, Union, Tuple
 
+import numpy as np
 import pandas as pd
+import torch
 import torchvision
+from omegaconf import ListConfig
 from torch.utils.data import Dataset, DataLoader
 from torchvision.datasets.folder import make_dataset
 from torchvision.datasets.utils import list_dir
@@ -14,6 +17,26 @@ from average_image.utils import SDDMeta
 from baselinev2.config import BASE_PATH
 from baselinev2.improve_metrics.crop_utils import patches_and_labels
 from unsupervised_tp_0.dataset import resize_frames, sort_list
+
+
+def people_collate_fn(batch):
+    gt_patches, fp_patches = [], []
+    gt_labels, fp_labels = [], []
+    for ele in batch:
+        gt, fp = ele
+        gt_patches.append(gt['patches'])
+        fp_patches.append(fp['patches'])
+
+        gt_labels.append(gt['labels'])
+        fp_labels.append(fp['labels'])
+
+    gt_patches = torch.cat(gt_patches, dim=0)
+    fp_patches = torch.cat(fp_patches, dim=0)
+
+    gt_labels = torch.cat(gt_labels)
+    fp_labels = torch.cat(fp_labels)
+
+    return [{'patches': gt_patches, 'labels': gt_labels}, {'patches': fp_patches, 'labels': fp_labels}]
 
 
 class SDDDatasetV0(Dataset):
@@ -61,6 +84,18 @@ class SDDDatasetV0(Dataset):
 
             video_list_subset = self.video_list
             video_list_idx_subset = self.video_list_idx
+
+            ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
+            ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
+            self.original_shape = [[r.shape[1], r.shape[2]] for r in ref_image]
+        if multiple_videos and (isinstance(num_videos, list) or isinstance(num_videos, ListConfig)):
+            # restricted to number of videos
+            num_videos = list(num_videos)
+            annotation_path = [self.annotation_list[n] for n in num_videos]
+            self.annotations_df = [self._read_annotation_file(p, self.use_generated) for p in annotation_path]
+
+            video_list_subset = [self.video_list[n] for n in num_videos]
+            video_list_idx_subset = [self.video_list_idx[n] for n in num_videos]
 
             ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
             ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
@@ -167,7 +202,7 @@ class PatchesDataset(SDDDatasetV0):
                  single_track_mode: bool = False, track_id: int = 0, video_number_to_use: int = 0,
                  multiple_videos: bool = False, bounding_box_size: Union[int, Tuple[int]] = 50,
                  num_patches: Optional[int] = None, use_generated: bool = False,
-                 radius_elimination: Optional[int] = 100):
+                 radius_elimination: Optional[int] = 100, merge_annotations: bool = False, plot: bool = False):
         super().__init__(root, video_label, frames_per_clip, num_videos, step_factor, step_between_clips, frame_rate,
                          fold, train, transform, _precomputed_metadata, num_workers, _video_width, _video_height,
                          _video_min_dimension, _audio_samples, scale, single_track_mode, track_id, video_number_to_use,
@@ -175,34 +210,52 @@ class PatchesDataset(SDDDatasetV0):
         self.bounding_box_size = bounding_box_size
         self.num_patches = num_patches
         self.radius_elimination = radius_elimination
+        self.merge_annotations = merge_annotations
+        self.multiple_videos = multiple_videos
+        self.num_videos = num_videos
+        self.plot = plot
+
+        if merge_annotations and multiple_videos and num_videos == -1:
+            frame_counts = [d.frame.max() for d in self.annotations_df]
+            frame_counts_cumsum = np.cumsum(frame_counts)
+
+            frame_adjusted_dfs = [self.annotations_df[0]]
+            for idx in range(1, len(self.annotations_df)):
+                temp = self.annotations_df[idx]
+                temp.frame += frame_counts_cumsum[idx - 1] + 1
+                frame_adjusted_dfs.append(temp)
+
+            self.merged_annotations = pd.concat(frame_adjusted_dfs)
 
     def __getitem__(self, item):
         frames, frame_numbers, video_idx = super(PatchesDataset, self).__getitem__(item=item)
         gt_patches_and_labels, fp_patches_and_labels = patches_and_labels(
             image=frames.squeeze(0),
             bounding_box_size=self.bounding_box_size,
-            annotations=self.annotations_df[video_idx],
+            annotations=self.merged_annotations
+            if self.merge_annotations and self.multiple_videos and self.num_videos == -1
+            else self.annotations_df[video_idx],
             frame_number=frame_numbers,
             num_patches=self.num_patches,
             new_shape=self.new_scale,
-            use_generated=self.use_generated, plot=False,
+            use_generated=self.use_generated, plot=self.plot,
             radius_elimination=self.radius_elimination)
         return gt_patches_and_labels, fp_patches_and_labels
 
 
 if __name__ == '__main__':
-    video_class = SDDVideoClasses.QUAD
+    video_class = SDDVideoClasses.LITTLE
     video_number = 0
-    n_workers = 0
+    n_workers = 12
 
     dataset = PatchesDataset(root=BASE_PATH, video_label=video_class, frames_per_clip=1,
                              num_workers=n_workers, num_videos=-1, video_number_to_use=video_number,
                              step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
                              single_track_mode=False, track_id=5, multiple_videos=True,
-                             use_generated=True)
-    loader = DataLoader(dataset, batch_size=8, num_workers=n_workers)
-    samples = next(iter(loader))
-    print()
+                             use_generated=False, plot=True, merge_annotations=True)
+    loader = DataLoader(dataset, batch_size=8, num_workers=n_workers, shuffle=False, collate_fn=people_collate_fn)
+    for data in loader:
+        print()
 
     # import shutil
     # video_clazzes = [SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.DEATH_CIRCLE,
