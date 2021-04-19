@@ -1,5 +1,5 @@
 # @package _global_
-num_workers : 0
+num_workers : 12
 make_checkpoint: True
 data_augmentation: 1
 
@@ -7,10 +7,10 @@ data_augmentation: 1
 trainer:
   max_epochs : 400
   gpus : 1
-  fast_dev_run: True
+  fast_dev_run: False
 
 
-batch_size: 4
+batch_size: 6
 shuffle: False
 pin_memory: True
 lr: 1e-4

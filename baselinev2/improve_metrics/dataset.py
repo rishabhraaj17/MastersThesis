@@ -240,6 +240,19 @@ class PatchesDataset(SDDDatasetV0):
             new_shape=self.new_scale,
             use_generated=self.use_generated, plot=self.plot,
             radius_elimination=self.radius_elimination)
+        if len(gt_patches_and_labels) == 0 or len(fp_patches_and_labels) == 0:
+            frames, frame_numbers, video_idx = super(PatchesDataset, self).__getitem__(item=0)
+            gt_patches_and_labels, fp_patches_and_labels = patches_and_labels(
+                image=frames.squeeze(0),
+                bounding_box_size=self.bounding_box_size,
+                annotations=self.merged_annotations
+                if self.merge_annotations and self.multiple_videos and self.num_videos == -1
+                else self.annotations_df[video_idx],
+                frame_number=frame_numbers,
+                num_patches=self.num_patches,
+                new_shape=self.new_scale,
+                use_generated=self.use_generated, plot=self.plot,
+                radius_elimination=self.radius_elimination)
         return gt_patches_and_labels, fp_patches_and_labels
 
 

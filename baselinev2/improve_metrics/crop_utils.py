@@ -13,6 +13,10 @@ from baseline.extracted_of_optimization import is_point_inside_circle
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import add_box_to_axes
 from baselinev2.utils import get_generated_frame_annotations, get_bbox_center
+from log import initialize_logging, get_logger
+
+initialize_logging()
+logger = get_logger('baselinev2.improve_metrics.crop_utils')
 
 
 class CustomRandomCrop(transforms.RandomCrop):
@@ -125,7 +129,13 @@ def sample_random_crops(img, size, n):
         crops.append(crop)
         boxes.append(torch.tensor(b_box))
 
-    return torch.stack(crops), torch.stack(boxes)
+    try:
+        crops = torch.stack(crops)
+        boxes = torch.stack(boxes)
+    except RuntimeError:
+        logger.warning('Skipping as frame not found!')
+    return crops, boxes
+    # return torch.stack(crops), torch.stack(boxes)
 
 
 def patches_and_labels_debug(image, bounding_box_size, annotations, frame_number, num_patches=None, new_shape=None,
@@ -247,6 +257,9 @@ def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_
                                                             tracks_with_annotations=True)
         gt_boxes = torch.from_numpy(gt_annotations[:, :-1])
 
+    if frame_annotation.size == 0:
+        return {}, {}
+
     num_patches = frame_annotation.shape[0] if num_patches is None else num_patches
     crops, boxes = sample_random_crops(image, bounding_box_size, num_patches)
 
@@ -270,6 +283,8 @@ def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_
         fp_boxes_centers = np.stack([get_bbox_center(fp_box) for fp_box in fp_boxes.numpy()]).squeeze()
 
         for g_idx, gt_center in enumerate(gt_bbox_centers):
+            if fp_boxes_centers.ndim == 1:
+                fp_boxes_centers = np.expand_dims(fp_boxes_centers, axis=0)
             for f_idx, fp_center in enumerate(fp_boxes_centers):
                 l2_distances_matrix[g_idx, f_idx] = np.linalg.norm((gt_center - fp_center), ord=2, axis=-1)
 
