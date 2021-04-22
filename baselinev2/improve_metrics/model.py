@@ -143,8 +143,6 @@ def linear_split(dataset: Dataset[T], lengths: Sequence[int]) -> List[Subset[T]]
     Randomly split a dataset into non-overlapping new datasets of given lengths.
     Optionally fix the generator for reproducible results, e.g.:
 
-    >>> linear_split(range(10), [3, 7])
-
     Args:
         dataset (Dataset): Dataset to be split
         lengths (sequence): lengths of splits to be produced
@@ -179,23 +177,64 @@ def make_datasets_linear_split(cfg, video_class, return_test_split=False, plot=F
     return train_dataset, val_dataset
 
 
-def make_datasets_simple(cfg, video_class, return_test_split=False, plot=False):
+def make_datasets_simple(cfg, video_class, return_test_split=False, plot=False, server_mode=False):
+    all_video_classes = [SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.DEATH_CIRCLE,
+                         SDDVideoClasses.GATES, SDDVideoClasses.HYANG, SDDVideoClasses.LITTLE,
+                         SDDVideoClasses.NEXUS, SDDVideoClasses.QUAD]
+    logger.info(f'Setting up train datasets...')
+
     train_datasets = []
-    for n in cfg.dataset.num_videos:
-        train_datasets.append(PatchesDataset(root=cfg.dataset.root, video_label=video_class, frames_per_clip=1,
-                                             num_workers=cfg.dataset.num_workers, num_videos=1,
-                                             video_number_to_use=n, plot=plot,
-                                             step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
-                                             single_track_mode=False, track_id=5, multiple_videos=False,
-                                             use_generated=cfg.use_generated_dataset, merge_annotations=False))
+    if server_mode:
+        for v_idx, v_clz in enumerate(all_video_classes):
+            for v_num in cfg.dataset.all_train_videos[v_idx]:
+                logger.info(f'Setting up dataset {v_idx} -> {v_clz.name} : {v_num}')
+                train_datasets.append(PatchesDataset(root=cfg.dataset.root, video_label=v_clz, frames_per_clip=1,
+                                                     num_workers=cfg.dataset.num_workers, num_videos=1,
+                                                     video_number_to_use=v_num, plot=plot,
+                                                     step_between_clips=1, transform=resize_frames, scale=1,
+                                                     frame_rate=30,
+                                                     single_track_mode=False, track_id=5, multiple_videos=False,
+                                                     use_generated=cfg.use_generated_dataset, merge_annotations=False,
+                                                     only_long_trajectories=cfg.dataset.only_long_trajectories,
+                                                     track_length_threshold=cfg.dataset.track_length_threshold))
+    else:
+        for n in cfg.dataset.num_videos:
+            logger.info(f'Setting up dataset -> {video_class.name} : {n}')
+            train_datasets.append(PatchesDataset(root=cfg.dataset.root, video_label=video_class, frames_per_clip=1,
+                                                 num_workers=cfg.dataset.num_workers, num_videos=1,
+                                                 video_number_to_use=n, plot=plot,
+                                                 step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
+                                                 single_track_mode=False, track_id=5, multiple_videos=False,
+                                                 use_generated=cfg.use_generated_dataset, merge_annotations=False,
+                                                 only_long_trajectories=cfg.dataset.only_long_trajectories,
+                                                 track_length_threshold=cfg.dataset.track_length_threshold))
+    logger.info(f'Setting up validation datasets...')
+
     val_datasets = []
-    for n in cfg.dataset.val_num_videos:
-        val_datasets.append(PatchesDataset(root=cfg.dataset.root, video_label=video_class, frames_per_clip=1,
-                                           num_workers=cfg.dataset.num_workers, num_videos=1,
-                                           video_number_to_use=n, plot=plot,
-                                           step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
-                                           single_track_mode=False, track_id=5, multiple_videos=False,
-                                           use_generated=cfg.use_generated_dataset, merge_annotations=False))
+    if server_mode:
+        for v_idx, v_clz in enumerate(all_video_classes):
+            for v_num in cfg.dataset.all_val_videos[v_idx]:
+                logger.info(f'Setting up dataset {v_idx} -> {v_clz.name} : {v_num}')
+                val_datasets.append(PatchesDataset(root=cfg.dataset.root, video_label=v_clz, frames_per_clip=1,
+                                                   num_workers=cfg.dataset.num_workers, num_videos=1,
+                                                   video_number_to_use=v_num, plot=plot,
+                                                   step_between_clips=1, transform=resize_frames, scale=1,
+                                                   frame_rate=30,
+                                                   single_track_mode=False, track_id=5, multiple_videos=False,
+                                                   use_generated=cfg.use_generated_dataset, merge_annotations=False,
+                                                   only_long_trajectories=cfg.dataset.only_long_trajectories,
+                                                   track_length_threshold=cfg.dataset.track_length_threshold))
+    else:
+        for n in cfg.dataset.val_num_videos:
+            logger.info(f'Setting up dataset -> {video_class.name} : {n}')
+            val_datasets.append(PatchesDataset(root=cfg.dataset.root, video_label=video_class, frames_per_clip=1,
+                                               num_workers=cfg.dataset.num_workers, num_videos=1,
+                                               video_number_to_use=n, plot=plot,
+                                               step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
+                                               single_track_mode=False, track_id=5, multiple_videos=False,
+                                               use_generated=cfg.use_generated_dataset, merge_annotations=False,
+                                               only_long_trajectories=cfg.dataset.only_long_trajectories,
+                                               track_length_threshold=cfg.dataset.track_length_threshold))
     train_dataset, val_dataset = ConcatDataset(train_datasets), ConcatDataset(val_datasets)
     return train_dataset, val_dataset
 
@@ -208,7 +247,9 @@ def make_test_datasets_simple(cfg, video_class, plot=False):
                                             video_number_to_use=n, plot=plot,
                                             step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
                                             single_track_mode=False, track_id=5, multiple_videos=False,
-                                            use_generated=cfg.eval.use_generated_dataset, merge_annotations=False))
+                                            use_generated=cfg.eval.use_generated_dataset, merge_annotations=False,
+                                            only_long_trajectories=cfg.eval.dataset.only_long_trajectories,
+                                            track_length_threshold=cfg.eval.dataset.track_length_threshold))
     return ConcatDataset(test_datasets)
 
 
@@ -301,7 +342,10 @@ def people_collate_fn(batch):
 
 @hydra.main(config_path="config", config_name="config")
 def model_trainer(cfg):
-    train_dataset, val_dataset = make_datasets_simple(cfg, VIDEO_CLASS, return_test_split=False, plot=False)
+    logger.info(f'Setting up datasets...')
+    train_dataset, val_dataset = make_datasets_simple(cfg, VIDEO_CLASS, return_test_split=False, plot=False,
+                                                      server_mode=False)
+    logger.info(f'Setting up model...')
     conv_layers = make_conv_blocks(cfg.input_dim, cfg.out_channels, cfg.kernel_dims, cfg.stride, cfg.padding,
                                    cfg.batch_norm, non_lin=Activations.RELU, dropout=cfg.dropout)
     classifier_layers = make_classifier_block(cfg.in_feat, cfg.out_feat, Activations.RELU)
@@ -311,8 +355,12 @@ def model_trainer(cfg):
                              batch_size=cfg.batch_size, num_workers=cfg.num_workers, shuffle=cfg.shuffle,
                              pin_memory=cfg.pin_memory, lr=cfg.lr, collate_fn=people_collate_fn)
 
+    logger.info(f'Setting up Trainer...')
+
     trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                       fast_dev_run=cfg.trainer.fast_dev_run)
+    logger.info(f'Starting training...')
+
     trainer.fit(model)
 
 

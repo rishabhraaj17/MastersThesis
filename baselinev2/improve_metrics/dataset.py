@@ -202,7 +202,8 @@ class PatchesDataset(SDDDatasetV0):
                  single_track_mode: bool = False, track_id: int = 0, video_number_to_use: int = 0,
                  multiple_videos: bool = False, bounding_box_size: Union[int, Tuple[int]] = 50,
                  num_patches: Optional[int] = None, use_generated: bool = False,
-                 radius_elimination: Optional[int] = 100, merge_annotations: bool = False, plot: bool = False):
+                 radius_elimination: Optional[int] = 100, merge_annotations: bool = False, plot: bool = False,
+                 only_long_trajectories: bool = False, track_length_threshold: int = 5):
         super().__init__(root, video_label, frames_per_clip, num_videos, step_factor, step_between_clips, frame_rate,
                          fold, train, transform, _precomputed_metadata, num_workers, _video_width, _video_height,
                          _video_min_dimension, _audio_samples, scale, single_track_mode, track_id, video_number_to_use,
@@ -214,6 +215,8 @@ class PatchesDataset(SDDDatasetV0):
         self.multiple_videos = multiple_videos
         self.num_videos = num_videos
         self.plot = plot
+        self.only_long_trajectories = only_long_trajectories
+        self.track_length_threshold = track_length_threshold
 
         if merge_annotations and multiple_videos and num_videos == -1:
             frame_counts = [d.frame.max() for d in self.annotations_df]
@@ -239,7 +242,9 @@ class PatchesDataset(SDDDatasetV0):
             num_patches=self.num_patches,
             new_shape=self.new_scale,
             use_generated=self.use_generated, plot=self.plot,
-            radius_elimination=self.radius_elimination)
+            radius_elimination=self.radius_elimination,
+            only_long_trajectories=self.only_long_trajectories,
+            track_length_threshold=self.track_length_threshold)
         if len(gt_patches_and_labels) == 0 or len(fp_patches_and_labels) == 0:
             frames, frame_numbers, video_idx = super(PatchesDataset, self).__getitem__(item=0)
             gt_patches_and_labels, fp_patches_and_labels = patches_and_labels(
@@ -252,7 +257,9 @@ class PatchesDataset(SDDDatasetV0):
                 num_patches=self.num_patches,
                 new_shape=self.new_scale,
                 use_generated=self.use_generated, plot=self.plot,
-                radius_elimination=self.radius_elimination)
+                radius_elimination=self.radius_elimination,
+                only_long_trajectories=self.only_long_trajectories,
+                track_length_threshold=self.track_length_threshold)
         return gt_patches_and_labels, fp_patches_and_labels
 
 
@@ -288,4 +295,3 @@ if __name__ == '__main__':
     #         for f in current_files:
     #             os.remove(os.path.join(gen_d_path, f))
     #         shutil.copyfile(d_path, gen_d_path + 'generated_annotations.csv')
-

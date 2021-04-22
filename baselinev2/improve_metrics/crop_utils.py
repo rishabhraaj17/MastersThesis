@@ -12,7 +12,7 @@ from average_image.constants import SDDVideoClasses
 from baseline.extracted_of_optimization import is_point_inside_circle
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import add_box_to_axes
-from baselinev2.utils import get_generated_frame_annotations, get_bbox_center
+from baselinev2.utils import get_generated_frame_annotations, get_bbox_center, get_generated_track_annotations_for_frame
 from log import initialize_logging, get_logger
 
 initialize_logging()
@@ -240,24 +240,38 @@ def patches_and_labels_debug(image, bounding_box_size, annotations, frame_number
 
 
 def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_patches=None, new_shape=None,
-                       use_generated=True, radius_elimination=None, plot=False):
+                       use_generated=True, radius_elimination=None, plot=False, only_long_trajectories=False,
+                       track_length_threshold=60):
     original_shape = (image.shape[2], image.shape[3]) if image.ndim == 4 else (image.shape[1], image.shape[2])
     new_shape = original_shape if new_shape is None else original_shape
 
-    if use_generated:
-        frame_annotation = get_generated_frame_annotations(annotations, frame_number)
-        gt_boxes = torch.from_numpy(frame_annotation[:, 1:5].astype(np.int))
-        generated_track_idx = frame_annotation[:, 0]
-        gt_bbox_centers = frame_annotation[:, 7:9]
+    if only_long_trajectories:
+        if use_generated:
+            frame_annotation = get_generated_frame_annotations(annotations, frame_number)
+            track_annotations = get_generated_track_annotations_for_frame(annotations, frame_number)
+            track_lengths = np.array([t.shape[0] for t in track_annotations])
+            feasible_track_length = track_lengths > track_length_threshold
+            feasible_frame_annotations = frame_annotation[feasible_track_length]
+            gt_boxes = torch.from_numpy(feasible_frame_annotations[:, 1:5].astype(np.int))
+            generated_track_idx = feasible_frame_annotations[:, 0]
+            gt_bbox_centers = feasible_frame_annotations[:, 7:9]
+        else:
+            return NotImplemented
     else:
-        frame_annotation = get_frame_annotations_and_skip_lost(annotations, frame_number)
-        gt_annotations, gt_bbox_centers = scale_annotations(frame_annotation,
-                                                            original_scale=original_shape,
-                                                            new_scale=new_shape, return_track_id=False,
-                                                            tracks_with_annotations=True)
-        gt_boxes = torch.from_numpy(gt_annotations[:, :-1])
+        if use_generated:
+            frame_annotation = get_generated_frame_annotations(annotations, frame_number)
+            gt_boxes = torch.from_numpy(frame_annotation[:, 1:5].astype(np.int))
+            generated_track_idx = frame_annotation[:, 0]
+            gt_bbox_centers = frame_annotation[:, 7:9]
+        else:
+            frame_annotation = get_frame_annotations_and_skip_lost(annotations, frame_number)
+            gt_annotations, gt_bbox_centers = scale_annotations(frame_annotation,
+                                                                original_scale=original_shape,
+                                                                new_scale=new_shape, return_track_id=False,
+                                                                tracks_with_annotations=True)
+            gt_boxes = torch.from_numpy(gt_annotations[:, :-1])
 
-    if frame_annotation.size == 0:
+    if frame_annotation.size == 0 or feasible_frame_annotations.size == 0:
         return {}, {}
 
     num_patches = frame_annotation.shape[0] if num_patches is None else num_patches
@@ -361,36 +375,37 @@ def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_
 
 
 def test_patches_and_labels(video_path, frame_number, bounding_box_size, annotations, num_patches=None,
-                            use_generated=True):
+                            use_generated=True, plot=False, only_long_trajectories=False):
     frame = extract_frame_from_video(video_path, frame_number)
     frame = torch.from_numpy(frame).permute(2, 0, 1)
     patches_and_labels(frame, bounding_box_size, annotations, frame_number, num_patches,
-                       use_generated=use_generated, radius_elimination=100)
+                       use_generated=use_generated, radius_elimination=100, plot=plot,
+                       only_long_trajectories=only_long_trajectories)
     print()
 
 
 if __name__ == '__main__':
-    use_generated_annotations = False
+    use_generated_annotations = True
     box_size = 50
     num_patch = 10
 
     v_root_path = '../Datasets/SDD/videos/'
     annotation_root_path = '../Datasets/SDD/annotations/'
     generated_annotation_root_path = '../Plots/baseline_v2/v0/'
-    v_clz = SDDVideoClasses.HYANG
-    v_num = 0
+    v_clz = SDDVideoClasses.DEATH_CIRCLE
+    v_num = 3
 
     v_path = f'{v_root_path}{v_clz.value}/video{v_num}/video.mov'
     annotation_path = f'{annotation_root_path}{v_clz.value}/video{v_num}/annotation_augmented.csv'
     generated_annotations = pd.read_csv(f'{generated_annotation_root_path}{v_clz.value}{v_num}/'
                                         f'csv_annotation/generated_annotations.csv')
-    f_num = 508
+    f_num = 10
 
     annotations_df = read_annotation_file(annotation_path)
 
     test_patches_and_labels(v_path, f_num, box_size,
                             generated_annotations if use_generated_annotations else annotations_df,
-                            use_generated=use_generated_annotations)
+                            use_generated=use_generated_annotations, plot=True, only_long_trajectories=True)
 
     # img_path = '../../Datasets/SDD/annotations/deathCircle/video4/reference.jpg'
     # image = tio.read_image(img_path)

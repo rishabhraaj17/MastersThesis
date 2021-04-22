@@ -21,6 +21,8 @@ eval:
     merge_annotations: False
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/"
     # root: "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/"
+    only_long_trajectories: True
+    track_length_threshold: 60
 
   checkpoint:
     path: "lightning_logs/version_"
