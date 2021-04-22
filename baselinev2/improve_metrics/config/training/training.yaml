@@ -18,7 +18,7 @@ patience: 4
 monitor_val: 'val_loss'
 
 # dataset
-use_generated_dataset: False
+use_generated_dataset: True
 
 dataset:
   name: 'stanford'

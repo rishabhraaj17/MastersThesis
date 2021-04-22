@@ -1,2 +1,27 @@
 # @package _global_
-num_workers: 12
+# @package _global_
+
+eval:
+  device: 'cuda:0'
+  num_workers : 12
+
+  batch_size: 8
+  shuffle: False
+  pin_memory: True
+
+  # dataset
+  use_generated_dataset: False
+
+  dataset:
+    name: 'stanford'
+    num_workers: 12
+    video_to_use: 0
+    num_videos: [3]
+    multiple_videos: False
+    merge_annotations: False
+    root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/"
+    # root: "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/"
+
+  checkpoint:
+    path: "lightning_logs/version_"
+    version: 0

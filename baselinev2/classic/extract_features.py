@@ -9712,7 +9712,8 @@ def combine_features_generate_annotations(files_base_path, files_list, csv_save_
 
 
 def combine_features_generate_annotations_v2(files_base_path, files_list, csv_save_path, min_track_length_threshold=5,
-                                             do_filter=True, low_memory_mode=False):
+                                             do_filter=True, low_memory_mode=False,
+                                             csv_filename='generated_annotations.csv'):
     annotation_data = []
     part_features_0: Dict[Any, Any] = torch.load(files_base_path + files_list[0])
     track_based_accumulated_features_0: Dict[int, TrackFeatures] = \
@@ -9728,7 +9729,8 @@ def combine_features_generate_annotations_v2(files_base_path, files_list, csv_sa
                                                          csv_save_path=csv_save_path,
                                                          low_memory_mode=low_memory_mode,
                                                          return_list=True,
-                                                         track_ids_to_skip=[]))
+                                                         track_ids_to_skip=[],
+                                                         csv_filename=csv_filename))
     else:
         logger.info('Combining Features')
         for p_idx in tqdm(range(1, len(files_list))):
@@ -9768,7 +9770,8 @@ def combine_features_generate_annotations_v2(files_base_path, files_list, csv_sa
                                                              csv_save_path=csv_save_path,
                                                              low_memory_mode=low_memory_mode,
                                                              return_list=True,
-                                                             track_ids_to_skip=keys_to_skip_during_filtering))
+                                                             track_ids_to_skip=keys_to_skip_during_filtering,
+                                                             csv_filename=csv_filename))
 
             track_based_accumulated_features_0 = copy.deepcopy(track_based_accumulated_features_1)
             frame_based_accumulated_features_0 = copy.deepcopy(frame_based_accumulated_features_1)
@@ -9780,7 +9783,7 @@ def combine_features_generate_annotations_v2(files_base_path, files_list, csv_sa
         'gt_center_x', 'gt_center_y'])
 
     if csv_save_path is not None:
-        df.to_csv(csv_save_path + 'generated_annotations.csv', index=False)
+        df.to_csv(csv_save_path + csv_filename, index=False)
         logger.info('CSV saved!')
 
 
@@ -9935,6 +9938,7 @@ if __name__ == '__main__':
     elif not eval_mode and EXECUTE_STEP == STEP.GENERATE_ANNOTATIONS:
         use_v2 = True
         track_length_threshold = 5
+        csv_save_filename = f'generated_annotations_{track_length_threshold}.csv'  # 'generated_annotations.csv'
 
         if not GENERATE_BUNDLED_ANNOTATIONS and use_v2:
             features_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
@@ -9952,7 +9956,8 @@ if __name__ == '__main__':
             combine_features_generate_annotations_v2(files_base_path=features_base_path, files_list=every_part_file,
                                                      min_track_length_threshold=track_length_threshold,
                                                      csv_save_path=csv_path,
-                                                     do_filter=True, low_memory_mode=False)
+                                                     do_filter=True, low_memory_mode=False,
+                                                     csv_filename=csv_save_filename)
         elif use_v2 and GENERATE_BUNDLED_ANNOTATIONS:
             for v_id, v_clz in enumerate(BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST):
                 for v_num in BUNDLED_ANNOTATIONS_PER_CLASSES_VIDEO_LIST[v_id]:

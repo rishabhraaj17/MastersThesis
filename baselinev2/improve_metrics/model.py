@@ -1,8 +1,11 @@
 import enum
+import os
 import warnings
+from pathlib import Path
 from typing import T, Sequence, List
 
 import hydra
+import matplotlib.pyplot as plt
 import torch
 from torch import nn
 import numpy as np
@@ -11,6 +14,7 @@ from torch._utils import _accumulate
 from torch.nn import BCEWithLogitsLoss
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, random_split, Dataset, Subset, ConcatDataset
+from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
 from baselinev2.config import MANUAL_SEED
@@ -196,6 +200,18 @@ def make_datasets_simple(cfg, video_class, return_test_split=False, plot=False):
     return train_dataset, val_dataset
 
 
+def make_test_datasets_simple(cfg, video_class, plot=False):
+    test_datasets = []
+    for n in cfg.eval.dataset.num_videos:
+        test_datasets.append(PatchesDataset(root=cfg.eval.dataset.root, video_label=video_class, frames_per_clip=1,
+                                            num_workers=cfg.eval.dataset.num_workers, num_videos=1,
+                                            video_number_to_use=n, plot=plot,
+                                            step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
+                                            single_track_mode=False, track_id=5, multiple_videos=False,
+                                            use_generated=cfg.eval.use_generated_dataset, merge_annotations=False))
+    return ConcatDataset(test_datasets)
+
+
 class PersonClassifier(LightningModule):
     def __init__(self, conv_block, classifier_block, train_dataset, val_dataset, batch_size=1, num_workers=0,
                  use_batch_norm=False, shuffle: bool = False, pin_memory: bool = True, lr=1e-5, collate_fn=None):
@@ -298,7 +314,84 @@ def model_trainer(cfg):
     trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                       fast_dev_run=cfg.trainer.fast_dev_run)
     trainer.fit(model)
-    print()
+
+
+@hydra.main(config_path="config", config_name="config")
+def model_eval(cfg):
+    test_dataset = make_test_datasets_simple(cfg, VIDEO_CLASS, plot=False)
+    test_loader = DataLoader(test_dataset, batch_size=cfg.eval.batch_size, num_workers=cfg.eval.num_workers,
+                             shuffle=False, collate_fn=people_collate_fn)
+
+    conv_layers = make_conv_blocks(cfg.input_dim, cfg.out_channels, cfg.kernel_dims, cfg.stride, cfg.padding,
+                                   cfg.batch_norm, non_lin=Activations.RELU, dropout=cfg.dropout)
+    classifier_layers = make_classifier_block(cfg.in_feat, cfg.out_feat, Activations.RELU)
+
+    model = PersonClassifier(conv_block=conv_layers, classifier_block=classifier_layers,
+                             train_dataset=None, val_dataset=None, batch_size=cfg.eval.batch_size,
+                             num_workers=cfg.eval.num_workers, shuffle=cfg.eval.shuffle,
+                             pin_memory=cfg.eval.pin_memory, lr=cfg.lr, collate_fn=people_collate_fn)
+    checkpoint_path = f'{cfg.eval.checkpoint.path}{cfg.eval.checkpoint.version}/checkpoints/'
+    checkpoint_file = checkpoint_path + os.listdir(checkpoint_path)[0]
+    load_dict = torch.load(checkpoint_file)
+
+    fig_save_path = f'{cfg.eval.checkpoint.path}{cfg.eval.checkpoint.version}/plots/{VIDEO_CLASS.name}/'
+
+    model.load_state_dict(load_dict['state_dict'])
+    model.to(cfg.eval.device)
+    model.eval()
+
+    accuracies, losses = [], []
+    for idx, (gt, fp) in enumerate(tqdm(test_loader)):
+        patches = torch.cat((gt['patches'], fp['patches']), dim=0)
+        labels = torch.cat((gt['labels'], fp['labels']), dim=0).view(-1, 1)
+
+        patches, labels = patches.to(cfg.eval.device), labels.to(cfg.eval.device)
+
+        with torch.no_grad():
+            out = model(patches)
+
+        loss = model.loss_fn(out, labels)
+
+        pred_labels = torch.round(torch.sigmoid(out))
+        accuracy = (pred_labels.eq(labels)).float().mean()
+
+        false_predictions = torch.where(labels.squeeze() != pred_labels.squeeze())[0]
+
+        if idx % 100 == 0:
+            plot_idx = np.random.choice(patches.shape[0], 64, replace=False)
+            false_plot_idx = np.random.choice(false_predictions.cpu().numpy(), 64,
+                                              replace=False if false_predictions.shape[0] > 64 else True)
+
+            plot_predictions(labels[plot_idx], patches[plot_idx], pred_labels[plot_idx], batch_idx=idx,
+                             save_path=fig_save_path + 'all/')
+            plot_predictions(labels[false_plot_idx], patches[false_plot_idx], pred_labels[false_plot_idx],
+                             batch_idx=idx, save_path=fig_save_path + 'false_predictions/')
+
+        losses.append(loss.item())
+        accuracies.append(accuracy.item())
+
+    acc, total_loss = np.array(accuracies).mean(), np.array(losses).mean()
+    logger.info(f'{VIDEO_CLASS.name} -> Accuracy: {acc} | Loss: {total_loss}')
+
+
+def plot_predictions(labels, patches, pred_labels, batch_idx, save_path=None, additional_text=''):
+    k = 0
+    fig, ax = plt.subplots(8, 8, figsize=(16, 14))
+    for i in range(8):
+        for j in range(8):
+            ax[i, j].axis('off')
+            ax[i, j].set_title(f'{labels[k].int().item()} | {pred_labels[k].int().item()}')
+            ax[i, j].imshow(patches[k].permute(1, 2, 0).cpu())
+
+            k += 1
+    plt.suptitle(f'Predictions\n GT | Prediction\n 1 -> Person/Object | 0 -> Background\n{additional_text}')
+
+    if save_path is not None:
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path + f'batch_idx_{batch_idx}.png')
+        plt.close()
+    else:
+        plt.show()
 
 
 if __name__ == '__main__':
@@ -306,3 +399,4 @@ if __name__ == '__main__':
         warnings.simplefilter("ignore")
 
         model_trainer()
+        # model_eval()

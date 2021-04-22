@@ -637,7 +637,13 @@ def filter_low_length_tracks_with_skips(track_based_features, frame_based_featur
         if len(dict_track_object_features) < threshold and dict_track_id not in track_ids_to_skip:
             for track_obj_feature in dict_track_object_features:
                 frame_containing_current_track = track_obj_feature.frame_number
-                current_track_frame_features = f_per_frame_features[frame_containing_current_track]
+                try:
+                    current_track_frame_features = f_per_frame_features[frame_containing_current_track]
+                except KeyError:
+                    logger.warning(f'Skipping frame {frame_containing_current_track} as frame was not present.'
+                                   f'This seems like a bug which comes when threshold is high e.g 80. '
+                                   f'Verfify it when needed!!')
+                    continue
                 assert frame_containing_current_track == current_track_frame_features.frame_number
                 current_track_frame_features_list = copy.deepcopy(current_track_frame_features.object_features)
 
@@ -882,7 +888,7 @@ def evaluate_extracted_features(track_based_features, frame_based_features, batc
 
 def extracted_features_in_csv(track_based_features, frame_based_features, do_filter=False,
                               min_track_length_threshold=5, csv_save_path=None, low_memory_mode=False,
-                              return_list=False, track_ids_to_skip=None):
+                              return_list=False, track_ids_to_skip=None, csv_filename='generated_annotations.csv'):
     # frame_track_distribution_pre_filter = {k: len(v.object_features) for k, v in frame_based_features.items()}
     if do_filter:
         if track_ids_to_skip is not None:
@@ -928,7 +934,7 @@ def extracted_features_in_csv(track_based_features, frame_based_features, do_fil
                                               'center_x', 'center_y', 'gt_x_min', 'gt_y_min', 'gt_x_max', 'gt_y_max',
                                               'gt_center_x', 'gt_center_y'])
     if csv_save_path is not None:
-        df.to_csv(csv_save_path + 'generated_annotations.csv', index=False)
+        df.to_csv(csv_save_path + csv_filename, index=False)
         logger.info('CSV saved!')
     return df
 
@@ -940,6 +946,17 @@ def associate_frame_with_ground_truth(frames, frame_numbers):
 def get_generated_frame_annotations(df: pd.DataFrame, frame_number: int):
     idx: pd.DataFrame = df.loc[df["frame_number"] == frame_number]
     return idx.to_numpy()
+
+
+def get_generated_track_annotations(df: pd.DataFrame, track_id: int):
+    idx: pd.DataFrame = df.loc[df["track_id"] == track_id]
+    return idx.to_numpy()
+
+
+def get_generated_track_annotations_for_frame(df: pd.DataFrame, frame_number: int):
+    idx: pd.DataFrame = df.loc[df["frame_number"] == frame_number]
+    track_annotations = [get_generated_track_annotations(df=df, track_id=t) for t in idx.track_id.to_numpy()]
+    return track_annotations
 
 
 def process_plot_per_track_angle_and_history(frame, frame_number, save_plot_path, track_based_accumulated_features,
