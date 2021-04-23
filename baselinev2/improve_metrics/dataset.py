@@ -1,5 +1,5 @@
 import os
-from typing import Optional, Any, Union, Tuple
+from typing import Optional, Any, Union, Tuple, Callable
 
 import numpy as np
 import pandas as pd
@@ -78,6 +78,10 @@ class SDDDatasetV0(Dataset):
         self.annotation_list_idx = sorted(self.annotation_list_idx)
 
         self.use_generated = use_generated
+        self.num_videos = num_videos
+        self.video_number_to_use = video_number_to_use
+        self.video_label = video_label
+        self.multiple_videos = multiple_videos
         if multiple_videos and num_videos == -1:
             annotation_path = self.annotation_list
             self.annotations_df = [self._read_annotation_file(p, self.use_generated) for p in annotation_path]
@@ -203,7 +207,8 @@ class PatchesDataset(SDDDatasetV0):
                  multiple_videos: bool = False, bounding_box_size: Union[int, Tuple[int]] = 50,
                  num_patches: Optional[int] = None, use_generated: bool = False,
                  radius_elimination: Optional[int] = 100, merge_annotations: bool = False, plot: bool = False,
-                 only_long_trajectories: bool = False, track_length_threshold: int = 5):
+                 only_long_trajectories: bool = False, track_length_threshold: int = 5,
+                 transforms: Optional[Callable] = None):
         super().__init__(root, video_label, frames_per_clip, num_videos, step_factor, step_between_clips, frame_rate,
                          fold, train, transform, _precomputed_metadata, num_workers, _video_width, _video_height,
                          _video_min_dimension, _audio_samples, scale, single_track_mode, track_id, video_number_to_use,
@@ -217,6 +222,7 @@ class PatchesDataset(SDDDatasetV0):
         self.plot = plot
         self.only_long_trajectories = only_long_trajectories
         self.track_length_threshold = track_length_threshold
+        self.transforms = transforms
 
         if merge_annotations and multiple_videos and num_videos == -1:
             frame_counts = [d.frame.max() for d in self.annotations_df]
@@ -244,9 +250,11 @@ class PatchesDataset(SDDDatasetV0):
             use_generated=self.use_generated, plot=self.plot,
             radius_elimination=self.radius_elimination,
             only_long_trajectories=self.only_long_trajectories,
-            track_length_threshold=self.track_length_threshold)
-        if len(gt_patches_and_labels) == 0 or len(fp_patches_and_labels) == 0:
-            frames, frame_numbers, video_idx = super(PatchesDataset, self).__getitem__(item=0)
+            track_length_threshold=self.track_length_threshold,
+            img_transforms=self.transforms)
+        while len(gt_patches_and_labels) == 0 and len(fp_patches_and_labels) == 0:
+            random_frame_num = np.random.choice(len(self), 1, replace=False).item()
+            frames, frame_numbers, video_idx = super(PatchesDataset, self).__getitem__(item=random_frame_num)
             gt_patches_and_labels, fp_patches_and_labels = patches_and_labels(
                 image=frames.squeeze(0),
                 bounding_box_size=self.bounding_box_size,
@@ -259,7 +267,8 @@ class PatchesDataset(SDDDatasetV0):
                 use_generated=self.use_generated, plot=self.plot,
                 radius_elimination=self.radius_elimination,
                 only_long_trajectories=self.only_long_trajectories,
-                track_length_threshold=self.track_length_threshold)
+                track_length_threshold=self.track_length_threshold,
+                img_transforms=self.transforms)
         return gt_patches_and_labels, fp_patches_and_labels
 
 

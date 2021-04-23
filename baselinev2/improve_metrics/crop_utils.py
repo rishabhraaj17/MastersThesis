@@ -6,6 +6,7 @@ import torchvision.ops
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as tvf
 from matplotlib import pyplot as plt, patches
+import albumentations as aug_transforms
 
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost, scale_annotations
 from average_image.constants import SDDVideoClasses
@@ -241,7 +242,7 @@ def patches_and_labels_debug(image, bounding_box_size, annotations, frame_number
 
 def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_patches=None, new_shape=None,
                        use_generated=True, radius_elimination=None, plot=False, only_long_trajectories=False,
-                       track_length_threshold=60):
+                       track_length_threshold=60, img_transforms=None):
     original_shape = (image.shape[2], image.shape[3]) if image.ndim == 4 else (image.shape[1], image.shape[2])
     new_shape = original_shape if new_shape is None else original_shape
 
@@ -368,6 +369,25 @@ def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_
         plt.show()
 
     gt_crops_resized = torch.stack(gt_crops_resized)
+
+    # data-augmentation
+    out = [img_transforms(image=np.transpose(im, [1, 2, 0])) for im in gt_crops_resized.numpy()]
+    out = [torch.from_numpy(o['image']).permute(2, 0, 1) for o in out]
+    gt_crops_resized = torch.stack(out)
+
+    out = [img_transforms(image=np.transpose(im, [1, 2, 0])) for im in crops.numpy()]
+    out = [torch.from_numpy(o['image']).permute(2, 0, 1) for o in out]
+    crops = torch.stack(out)
+
+    if plot:
+        gt_crops_grid = torchvision.utils.make_grid(gt_crops_resized)
+        plt.imshow(gt_crops_grid.permute(1, 2, 0))
+        plt.show()
+
+        gt_crops_grid = torchvision.utils.make_grid(crops)
+        plt.imshow(gt_crops_grid.permute(1, 2, 0))
+        plt.show()
+
     gt_patches_and_labels = {'patches': gt_crops_resized, 'labels': torch.ones(size=(gt_crops_resized.shape[0],))}
     fp_patches_and_labels = {'patches': crops, 'labels': torch.zeros(size=(crops.shape[0],))}
 
@@ -375,12 +395,12 @@ def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_
 
 
 def test_patches_and_labels(video_path, frame_number, bounding_box_size, annotations, num_patches=None,
-                            use_generated=True, plot=False, only_long_trajectories=False):
+                            use_generated=True, plot=False, only_long_trajectories=False, img_transforms=None):
     frame = extract_frame_from_video(video_path, frame_number)
     frame = torch.from_numpy(frame).permute(2, 0, 1)
     patches_and_labels(frame, bounding_box_size, annotations, frame_number, num_patches,
                        use_generated=use_generated, radius_elimination=100, plot=plot,
-                       only_long_trajectories=only_long_trajectories)
+                       only_long_trajectories=only_long_trajectories, img_transforms=img_transforms)
     print()
 
 
@@ -403,9 +423,17 @@ if __name__ == '__main__':
 
     annotations_df = read_annotation_file(annotation_path)
 
+    img_t = aug_transforms.Compose([
+        aug_transforms.HorizontalFlip(p=0.4),
+        aug_transforms.VerticalFlip(p=0.4),
+        aug_transforms.Rotate(p=0.4),
+        aug_transforms.RandomBrightnessContrast(p=0.2),
+    ], p=0.7)
+
     test_patches_and_labels(v_path, f_num, box_size,
                             generated_annotations if use_generated_annotations else annotations_df,
-                            use_generated=use_generated_annotations, plot=True, only_long_trajectories=True)
+                            use_generated=use_generated_annotations, plot=True, only_long_trajectories=True,
+                            img_transforms=img_t)
 
     # img_path = '../../Datasets/SDD/annotations/deathCircle/video4/reference.jpg'
     # image = tio.read_image(img_path)

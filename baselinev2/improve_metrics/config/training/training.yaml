@@ -1,7 +1,12 @@
 # @package _global_
 num_workers : 12
 make_checkpoint: True
-data_augmentation: 1
+data_augmentation: True
+
+server_mode: False
+
+use_resnet: True
+use_pretrained: True
 
 # trainer
 trainer:
