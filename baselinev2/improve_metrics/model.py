@@ -363,7 +363,8 @@ def model_trainer(cfg):
 
     logger.info(f'Setting up datasets...')
     train_dataset, val_dataset = make_datasets_simple(cfg, VIDEO_CLASS, return_test_split=False, plot=False,
-                                                      server_mode=False, transforms=img_t)
+                                                      server_mode=False,
+                                                      transforms=img_t if cfg.data_augmentation else None)
     logger.info(f'Setting up model...')
     if cfg.use_resnet:
         conv_layers = resnet18(pretrained=cfg.use_pretrained)
