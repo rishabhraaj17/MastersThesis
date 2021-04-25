@@ -12,4 +12,6 @@ padding: [1, 1, 1, 1]
 
 # classifier dim
 in_feat: 512
+#in_feat: 64
 out_feat: [256, 32, 8, 1]
+#out_feat: [32, 8, 1]

@@ -6,7 +6,11 @@ data_augmentation: True
 server_mode: False
 
 use_resnet: True
-use_pretrained: True
+use_pretrained: False
+smaller_resnet: True
+first_in_channel: 3
+first_stride: 2
+first_padding: 1
 
 # trainer
 trainer:
@@ -44,6 +48,9 @@ dataset:
                      [0, 1, 2, 3, 4, 7, 8, 9, 10, 11], [1, 2, 3]]
   all_val_videos: [[0], [3], [2], [4], [7], [0], [5], [0]]
   all_test_videos: [[6], [3], [4], [7], [9, 14], [0], [6], [0]]
+
+  additional_h: 20
+  additional_w: 20
 
   ratio:
     train: 0.8

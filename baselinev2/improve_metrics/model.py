@@ -7,7 +7,7 @@ from typing import T, Sequence, List
 import hydra
 import matplotlib.pyplot as plt
 import torch
-from albumentations import Compose, HorizontalFlip, VerticalFlip, Rotate, RandomBrightnessContrast
+from albumentations import Compose, HorizontalFlip, VerticalFlip, Rotate, RandomBrightnessContrast, ShiftScaleRotate
 from torch import nn
 import numpy as np
 from pytorch_lightning import LightningModule, Trainer
@@ -20,7 +20,7 @@ from tqdm import tqdm
 from average_image.constants import SDDVideoClasses
 from baselinev2.config import MANUAL_SEED
 from baselinev2.improve_metrics.dataset import PatchesDataset
-from baselinev2.improve_metrics.modules import resnet18
+from baselinev2.improve_metrics.modules import resnet18, resnet9
 from log import initialize_logging, get_logger
 from unsupervised_tp_0.dataset import resize_frames
 
@@ -199,7 +199,9 @@ def make_datasets_simple(cfg, video_class, return_test_split=False, plot=False, 
                                                      use_generated=cfg.use_generated_dataset, merge_annotations=False,
                                                      only_long_trajectories=cfg.dataset.only_long_trajectories,
                                                      track_length_threshold=cfg.dataset.track_length_threshold,
-                                                     transforms=transforms))
+                                                     transforms=transforms,
+                                                     additional_h=cfg.dataset.additional_h,
+                                                     additional_w=cfg.dataset.additional_w))
     else:
         for n in cfg.dataset.num_videos:
             logger.info(f'Setting up dataset -> {video_class.name} : {n}')
@@ -211,7 +213,9 @@ def make_datasets_simple(cfg, video_class, return_test_split=False, plot=False, 
                                                  use_generated=cfg.use_generated_dataset, merge_annotations=False,
                                                  only_long_trajectories=cfg.dataset.only_long_trajectories,
                                                  track_length_threshold=cfg.dataset.track_length_threshold,
-                                                 transforms=transforms))
+                                                 transforms=transforms,
+                                                 additional_h=cfg.dataset.additional_h,
+                                                 additional_w=cfg.dataset.additional_w))
     logger.info(f'Setting up validation datasets...')
 
     val_datasets = []
@@ -228,7 +232,9 @@ def make_datasets_simple(cfg, video_class, return_test_split=False, plot=False, 
                                                    use_generated=cfg.use_generated_dataset, merge_annotations=False,
                                                    only_long_trajectories=cfg.dataset.only_long_trajectories,
                                                    track_length_threshold=cfg.dataset.track_length_threshold,
-                                                   transforms=transforms))
+                                                   transforms=transforms,
+                                                   additional_h=cfg.dataset.additional_h,
+                                                   additional_w=cfg.dataset.additional_w))
     else:
         for n in cfg.dataset.val_num_videos:
             logger.info(f'Setting up dataset -> {video_class.name} : {n}')
@@ -240,14 +246,17 @@ def make_datasets_simple(cfg, video_class, return_test_split=False, plot=False, 
                                                use_generated=cfg.use_generated_dataset, merge_annotations=False,
                                                only_long_trajectories=cfg.dataset.only_long_trajectories,
                                                track_length_threshold=cfg.dataset.track_length_threshold,
-                                               transforms=transforms))
+                                               transforms=transforms,
+                                               additional_h=cfg.dataset.additional_h,
+                                               additional_w=cfg.dataset.additional_w))
     train_dataset, val_dataset = ConcatDataset(train_datasets), ConcatDataset(val_datasets)
     return train_dataset, val_dataset
 
 
-def make_test_datasets_simple(cfg, video_class, plot=False):
+def make_test_datasets_simple(cfg, video_class, plot=False, transforms=None):
     test_datasets = []
     for n in cfg.eval.dataset.num_videos:
+        logger.info(f'Setting up dataset -> {video_class.name} : {n}')
         test_datasets.append(PatchesDataset(root=cfg.eval.dataset.root, video_label=video_class, frames_per_clip=1,
                                             num_workers=cfg.eval.dataset.num_workers, num_videos=1,
                                             video_number_to_use=n, plot=plot,
@@ -255,7 +264,10 @@ def make_test_datasets_simple(cfg, video_class, plot=False):
                                             single_track_mode=False, track_id=5, multiple_videos=False,
                                             use_generated=cfg.eval.use_generated_dataset, merge_annotations=False,
                                             only_long_trajectories=cfg.eval.dataset.only_long_trajectories,
-                                            track_length_threshold=cfg.eval.dataset.track_length_threshold))
+                                            track_length_threshold=cfg.eval.dataset.track_length_threshold,
+                                            transforms=transforms,
+                                            additional_h=cfg.eval.dataset.additional_h,
+                                            additional_w=cfg.eval.dataset.additional_w))
     return ConcatDataset(test_datasets)
 
 
@@ -359,6 +371,7 @@ def model_trainer(cfg):
         VerticalFlip(p=0.4),
         Rotate(p=0.4),
         RandomBrightnessContrast(p=0.2),
+        ShiftScaleRotate(p=0.2),
     ], p=0.7)
 
     logger.info(f'Setting up datasets...')
@@ -367,7 +380,11 @@ def model_trainer(cfg):
                                                       transforms=img_t if cfg.data_augmentation else None)
     logger.info(f'Setting up model...')
     if cfg.use_resnet:
-        conv_layers = resnet18(pretrained=cfg.use_pretrained)
+        conv_layers = resnet18(pretrained=cfg.use_pretrained) \
+            if cfg.smaller_resnet else resnet9(pretrained=cfg.use_pretrained,
+                                               first_in_channel=cfg.first_in_channel,
+                                               first_stride=cfg.first_stride,
+                                               first_padding=cfg.first_padding)
     else:
         conv_layers = make_conv_blocks(cfg.input_dim, cfg.out_channels, cfg.kernel_dims, cfg.stride, cfg.padding,
                                        cfg.batch_norm, non_lin=Activations.RELU, dropout=cfg.dropout)
@@ -391,12 +408,30 @@ def model_trainer(cfg):
 
 @hydra.main(config_path="config", config_name="config")
 def model_eval(cfg):
-    test_dataset = make_test_datasets_simple(cfg, VIDEO_CLASS, plot=False)
+    img_t = Compose([
+        HorizontalFlip(p=0.4),
+        VerticalFlip(p=0.4),
+        Rotate(p=0.4),
+        RandomBrightnessContrast(p=0.2),
+    ], p=0.7)
+
+    logger.info(f'Setting up datasets...')
+    eval_video_class = getattr(SDDVideoClasses, cfg.eval.dataset.video_class)
+    test_dataset = make_test_datasets_simple(cfg, VIDEO_CLASS, plot=False,
+                                             transforms=img_t if cfg.eval.data_augmentation else None)
     test_loader = DataLoader(test_dataset, batch_size=cfg.eval.batch_size, num_workers=cfg.eval.num_workers,
                              shuffle=False, collate_fn=people_collate_fn)
 
-    conv_layers = make_conv_blocks(cfg.input_dim, cfg.out_channels, cfg.kernel_dims, cfg.stride, cfg.padding,
-                                   cfg.batch_norm, non_lin=Activations.RELU, dropout=cfg.dropout)
+    logger.info(f'Setting up model...')
+    if cfg.eval.use_resnet:
+        conv_layers = resnet18(pretrained=cfg.eval.use_pretrained) \
+            if cfg.eval.smaller_resnet else resnet9(pretrained=cfg.eval.use_pretrained,
+                                                    first_in_channel=cfg.eval.first_in_channel,
+                                                    first_stride=cfg.eval.first_stride,
+                                                    first_padding=cfg.eval.first_padding)
+    else:
+        conv_layers = make_conv_blocks(cfg.input_dim, cfg.out_channels, cfg.kernel_dims, cfg.stride, cfg.padding,
+                                       cfg.batch_norm, non_lin=Activations.RELU, dropout=cfg.dropout)
     classifier_layers = make_classifier_block(cfg.in_feat, cfg.out_feat, Activations.RELU)
 
     model = PersonClassifier(conv_block=conv_layers, classifier_block=classifier_layers,
@@ -473,3 +508,8 @@ if __name__ == '__main__':
 
         model_trainer()
         # model_eval()
+
+        # m = resnet9(first_in_channel=3, first_stride=2, first_padding=1)
+        # inp = torch.randn((2, 3, 100, 100))
+        # print(m)
+        # print(m(inp).size())

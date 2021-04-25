@@ -208,7 +208,7 @@ class PatchesDataset(SDDDatasetV0):
                  num_patches: Optional[int] = None, use_generated: bool = False,
                  radius_elimination: Optional[int] = 100, merge_annotations: bool = False, plot: bool = False,
                  only_long_trajectories: bool = False, track_length_threshold: int = 5,
-                 transforms: Optional[Callable] = None):
+                 transforms: Optional[Callable] = None, additional_w=None, additional_h=None):
         super().__init__(root, video_label, frames_per_clip, num_videos, step_factor, step_between_clips, frame_rate,
                          fold, train, transform, _precomputed_metadata, num_workers, _video_width, _video_height,
                          _video_min_dimension, _audio_samples, scale, single_track_mode, track_id, video_number_to_use,
@@ -223,6 +223,8 @@ class PatchesDataset(SDDDatasetV0):
         self.only_long_trajectories = only_long_trajectories
         self.track_length_threshold = track_length_threshold
         self.transforms = transforms
+        self.additional_w = additional_w
+        self.additional_h = additional_h
 
         if merge_annotations and multiple_videos and num_videos == -1:
             frame_counts = [d.frame.max() for d in self.annotations_df]
@@ -251,7 +253,9 @@ class PatchesDataset(SDDDatasetV0):
             radius_elimination=self.radius_elimination,
             only_long_trajectories=self.only_long_trajectories,
             track_length_threshold=self.track_length_threshold,
-            img_transforms=self.transforms)
+            img_transforms=self.transforms,
+            additional_w=self.additional_w,
+            additional_h=self.additional_h)
         while len(gt_patches_and_labels) == 0 and len(fp_patches_and_labels) == 0:
             random_frame_num = np.random.choice(len(self), 1, replace=False).item()
             frames, frame_numbers, video_idx = super(PatchesDataset, self).__getitem__(item=random_frame_num)
@@ -268,7 +272,9 @@ class PatchesDataset(SDDDatasetV0):
                 radius_elimination=self.radius_elimination,
                 only_long_trajectories=self.only_long_trajectories,
                 track_length_threshold=self.track_length_threshold,
-                img_transforms=self.transforms)
+                img_transforms=self.transforms,
+                additional_w=self.additional_w,
+                additional_h=self.additional_h)
         return gt_patches_and_labels, fp_patches_and_labels
 
 

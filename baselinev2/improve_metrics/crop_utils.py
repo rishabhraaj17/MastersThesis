@@ -242,7 +242,7 @@ def patches_and_labels_debug(image, bounding_box_size, annotations, frame_number
 
 def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_patches=None, new_shape=None,
                        use_generated=True, radius_elimination=None, plot=False, only_long_trajectories=False,
-                       track_length_threshold=60, img_transforms=None):
+                       track_length_threshold=60, img_transforms=None, additional_w=None, additional_h=None):
     original_shape = (image.shape[2], image.shape[3]) if image.ndim == 4 else (image.shape[1], image.shape[2])
     new_shape = original_shape if new_shape is None else original_shape
 
@@ -279,7 +279,7 @@ def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_
     crops, boxes = sample_random_crops(image, bounding_box_size, num_patches)
 
     gt_boxes_xywh = torchvision.ops.box_convert(gt_boxes, 'xyxy', 'xywh')
-    gt_boxes_xywh = [torch.tensor((b[1], b[0], b[2], b[3])) for b in gt_boxes_xywh]
+    gt_boxes_xywh = [torch.tensor((b[1], b[0], b[2] + additional_h, b[3] + additional_w)) for b in gt_boxes_xywh]
     gt_boxes_xywh = torch.stack(gt_boxes_xywh)
 
     fp_boxes = torchvision.ops.box_convert(boxes, 'xywh', 'xyxy')
@@ -371,13 +371,14 @@ def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_
     gt_crops_resized = torch.stack(gt_crops_resized)
 
     # data-augmentation
-    out = [img_transforms(image=np.transpose(im, [1, 2, 0])) for im in gt_crops_resized.numpy()]
-    out = [torch.from_numpy(o['image']).permute(2, 0, 1) for o in out]
-    gt_crops_resized = torch.stack(out)
+    if img_transforms:
+        out = [img_transforms(image=np.transpose(im, [1, 2, 0])) for im in gt_crops_resized.numpy()]
+        out = [torch.from_numpy(o['image']).permute(2, 0, 1) for o in out]
+        gt_crops_resized = torch.stack(out)
 
-    out = [img_transforms(image=np.transpose(im, [1, 2, 0])) for im in crops.numpy()]
-    out = [torch.from_numpy(o['image']).permute(2, 0, 1) for o in out]
-    crops = torch.stack(out)
+        out = [img_transforms(image=np.transpose(im, [1, 2, 0])) for im in crops.numpy()]
+        out = [torch.from_numpy(o['image']).permute(2, 0, 1) for o in out]
+        crops = torch.stack(out)
 
     if plot:
         gt_crops_grid = torchvision.utils.make_grid(gt_crops_resized)
@@ -395,12 +396,14 @@ def patches_and_labels(image, bounding_box_size, annotations, frame_number, num_
 
 
 def test_patches_and_labels(video_path, frame_number, bounding_box_size, annotations, num_patches=None,
-                            use_generated=True, plot=False, only_long_trajectories=False, img_transforms=None):
+                            use_generated=True, plot=False, only_long_trajectories=False, img_transforms=None,
+                            additional_w=None, additional_h=None):
     frame = extract_frame_from_video(video_path, frame_number)
     frame = torch.from_numpy(frame).permute(2, 0, 1)
     patches_and_labels(frame, bounding_box_size, annotations, frame_number, num_patches,
                        use_generated=use_generated, radius_elimination=100, plot=plot,
-                       only_long_trajectories=only_long_trajectories, img_transforms=img_transforms)
+                       only_long_trajectories=only_long_trajectories, img_transforms=img_transforms,
+                       additional_w=additional_w, additional_h=additional_h)
     print()
 
 
@@ -428,12 +431,13 @@ if __name__ == '__main__':
         aug_transforms.VerticalFlip(p=0.4),
         aug_transforms.Rotate(p=0.4),
         aug_transforms.RandomBrightnessContrast(p=0.2),
+        aug_transforms.ShiftScaleRotate(p=0.4)
     ], p=0.7)
 
     test_patches_and_labels(v_path, f_num, box_size,
                             generated_annotations if use_generated_annotations else annotations_df,
                             use_generated=use_generated_annotations, plot=True, only_long_trajectories=True,
-                            img_transforms=img_t)
+                            img_transforms=img_t, additional_w=20, additional_h=20)
 
     # img_path = '../../Datasets/SDD/annotations/deathCircle/video4/reference.jpg'
     # image = tio.read_image(img_path)

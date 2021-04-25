@@ -5,17 +5,27 @@ eval:
   device: 'cuda:0'
   num_workers : 12
 
+  data_augmentation: False
+
+  use_resnet: True
+  use_pretrained: False
+  smaller_resnet: True
+  first_in_channel: 3
+  first_stride: 2
+  first_padding: 1
+
   batch_size: 8
   shuffle: False
   pin_memory: True
 
   # dataset
-  use_generated_dataset: False
+  use_generated_dataset: True
 
   dataset:
     name: 'stanford'
     num_workers: 12
     video_to_use: 0
+    video_class: 'DEATH_CIRCLE'
     num_videos: [3]
     multiple_videos: False
     merge_annotations: False
@@ -24,6 +34,9 @@ eval:
     only_long_trajectories: True
     track_length_threshold: 60
 
+    additional_h: 20
+    additional_w: 20
+
   checkpoint:
     path: "lightning_logs/version_"
-    version: 0
+    version: 4
