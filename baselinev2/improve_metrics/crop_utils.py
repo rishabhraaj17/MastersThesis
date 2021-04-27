@@ -773,7 +773,7 @@ def patches_and_labels_with_anchors_different_crop_track_threshold(
 
     fp_boxes_match_numpy = fp_boxes_match.numpy()
 
-    l2_distances_matrix = np.zeros(shape=(fp_boxes.shape[0], fp_boxes.shape[0]))
+    l2_distances_matrix = np.zeros(shape=(gt_boxes_for_random_crops.shape[0], fp_boxes.shape[0]))
     if radius_elimination is not None:
         fp_boxes_centers = np.stack([get_bbox_center(fp_box) for fp_box in fp_boxes.numpy()]).squeeze()
 
@@ -795,21 +795,21 @@ def patches_and_labels_with_anchors_different_crop_track_threshold(
     # overlapping_boxes = [fp_boxes[fp_boxes_match], gt_boxes[gt_box_match]]
     overlapping_boxes = [fp_boxes[fp_boxes_match], gt_boxes_for_random_crops[gt_box_match]]
 
-    if plot:
+    # if plot:
         # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes, overlapping_boxes=overlapping_boxes)
         # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes, title='xyxy',
         #                            overlapping_boxes=overlapping_boxes)
-        show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes_for_random_crops, title='xyxy',
-                                   overlapping_boxes=overlapping_boxes)
+        # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes_for_random_crops, title='xyxy',
+        #                            overlapping_boxes=overlapping_boxes)
         # show_image_with_crop_boxes(image.permute(1, 2, 0), boxes, gt_boxes_xywh, xywh_mode_v2=False, xyxy_mode=False,
         #                            title='xywh')
-        gt_crops_grid = torchvision.utils.make_grid(gt_crops_resized)
-        plt.imshow(gt_crops_grid.permute(1, 2, 0))
-        plt.show()
+        # gt_crops_grid = torchvision.utils.make_grid(gt_crops_resized)
+        # plt.imshow(gt_crops_grid.permute(1, 2, 0))
+        # plt.show()
 
-        fp_crops_grid = torchvision.utils.make_grid(crops)
-        plt.imshow(fp_crops_grid.permute(1, 2, 0))
-        plt.show()
+        # fp_crops_grid = torchvision.utils.make_grid(crops)
+        # plt.imshow(fp_crops_grid.permute(1, 2, 0))
+        # plt.show()
 
     fp_boxes = fp_boxes[valid_fp_boxes_idx]
     boxes = boxes[valid_fp_boxes_idx]
@@ -879,9 +879,9 @@ def patches_and_labels_with_anchors_different_crop_track_threshold(
         show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes_for_random_crops)
         show_image_with_crop_boxes(image.permute(1, 2, 0), boxes, gt_boxes_xywh, xywh_mode_v2=False, xyxy_mode=False,
                                    title='xywh')
-        fp_crops_grid = torchvision.utils.make_grid(crops)
-        plt.imshow(fp_crops_grid.permute(1, 2, 0))
-        plt.show()
+        # fp_crops_grid = torchvision.utils.make_grid(crops)
+        # plt.imshow(fp_crops_grid.permute(1, 2, 0))
+        # plt.show()
 
     gt_crops_resized = torch.stack(gt_crops_resized)
 
