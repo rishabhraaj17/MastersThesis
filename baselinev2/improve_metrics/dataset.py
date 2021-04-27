@@ -15,7 +15,8 @@ from tqdm import tqdm
 from average_image.constants import SDDVideoClasses
 from average_image.utils import SDDMeta
 from baselinev2.config import BASE_PATH
-from baselinev2.improve_metrics.crop_utils import patches_and_labels
+from baselinev2.improve_metrics.crop_utils import patches_and_labels, patches_and_labels_with_anchors, \
+    patches_and_labels_with_anchors_different_crop_track_threshold
 from unsupervised_tp_0.dataset import resize_frames, sort_list
 
 
@@ -206,9 +207,10 @@ class PatchesDataset(SDDDatasetV0):
                  single_track_mode: bool = False, track_id: int = 0, video_number_to_use: int = 0,
                  multiple_videos: bool = False, bounding_box_size: Union[int, Tuple[int]] = 50,
                  num_patches: Optional[int] = None, use_generated: bool = False,
-                 radius_elimination: Optional[int] = 100, merge_annotations: bool = False, plot: bool = False,
+                 radius_elimination: Optional[int] = 130, merge_annotations: bool = False, plot: bool = False,
                  only_long_trajectories: bool = False, track_length_threshold: int = 5,
-                 transforms: Optional[Callable] = None, additional_w=None, additional_h=None):
+                 transforms: Optional[Callable] = None, additional_w=None, additional_h=None,
+                 aspect_ratios=(0.75, 0.5), scales=(2.0,), track_length_threshold_for_random_crops=30):
         super().__init__(root, video_label, frames_per_clip, num_videos, step_factor, step_between_clips, frame_rate,
                          fold, train, transform, _precomputed_metadata, num_workers, _video_width, _video_height,
                          _video_min_dimension, _audio_samples, scale, single_track_mode, track_id, video_number_to_use,
@@ -225,6 +227,9 @@ class PatchesDataset(SDDDatasetV0):
         self.transforms = transforms
         self.additional_w = additional_w
         self.additional_h = additional_h
+        self.aspect_ratios = aspect_ratios
+        self.scales = scales
+        self.track_length_threshold_for_random_crops = track_length_threshold_for_random_crops
 
         if merge_annotations and multiple_videos and num_videos == -1:
             frame_counts = [d.frame.max() for d in self.annotations_df]
@@ -240,7 +245,7 @@ class PatchesDataset(SDDDatasetV0):
 
     def __getitem__(self, item):
         frames, frame_numbers, video_idx = super(PatchesDataset, self).__getitem__(item=item)
-        gt_patches_and_labels, fp_patches_and_labels = patches_and_labels(
+        gt_patches_and_labels, fp_patches_and_labels = patches_and_labels_with_anchors_different_crop_track_threshold(
             image=frames.squeeze(0),
             bounding_box_size=self.bounding_box_size,
             annotations=self.merged_annotations
@@ -255,11 +260,14 @@ class PatchesDataset(SDDDatasetV0):
             track_length_threshold=self.track_length_threshold,
             img_transforms=self.transforms,
             additional_w=self.additional_w,
-            additional_h=self.additional_h)
+            additional_h=self.additional_h,
+            scales=self.scales,
+            aspect_ratios=self.aspect_ratios,
+            track_length_threshold_for_random_crops=self.track_length_threshold_for_random_crops)
         while len(gt_patches_and_labels) == 0 and len(fp_patches_and_labels) == 0:
             random_frame_num = np.random.choice(len(self), 1, replace=False).item()
             frames, frame_numbers, video_idx = super(PatchesDataset, self).__getitem__(item=random_frame_num)
-            gt_patches_and_labels, fp_patches_and_labels = patches_and_labels(
+            gt_patches_and_labels, fp_patches_and_labels = patches_and_labels_with_anchors_different_crop_track_threshold(
                 image=frames.squeeze(0),
                 bounding_box_size=self.bounding_box_size,
                 annotations=self.merged_annotations
@@ -274,7 +282,10 @@ class PatchesDataset(SDDDatasetV0):
                 track_length_threshold=self.track_length_threshold,
                 img_transforms=self.transforms,
                 additional_w=self.additional_w,
-                additional_h=self.additional_h)
+                additional_h=self.additional_h,
+                scales=self.scales,
+                aspect_ratios=self.aspect_ratios,
+                track_length_threshold_for_random_crops=self.track_length_threshold_for_random_crops)
         return gt_patches_and_labels, fp_patches_and_labels
 
 

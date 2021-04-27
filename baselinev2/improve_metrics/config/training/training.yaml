@@ -51,6 +51,10 @@ dataset:
 
   additional_h: 20
   additional_w: 20
+  aspect_ratios: [0.75, 0.5]
+  scales: [2.0]
+  track_length_threshold_for_random_crops: 5
+  radius_elimination: 160
 
   ratio:
     train: 0.8

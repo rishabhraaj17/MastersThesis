@@ -647,6 +647,269 @@ def patches_and_labels_with_anchors(image, bounding_box_size, annotations, frame
     return gt_patches_and_labels, fp_patches_and_labels
 
 
+def patches_and_labels_with_anchors_different_crop_track_threshold(
+        image, bounding_box_size, annotations, frame_number, num_patches=None,
+        new_shape=None,
+        use_generated=True, radius_elimination=None, plot=False,
+        only_long_trajectories=False,
+        track_length_threshold=60, img_transforms=None, additional_w=None,
+        additional_h=None,
+        aspect_ratios=(), scales=(), track_length_threshold_for_random_crops=30):
+    original_shape = (image.shape[2], image.shape[3]) if image.ndim == 4 else (image.shape[1], image.shape[2])
+    new_shape = original_shape if new_shape is None else original_shape
+
+    if only_long_trajectories:
+        if use_generated:
+            frame_annotation = get_generated_frame_annotations(annotations, frame_number)
+            track_annotations = get_generated_track_annotations_for_frame(annotations, frame_number)
+            track_lengths = np.array([t.shape[0] for t in track_annotations])
+
+            feasible_track_length = track_lengths > track_length_threshold
+            feasible_frame_annotations = frame_annotation[feasible_track_length]
+            gt_boxes = torch.from_numpy(feasible_frame_annotations[:, 1:5].astype(np.int))
+            generated_track_idx = feasible_frame_annotations[:, 0]
+            gt_bbox_centers = feasible_frame_annotations[:, 7:9]
+
+            feasible_track_length_for_random_crops = track_lengths > track_length_threshold_for_random_crops
+            feasible_frame_annotations_for_random_crops = frame_annotation[feasible_track_length_for_random_crops]
+            gt_boxes_for_random_crops = torch.from_numpy(
+                feasible_frame_annotations_for_random_crops[:, 1:5].astype(np.int))
+            generated_track_idx_for_random_crops = feasible_frame_annotations_for_random_crops[:, 0]
+            gt_bbox_centers_for_random_crops = feasible_frame_annotations_for_random_crops[:, 7:9]
+        else:
+            return NotImplemented
+    else:
+        if use_generated:
+            frame_annotation = get_generated_frame_annotations(annotations, frame_number)
+            gt_boxes = torch.from_numpy(frame_annotation[:, 1:5].astype(np.int))
+            generated_track_idx = frame_annotation[:, 0]
+            gt_bbox_centers = frame_annotation[:, 7:9]
+        else:
+            frame_annotation = get_frame_annotations_and_skip_lost(annotations, frame_number)
+            gt_annotations, gt_bbox_centers = scale_annotations(frame_annotation,
+                                                                original_scale=original_shape,
+                                                                new_scale=new_shape, return_track_id=False,
+                                                                tracks_with_annotations=True)
+            gt_boxes = torch.from_numpy(gt_annotations[:, :-1])
+
+    if frame_annotation.size == 0 or feasible_frame_annotations.size == 0:
+        return {}, {}
+
+    gt_boxes_xywh = torchvision.ops.box_convert(gt_boxes, 'xyxy', 'xywh')
+    gt_boxes_xywh = [torch.tensor((b[1], b[0], b[2] + additional_h, b[3] + additional_w)) for b in gt_boxes_xywh]
+
+    new_gt_boxes_xywh_w = []
+    new_gt_boxes_xywh_h = []
+
+    gt_boxes_cxcywh = torchvision.ops.box_convert(gt_boxes, 'xyxy', 'cxcywh')
+    if len(aspect_ratios) != 0 and len(scales) != 0:
+        for scale in scales:
+            for ratio in aspect_ratios:
+                for box in gt_boxes_cxcywh:
+                    _x, _y, _w, _h = box
+                    adjusted_box = torch.tensor((_x, _y, int(_w * ratio * scale), int(_h * (1 / ratio) * scale)))
+                    new_gt_boxes_xywh_w.append(adjusted_box)
+                    adjusted_box = torch.tensor((_x, _y, int(_w * 1 / ratio * scale), int(_h * ratio) * scale))
+                    new_gt_boxes_xywh_h.append(adjusted_box)
+
+    new_gt_boxes_xywh_w = torchvision.ops.box_convert(torch.stack(new_gt_boxes_xywh_w), 'cxcywh', 'xywh').int()
+    new_gt_boxes_xywh_w = [torch.tensor((b[1], b[0], b[2] + additional_h, b[3] + additional_w))
+                           for b in new_gt_boxes_xywh_w]
+
+    new_gt_boxes_xywh_h = torchvision.ops.box_convert(torch.stack(new_gt_boxes_xywh_h), 'cxcywh', 'xywh').int()
+    new_gt_boxes_xywh_h = [torch.tensor((b[1], b[0], b[2] + additional_h, b[3] + additional_w))
+                           for b in new_gt_boxes_xywh_h]
+    _gt_crops_w = [tvf.crop(image, top=b[0], left=b[1], width=b[2], height=b[3]) for b in new_gt_boxes_xywh_w]
+    _gt_crops_h = [tvf.crop(image, top=b[0], left=b[1], width=b[2], height=b[3]) for b in new_gt_boxes_xywh_h]
+
+    _gt_crops_w_resized = [tvf.resize(c, [bounding_box_size, bounding_box_size])
+                           for c in _gt_crops_w if c.shape[1] != 0 and c.shape[2] != 0]
+    _gt_crops_h_resized = [tvf.resize(c, [bounding_box_size, bounding_box_size])
+                           for c in _gt_crops_h if c.shape[1] != 0 and c.shape[2] != 0]
+
+    # k = 0
+    # for i in range(40):
+    #     for j in range(4):
+    #         try:
+    #             # ax[i, j].axis('off')
+    #             fig, ax = plt.subplots(1, 2)
+    #
+    #             ax[0].set_title(f'{k}')
+    #             # ax[0].imshow(_gt_crops_w[k].permute(1, 2, 0))
+    #             ax[0].imshow(_gt_crops_w_resized[k].permute(1, 2, 0))
+    #
+    #             ax[1].set_title(f'{k}')
+    #             # ax[1].imshow(_gt_crops_h[k].permute(1, 2, 0))
+    #             ax[1].imshow(_gt_crops_h_resized[k].permute(1, 2, 0))
+    #
+    #             k += 1
+    #             plt.show()
+    #
+    #         except IndexError:
+    #             continue
+
+    gt_boxes_xywh = torch.stack(gt_boxes_xywh)
+
+    gt_crops = [tvf.crop(image, top=b[0], left=b[1], width=b[2], height=b[3]) for b in gt_boxes_xywh]
+    gt_crops_resized = [tvf.resize(c, [bounding_box_size, bounding_box_size])
+                        for c in gt_crops if c.shape[1] != 0 and c.shape[2] != 0]
+
+    gt_crops_resized.extend(_gt_crops_w_resized)
+    gt_crops_resized.extend(_gt_crops_h_resized)
+
+    num_patches = (len(gt_crops) + len(_gt_crops_w) + len(_gt_crops_h)) if num_patches is None else num_patches
+    crops, boxes = sample_random_crops(image, bounding_box_size, num_patches)
+
+    # correct mapping now
+    boxes_t = [torch.tensor((b[1], b[0], b[2], b[3])) for b in boxes]
+    boxes_t = torch.stack(boxes_t)
+    fp_boxes = torchvision.ops.box_convert(boxes_t, 'xywh', 'xyxy')
+
+    # fp_boxes = torchvision.ops.box_convert(boxes, 'xywh', 'xyxy') - incorrect or let crop random switch it
+
+    # boxes_iou = torchvision.ops.box_iou(gt_boxes, fp_boxes)
+    boxes_iou = torchvision.ops.box_iou(gt_boxes_for_random_crops, fp_boxes)
+    gt_box_match, fp_boxes_match = torch.where(boxes_iou)
+
+    fp_boxes_match_numpy = fp_boxes_match.numpy()
+
+    l2_distances_matrix = np.zeros(shape=(fp_boxes.shape[0], fp_boxes.shape[0]))
+    if radius_elimination is not None:
+        fp_boxes_centers = np.stack([get_bbox_center(fp_box) for fp_box in fp_boxes.numpy()]).squeeze()
+
+        # for g_idx, gt_center in enumerate(gt_bbox_centers):
+        for g_idx, gt_center in enumerate(gt_bbox_centers_for_random_crops):
+            if fp_boxes_centers.ndim == 1:
+                fp_boxes_centers = np.expand_dims(fp_boxes_centers, axis=0)
+            for f_idx, fp_center in enumerate(fp_boxes_centers):
+                l2_distances_matrix[g_idx, f_idx] = np.linalg.norm((gt_center - fp_center), ord=2, axis=-1)
+
+        # l2_distances_matrix = l2_distances_matrix[:gt_bbox_centers.shape[0], ...]
+        l2_distances_matrix = l2_distances_matrix[:gt_bbox_centers_for_random_crops.shape[0], ...]
+        gt_r_invalid, fp_r_invalid = np.where(l2_distances_matrix < radius_elimination)
+
+        fp_boxes_match_numpy = np.union1d(fp_boxes_match.numpy(), fp_r_invalid)
+
+    valid_fp_boxes_idx = np.setdiff1d(np.arange(fp_boxes.shape[0]), fp_boxes_match_numpy)
+
+    # overlapping_boxes = [fp_boxes[fp_boxes_match], gt_boxes[gt_box_match]]
+    overlapping_boxes = [fp_boxes[fp_boxes_match], gt_boxes_for_random_crops[gt_box_match]]
+
+    if plot:
+        # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes, overlapping_boxes=overlapping_boxes)
+        # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes, title='xyxy',
+        #                            overlapping_boxes=overlapping_boxes)
+        show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes_for_random_crops, title='xyxy',
+                                   overlapping_boxes=overlapping_boxes)
+        # show_image_with_crop_boxes(image.permute(1, 2, 0), boxes, gt_boxes_xywh, xywh_mode_v2=False, xyxy_mode=False,
+        #                            title='xywh')
+        gt_crops_grid = torchvision.utils.make_grid(gt_crops_resized)
+        plt.imshow(gt_crops_grid.permute(1, 2, 0))
+        plt.show()
+
+        fp_crops_grid = torchvision.utils.make_grid(crops)
+        plt.imshow(fp_crops_grid.permute(1, 2, 0))
+        plt.show()
+
+    fp_boxes = fp_boxes[valid_fp_boxes_idx]
+    boxes = boxes[valid_fp_boxes_idx]
+    crops = crops[valid_fp_boxes_idx]
+    # crops = [tvf.crop(image, top=b[0], left=b[1], width=b[2], height=b[3]) for b in boxes]
+    # crops = torch.stack(crops)
+
+    if plot:
+        show_image_with_crop_boxes(image.permute(1, 2, 0), boxes, gt_boxes_xywh, xywh_mode_v2=False, xyxy_mode=False,
+                                   title='xywh')
+        # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes, title='xyxy')
+        show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes_for_random_crops, title='xyxy')
+        gt_crops_grid = torchvision.utils.make_grid(crops)
+        plt.imshow(gt_crops_grid.permute(1, 2, 0))
+        plt.show()
+
+    boxes_to_replace = num_patches - fp_boxes.shape[0]
+    replaceable_boxes, replaceable_fp_boxes, replaceable_crops = [], [], []
+    replacement_required = False
+
+    while boxes_to_replace != 0:
+        replacement_required = True
+        temp_crops, temp_boxes = sample_random_crops(image, bounding_box_size, boxes_to_replace)
+        boxes_temp = [torch.tensor((b[1], b[0], b[2], b[3])) for b in temp_boxes]
+        boxes_temp = torch.stack(boxes_temp)
+        temp_fp_boxes = torchvision.ops.box_convert(boxes_temp, 'xywh', 'xyxy')
+
+        # temp_boxes_iou = torchvision.ops.box_iou(gt_boxes, temp_fp_boxes)
+        temp_boxes_iou = torchvision.ops.box_iou(gt_boxes_for_random_crops, temp_fp_boxes)
+        temp_gt_box_match, temp_fp_boxes_match = torch.where(temp_boxes_iou)
+
+        temp_fp_boxes_match_numpy = temp_fp_boxes_match.numpy()
+        if radius_elimination:
+            # temp_l2_distances_matrix = np.zeros(shape=(gt_boxes.shape[0], temp_fp_boxes.shape[0]))
+            temp_l2_distances_matrix = np.zeros(shape=(gt_boxes_for_random_crops.shape[0], temp_fp_boxes.shape[0]))
+            temp_fp_boxes_centers = np.stack([get_bbox_center(fp_box) for fp_box in temp_fp_boxes.numpy()]).squeeze()
+
+            # for g_idx, gt_center in enumerate(gt_bbox_centers):
+            for g_idx, gt_center in enumerate(gt_bbox_centers_for_random_crops):
+                if temp_fp_boxes_centers.ndim == 1:
+                    temp_fp_boxes_centers = np.expand_dims(temp_fp_boxes_centers, axis=0)
+                for f_idx, fp_center in enumerate(temp_fp_boxes_centers):
+                    temp_l2_distances_matrix[g_idx, f_idx] = np.linalg.norm((gt_center - fp_center), ord=2, axis=-1)
+
+            temp_gt_r_invalid, temp_fp_r_invalid = np.where(temp_l2_distances_matrix < radius_elimination)
+
+            temp_fp_boxes_match_numpy = np.union1d(temp_fp_boxes_match.numpy(), temp_fp_r_invalid)
+
+        temp_valid_fp_boxes_idx = np.setdiff1d(np.arange(temp_fp_boxes.shape[0]), temp_fp_boxes_match_numpy)
+        replaceable_boxes.append(temp_boxes[temp_valid_fp_boxes_idx])
+        replaceable_fp_boxes.append(temp_fp_boxes[temp_valid_fp_boxes_idx])
+        replaceable_crops.append(temp_crops[temp_valid_fp_boxes_idx])
+
+        boxes_to_replace -= temp_valid_fp_boxes_idx.size
+
+    if replacement_required:
+        replaceable_boxes = torch.cat(replaceable_boxes)
+        replaceable_fp_boxes = torch.cat(replaceable_fp_boxes)
+        replaceable_crops = torch.cat(replaceable_crops)
+
+        boxes = torch.cat((boxes, replaceable_boxes))
+        fp_boxes = torch.cat((fp_boxes, replaceable_fp_boxes))
+        crops = torch.cat((crops, replaceable_crops))
+
+    if plot:
+        # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes)
+        show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes_for_random_crops)
+        show_image_with_crop_boxes(image.permute(1, 2, 0), boxes, gt_boxes_xywh, xywh_mode_v2=False, xyxy_mode=False,
+                                   title='xywh')
+        fp_crops_grid = torchvision.utils.make_grid(crops)
+        plt.imshow(fp_crops_grid.permute(1, 2, 0))
+        plt.show()
+
+    gt_crops_resized = torch.stack(gt_crops_resized)
+
+    # data-augmentation
+    if img_transforms:
+        out = [img_transforms(image=np.transpose(im, [1, 2, 0])) for im in gt_crops_resized.numpy()]
+        out = [torch.from_numpy(o['image']).permute(2, 0, 1) for o in out]
+        gt_crops_resized = torch.stack(out)
+
+        out = [img_transforms(image=np.transpose(im, [1, 2, 0])) for im in crops.numpy()]
+        out = [torch.from_numpy(o['image']).permute(2, 0, 1) for o in out]
+        crops = torch.stack(out)
+
+    if plot:
+        gt_crops_grid = torchvision.utils.make_grid(gt_crops_resized)
+        plt.imshow(gt_crops_grid.permute(1, 2, 0))
+        plt.show()
+
+        gt_crops_grid = torchvision.utils.make_grid(crops)
+        plt.imshow(gt_crops_grid.permute(1, 2, 0))
+        plt.show()
+
+    gt_patches_and_labels = {'patches': gt_crops_resized, 'labels': torch.ones(size=(gt_crops_resized.shape[0],))}
+    fp_patches_and_labels = {'patches': crops, 'labels': torch.zeros(size=(crops.shape[0],))}
+
+    return gt_patches_and_labels, fp_patches_and_labels
+
+
 def patches_and_labels_with_anchors_v1(image, bounding_box_size, annotations, frame_number, num_patches=None,
                                        new_shape=None,
                                        use_generated=True, radius_elimination=None, plot=False,
@@ -893,18 +1156,26 @@ def patches_and_labels_with_anchors_v1(image, bounding_box_size, annotations, fr
 
 def test_patches_and_labels(video_path, frame_number, bounding_box_size, annotations, num_patches=None,
                             use_generated=True, plot=False, only_long_trajectories=False, img_transforms=None,
-                            additional_w=None, additional_h=None, aspect_ratios=(), scales=()):
+                            additional_w=None, additional_h=None, aspect_ratios=(), scales=(),
+                            track_length_threshold_for_random_crops=30):
     frame = extract_frame_from_video(video_path, frame_number)
     frame = torch.from_numpy(frame).permute(2, 0, 1)
     # patches_and_labels(frame, bounding_box_size, annotations, frame_number, num_patches,
     #                    use_generated=use_generated, radius_elimination=100, plot=plot,
     #                    only_long_trajectories=only_long_trajectories, img_transforms=img_transforms,
     #                    additional_w=additional_w, additional_h=additional_h)
-    patches_and_labels_with_anchors(frame, bounding_box_size, annotations, frame_number, num_patches,
-                                    use_generated=use_generated, radius_elimination=150, plot=plot,
-                                    only_long_trajectories=only_long_trajectories, img_transforms=img_transforms,
-                                    additional_w=additional_w, additional_h=additional_h, scales=scales,
-                                    aspect_ratios=aspect_ratios)
+    # patches_and_labels_with_anchors(frame, bounding_box_size, annotations, frame_number, num_patches,
+    #                                 use_generated=use_generated, radius_elimination=150, plot=plot,
+    #                                 only_long_trajectories=only_long_trajectories, img_transforms=img_transforms,
+    #                                 additional_w=additional_w, additional_h=additional_h, scales=scales,
+    #                                 aspect_ratios=aspect_ratios)
+    patches_and_labels_with_anchors_different_crop_track_threshold(
+        frame, bounding_box_size, annotations, frame_number, num_patches,
+        use_generated=use_generated, radius_elimination=150, plot=plot,
+        only_long_trajectories=only_long_trajectories, img_transforms=img_transforms,
+        additional_w=additional_w, additional_h=additional_h, scales=scales,
+        aspect_ratios=aspect_ratios,
+        track_length_threshold_for_random_crops=track_length_threshold_for_random_crops)
     print()
 
 
@@ -923,7 +1194,7 @@ if __name__ == '__main__':
     annotation_path = f'{annotation_root_path}{v_clz.value}/video{v_num}/annotation_augmented.csv'
     generated_annotations = pd.read_csv(f'{generated_annotation_root_path}{v_clz.value}{v_num}/'
                                         f'csv_annotation/generated_annotations.csv')
-    f_num = 10
+    f_num = 100
 
     annotations_df = read_annotation_file(annotation_path)
 

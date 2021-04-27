@@ -36,7 +36,11 @@ eval:
 
     additional_h: 20
     additional_w: 20
+    aspect_ratios: [ 0.75, 0.5 ]
+    scales: [ 2.0 ]
+    track_length_threshold_for_random_crops: 30
+    radius_elimination: 150
 
   checkpoint:
     path: "lightning_logs/version_"
-    version: 4
+    version: 5

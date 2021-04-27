@@ -201,7 +201,12 @@ def make_datasets_simple(cfg, video_class, return_test_split=False, plot=False, 
                                                      track_length_threshold=cfg.dataset.track_length_threshold,
                                                      transforms=transforms,
                                                      additional_h=cfg.dataset.additional_h,
-                                                     additional_w=cfg.dataset.additional_w))
+                                                     additional_w=cfg.dataset.additional_w,
+                                                     scales=cfg.dataset.scales,
+                                                     aspect_ratios=cfg.dataset.aspect_ratios,
+                                                     track_length_threshold_for_random_crops=
+                                                     cfg.dataset.track_length_threshold_for_random_crops,
+                                                     radius_elimination=cfg.dataset.radius_elimination))
     else:
         for n in cfg.dataset.num_videos:
             logger.info(f'Setting up dataset -> {video_class.name} : {n}')
@@ -215,7 +220,12 @@ def make_datasets_simple(cfg, video_class, return_test_split=False, plot=False, 
                                                  track_length_threshold=cfg.dataset.track_length_threshold,
                                                  transforms=transforms,
                                                  additional_h=cfg.dataset.additional_h,
-                                                 additional_w=cfg.dataset.additional_w))
+                                                 additional_w=cfg.dataset.additional_w,
+                                                 scales=cfg.dataset.scales,
+                                                 aspect_ratios=cfg.dataset.aspect_ratios,
+                                                 track_length_threshold_for_random_crops=
+                                                 cfg.dataset.track_length_threshold_for_random_crops,
+                                                 radius_elimination=cfg.dataset.radius_elimination))
     logger.info(f'Setting up validation datasets...')
 
     val_datasets = []
@@ -234,7 +244,12 @@ def make_datasets_simple(cfg, video_class, return_test_split=False, plot=False, 
                                                    track_length_threshold=cfg.dataset.track_length_threshold,
                                                    transforms=transforms,
                                                    additional_h=cfg.dataset.additional_h,
-                                                   additional_w=cfg.dataset.additional_w))
+                                                   additional_w=cfg.dataset.additional_w,
+                                                   scales=cfg.dataset.scales,
+                                                   aspect_ratios=cfg.dataset.aspect_ratios,
+                                                   track_length_threshold_for_random_crops=
+                                                   cfg.dataset.track_length_threshold_for_random_crops,
+                                                   radius_elimination=cfg.dataset.radius_elimination))
     else:
         for n in cfg.dataset.val_num_videos:
             logger.info(f'Setting up dataset -> {video_class.name} : {n}')
@@ -248,7 +263,12 @@ def make_datasets_simple(cfg, video_class, return_test_split=False, plot=False, 
                                                track_length_threshold=cfg.dataset.track_length_threshold,
                                                transforms=transforms,
                                                additional_h=cfg.dataset.additional_h,
-                                               additional_w=cfg.dataset.additional_w))
+                                               additional_w=cfg.dataset.additional_w,
+                                               scales=cfg.dataset.scales,
+                                               aspect_ratios=cfg.dataset.aspect_ratios,
+                                               track_length_threshold_for_random_crops=
+                                               cfg.dataset.track_length_threshold_for_random_crops,
+                                               radius_elimination=cfg.dataset.radius_elimination))
     train_dataset, val_dataset = ConcatDataset(train_datasets), ConcatDataset(val_datasets)
     return train_dataset, val_dataset
 
@@ -267,7 +287,12 @@ def make_test_datasets_simple(cfg, video_class, plot=False, transforms=None):
                                             track_length_threshold=cfg.eval.dataset.track_length_threshold,
                                             transforms=transforms,
                                             additional_h=cfg.eval.dataset.additional_h,
-                                            additional_w=cfg.eval.dataset.additional_w))
+                                            additional_w=cfg.eval.dataset.additional_w,
+                                            scales=cfg.eval.dataset.scales,
+                                            aspect_ratios=cfg.eval.dataset.aspect_ratios,
+                                            track_length_threshold_for_random_crops=
+                                            cfg.eval.dataset.track_length_threshold_for_random_crops,
+                                            radius_elimination=cfg.eval.dataset.radius_elimination))
     return ConcatDataset(test_datasets)
 
 
