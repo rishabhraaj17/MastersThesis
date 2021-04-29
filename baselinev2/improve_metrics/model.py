@@ -8,6 +8,7 @@ import hydra
 import matplotlib.pyplot as plt
 import torch
 from albumentations import Compose, HorizontalFlip, VerticalFlip, Rotate, RandomBrightnessContrast, ShiftScaleRotate
+from omegaconf import DictConfig
 from torch import nn
 import numpy as np
 from pytorch_lightning import LightningModule, Trainer
@@ -298,7 +299,8 @@ def make_test_datasets_simple(cfg, video_class, plot=False, transforms=None):
 
 class PersonClassifier(LightningModule):
     def __init__(self, conv_block, classifier_block, train_dataset, val_dataset, batch_size=1, num_workers=0,
-                 use_batch_norm=False, shuffle: bool = False, pin_memory: bool = True, lr=1e-5, collate_fn=None):
+                 use_batch_norm=False, shuffle: bool = False, pin_memory: bool = True, lr=1e-5, collate_fn=None,
+                 hparams: DictConfig = None):
         super(PersonClassifier, self).__init__()
         self.conv_block = conv_block
         self.classifier_block = classifier_block
@@ -312,7 +314,9 @@ class PersonClassifier(LightningModule):
         self.pin_memory = pin_memory
         self.lr = lr
         self.collate_fn = collate_fn
+
         self.loss_fn = BCEWithLogitsLoss()
+        self.hparams = hparams
 
     def forward(self, x):
         out = self.conv_block(x)
@@ -406,10 +410,10 @@ def model_trainer(cfg):
     logger.info(f'Setting up model...')
     if cfg.use_resnet:
         conv_layers = resnet18(pretrained=cfg.use_pretrained) \
-            if cfg.smaller_resnet else resnet9(pretrained=cfg.use_pretrained,
-                                               first_in_channel=cfg.first_in_channel,
-                                               first_stride=cfg.first_stride,
-                                               first_padding=cfg.first_padding)
+            if not cfg.smaller_resnet else resnet9(pretrained=cfg.use_pretrained,
+                                                   first_in_channel=cfg.first_in_channel,
+                                                   first_stride=cfg.first_stride,
+                                                   first_padding=cfg.first_padding)
     else:
         conv_layers = make_conv_blocks(cfg.input_dim, cfg.out_channels, cfg.kernel_dims, cfg.stride, cfg.padding,
                                        cfg.batch_norm, non_lin=Activations.RELU, dropout=cfg.dropout)
@@ -418,14 +422,23 @@ def model_trainer(cfg):
     model = PersonClassifier(conv_block=conv_layers, classifier_block=classifier_layers,
                              train_dataset=train_dataset, val_dataset=val_dataset,
                              batch_size=cfg.batch_size, num_workers=cfg.num_workers, shuffle=cfg.shuffle,
-                             pin_memory=cfg.pin_memory, lr=cfg.lr, collate_fn=people_collate_fn)
+                             pin_memory=cfg.pin_memory, lr=cfg.lr, collate_fn=people_collate_fn,
+                             hparams=cfg)
 
     model.apply(init_weights)
 
     logger.info(f'Setting up Trainer...')
 
-    trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
-                      fast_dev_run=cfg.trainer.fast_dev_run)
+    if cfg.resume_mode:
+        checkpoint_path = f'{cfg.resume.checkpoint.path}{cfg.resume.checkpoint.version}/checkpoints/'
+        checkpoint_file = checkpoint_path + os.listdir(checkpoint_path)[0]
+
+        # hyper_parameters_path = f'{cfg.resume.checkpoint.path}{cfg.resume.checkpoint.version}/hparams.yaml'
+        trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
+                          fast_dev_run=cfg.trainer.fast_dev_run, resume_from_checkpoint=checkpoint_file)
+    else:
+        trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
+                          fast_dev_run=cfg.trainer.fast_dev_run)
     logger.info(f'Starting training...')
 
     trainer.fit(model)

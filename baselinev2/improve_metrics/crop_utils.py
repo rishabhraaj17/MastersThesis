@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import timeout_decorator
 import torch
 import torchvision.io as tio
 import torchvision.ops
@@ -11,6 +12,7 @@ import albumentations as aug_transforms
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost, scale_annotations
 from average_image.constants import SDDVideoClasses
 from baseline.extracted_of_optimization import is_point_inside_circle
+from baselinev2.exceptions import TimeoutException
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import add_box_to_axes
 from baselinev2.utils import get_generated_frame_annotations, get_bbox_center, get_generated_track_annotations_for_frame
@@ -18,6 +20,8 @@ from log import initialize_logging, get_logger
 
 initialize_logging()
 logger = get_logger('baselinev2.improve_metrics.crop_utils')
+
+REPLACEMENT_TIMEOUT = 10
 
 
 class CustomRandomCrop(transforms.RandomCrop):
@@ -796,20 +800,20 @@ def patches_and_labels_with_anchors_different_crop_track_threshold(
     overlapping_boxes = [fp_boxes[fp_boxes_match], gt_boxes_for_random_crops[gt_box_match]]
 
     # if plot:
-        # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes, overlapping_boxes=overlapping_boxes)
-        # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes, title='xyxy',
-        #                            overlapping_boxes=overlapping_boxes)
-        # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes_for_random_crops, title='xyxy',
-        #                            overlapping_boxes=overlapping_boxes)
-        # show_image_with_crop_boxes(image.permute(1, 2, 0), boxes, gt_boxes_xywh, xywh_mode_v2=False, xyxy_mode=False,
-        #                            title='xywh')
-        # gt_crops_grid = torchvision.utils.make_grid(gt_crops_resized)
-        # plt.imshow(gt_crops_grid.permute(1, 2, 0))
-        # plt.show()
+    # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes, overlapping_boxes=overlapping_boxes)
+    # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes, title='xyxy',
+    #                            overlapping_boxes=overlapping_boxes)
+    # show_image_with_crop_boxes(image.permute(1, 2, 0), fp_boxes, gt_boxes_for_random_crops, title='xyxy',
+    #                            overlapping_boxes=overlapping_boxes)
+    # show_image_with_crop_boxes(image.permute(1, 2, 0), boxes, gt_boxes_xywh, xywh_mode_v2=False, xyxy_mode=False,
+    #                            title='xywh')
+    # gt_crops_grid = torchvision.utils.make_grid(gt_crops_resized)
+    # plt.imshow(gt_crops_grid.permute(1, 2, 0))
+    # plt.show()
 
-        # fp_crops_grid = torchvision.utils.make_grid(crops)
-        # plt.imshow(fp_crops_grid.permute(1, 2, 0))
-        # plt.show()
+    # fp_crops_grid = torchvision.utils.make_grid(crops)
+    # plt.imshow(fp_crops_grid.permute(1, 2, 0))
+    # plt.show()
 
     fp_boxes = fp_boxes[valid_fp_boxes_idx]
     boxes = boxes[valid_fp_boxes_idx]
@@ -830,40 +834,15 @@ def patches_and_labels_with_anchors_different_crop_track_threshold(
     replaceable_boxes, replaceable_fp_boxes, replaceable_crops = [], [], []
     replacement_required = False
 
-    while boxes_to_replace != 0:
-        replacement_required = True
-        temp_crops, temp_boxes = sample_random_crops(image, bounding_box_size, boxes_to_replace)
-        boxes_temp = [torch.tensor((b[1], b[0], b[2], b[3])) for b in temp_boxes]
-        boxes_temp = torch.stack(boxes_temp)
-        temp_fp_boxes = torchvision.ops.box_convert(boxes_temp, 'xywh', 'xyxy')
-
-        # temp_boxes_iou = torchvision.ops.box_iou(gt_boxes, temp_fp_boxes)
-        temp_boxes_iou = torchvision.ops.box_iou(gt_boxes_for_random_crops, temp_fp_boxes)
-        temp_gt_box_match, temp_fp_boxes_match = torch.where(temp_boxes_iou)
-
-        temp_fp_boxes_match_numpy = temp_fp_boxes_match.numpy()
-        if radius_elimination:
-            # temp_l2_distances_matrix = np.zeros(shape=(gt_boxes.shape[0], temp_fp_boxes.shape[0]))
-            temp_l2_distances_matrix = np.zeros(shape=(gt_boxes_for_random_crops.shape[0], temp_fp_boxes.shape[0]))
-            temp_fp_boxes_centers = np.stack([get_bbox_center(fp_box) for fp_box in temp_fp_boxes.numpy()]).squeeze()
-
-            # for g_idx, gt_center in enumerate(gt_bbox_centers):
-            for g_idx, gt_center in enumerate(gt_bbox_centers_for_random_crops):
-                if temp_fp_boxes_centers.ndim == 1:
-                    temp_fp_boxes_centers = np.expand_dims(temp_fp_boxes_centers, axis=0)
-                for f_idx, fp_center in enumerate(temp_fp_boxes_centers):
-                    temp_l2_distances_matrix[g_idx, f_idx] = np.linalg.norm((gt_center - fp_center), ord=2, axis=-1)
-
-            temp_gt_r_invalid, temp_fp_r_invalid = np.where(temp_l2_distances_matrix < radius_elimination)
-
-            temp_fp_boxes_match_numpy = np.union1d(temp_fp_boxes_match.numpy(), temp_fp_r_invalid)
-
-        temp_valid_fp_boxes_idx = np.setdiff1d(np.arange(temp_fp_boxes.shape[0]), temp_fp_boxes_match_numpy)
-        replaceable_boxes.append(temp_boxes[temp_valid_fp_boxes_idx])
-        replaceable_fp_boxes.append(temp_fp_boxes[temp_valid_fp_boxes_idx])
-        replaceable_crops.append(temp_crops[temp_valid_fp_boxes_idx])
-
-        boxes_to_replace -= temp_valid_fp_boxes_idx.size
+    try:
+        replacement_required = replace_overlapping_boxes(
+            bounding_box_size, boxes_to_replace,
+            gt_bbox_centers_for_random_crops, gt_boxes_for_random_crops, image,
+            radius_elimination, replaceable_boxes, replaceable_crops,
+            replaceable_fp_boxes, replacement_required)
+    except TimeoutException:
+        logger.warning(f'Replacement timed-out : {REPLACEMENT_TIMEOUT}!! Skipping frame')
+        return {}, {}
 
     if replacement_required:
         replaceable_boxes = torch.cat(replaceable_boxes)
@@ -908,6 +887,50 @@ def patches_and_labels_with_anchors_different_crop_track_threshold(
     fp_patches_and_labels = {'patches': crops, 'labels': torch.zeros(size=(crops.shape[0],))}
 
     return gt_patches_and_labels, fp_patches_and_labels
+
+
+@timeout_decorator.timeout(seconds=REPLACEMENT_TIMEOUT, timeout_exception=TimeoutException)
+def replace_overlapping_boxes(bounding_box_size, boxes_to_replace, gt_bbox_centers_for_random_crops,
+                              gt_boxes_for_random_crops, image, radius_elimination, replaceable_boxes,
+                              replaceable_crops, replaceable_fp_boxes, replacement_required):
+    while boxes_to_replace != 0:
+        replacement_required = True
+        temp_crops, temp_boxes = sample_random_crops(image, bounding_box_size, boxes_to_replace)
+        boxes_temp = [torch.tensor((b[1], b[0], b[2], b[3])) for b in temp_boxes]
+        boxes_temp = torch.stack(boxes_temp)
+        temp_fp_boxes = torchvision.ops.box_convert(boxes_temp, 'xywh', 'xyxy')
+
+        # temp_boxes_iou = torchvision.ops.box_iou(gt_boxes, temp_fp_boxes)
+        temp_boxes_iou = torchvision.ops.box_iou(gt_boxes_for_random_crops, temp_fp_boxes)
+        temp_gt_box_match, temp_fp_boxes_match = torch.where(temp_boxes_iou)
+
+        temp_fp_boxes_match_numpy = temp_fp_boxes_match.numpy()
+        if radius_elimination:
+            # temp_l2_distances_matrix = np.zeros(shape=(gt_boxes.shape[0], temp_fp_boxes.shape[0]))
+            temp_l2_distances_matrix = np.zeros(shape=(gt_boxes_for_random_crops.shape[0], temp_fp_boxes.shape[0]))
+            temp_fp_boxes_centers = np.stack([get_bbox_center(fp_box) for fp_box in temp_fp_boxes.numpy()]).squeeze()
+
+            # for g_idx, gt_center in enumerate(gt_bbox_centers):
+            for g_idx, gt_center in enumerate(gt_bbox_centers_for_random_crops):
+                if temp_fp_boxes_centers.ndim == 1:
+                    temp_fp_boxes_centers = np.expand_dims(temp_fp_boxes_centers, axis=0)
+                for f_idx, fp_center in enumerate(temp_fp_boxes_centers):
+                    try:
+                        temp_l2_distances_matrix[g_idx, f_idx] = np.linalg.norm((gt_center - fp_center), ord=2, axis=-1)
+                    except TypeError:
+                        raise TimeoutException
+
+            temp_gt_r_invalid, temp_fp_r_invalid = np.where(temp_l2_distances_matrix < radius_elimination)
+
+            temp_fp_boxes_match_numpy = np.union1d(temp_fp_boxes_match.numpy(), temp_fp_r_invalid)
+
+        temp_valid_fp_boxes_idx = np.setdiff1d(np.arange(temp_fp_boxes.shape[0]), temp_fp_boxes_match_numpy)
+        replaceable_boxes.append(temp_boxes[temp_valid_fp_boxes_idx])
+        replaceable_fp_boxes.append(temp_fp_boxes[temp_valid_fp_boxes_idx])
+        replaceable_crops.append(temp_crops[temp_valid_fp_boxes_idx])
+
+        boxes_to_replace -= temp_valid_fp_boxes_idx.size
+    return replacement_required
 
 
 def patches_and_labels_with_anchors_v1(image, bounding_box_size, annotations, frame_number, num_patches=None,

@@ -12,6 +12,13 @@ first_in_channel: 3
 first_stride: 2
 first_padding: 1
 
+device: "cuda:0"
+resume_mode: True
+resume:
+  checkpoint:
+    path: "lightning_logs/version_"
+    version: 7
+
 # trainer
 trainer:
   max_epochs : 400
@@ -19,7 +26,7 @@ trainer:
   fast_dev_run: False
 
 
-batch_size: 6
+batch_size: 2
 shuffle: False
 pin_memory: True
 lr: 1e-4
@@ -33,8 +40,8 @@ dataset:
   name: 'stanford'
   num_workers: 12
   video_to_use: 0
-  num_videos: [0, 1, 2, 4]  # -1
-  val_num_videos: [3]
+  num_videos: [0, 1, 3, 4]  # -1
+  val_num_videos: [2]
   test_num_videos: [3]
   multiple_videos: True
   merge_annotations: True
