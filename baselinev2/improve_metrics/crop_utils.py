@@ -716,20 +716,20 @@ def patches_and_labels_with_anchors_different_crop_track_threshold(
                     adjusted_box = torch.tensor((_x, _y, int(_w * 1 / ratio * scale), int(_h * ratio) * scale))
                     new_gt_boxes_xywh_h.append(adjusted_box)
 
-    new_gt_boxes_xywh_w = torchvision.ops.box_convert(torch.stack(new_gt_boxes_xywh_w), 'cxcywh', 'xywh').int()
-    new_gt_boxes_xywh_w = [torch.tensor((b[1], b[0], b[2] + additional_h, b[3] + additional_w))
-                           for b in new_gt_boxes_xywh_w]
+        new_gt_boxes_xywh_w = torchvision.ops.box_convert(torch.stack(new_gt_boxes_xywh_w), 'cxcywh', 'xywh').int()
+        new_gt_boxes_xywh_w = [torch.tensor((b[1], b[0], b[2] + additional_h, b[3] + additional_w))
+                               for b in new_gt_boxes_xywh_w]
 
-    new_gt_boxes_xywh_h = torchvision.ops.box_convert(torch.stack(new_gt_boxes_xywh_h), 'cxcywh', 'xywh').int()
-    new_gt_boxes_xywh_h = [torch.tensor((b[1], b[0], b[2] + additional_h, b[3] + additional_w))
-                           for b in new_gt_boxes_xywh_h]
-    _gt_crops_w = [tvf.crop(image, top=b[0], left=b[1], width=b[2], height=b[3]) for b in new_gt_boxes_xywh_w]
-    _gt_crops_h = [tvf.crop(image, top=b[0], left=b[1], width=b[2], height=b[3]) for b in new_gt_boxes_xywh_h]
+        new_gt_boxes_xywh_h = torchvision.ops.box_convert(torch.stack(new_gt_boxes_xywh_h), 'cxcywh', 'xywh').int()
+        new_gt_boxes_xywh_h = [torch.tensor((b[1], b[0], b[2] + additional_h, b[3] + additional_w))
+                               for b in new_gt_boxes_xywh_h]
+        _gt_crops_w = [tvf.crop(image, top=b[0], left=b[1], width=b[2], height=b[3]) for b in new_gt_boxes_xywh_w]
+        _gt_crops_h = [tvf.crop(image, top=b[0], left=b[1], width=b[2], height=b[3]) for b in new_gt_boxes_xywh_h]
 
-    _gt_crops_w_resized = [tvf.resize(c, [bounding_box_size, bounding_box_size])
-                           for c in _gt_crops_w if c.shape[1] != 0 and c.shape[2] != 0]
-    _gt_crops_h_resized = [tvf.resize(c, [bounding_box_size, bounding_box_size])
-                           for c in _gt_crops_h if c.shape[1] != 0 and c.shape[2] != 0]
+        _gt_crops_w_resized = [tvf.resize(c, [bounding_box_size, bounding_box_size])
+                               for c in _gt_crops_w if c.shape[1] != 0 and c.shape[2] != 0]
+        _gt_crops_h_resized = [tvf.resize(c, [bounding_box_size, bounding_box_size])
+                               for c in _gt_crops_h if c.shape[1] != 0 and c.shape[2] != 0]
 
     # k = 0
     # for i in range(40):
@@ -758,10 +758,14 @@ def patches_and_labels_with_anchors_different_crop_track_threshold(
     gt_crops_resized = [tvf.resize(c, [bounding_box_size, bounding_box_size])
                         for c in gt_crops if c.shape[1] != 0 and c.shape[2] != 0]
 
-    gt_crops_resized.extend(_gt_crops_w_resized)
-    gt_crops_resized.extend(_gt_crops_h_resized)
+    if len(aspect_ratios) != 0 and len(scales) != 0:
+        gt_crops_resized.extend(_gt_crops_w_resized)
+        gt_crops_resized.extend(_gt_crops_h_resized)
 
-    num_patches = (len(gt_crops) + len(_gt_crops_w) + len(_gt_crops_h)) if num_patches is None else num_patches
+        num_patches = (len(gt_crops) + len(_gt_crops_w) + len(_gt_crops_h)) if num_patches is None else num_patches
+    else:
+        num_patches = len(gt_crops) if num_patches is None else num_patches
+
     crops, boxes = sample_random_crops(image, bounding_box_size, num_patches)
 
     # correct mapping now

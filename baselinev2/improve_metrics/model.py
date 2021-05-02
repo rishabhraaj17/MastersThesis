@@ -359,7 +359,7 @@ class PersonClassifier(LightningModule):
         opt = torch.optim.Adam(self.parameters(), lr=self.lr)
         schedulers = [
             {
-                'scheduler': ReduceLROnPlateau(opt, patience=15, verbose=True, factor=0.2, cooldown=2),
+                'scheduler': ReduceLROnPlateau(opt, patience=5, verbose=True, factor=0.2, cooldown=2),
                 'monitor': 'val_loss_epoch',
                 'interval': 'epoch',
                 'frequency': 1
@@ -404,7 +404,9 @@ def model_trainer(cfg):
     ], p=0.7)
 
     logger.info(f'Setting up datasets...')
-    train_dataset, val_dataset = make_datasets_simple(cfg, VIDEO_CLASS, return_test_split=False, plot=False,
+    video_class = getattr(SDDVideoClasses, cfg.dataset.video_class)
+    logger.info(f'Video Class: {video_class.name}')
+    train_dataset, val_dataset = make_datasets_simple(cfg, video_class=video_class, return_test_split=False, plot=False,
                                                       server_mode=False,
                                                       transforms=img_t if cfg.data_augmentation else None)
     logger.info(f'Setting up model...')
@@ -455,7 +457,8 @@ def model_eval(cfg):
 
     logger.info(f'Setting up datasets...')
     eval_video_class = getattr(SDDVideoClasses, cfg.eval.dataset.video_class)
-    test_dataset = make_test_datasets_simple(cfg, VIDEO_CLASS, plot=False,
+    logger.info(f'Video Class: {eval_video_class.name}')
+    test_dataset = make_test_datasets_simple(cfg, eval_video_class, plot=False,
                                              transforms=img_t if cfg.eval.data_augmentation else None)
     test_loader = DataLoader(test_dataset, batch_size=cfg.eval.batch_size, num_workers=cfg.eval.num_workers,
                              shuffle=False, collate_fn=people_collate_fn)
@@ -463,10 +466,10 @@ def model_eval(cfg):
     logger.info(f'Setting up model...')
     if cfg.eval.use_resnet:
         conv_layers = resnet18(pretrained=cfg.eval.use_pretrained) \
-            if cfg.eval.smaller_resnet else resnet9(pretrained=cfg.eval.use_pretrained,
-                                                    first_in_channel=cfg.eval.first_in_channel,
-                                                    first_stride=cfg.eval.first_stride,
-                                                    first_padding=cfg.eval.first_padding)
+            if not cfg.eval.smaller_resnet else resnet9(pretrained=cfg.eval.use_pretrained,
+                                                        first_in_channel=cfg.eval.first_in_channel,
+                                                        first_stride=cfg.eval.first_stride,
+                                                        first_padding=cfg.eval.first_padding)
     else:
         conv_layers = make_conv_blocks(cfg.input_dim, cfg.out_channels, cfg.kernel_dims, cfg.stride, cfg.padding,
                                        cfg.batch_norm, non_lin=Activations.RELU, dropout=cfg.dropout)
@@ -475,10 +478,13 @@ def model_eval(cfg):
     model = PersonClassifier(conv_block=conv_layers, classifier_block=classifier_layers,
                              train_dataset=None, val_dataset=None, batch_size=cfg.eval.batch_size,
                              num_workers=cfg.eval.num_workers, shuffle=cfg.eval.shuffle,
-                             pin_memory=cfg.eval.pin_memory, lr=cfg.lr, collate_fn=people_collate_fn)
+                             pin_memory=cfg.eval.pin_memory, lr=cfg.lr, collate_fn=people_collate_fn,
+                             hparams=cfg)
     checkpoint_path = f'{cfg.eval.checkpoint.path}{cfg.eval.checkpoint.version}/checkpoints/'
     checkpoint_file = checkpoint_path + os.listdir(checkpoint_path)[0]
     load_dict = torch.load(checkpoint_file)
+
+    logger.info(f'Checkpoint: {checkpoint_file}')
 
     fig_save_path = f'{cfg.eval.checkpoint.path}{cfg.eval.checkpoint.version}/plots/{VIDEO_CLASS.name}/'
 
@@ -488,8 +494,12 @@ def model_eval(cfg):
 
     accuracies, losses = [], []
     for idx, (gt, fp) in enumerate(tqdm(test_loader)):
-        patches = torch.cat((gt['patches'], fp['patches']), dim=0)
-        labels = torch.cat((gt['labels'], fp['labels']), dim=0).view(-1, 1)
+        if cfg.eval.test_only_box_crops:
+            patches = gt['patches']
+            labels = gt['labels'].view(-1, 1)
+        else:
+            patches = torch.cat((gt['patches'], fp['patches']), dim=0)
+            labels = torch.cat((gt['labels'], fp['labels']), dim=0).view(-1, 1)
 
         patches, labels = patches.to(cfg.eval.device), labels.to(cfg.eval.device)
 
@@ -504,14 +514,16 @@ def model_eval(cfg):
         false_predictions = torch.where(labels.squeeze() != pred_labels.squeeze())[0]
 
         if idx % 100 == 0:
-            plot_idx = np.random.choice(patches.shape[0], 64, replace=False)
+            plot_idx = np.random.choice(patches.shape[0], 64, replace=True)
             false_plot_idx = np.random.choice(false_predictions.cpu().numpy(), 64,
-                                              replace=False if false_predictions.shape[0] > 64 else True)
+                                              replace=False if false_predictions.shape[0] > 64 else True) \
+                if len(false_predictions) != 0 else []
 
             plot_predictions(labels[plot_idx], patches[plot_idx], pred_labels[plot_idx], batch_idx=idx,
                              save_path=fig_save_path + 'all/')
-            plot_predictions(labels[false_plot_idx], patches[false_plot_idx], pred_labels[false_plot_idx],
-                             batch_idx=idx, save_path=fig_save_path + 'false_predictions/')
+            if len(false_predictions) != 0:
+                plot_predictions(labels[false_plot_idx], patches[false_plot_idx], pred_labels[false_plot_idx],
+                                 batch_idx=idx, save_path=fig_save_path + 'false_predictions/')
 
         losses.append(loss.item())
         accuracies.append(accuracy.item())

@@ -2,6 +2,7 @@
 # @package _global_
 
 eval:
+  test_only_box_crops: True
   device: 'cuda:0'
   num_workers : 12
 
@@ -14,7 +15,7 @@ eval:
   first_stride: 2
   first_padding: 1
 
-  batch_size: 8
+  batch_size: 3
   shuffle: False
   pin_memory: True
 
@@ -36,11 +37,14 @@ eval:
 
     additional_h: 20
     additional_w: 20
-    aspect_ratios: [ 0.75, 0.5 ]
-    scales: [ 2.0 ]
+#    aspect_ratios: [ 0.75, 0.5 ]
+    aspect_ratios: []
+#    scales: [ 2.0 ]
+    scales: []
     track_length_threshold_for_random_crops: 30
     radius_elimination: 150
 
   checkpoint:
     path: "lightning_logs/version_"
-    version: 5
+    version: 10
+    object_classifier_version: 8

@@ -1,15 +1,20 @@
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import cv2 as cv
+import hydra
 import numpy as np
 import scipy
 import skimage
 import torch
+import torchvision
+import torchvision.transforms.functional as tvf
 from matplotlib import pyplot as plt, patches
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import pandas as pd
+from omegaconf import DictConfig
+from torch.nn import Module
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -18,6 +23,11 @@ import seaborn as sns
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost, scale_annotations
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from baselinev2.config import BASE_PATH, DATASET_META, SERVER_PATH
+from baselinev2.improve_metrics.crop_utils import show_image_with_crop_boxes
+from baselinev2.improve_metrics.dataset import SDDDatasetV0
+from baselinev2.improve_metrics.model import make_conv_blocks, Activations, PersonClassifier, people_collate_fn, \
+    make_classifier_block
+from baselinev2.improve_metrics.modules import resnet18, resnet9
 from baselinev2.plot_utils import add_box_to_axes, add_box_to_axes_with_annotation, \
     add_features_to_axis
 from baselinev2.utils import get_generated_frame_annotations
@@ -48,8 +58,18 @@ class PerTrajectoryPR(object):
                  overlap_threshold: float = 2, num_workers: int = 12, batch_size: int = 32,
                  drop_last_batch: bool = True, custom_video_shape: bool = False,
                  video_mode: bool = True, save_path_for_video: str = None, desired_fps: int = 5,
-                 plot_scale_factor: int = 1, save_path_for_features: str = None):
+                 plot_scale_factor: int = 1, save_path_for_features: str = None,
+                 object_classifier: Optional[Module] = None, additional_crop_h: int = 0,
+                 additional_crop_w: int = 0, bounding_box_size: int = 50, cfg: DictConfig = None):
         super(PerTrajectoryPR, self).__init__()
+
+        self.object_classifier = object_classifier
+
+        self.additional_crop_w = additional_crop_w
+        self.additional_crop_h = additional_crop_h
+        self.bounding_box_size = bounding_box_size
+        self.cfg = cfg
+
         self.video_class = video_class
         self.video_number = video_number
         self.video_meta = video_meta
@@ -57,10 +77,10 @@ class PerTrajectoryPR(object):
         self.generated_annotation_path = generated_annotation_root_path
         self.overlap_threshold = overlap_threshold
 
-        self.dataset = SDDSimpleDataset(root=BASE_PATH, video_label=video_class, frames_per_clip=1,
-                                        num_workers=num_workers, num_videos=1, video_number_to_use=video_number,
-                                        step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
-                                        single_track_mode=False, track_id=5, multiple_videos=False)
+        self.dataset = SDDDatasetV0(root='../../' + BASE_PATH, video_label=video_class, frames_per_clip=1,
+                                    num_workers=num_workers, num_videos=1, video_number_to_use=video_number,
+                                    step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
+                                    single_track_mode=False, track_id=5, multiple_videos=False)
 
         self.data_loader = DataLoader(self.dataset, batch_size, drop_last=drop_last_batch)
         self.gt_annotations = self.dataset.annotations_df
@@ -76,6 +96,7 @@ class PerTrajectoryPR(object):
         self.ratio = float(meta_info.flatten()[-1])
 
         self.track_metrics = {}
+        self.boosted_track_metrics = {}
         self.save_path_for_features = save_path_for_features
 
         if video_mode:
@@ -232,6 +253,183 @@ class PerTrajectoryPR(object):
                 self.destroy()
             torch.save(self.track_metrics, self.save_path_for_features)
         logger.info('Finished extracting metrics!')
+
+    def extract_metrics_with_boosted_precision(self):
+        track_ids_killed = []
+        tp_list, fp_list, fn_list = [], [], []
+        try:
+            for p_idx, data in enumerate(tqdm(self.data_loader)):
+                frames, frame_numbers, _ = data
+                frames = frames.squeeze()
+                frames = (frames * 255.0).permute(0, 2, 3, 1).numpy().astype(np.uint8)
+                frames_count = frames.shape[0]
+                original_shape = new_shape = [frames.shape[1], frames.shape[2]]
+
+                for frame_idx, (frame, frame_number) in tqdm(enumerate(zip(frames, frame_numbers)),
+                                                             total=len(frame_numbers)):
+                    gt_frame_annotation = get_frame_annotations_and_skip_lost(self.gt_annotations[0],
+                                                                              frame_number.item())
+                    gt_annotations, gt_bbox_centers = scale_annotations(gt_frame_annotation,
+                                                                        original_scale=original_shape,
+                                                                        new_scale=new_shape, return_track_id=False,
+                                                                        tracks_with_annotations=True)
+                    gt_boxes = gt_annotations[:, :-1]
+                    gt_track_idx = gt_annotations[:, -1]
+
+                    generated_frame_annotation = get_generated_frame_annotations(self.generated_annotations,
+                                                                                 frame_number.item())
+                    generated_boxes = generated_frame_annotation[:, 1:5]
+                    generated_track_idx = generated_frame_annotation[:, 0]
+
+                    # classify patches
+                    generated_boxes_xywh = torchvision.ops.box_convert(torch.from_numpy(generated_boxes.astype(np.int)),
+                                                                       'xyxy', 'xywh')
+                    generated_boxes_xywh = [torch.tensor((b[1], b[0], b[2] + self.additional_crop_h,
+                                                          b[3] + self.additional_crop_w)) for b in generated_boxes_xywh]
+                    generated_boxes_xywh = torch.stack(generated_boxes_xywh)
+
+                    generated_crops = [tvf.crop(torch.from_numpy(frame).permute(2, 0, 1),
+                                                top=b[0], left=b[1], width=b[2], height=b[3])
+                                       for b in generated_boxes_xywh]
+                    generated_crops_resized = [tvf.resize(c, [self.bounding_box_size, self.bounding_box_size])
+                                               for c in generated_crops if c.shape[1] != 0 and c.shape[2] != 0]
+                    generated_crops_resized = torch.stack(generated_crops_resized)
+                    generated_crops_resized = (generated_crops_resized.float() / 255.0).to(self.cfg.eval.device)
+
+                    # plot
+                    show_image_with_crop_boxes(frame,
+                                               [], generated_boxes_xywh, xywh_mode_v2=False, xyxy_mode=False,
+                                               title='xywh')
+                    gt_crops_grid = torchvision.utils.make_grid(generated_crops_resized)
+                    plt.imshow(gt_crops_grid.cpu().permute(1, 2, 0))
+                    plt.show()
+
+                    with torch.no_grad():
+                        patch_predictions = self.object_classifier(generated_crops_resized)
+
+                    pred_labels = torch.round(torch.sigmoid(patch_predictions))
+
+                    valid_boxes_idx = (pred_labels > 0.5).squeeze().cpu()
+
+                    valid_boxes = generated_boxes_xywh[valid_boxes_idx]
+                    invalid_boxes = generated_boxes_xywh[~valid_boxes_idx]
+
+                    # plot removed boxes
+                    show_image_with_crop_boxes(frame,
+                                               invalid_boxes, valid_boxes, xywh_mode_v2=False, xyxy_mode=False,
+                                               title='xywh')
+
+                    valid_track_idx = generated_track_idx[valid_boxes_idx]
+                    invalid_track_idx = generated_track_idx[~valid_boxes_idx]
+                    valid_generated_boxes = generated_boxes[valid_boxes_idx]
+
+                    track_ids_killed = np.union1d(track_ids_killed, invalid_track_idx)
+
+                    for generated_t_idx in generated_track_idx:
+                        if generated_t_idx not in self.track_metrics.keys():
+                            self.track_metrics.update({generated_t_idx: MetricPerTrack(track_id=generated_t_idx)})
+
+                    for valid_t_idx in generated_track_idx:
+                        if valid_t_idx not in self.boosted_track_metrics.keys() \
+                                and not np.isin(valid_t_idx, track_ids_killed):
+                            self.boosted_track_metrics.update({valid_t_idx: MetricPerTrack(track_id=valid_t_idx)})
+
+                    fn, fp, match_cols, match_rows, precision, recall, tp = self.calculate_precision_recall(
+                        frame_number, generated_boxes, generated_track_idx, gt_boxes, gt_track_idx,
+                        self.track_metrics, killed_track_ids=None)
+
+                    fn_boosted, fp_boosted, match_cols_boosted, match_rows_boosted, \
+                    precision_boosted, recall_boosted, tp_boosted = self.calculate_precision_recall(
+                        frame_number, valid_generated_boxes, valid_track_idx, gt_boxes, gt_track_idx,
+                        self.boosted_track_metrics, killed_track_ids=track_ids_killed)
+
+                    tp_list.append(tp)
+                    fp_list.append(fp)
+                    fn_list.append(fn)
+
+                    skipped_idx = np.setdiff1d(np.arange(len(generated_track_idx)), match_cols).astype(np.int)
+                    logger.info(f'{self.video_class.name} - {self.video_number} || Precision: {precision} |'
+                                f' Recall: {recall}')
+                    logger.info('Boosted')
+                    logger.info(f'{self.video_class.name} - {self.video_number} || Precision: {precision_boosted} |'
+                                f' Recall: {recall_boosted}')
+                    self.plot(frame, frame_number, generated_boxes, generated_track_idx, gt_boxes, gt_track_idx,
+                              precision, recall,
+                              matched_gt_track_idx=gt_track_idx[match_rows] if match_rows.size != 0 else [],
+                              matched_generated_track_idx=
+                              generated_track_idx[match_cols] if match_cols.size != 0 else [],
+                              matched_gt_boxes=gt_boxes[match_rows] if match_rows.size != 0 else [],
+                              matched_generated_boxes=generated_boxes[match_cols] if match_cols.size != 0 else [],
+                              skipped_generated_boxes=generated_boxes[skipped_idx] if skipped_idx.size != 0 else [],
+                              skipped_generated_track_idx=
+                              generated_track_idx[skipped_idx] if skipped_idx.size != 0 else [])
+        except KeyboardInterrupt:
+            if self.video_mode:
+                logger.info('Saving video before exiting!')
+                self.destroy()
+        finally:
+            if self.video_mode:
+                self.destroy()
+            torch.save({'original': self.track_metrics, 'boosted': self.boosted_track_metrics},
+                       self.save_path_for_features)
+        logger.info('Finished extracting metrics!')
+
+    def calculate_precision_recall(self, frame_number, generated_boxes, generated_track_idx, gt_boxes, gt_track_idx,
+                                   track_metrics, killed_track_ids=None):
+        l2_distance_boxes_score_matrix = np.zeros(shape=(len(gt_boxes), len(generated_boxes)))
+        if generated_boxes.size != 0:
+            for a_i, a_box in enumerate(gt_boxes):
+                for r_i, r_box in enumerate(generated_boxes):
+                    dist = np.linalg.norm((self.get_bbox_center(a_box).flatten() -
+                                           self.get_bbox_center(r_box).flatten()), 2) * self.ratio
+                    l2_distance_boxes_score_matrix[a_i, r_i] = dist
+
+            l2_distance_boxes_score_matrix = self.overlap_threshold - l2_distance_boxes_score_matrix
+            l2_distance_boxes_score_matrix[l2_distance_boxes_score_matrix < 0] = 10
+            # Hungarian
+            # match_rows, match_cols = scipy.optimize.linear_sum_assignment(-l2_distance_boxes_score_matrix)
+            match_rows, match_cols = scipy.optimize.linear_sum_assignment(l2_distance_boxes_score_matrix)
+            actually_matched_mask = l2_distance_boxes_score_matrix[match_rows, match_cols] < 10
+            match_rows = match_rows[actually_matched_mask]
+            match_cols = match_cols[actually_matched_mask]
+            match_rows_tracks_idx = [gt_track_idx[m].item() for m in match_rows]
+            match_cols_tracks_idx = [generated_track_idx[m] for m in match_cols]
+
+            if killed_track_ids is None:
+                for generated_t_idx in generated_track_idx:
+                    if generated_t_idx in match_cols_tracks_idx:
+                        track_metrics[generated_t_idx].tp.append(1)
+                    else:
+                        track_metrics[generated_t_idx].fp.append(1)
+                    track_metrics[generated_t_idx].frames.append(frame_number.item())
+            else:
+                for generated_t_idx in generated_track_idx:
+                    if not np.isin(generated_t_idx, killed_track_ids):
+                        if generated_t_idx in match_cols_tracks_idx:
+                            track_metrics[generated_t_idx].tp.append(1)
+                        else:
+                            track_metrics[generated_t_idx].fp.append(1)
+                        track_metrics[generated_t_idx].frames.append(frame_number.item())
+        else:
+            match_rows, match_cols = np.array([]), np.array([])
+            match_rows_tracks_idx, match_cols_tracks_idx = np.array([]), np.array([])
+        if len(match_rows) != 0:
+            if len(match_rows) != len(match_cols):
+                logger.warning('Matching arrays length not same!')
+            tp = len(match_rows)
+            fp = len(generated_boxes) - len(match_rows)
+            fn = len(gt_boxes) - len(match_rows)
+
+            precision = tp / (tp + fp)
+            recall = tp / (tp + fn)
+        else:
+            tp = 0
+            fp = 0
+            fn = len(gt_boxes)
+
+            precision = 0
+            recall = 0
+        return fn, fp, match_cols, match_rows, precision, recall, tp
 
     @staticmethod
     def plot_for_video_current_frame(gt_rgb, current_frame_rgb, gt_annotations, current_frame_annotation,
@@ -459,11 +657,53 @@ class PerTrajectoryPR(object):
         plt.show()
 
 
+@hydra.main(config_path="config", config_name="config")
+def boost_precision(cfg):
+    logger.info(f'Setting up model...')
+
+    if cfg.eval.use_resnet:
+        conv_layers = resnet18(pretrained=cfg.eval.use_pretrained) \
+            if not cfg.eval.smaller_resnet else resnet9(pretrained=cfg.eval.use_pretrained,
+                                                        first_in_channel=cfg.eval.first_in_channel,
+                                                        first_stride=cfg.eval.first_stride,
+                                                        first_padding=cfg.eval.first_padding)
+    else:
+        conv_layers = make_conv_blocks(cfg.input_dim, cfg.out_channels, cfg.kernel_dims, cfg.stride, cfg.padding,
+                                       cfg.batch_norm, non_lin=Activations.RELU, dropout=cfg.dropout)
+    classifier_layers = make_classifier_block(cfg.in_feat, cfg.out_feat, Activations.RELU)
+
+    model = PersonClassifier(conv_block=conv_layers, classifier_block=classifier_layers,
+                             train_dataset=None, val_dataset=None, batch_size=cfg.eval.batch_size,
+                             num_workers=cfg.eval.num_workers, shuffle=cfg.eval.shuffle,
+                             pin_memory=cfg.eval.pin_memory, lr=cfg.lr, collate_fn=people_collate_fn,
+                             hparams=cfg)
+    checkpoint_path = f'{cfg.eval.checkpoint.path}{cfg.eval.checkpoint.object_classifier_version}/checkpoints/'
+    checkpoint_file = checkpoint_path + os.listdir(checkpoint_path)[0]
+    load_dict = torch.load(checkpoint_file)
+
+    model.load_state_dict(load_dict['state_dict'])
+    model.to(cfg.eval.device)
+    model.eval()
+
+    video_save_path = f'../../../Plots/baseline_v2/v0/experiments/video_{video_clz.name}_{video_num}.avi'
+    feats_save_path = f'../../../Plots/baseline_v2/v0/experiments/feats_{video_clz.name}_{video_num}.pt'
+
+    per_trajectory_pr = PerTrajectoryPR(video_class=video_clz, video_number=video_num, video_meta=video_clz_meta,
+                                        num_workers=12, save_path_for_video=video_save_path,
+                                        save_path_for_features=feats_save_path, video_mode=False,
+                                        object_classifier=model, cfg=cfg,
+                                        generated_annotation_root_path='../../../Plots/baseline_v2/v0/')
+    # per_trajectory_pr.extract_metrics()
+    per_trajectory_pr.extract_metrics_with_boosted_precision()
+
+    return model
+
+
 if __name__ == '__main__':
     analyze = False
     all_dataset = False
     combine_features = False
-    plot_only = True
+    plot_only = False
 
     video_clz = SDDVideoClasses.DEATH_CIRCLE
     video_clz_meta = SDDVideoDatasets.DEATH_CIRCLE
@@ -508,7 +748,4 @@ if __name__ == '__main__':
                                                     SERVER_PATH + 'Plots/baseline_v2/v0/')
                 per_trajectory_pr.extract_metrics()
     else:
-        per_trajectory_pr = PerTrajectoryPR(video_class=video_clz, video_number=video_num, video_meta=video_clz_meta,
-                                            num_workers=12, save_path_for_video=video_save_path,
-                                            save_path_for_features=feats_save_path, video_mode=False)
-        per_trajectory_pr.extract_metrics()
+        boost_precision()
