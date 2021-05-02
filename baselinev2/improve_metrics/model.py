@@ -407,7 +407,7 @@ def model_trainer(cfg):
     video_class = getattr(SDDVideoClasses, cfg.dataset.video_class)
     logger.info(f'Video Class: {video_class.name}')
     train_dataset, val_dataset = make_datasets_simple(cfg, video_class=video_class, return_test_split=False, plot=False,
-                                                      server_mode=False,
+                                                      server_mode=cfg.server_mode,
                                                       transforms=img_t if cfg.data_augmentation else None)
     logger.info(f'Setting up model...')
     if cfg.use_resnet:
