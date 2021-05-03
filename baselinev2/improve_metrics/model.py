@@ -532,6 +532,83 @@ def model_eval(cfg):
     logger.info(f'{VIDEO_CLASS.name} -> Accuracy: {acc} | Loss: {total_loss}')
 
 
+@hydra.main(config_path="config", config_name="config")
+def model_eval_per_frame(cfg):
+    logger.info(f'Setting up datasets...')
+    eval_video_class = getattr(SDDVideoClasses, cfg.eval.dataset.video_class)
+    logger.info(f'Video Class: {eval_video_class.name}')
+    test_dataset = make_test_datasets_simple(cfg, eval_video_class, plot=False,
+                                             transforms=None)
+    logger.info(f'Setting up model...')
+    if cfg.eval.use_resnet:
+        conv_layers = resnet18(pretrained=cfg.eval.use_pretrained) \
+            if not cfg.eval.smaller_resnet else resnet9(pretrained=cfg.eval.use_pretrained,
+                                                        first_in_channel=cfg.eval.first_in_channel,
+                                                        first_stride=cfg.eval.first_stride,
+                                                        first_padding=cfg.eval.first_padding)
+    else:
+        conv_layers = make_conv_blocks(cfg.input_dim, cfg.out_channels, cfg.kernel_dims, cfg.stride, cfg.padding,
+                                       cfg.batch_norm, non_lin=Activations.RELU, dropout=cfg.dropout)
+    classifier_layers = make_classifier_block(cfg.in_feat, cfg.out_feat, Activations.RELU)
+
+    model = PersonClassifier(conv_block=conv_layers, classifier_block=classifier_layers,
+                             train_dataset=None, val_dataset=None, batch_size=cfg.eval.batch_size,
+                             num_workers=cfg.eval.num_workers, shuffle=cfg.eval.shuffle,
+                             pin_memory=cfg.eval.pin_memory, lr=cfg.lr, collate_fn=people_collate_fn,
+                             hparams=cfg)
+    checkpoint_path = f'{cfg.eval.checkpoint.path}{cfg.eval.checkpoint.version}/checkpoints/'
+    checkpoint_file = checkpoint_path + os.listdir(checkpoint_path)[0]
+    load_dict = torch.load(checkpoint_file)
+
+    logger.info(f'Checkpoint: {checkpoint_file}')
+
+    fig_save_path = f'{cfg.eval.checkpoint.path}{cfg.eval.checkpoint.version}/plots/{VIDEO_CLASS.name}/'
+
+    model.load_state_dict(load_dict['state_dict'])
+    model.to(cfg.eval.device)
+    model.eval()
+
+    accuracies, losses = [], []
+    for idx in tqdm(range(len(test_dataset))):
+        gt, fp = test_dataset.__getitem__(idx)
+        if cfg.eval.test_only_box_crops:
+            patches = gt['patches']
+            labels = gt['labels'].view(-1, 1)
+        else:
+            patches = torch.cat((gt['patches'], fp['patches']), dim=0)
+            labels = torch.cat((gt['labels'], fp['labels']), dim=0).view(-1, 1)
+
+        patches, labels = patches.to(cfg.eval.device), labels.to(cfg.eval.device)
+
+        with torch.no_grad():
+            out = model(patches)
+
+        loss = model.loss_fn(out, labels)
+
+        pred_labels = torch.round(torch.sigmoid(out))
+        accuracy = (pred_labels.eq(labels)).float().mean()
+
+        false_predictions = torch.where(labels.squeeze() != pred_labels.squeeze())[0]
+
+        if idx % 100 == 0:
+            plot_idx = np.random.choice(patches.shape[0], 64, replace=True)
+            false_plot_idx = np.random.choice(false_predictions.cpu().numpy(), 64,
+                                              replace=False if false_predictions.shape[0] > 64 else True) \
+                if len(false_predictions) != 0 else []
+
+            plot_predictions(labels[plot_idx], patches[plot_idx], pred_labels[plot_idx], batch_idx=idx,
+                             save_path=fig_save_path + 'all/')
+            if len(false_predictions) != 0:
+                plot_predictions(labels[false_plot_idx], patches[false_plot_idx], pred_labels[false_plot_idx],
+                                 batch_idx=idx, save_path=fig_save_path + 'false_predictions/')
+
+        losses.append(loss.item())
+        accuracies.append(accuracy.item())
+
+    acc, total_loss = np.array(accuracies).mean(), np.array(losses).mean()
+    logger.info(f'{VIDEO_CLASS.name} -> Accuracy: {acc} | Loss: {total_loss}')
+
+
 def plot_predictions(labels, patches, pred_labels, batch_idx, save_path=None, additional_text=''):
     k = 0
     fig, ax = plt.subplots(8, 8, figsize=(16, 14))
@@ -556,8 +633,9 @@ if __name__ == '__main__':
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
-        model_trainer()
+        # model_trainer()
         # model_eval()
+        model_eval_per_frame()
 
         # m = resnet9(first_in_channel=3, first_stride=2, first_padding=1)
         # inp = torch.randn((2, 3, 100, 100))

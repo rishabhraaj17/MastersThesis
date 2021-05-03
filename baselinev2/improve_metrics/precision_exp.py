@@ -30,7 +30,7 @@ from baselinev2.improve_metrics.model import make_conv_blocks, Activations, Pers
 from baselinev2.improve_metrics.modules import resnet18, resnet9
 from baselinev2.plot_utils import add_box_to_axes, add_box_to_axes_with_annotation, \
     add_features_to_axis
-from baselinev2.utils import get_generated_frame_annotations
+from baselinev2.utils import get_generated_frame_annotations, get_generated_track_annotations_for_frame
 from log import initialize_logging, get_logger
 from unsupervised_tp_0.dataset import SDDSimpleDataset, resize_frames
 
@@ -254,7 +254,7 @@ class PerTrajectoryPR(object):
             torch.save(self.track_metrics, self.save_path_for_features)
         logger.info('Finished extracting metrics!')
 
-    def extract_metrics_with_boosted_precision(self):
+    def extract_metrics_with_boosted_precision(self, plot: bool = False):
         track_ids_killed = []
         tp_list, fp_list, fn_list = [], [], []
         try:
@@ -281,49 +281,66 @@ class PerTrajectoryPR(object):
                     generated_boxes = generated_frame_annotation[:, 1:5]
                     generated_track_idx = generated_frame_annotation[:, 0]
 
+                    # generated_frame_annotation = get_generated_frame_annotations(self.generated_annotations,
+                    #                                                              frame_number.item())
+                    # generated_track_annotations = get_generated_track_annotations_for_frame(self.generated_annotations,
+                    #                                                                         frame_number.item())
+                    # generated_track_lengths = np.array([t.shape[0] for t in generated_track_annotations])
+                    #
+                    # feasible_generated_track_length = generated_track_lengths > 60
+                    # feasible_generated_frame_annotations = generated_frame_annotation[feasible_generated_track_length]
+                    # generated_boxes = torch.from_numpy(
+                    #     feasible_generated_frame_annotations[:, 1:5].astype(np.int)).numpy()
+                    # generated_track_idx = feasible_generated_frame_annotations[:, 0]
+
                     # classify patches
                     generated_boxes_xywh = torchvision.ops.box_convert(torch.from_numpy(generated_boxes.astype(np.int)),
                                                                        'xyxy', 'xywh')
                     generated_boxes_xywh = [torch.tensor((b[1], b[0], b[2] + self.additional_crop_h,
                                                           b[3] + self.additional_crop_w)) for b in generated_boxes_xywh]
-                    generated_boxes_xywh = torch.stack(generated_boxes_xywh)
+                    try:
+                        generated_boxes_xywh = torch.stack(generated_boxes_xywh)
 
-                    generated_crops = [tvf.crop(torch.from_numpy(frame).permute(2, 0, 1),
-                                                top=b[0], left=b[1], width=b[2], height=b[3])
-                                       for b in generated_boxes_xywh]
-                    generated_crops_resized = [tvf.resize(c, [self.bounding_box_size, self.bounding_box_size])
-                                               for c in generated_crops if c.shape[1] != 0 and c.shape[2] != 0]
-                    generated_crops_resized = torch.stack(generated_crops_resized)
-                    generated_crops_resized = (generated_crops_resized.float() / 255.0).to(self.cfg.eval.device)
+                        generated_crops = [tvf.crop(torch.from_numpy(frame).permute(2, 0, 1),
+                                                    top=b[0], left=b[1], width=b[2], height=b[3])
+                                           for b in generated_boxes_xywh]
+                        generated_crops_resized = [tvf.resize(c, [self.bounding_box_size, self.bounding_box_size])
+                                                   for c in generated_crops if c.shape[1] != 0 and c.shape[2] != 0]
+                        generated_crops_resized = torch.stack(generated_crops_resized)
+                        generated_crops_resized = (generated_crops_resized.float() / 255.0).to(self.cfg.eval.device)
 
-                    # plot
-                    show_image_with_crop_boxes(frame,
-                                               [], generated_boxes_xywh, xywh_mode_v2=False, xyxy_mode=False,
-                                               title='xywh')
-                    gt_crops_grid = torchvision.utils.make_grid(generated_crops_resized)
-                    plt.imshow(gt_crops_grid.cpu().permute(1, 2, 0))
-                    plt.show()
+                        # plot
+                        if plot:
+                            show_image_with_crop_boxes(frame,
+                                                       [], generated_boxes_xywh, xywh_mode_v2=False, xyxy_mode=False,
+                                                       title='xywh')
+                            gt_crops_grid = torchvision.utils.make_grid(generated_crops_resized)
+                            plt.imshow(gt_crops_grid.cpu().permute(1, 2, 0))
+                            plt.show()
 
-                    with torch.no_grad():
-                        patch_predictions = self.object_classifier(generated_crops_resized)
+                        with torch.no_grad():
+                            patch_predictions = self.object_classifier(generated_crops_resized)
 
-                    pred_labels = torch.round(torch.sigmoid(patch_predictions))
+                        pred_labels = torch.round(torch.sigmoid(patch_predictions))
 
-                    valid_boxes_idx = (pred_labels > 0.5).squeeze().cpu()
+                        valid_boxes_idx = (pred_labels > 0.5).squeeze().cpu()
 
-                    valid_boxes = generated_boxes_xywh[valid_boxes_idx]
-                    invalid_boxes = generated_boxes_xywh[~valid_boxes_idx]
+                        valid_boxes = generated_boxes_xywh[valid_boxes_idx]
+                        invalid_boxes = generated_boxes_xywh[~valid_boxes_idx]
 
-                    # plot removed boxes
-                    show_image_with_crop_boxes(frame,
-                                               invalid_boxes, valid_boxes, xywh_mode_v2=False, xyxy_mode=False,
-                                               title='xywh')
+                        # plot removed boxes
+                        if plot:
+                            show_image_with_crop_boxes(frame,
+                                                       invalid_boxes, valid_boxes, xywh_mode_v2=False, xyxy_mode=False,
+                                                       title='xywh')
 
-                    valid_track_idx = generated_track_idx[valid_boxes_idx]
-                    invalid_track_idx = generated_track_idx[~valid_boxes_idx]
-                    valid_generated_boxes = generated_boxes[valid_boxes_idx]
+                        valid_track_idx = generated_track_idx[valid_boxes_idx]
+                        invalid_track_idx = generated_track_idx[~valid_boxes_idx]
+                        valid_generated_boxes = generated_boxes[valid_boxes_idx]
 
-                    track_ids_killed = np.union1d(track_ids_killed, invalid_track_idx)
+                        track_ids_killed = np.union1d(track_ids_killed, invalid_track_idx)
+                    except RuntimeError:
+                        valid_generated_boxes, valid_track_idx = np.array([]), np.array([])
 
                     for generated_t_idx in generated_track_idx:
                         if generated_t_idx not in self.track_metrics.keys():
@@ -573,11 +590,15 @@ class PerTrajectoryPR(object):
         print()
 
     @staticmethod
-    def analyze_multiple_features(paths, mode='mean'):
-        features: List[Dict[int, MetricPerTrack]] = [torch.load(path) for path in paths]
+    def analyze_multiple_features(paths, mode='mean', boosted: bool = False):
+        features: List[Dict[str, Dict[int, MetricPerTrack]]] = [torch.load(path) for path in paths]
         track_len_to_precision = {}
 
         for feat in features:
+            if boosted:
+                feat = feat['boosted']
+            else:
+                feat = feat['original']
             for key, value in tqdm(feat.items()):
                 value.track_length = len(value.frames)
 
@@ -692,7 +713,9 @@ def boost_precision(cfg):
                                         num_workers=12, save_path_for_video=video_save_path,
                                         save_path_for_features=feats_save_path, video_mode=False,
                                         object_classifier=model, cfg=cfg,
-                                        generated_annotation_root_path='../../../Plots/baseline_v2/v0/')
+                                        generated_annotation_root_path='../../../Plots/baseline_v2/v0/',
+                                        additional_crop_h=cfg.eval.dataset.additional_h,
+                                        additional_crop_w=cfg.eval.dataset.additional_w)
     # per_trajectory_pr.extract_metrics()
     per_trajectory_pr.extract_metrics_with_boosted_precision()
 
@@ -714,11 +737,15 @@ if __name__ == '__main__':
 
     if analyze:
         # PerTrajectoryPR.analyze_feature(feats_save_path)
+        start, end = 0, 1
         PerTrajectoryPR.analyze_multiple_features([
-            f'../Plots/baseline_v2/v0/experiments/feats_{video_clz.name}_{i}.pt' for i in range(5)
-        ], mode='median')
+            f'../Plots/baseline_v2/v0/experiments/feats_{video_clz.name}_{i}.pt' for i in range(start, end)
+        ], mode='median', boosted=False)
+        PerTrajectoryPR.analyze_multiple_features([
+            f'../Plots/baseline_v2/v0/experiments/feats_{video_clz.name}_{i}.pt' for i in range(start, end)
+        ], mode='median', boosted=True)
     elif plot_only:
-        feat_path = f'../Plots/baseline_v2/v0/experiments/combined.pt'
+        feat_path = f'../Plots/baseline_v2/v0/experiments/feats_DEATH_CIRCLE_2.pt'
         PerTrajectoryPR.just_plot(feat_path, 'median')
     elif combine_features:
         feat_paths = os.listdir(SERVER_PATH + 'Plots/baseline_v2/v0/experiments/')

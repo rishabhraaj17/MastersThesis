@@ -27,7 +27,7 @@ eval:
     num_workers: 12
     video_to_use: 0
     video_class: 'DEATH_CIRCLE'
-    num_videos: [3]
+    num_videos: [2]
     multiple_videos: False
     merge_annotations: False
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/"
@@ -46,5 +46,5 @@ eval:
 
   checkpoint:
     path: "lightning_logs/version_"
-    version: 10
-    object_classifier_version: 8
+    version: 11
+    object_classifier_version: 11
