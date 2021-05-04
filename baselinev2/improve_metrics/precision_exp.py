@@ -325,18 +325,36 @@ class PerTrajectoryPR(object):
 
                         valid_boxes_idx = (pred_labels > 0.5).squeeze().cpu()
 
-                        valid_boxes = generated_boxes_xywh[valid_boxes_idx]
-                        invalid_boxes = generated_boxes_xywh[~valid_boxes_idx]
+                        if valid_boxes_idx.ndim == 0:
+                            if valid_boxes_idx.item():
+                                valid_boxes_idx = 0
+                                valid_boxes = generated_boxes_xywh[valid_boxes_idx]
+                                invalid_boxes = []
 
-                        # plot removed boxes
-                        if plot:
-                            show_image_with_crop_boxes(frame,
-                                                       invalid_boxes, valid_boxes, xywh_mode_v2=False, xyxy_mode=False,
-                                                       title='xywh')
+                                valid_track_idx = [generated_track_idx[valid_boxes_idx]]
+                                invalid_track_idx = []
+                            else:
+                                valid_boxes_idx = 0
+                                valid_boxes = []
+                                invalid_boxes = generated_boxes_xywh[valid_boxes_idx]
 
-                        valid_track_idx = generated_track_idx[valid_boxes_idx]
-                        invalid_track_idx = generated_track_idx[~valid_boxes_idx]
-                        valid_generated_boxes = generated_boxes[valid_boxes_idx]
+                                valid_track_idx = []
+                                invalid_track_idx = [generated_track_idx[valid_boxes_idx]]
+
+                            valid_generated_boxes = np.expand_dims(generated_boxes[valid_boxes_idx], 0)
+                        else:
+                            valid_boxes = generated_boxes_xywh[valid_boxes_idx]
+                            invalid_boxes = generated_boxes_xywh[~valid_boxes_idx]
+
+                            # plot removed boxes
+                            if plot:
+                                show_image_with_crop_boxes(frame,
+                                                           invalid_boxes, valid_boxes, xywh_mode_v2=False, xyxy_mode=False,
+                                                           title='xywh')
+
+                            valid_track_idx = generated_track_idx[valid_boxes_idx]
+                            invalid_track_idx = generated_track_idx[~valid_boxes_idx]
+                            valid_generated_boxes = generated_boxes[valid_boxes_idx]
 
                         track_ids_killed = np.union1d(track_ids_killed, invalid_track_idx)
                     except RuntimeError:
@@ -730,14 +748,14 @@ if __name__ == '__main__':
 
     video_clz = SDDVideoClasses.DEATH_CIRCLE
     video_clz_meta = SDDVideoDatasets.DEATH_CIRCLE
-    video_num = 3
+    video_num = 4
 
     video_save_path = f'../Plots/baseline_v2/v0/experiments/video_{video_clz.name}_{video_num}.avi'
     feats_save_path = f'../Plots/baseline_v2/v0/experiments/feats_{video_clz.name}_{video_num}.pt'
 
     if analyze:
         # PerTrajectoryPR.analyze_feature(feats_save_path)
-        start, end = 0, 1
+        start, end = 0, 4
         PerTrajectoryPR.analyze_multiple_features([
             f'../Plots/baseline_v2/v0/experiments/feats_{video_clz.name}_{i}.pt' for i in range(start, end)
         ], mode='median', boosted=False)
