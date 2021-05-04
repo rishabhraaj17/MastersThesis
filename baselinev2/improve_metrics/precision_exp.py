@@ -39,6 +39,16 @@ from unsupervised_tp_0.dataset import SDDSimpleDataset, resize_frames
 initialize_logging()
 logger = get_logger('improve_metrics.precision_exp')
 
+DATASET_TO_MODEL = {
+    SDDVideoClasses.BOOKSTORE: 376647,
+    SDDVideoClasses.COUPA: 377095,
+    SDDVideoClasses.GATES: 373993,
+    SDDVideoClasses.HYANG: 373994,
+    SDDVideoClasses.LITTLE: 376650,
+    SDDVideoClasses.NEXUS: 377688,
+    SDDVideoClasses.QUAD: 377576
+}
+
 
 class MetricPerTrack(object):
     def __init__(self, track_id: int):
@@ -333,6 +343,7 @@ class PerTrajectoryPR(object):
 
                                 valid_track_idx = [generated_track_idx[valid_boxes_idx]]
                                 invalid_track_idx = []
+                                valid_generated_boxes = np.expand_dims(generated_boxes[valid_boxes_idx], 0)
                             else:
                                 valid_boxes_idx = 0
                                 valid_boxes = []
@@ -340,8 +351,9 @@ class PerTrajectoryPR(object):
 
                                 valid_track_idx = []
                                 invalid_track_idx = [generated_track_idx[valid_boxes_idx]]
+                                valid_generated_boxes = np.array([])
 
-                            valid_generated_boxes = np.expand_dims(generated_boxes[valid_boxes_idx], 0)
+                            # valid_generated_boxes = np.expand_dims(generated_boxes[valid_boxes_idx], 0)
                         else:
                             valid_boxes = generated_boxes_xywh[valid_boxes_idx]
                             invalid_boxes = generated_boxes_xywh[~valid_boxes_idx]
@@ -740,9 +752,74 @@ def boost_precision(cfg):
     return model
 
 
+@hydra.main(config_path="config", config_name="config")
+def boosted_precision_for_all_clips(cfg):
+    logger.info(f'Setting up model...')
+    if cfg.eval.use_resnet:
+        conv_layers = resnet18(pretrained=cfg.eval.use_pretrained) \
+            if not cfg.eval.smaller_resnet else resnet9(pretrained=cfg.eval.use_pretrained,
+                                                        first_in_channel=cfg.eval.first_in_channel,
+                                                        first_stride=cfg.eval.first_stride,
+                                                        first_padding=cfg.eval.first_padding)
+    else:
+        conv_layers = make_conv_blocks(cfg.input_dim, cfg.out_channels, cfg.kernel_dims, cfg.stride, cfg.padding,
+                                       cfg.batch_norm, non_lin=Activations.RELU, dropout=cfg.dropout)
+    classifier_layers = make_classifier_block(cfg.in_feat, cfg.out_feat, Activations.RELU)
+
+    video_clazzes = [SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.GATES,
+                     SDDVideoClasses.HYANG, SDDVideoClasses.LITTLE, SDDVideoClasses.NEXUS, SDDVideoClasses.QUAD]
+    video_metas = [SDDVideoDatasets.BOOKSTORE, SDDVideoDatasets.COUPA, SDDVideoDatasets.GATES,
+                   SDDVideoDatasets.HYANG, SDDVideoDatasets.LITTLE, SDDVideoDatasets.NEXUS, SDDVideoDatasets.QUAD]
+    video_numbers = [[i for i in range(7)], [i for i in range(4)], [i for i in range(9)], [i for i in range(15)],
+                     [i for i in range(4)], [i for i in range(12)], [i for i in range(4)]]
+
+    for idx, (v_clz, v_meta) in tqdm(enumerate(zip(video_clazzes, video_metas))):
+        model = PersonClassifier(conv_block=conv_layers, classifier_block=classifier_layers,
+                                 train_dataset=None, val_dataset=None, batch_size=cfg.eval.batch_size,
+                                 num_workers=cfg.eval.num_workers, shuffle=cfg.eval.shuffle,
+                                 pin_memory=cfg.eval.pin_memory, lr=cfg.lr, collate_fn=people_collate_fn,
+                                 hparams=cfg)
+
+        logger.info(f"Loading weights for the dataset: {v_clz.name}")
+        checkpoint_path = f'{cfg.eval.checkpoint.path}{DATASET_TO_MODEL[v_clz]}/checkpoints/'
+        checkpoint_file = checkpoint_path + os.listdir(checkpoint_path)[0]
+        logger.info(f"Checkpoint file: {checkpoint_file}")
+        load_dict = torch.load(checkpoint_file)
+
+        model.load_state_dict(load_dict['state_dict'])
+        model.to(cfg.eval.device)
+        model.eval()
+        for v_num in video_numbers[idx]:
+            logger.info(f"************** Processing clip: {v_clz.name} - {v_num} *******************************")
+
+            video_save_path = f'../../../Plots/baseline_v2/v0/experiments/video_{v_clz.name}_{v_num}.avi'
+            feats_save_path = f'../../../Plots/baseline_v2/v0/experiments/feats_{v_clz.name}_{v_num}.pt'
+
+            # video_save_path = f'Plots/baseline_v2/v0/experiments/video_{v_clz.name}_{v_num}.avi'
+            # feats_save_path = f'Plots/baseline_v2/v0/experiments/feats_{v_clz.name}_{v_num}.pt'
+
+            per_trajectory_pr = PerTrajectoryPR(video_class=v_clz, video_number=v_num,
+                                                video_meta=v_meta,
+                                                num_workers=12,
+                                                # save_path_for_video=SERVER_PATH + video_save_path,
+                                                save_path_for_video=video_save_path,
+                                                # save_path_for_features=SERVER_PATH + feats_save_path,
+                                                save_path_for_features=feats_save_path,
+                                                video_mode=False,
+                                                object_classifier=model, cfg=cfg,
+                                                # generated_annotation_root_path=
+                                                # SERVER_PATH + '../../../Plots/baseline_v2/v0/',
+                                                generated_annotation_root_path=
+                                                '../../../Plots/baseline_v2/v0/',
+                                                additional_crop_h=cfg.eval.dataset.additional_h,
+                                                additional_crop_w=cfg.eval.dataset.additional_w)
+            per_trajectory_pr.extract_metrics_with_boosted_precision()
+
+
 if __name__ == '__main__':
     analyze = False
     all_dataset = False
+    all_dataset_boosted = True
     combine_features = False
     plot_only = False
 
@@ -792,5 +869,7 @@ if __name__ == '__main__':
                                                     generated_annotation_root_path=
                                                     SERVER_PATH + 'Plots/baseline_v2/v0/')
                 per_trajectory_pr.extract_metrics()
+    elif all_dataset_boosted:
+        boosted_precision_for_all_clips()
     else:
         boost_precision()
