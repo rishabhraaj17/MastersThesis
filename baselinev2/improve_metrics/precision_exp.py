@@ -316,6 +316,11 @@ class PerTrajectoryPR(object):
                                            for b in generated_boxes_xywh]
                         generated_crops_resized = [tvf.resize(c, [self.bounding_box_size, self.bounding_box_size])
                                                    for c in generated_crops if c.shape[1] != 0 and c.shape[2] != 0]
+                        generated_valid_boxes = [c_i for c_i, c in enumerate(generated_crops)
+                                                   if c.shape[1] != 0 and c.shape[2] != 0]
+                        generated_boxes_xywh = generated_boxes_xywh[generated_valid_boxes]
+                        generated_track_idx = generated_track_idx[generated_valid_boxes]
+                        generated_boxes = generated_boxes[generated_valid_boxes]
                         generated_crops_resized = torch.stack(generated_crops_resized)
                         generated_crops_resized = (generated_crops_resized.float() / 255.0).to(self.cfg.eval.device)
 
