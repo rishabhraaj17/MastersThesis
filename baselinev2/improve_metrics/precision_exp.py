@@ -267,6 +267,7 @@ class PerTrajectoryPR(object):
     def extract_metrics_with_boosted_precision(self, plot: bool = False):
         track_ids_killed = []
         tp_list, fp_list, fn_list = [], [], []
+        tp_boosted_list, fp_boosted_list, fn_boosted_list = [], [], []
         try:
             for p_idx, data in enumerate(tqdm(self.data_loader)):
                 frames, frame_numbers, _ = data
@@ -398,6 +399,10 @@ class PerTrajectoryPR(object):
                     tp_list.append(tp)
                     fp_list.append(fp)
                     fn_list.append(fn)
+                    
+                    tp_boosted_list.append(tp_boosted)
+                    fp_boosted_list.append(fp_boosted)
+                    fn_boosted_list.append(fn_boosted)
 
                     skipped_idx = np.setdiff1d(np.arange(len(generated_track_idx)), match_cols).astype(np.int)
                     logger.info(f'{self.video_class.name} - {self.video_number} || Precision: {precision} |'
@@ -422,7 +427,13 @@ class PerTrajectoryPR(object):
         finally:
             if self.video_mode:
                 self.destroy()
-            torch.save({'original': self.track_metrics, 'boosted': self.boosted_track_metrics},
+            if not os.path.exists(os.path.split(self.save_path_for_features)[0]):
+                os.makedirs(os.path.split(self.save_path_for_features)[0])
+            torch.save({'original': self.track_metrics, 'boosted': self.boosted_track_metrics, 
+                        'frame_based_metrics': {'original': {'tp': tp_list, 'fp': fp_list, 'fn': fn_list},
+                                                'boosted': {'tp': tp_boosted_list,
+                                                            'fp': fp_boosted_list,
+                                                            'fn': fn_boosted_list}}},
                        self.save_path_for_features)
         logger.info('Finished extracting metrics!')
 
@@ -798,7 +809,7 @@ def boosted_precision_for_all_clips(cfg):
             logger.info(f"************** Processing clip: {v_clz.name} - {v_num} *******************************")
 
             video_save_path = f'../../../Plots/baseline_v2/v0/experiments/video_{v_clz.name}_{v_num}.avi'
-            feats_save_path = f'../../../Plots/baseline_v2/v0/experiments/feats_{v_clz.name}_{v_num}.pt'
+            feats_save_path = f'../../../Plots/baseline_v2/v0/experimentsv2/feats_{v_clz.name}_{v_num}.pt'
 
             # video_save_path = f'Plots/baseline_v2/v0/experiments/video_{v_clz.name}_{v_num}.avi'
             # feats_save_path = f'Plots/baseline_v2/v0/experiments/feats_{v_clz.name}_{v_num}.pt'
