@@ -46,7 +46,8 @@ DATASET_TO_MODEL = {
     SDDVideoClasses.HYANG: 373994,
     SDDVideoClasses.LITTLE: 376650,
     SDDVideoClasses.NEXUS: 377688,
-    SDDVideoClasses.QUAD: 377576
+    SDDVideoClasses.QUAD: 377576,
+    SDDVideoClasses.DEATH_CIRCLE: 11
 }
 
 
@@ -318,7 +319,7 @@ class PerTrajectoryPR(object):
                         generated_crops_resized = [tvf.resize(c, [self.bounding_box_size, self.bounding_box_size])
                                                    for c in generated_crops if c.shape[1] != 0 and c.shape[2] != 0]
                         generated_valid_boxes = [c_i for c_i, c in enumerate(generated_crops)
-                                                   if c.shape[1] != 0 and c.shape[2] != 0]
+                                                 if c.shape[1] != 0 and c.shape[2] != 0]
                         generated_boxes_xywh = generated_boxes_xywh[generated_valid_boxes]
                         generated_track_idx = generated_track_idx[generated_valid_boxes]
                         generated_boxes = generated_boxes[generated_valid_boxes]
@@ -367,7 +368,8 @@ class PerTrajectoryPR(object):
                             # plot removed boxes
                             if plot:
                                 show_image_with_crop_boxes(frame,
-                                                           invalid_boxes, valid_boxes, xywh_mode_v2=False, xyxy_mode=False,
+                                                           invalid_boxes, valid_boxes, xywh_mode_v2=False,
+                                                           xyxy_mode=False,
                                                            title='xywh')
 
                             valid_track_idx = generated_track_idx[valid_boxes_idx]
@@ -399,7 +401,7 @@ class PerTrajectoryPR(object):
                     tp_list.append(tp)
                     fp_list.append(fp)
                     fn_list.append(fn)
-                    
+
                     tp_boosted_list.append(tp_boosted)
                     fp_boosted_list.append(fp_boosted)
                     fn_boosted_list.append(fn_boosted)
@@ -429,7 +431,7 @@ class PerTrajectoryPR(object):
                 self.destroy()
             if not os.path.exists(os.path.split(self.save_path_for_features)[0]):
                 os.makedirs(os.path.split(self.save_path_for_features)[0])
-            torch.save({'original': self.track_metrics, 'boosted': self.boosted_track_metrics, 
+            torch.save({'original': self.track_metrics, 'boosted': self.boosted_track_metrics,
                         'frame_based_metrics': {'original': {'tp': tp_list, 'fp': fp_list, 'fn': fn_list},
                                                 'boosted': {'tp': tp_boosted_list,
                                                             'fp': fp_boosted_list,
@@ -681,10 +683,17 @@ class PerTrajectoryPR(object):
 
     @staticmethod
     def combine_multiple_features(paths):
-        features: List[Dict[int, MetricPerTrack]] = [torch.load(path) for path in paths]
+        # paths.remove('../Plots/baseline_v2/v0/experiments/combined.pt')
+        features: List[Dict[str, MetricPerTrack]] = [torch.load(path) for path in paths]
+
+        original_features, boosted_features = [], []
+        for f in features:
+            original_features.append(f['original'])
+            boosted_features.append(f['boosted'])
+
         track_len_to_precision = {}
 
-        for feat in features:
+        for feat in original_features:
             for key, value in tqdm(feat.items()):
                 value.track_length = len(value.frames)
 
@@ -698,6 +707,71 @@ class PerTrajectoryPR(object):
                     track_len_to_precision.update({value.track_length: [value.precision]})
 
         return {'features': features, 'out': track_len_to_precision}
+
+    @staticmethod
+    def combine_multiple_features_v2(paths):
+        features: List[Dict[str, MetricPerTrack]] = [torch.load(path) for path in paths]
+        video_list = [os.path.split(p)[-1][6:-3] for p in paths]
+
+        original_features, boosted_features, frame_based_metrics = [], [], []
+        for f in features:
+            original_features.append(f['original'])
+            boosted_features.append(f['boosted'])
+            frame_based_metrics.append(f['frame_based_metrics'])
+
+        track_len_to_precision_original = {}
+        track_len_to_precision_boosted = {}
+        metric_per_video = {}
+
+        for frame_metrics, video_name_number in zip(frame_based_metrics, video_list):
+            original_metrics = frame_metrics['original']
+            boosted_metrics = frame_metrics['boosted']
+
+            original_precision = np.array(original_metrics['tp']).sum() / \
+                                 (np.array(original_metrics['tp']).sum() + np.array(original_metrics['fp']).sum())
+            original_recall = np.array(original_metrics['tp']).sum() / \
+                              (np.array(original_metrics['tp']).sum() + np.array(original_metrics['fn']).sum())
+
+            boosted_precision = np.array(boosted_metrics['tp']).sum() / \
+                                (np.array(boosted_metrics['tp']).sum() + np.array(boosted_metrics['fp']).sum())
+            boosted_recall = np.array(boosted_metrics['tp']).sum() / \
+                             (np.array(boosted_metrics['tp']).sum() + np.array(boosted_metrics['fn']).sum())
+
+            metric_per_video.update(
+                {video_name_number: {
+                    'original': {'precision': original_precision, 'recall': original_recall},
+                    'boosted': {'precision': boosted_precision, 'recall': boosted_recall}}})
+
+        for original_feat in original_features:
+            for key, value in tqdm(original_feat.items()):
+                value.track_length = len(value.frames)
+
+                tp = np.array(value.tp).sum()
+                fp = np.array(value.fp).sum()
+                value.precision = tp / (tp + fp)
+
+                if value.track_length in track_len_to_precision_original.keys():
+                    track_len_to_precision_original[value.track_length].append(value.precision)
+                else:
+                    track_len_to_precision_original.update({value.track_length: [value.precision]})
+
+        for boosted_feat in boosted_features:
+            for key, value in tqdm(boosted_feat.items()):
+                value.track_length = len(value.frames)
+
+                tp = np.array(value.tp).sum()
+                fp = np.array(value.fp).sum()
+                value.precision = tp / (tp + fp)
+
+                if value.track_length in track_len_to_precision_boosted.keys():
+                    track_len_to_precision_boosted[value.track_length].append(value.precision)
+                else:
+                    track_len_to_precision_boosted.update({value.track_length: [value.precision]})
+
+        return {'features': features,
+                'out': {'original': track_len_to_precision_original,
+                        'boosted': track_len_to_precision_boosted,
+                        'metrics': metric_per_video}}
 
     @staticmethod
     def just_plot(feat_path, mode='mean'):
@@ -721,6 +795,69 @@ class PerTrajectoryPR(object):
         sns_data = pd.DataFrame.from_dict({'lengths': lengths, 'precision': precisions})
         # sns.displot(sns_data, x="lengths", y='precision', cbar=True)
         sns.jointplot(data=sns_data, x="lengths", y='precision')
+        plt.show()
+
+    @staticmethod
+    def just_plot_v2(feat_path, mode='mean', boosted=False):
+        feat = torch.load(feat_path)
+        track_len_to_precision = feat['out']['original'] if not boosted else feat['out']['boosted']
+        metrics = feat['out']['metrics']
+
+        video_list, v_num_list, p_list, p_b_list, r_list, r_b_list, p_delta, r_delta = [], [], [], [], [], [], [], []
+        df_data = {}
+        for vid, m in metrics.items():
+            try:
+                v_clz, v_num = vid.split('_')
+            except ValueError:
+                v_clz, v_clz_add, v_num = vid.split('_')
+                v_clz += '_' + v_clz_add
+
+            video_list.append(v_clz)
+            v_num_list.append(v_num)
+            p_list.append(m['original']['precision'])
+            p_b_list.append(m['boosted']['precision'])
+            p_delta.append(m['boosted']['precision'] - m['original']['precision'])
+            r_list.append(m['original']['recall'])
+            r_b_list.append(m['boosted']['recall'])
+            r_delta.append(m['boosted']['recall'] - m['original']['recall'])
+
+        df_data.update({
+            'VIDEO': video_list,
+            'VIDEO_NUMBER': v_num_list,
+            'Precision': p_list,
+            'Precision - Boosted': p_b_list,
+            'Delta Precision': p_delta,
+            'Recall': r_list,
+            'Recall - Boosted': r_b_list,
+            'Delta Recall': r_delta,
+        })
+        df = pd.DataFrame.from_dict(df_data, orient='index').transpose()
+        df = df.sort_values(['VIDEO', 'VIDEO_NUMBER'])
+
+        df.to_markdown('../Plots/baseline_v2/v0/experimentsv2/metrics.md', index=False)
+        import json
+        with open('../Plots/baseline_v2/v0/experimentsv2/metrics.json', 'w+') as f:
+            json.dump(metrics, f)
+        for key, value in tqdm(track_len_to_precision.items()):
+            if mode == 'mean':
+                track_len_to_precision[key] = np.array(value).mean()
+            else:
+                track_len_to_precision[key] = np.median(np.array(value))
+
+        lengths = list(track_len_to_precision.keys())
+        precisions = list(track_len_to_precision.values())
+        plt.bar(lengths, precisions)
+        plt.xlabel('Track Length')
+        plt.ylabel('Precision')
+        plt.title('Precision vs Track Length')
+        plt.suptitle(f'Whole Dataset')
+        plt.savefig(f"../Plots/baseline_v2/v0/experimentsv2/whole_dataset_{'boosted' if boosted else 'original'}_0.png")
+        plt.show()
+
+        sns_data = pd.DataFrame.from_dict({'lengths': lengths, 'precision': precisions})
+        # sns.displot(sns_data, x="lengths", y='precision', cbar=True)
+        sns.jointplot(data=sns_data, x="lengths", y='precision')
+        plt.savefig(f"../Plots/baseline_v2/v0/experimentsv2/whole_dataset_{'boosted' if boosted else 'original'}_1.png")
         plt.show()
 
 
@@ -835,9 +972,9 @@ def boosted_precision_for_all_clips(cfg):
 if __name__ == '__main__':
     analyze = False
     all_dataset = False
-    all_dataset_boosted = True
+    all_dataset_boosted = False
     combine_features = False
-    plot_only = False
+    plot_only = True
 
     video_clz = SDDVideoClasses.DEATH_CIRCLE
     video_clz_meta = SDDVideoDatasets.DEATH_CIRCLE
@@ -856,13 +993,22 @@ if __name__ == '__main__':
             f'../Plots/baseline_v2/v0/experiments/feats_{video_clz.name}_{i}.pt' for i in range(start, end)
         ], mode='median', boosted=True)
     elif plot_only:
-        feat_path = f'../Plots/baseline_v2/v0/experiments/feats_DEATH_CIRCLE_2.pt'
-        PerTrajectoryPR.just_plot(feat_path, 'median')
+        feat_path = f'../Plots/baseline_v2/v0/experimentsv2/combined.pt'
+        PerTrajectoryPR.just_plot_v2(feat_path, 'median', boosted=False)
+        PerTrajectoryPR.just_plot_v2(feat_path, 'median', boosted=True)
     elif combine_features:
-        feat_paths = os.listdir(SERVER_PATH + 'Plots/baseline_v2/v0/experiments/')
-        feat_paths = [SERVER_PATH + 'Plots/baseline_v2/v0/experiments/' + p for p in feat_paths]
-        out = PerTrajectoryPR.combine_multiple_features(feat_paths)
-        torch.save(out, SERVER_PATH + 'Plots/baseline_v2/v0/experiments/combined.pt')
+        feat_paths = os.listdir(SERVER_PATH + 'Plots/baseline_v2/v0/experimentsv2/')
+        feat_paths = [SERVER_PATH + 'Plots/baseline_v2/v0/experimentsv2/' + p for p in feat_paths]
+
+        # feat_paths = os.listdir('../' + 'Plots/baseline_v2/v0/experimentsv2/')
+        # feat_paths = ['../' + 'Plots/baseline_v2/v0/experimentsv2/' + p for p in feat_paths]
+
+        # feat_paths = os.listdir('../' + 'Plots/baseline_v2/v0/experiments/')
+        # feat_paths = ['../' + 'Plots/baseline_v2/v0/experiments/' + p for p in feat_paths]
+
+        out = PerTrajectoryPR.combine_multiple_features_v2(feat_paths)
+        # out = PerTrajectoryPR.combine_multiple_features(feat_paths)
+        torch.save(out, SERVER_PATH + 'Plots/baseline_v2/v0/experimentsv2/combined.pt')
     elif all_dataset:
         video_clazzes = [SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.GATES,
                          SDDVideoClasses.HYANG, SDDVideoClasses.NEXUS, SDDVideoClasses.QUAD]
