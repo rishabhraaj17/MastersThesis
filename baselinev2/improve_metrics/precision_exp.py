@@ -851,13 +851,15 @@ class PerTrajectoryPR(object):
         plt.ylabel('Precision')
         plt.title('Precision vs Track Length')
         plt.suptitle(f'Whole Dataset')
-        plt.savefig(f"../Plots/baseline_v2/v0/experimentsv2/whole_dataset_{'boosted' if boosted else 'original'}_0.png")
+        plt.savefig(f"../Plots/baseline_v2/v0/experimentsv2/whole_dataset_{'boosted' if boosted else 'original'}_"
+                    f"{mode}_0.png")
         plt.show()
 
         sns_data = pd.DataFrame.from_dict({'lengths': lengths, 'precision': precisions})
         # sns.displot(sns_data, x="lengths", y='precision', cbar=True)
         sns.jointplot(data=sns_data, x="lengths", y='precision')
-        plt.savefig(f"../Plots/baseline_v2/v0/experimentsv2/whole_dataset_{'boosted' if boosted else 'original'}_1.png")
+        plt.savefig(f"../Plots/baseline_v2/v0/experimentsv2/whole_dataset_{'boosted' if boosted else 'original'}_"
+                    f"{mode}_1.png")
         plt.show()
 
 
