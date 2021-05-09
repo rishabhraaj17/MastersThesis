@@ -21,6 +21,7 @@ BATCH_CHECKPOINT = 50
 RESUME_MODE = False
 TIMEOUT_MODE = True
 CSV_MODE = False
+WITH_OBJECT_CLASSIFIER = True
 
 META_PATH = f'{ROOT_PATH}Datasets/SDD/H_SDD.txt'
 DATASET_META = SDDMeta(META_PATH)
@@ -33,7 +34,7 @@ SAVE_BASE_PATH = f"{ROOT_PATH}Datasets/SDD_Features/"
 
 BASE_PATH = f"{ROOT_PATH}Datasets/SDD/"
 
-EXECUTE_STEP = STEP.GENERATE_ANNOTATIONS
+EXECUTE_STEP = STEP.MINIMAL
 
 version = 0
 video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/'
@@ -439,3 +440,17 @@ EVAL_SIMPLE_MODEL_CONFIG_DICT_UNSUPERVISED = {
 }
 
 RELATIVE_DISTANCE_OUTLIER_FILTER_THRESHOLD = 100.  # None
+
+# OBJECT CLASSIFIER CONFIG COPY
+OC_USE_PRETRAINED = False
+OC_SMALLER_RESNET = True
+OC_USE_RESNET = True
+OC_BATCH_SIZE = 1
+OC_NUM_WORKERS = 0
+OC_CHECKPOINT_PATH = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/improve_metrics/' \
+                     'logs/lightning_logs/version_'
+OC_CHECKPOINT_VERSION = 381635
+OC_DEVICE = 'cuda:0'
+
+OC_ADDITIONAL_CROP_H = 20
+OC_ADDITIONAL_CROP_W = 20
