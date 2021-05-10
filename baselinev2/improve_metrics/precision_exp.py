@@ -710,8 +710,11 @@ class PerTrajectoryPR(object):
 
     @staticmethod
     def combine_multiple_features_v2(paths):
-        features: List[Dict[str, MetricPerTrack]] = [torch.load(path) for path in paths]
+        features: List[Dict[str, Dict]] = [torch.load(path) for path in paths]
         video_list = [os.path.split(p)[-1][6:-3] for p in paths]
+
+        original_dataset_tp, original_dataset_fp, original_dataset_fn = [], [], []
+        boosted_dataset_tp, boosted_dataset_fp, boosted_dataset_fn = [], [], []
 
         original_features, boosted_features, frame_based_metrics = [], [], []
         for f in features:
@@ -726,6 +729,14 @@ class PerTrajectoryPR(object):
         for frame_metrics, video_name_number in zip(frame_based_metrics, video_list):
             original_metrics = frame_metrics['original']
             boosted_metrics = frame_metrics['boosted']
+
+            original_dataset_tp.extend(original_metrics['tp'])
+            original_dataset_fp.extend(original_metrics['fp'])
+            original_dataset_fn.extend(original_metrics['fn'])
+
+            boosted_dataset_tp.extend(boosted_metrics['tp'])
+            boosted_dataset_fp.extend(boosted_metrics['fp'])
+            boosted_dataset_fn.extend(boosted_metrics['fn'])
 
             original_precision = np.array(original_metrics['tp']).sum() / \
                                  (np.array(original_metrics['tp']).sum() + np.array(original_metrics['fp']).sum())
@@ -768,6 +779,17 @@ class PerTrajectoryPR(object):
                 else:
                     track_len_to_precision_boosted.update({value.track_length: [value.precision]})
 
+        logger.info(
+            f'Whole Dataset- \nPrecision:\n'
+            f' - Original: '
+            f'{np.array(original_dataset_tp).sum() / (np.array(original_dataset_tp).sum() + np.array(original_dataset_fp).sum())}\n'
+            f' - Boosted: '
+            f'{np.array(boosted_dataset_tp).sum() / (np.array(boosted_dataset_tp).sum() + np.array(boosted_dataset_fp).sum())}'
+            f'\nRecall:\n'
+            f' - Original: '
+            f'{np.array(original_dataset_tp).sum() / (np.array(original_dataset_tp).sum() + np.array(original_dataset_fn).sum())}\n'
+            f' - Boosted: '
+            f'{np.array(boosted_dataset_tp).sum() / (np.array(boosted_dataset_tp).sum() + np.array(boosted_dataset_fn).sum())}')
         return {'features': features,
                 'out': {'original': track_len_to_precision_original,
                         'boosted': track_len_to_precision_boosted,
@@ -999,11 +1021,13 @@ if __name__ == '__main__':
         PerTrajectoryPR.just_plot_v2(feat_path, 'median', boosted=False)
         PerTrajectoryPR.just_plot_v2(feat_path, 'median', boosted=True)
     elif combine_features:
-        feat_paths = os.listdir(SERVER_PATH + 'Plots/baseline_v2/v0/experimentsv2/')
-        feat_paths = [SERVER_PATH + 'Plots/baseline_v2/v0/experimentsv2/' + p for p in feat_paths]
+        # feat_paths = os.listdir(SERVER_PATH + 'Plots/baseline_v2/v0/experimentsv2/')
+        # feat_paths = [SERVER_PATH + 'Plots/baseline_v2/v0/experimentsv2/' + p for p in feat_paths]
 
-        # feat_paths = os.listdir('../' + 'Plots/baseline_v2/v0/experimentsv2/')
-        # feat_paths = ['../' + 'Plots/baseline_v2/v0/experimentsv2/' + p for p in feat_paths]
+        feat_paths = os.listdir('../' + 'Plots/baseline_v2/v0/experimentsv2/')
+        feat_paths = ['../' + 'Plots/baseline_v2/v0/experimentsv2/' + p for p in feat_paths]
+        feat_paths.remove('../Plots/baseline_v2/v0/experimentsv2/plots')
+        feat_paths.remove('../Plots/baseline_v2/v0/experimentsv2/combined.pt')
 
         # feat_paths = os.listdir('../' + 'Plots/baseline_v2/v0/experiments/')
         # feat_paths = ['../' + 'Plots/baseline_v2/v0/experiments/' + p for p in feat_paths]
