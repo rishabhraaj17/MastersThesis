@@ -43,14 +43,14 @@ class BaselineDataset(Dataset):
     def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode,
                  meta_label: SDDVideoDatasets, root: str = SAVE_BASE_PATH,
                  observation_length: int = 8, prediction_length: int = 12,
-                 relative_velocities: bool = False):
+                 relative_velocities: bool = False, split_name: str = 'splits_v1'):
         super(BaselineDataset, self).__init__()
         try:
             self.ratio = float(DATASET_META.get_meta(meta_label, video_number)[0]['Ratio'].to_numpy()[0])
         except IndexError:
             # Homography not known!
             self.ratio = 1
-        path_to_dataset = f'{root}{video_class.value}/video{video_number}/splits_v1/'
+        path_to_dataset = f'{root}{video_class.value}/video{video_number}/{split_name}/'
 
         self.tracks = np.load(f'{path_to_dataset}{split.value}_tracks.npy', allow_pickle=True, mmap_mode='r+')
         self.relative_distances = np.load(f'{path_to_dataset}{split.value}_distances.npy', allow_pickle=True,
@@ -89,14 +89,15 @@ class BaselineDataset(Dataset):
 class BaselineGeneratedDataset(Dataset):
     def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode,
                  meta_label: SDDVideoDatasets, root: str = GENERATED_DATASET_ROOT,
-                 observation_length: int = 8, prediction_length: int = 12, relative_velocities: bool = False):
+                 observation_length: int = 8, prediction_length: int = 12, relative_velocities: bool = False,
+                 split_name: str = 'splits_v1'):
         super(BaselineGeneratedDataset, self).__init__()
         try:
             self.ratio = float(DATASET_META.get_meta(meta_label, video_number)[0]['Ratio'].to_numpy()[0])
         except IndexError:
             # Homography not known!
             self.ratio = 1
-        path_to_dataset = f'{root}{video_class.value}{video_number}/splits_v1/'
+        path_to_dataset = f'{root}{video_class.value}{video_number}/{split_name}/'
 
         self.tracks = np.load(f'{path_to_dataset}{split.value}_tracks.npy', allow_pickle=True, mmap_mode='r+')
         self.relative_distances = np.load(f'{path_to_dataset}{split.value}_distances.npy', allow_pickle=True,
@@ -212,34 +213,39 @@ def get_dataset(video_clazz: SDDVideoClasses, video_number: int, mode: NetworkMo
         BaselineDataset(video_clazz, video_number, mode, meta_label=meta_label)
 
 
-def get_all_dataset(get_generated: bool = False, root: str = SAVE_BASE_PATH):
+def get_all_dataset(get_generated: bool = False, root: str = SAVE_BASE_PATH, split_name: str = 'splits_v1'):
     dataset = BaselineGeneratedDataset if get_generated else BaselineDataset
 
     train_datasets, val_datasets = [], []
     for v_idx, (video_clazz, meta) in enumerate(zip(SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_VIDEO_META_CLASSES_LIST_FOR_NN)):
         for video_number in SDD_PER_CLASS_VIDEOS_LIST_FOR_NN[v_idx]:
             train_datasets.append(dataset(video_class=video_clazz, video_number=video_number,
-                                          split=NetworkMode.TRAIN, meta_label=meta, root=root))
+                                          split=NetworkMode.TRAIN, meta_label=meta, root=root,
+                                          split_name=split_name))
             val_datasets.append(dataset(video_class=video_clazz, video_number=video_number,
-                                        split=NetworkMode.VALIDATION, meta_label=meta, root=root))
+                                        split=NetworkMode.VALIDATION, meta_label=meta, root=root,
+                                        split_name=split_name))
     dataset_train = ConcatDataset(datasets=train_datasets)
     dataset_val = ConcatDataset(datasets=val_datasets)
 
     return dataset_train, dataset_val
 
 
-def get_all_dataset_all_splits(get_generated: bool = False, root: str = SAVE_BASE_PATH):
+def get_all_dataset_all_splits(get_generated: bool = False, root: str = SAVE_BASE_PATH, split_name: str = 'splits_v1'):
     dataset = BaselineGeneratedDataset if get_generated else BaselineDataset
 
     train_datasets, val_datasets, test_datasets = [], [], []
     for v_idx, (video_clazz, meta) in enumerate(zip(SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_VIDEO_META_CLASSES_LIST_FOR_NN)):
         for video_number in SDD_PER_CLASS_VIDEOS_LIST_FOR_NN[v_idx]:
             train_datasets.append(dataset(video_class=video_clazz, video_number=video_number,
-                                          split=NetworkMode.TRAIN, meta_label=meta, root=root))
+                                          split=NetworkMode.TRAIN, meta_label=meta, root=root,
+                                          split_name=split_name))
             val_datasets.append(dataset(video_class=video_clazz, video_number=video_number,
-                                        split=NetworkMode.VALIDATION, meta_label=meta, root=root))
+                                        split=NetworkMode.VALIDATION, meta_label=meta, root=root,
+                                        split_name=split_name))
             test_datasets.append(dataset(video_class=video_clazz, video_number=video_number,
-                                         split=NetworkMode.TEST, meta_label=meta, root=root))
+                                         split=NetworkMode.TEST, meta_label=meta, root=root,
+                                         split_name=split_name))
     dataset_train = ConcatDataset(datasets=train_datasets)
     dataset_val = ConcatDataset(datasets=val_datasets)
     dataset_test = ConcatDataset(datasets=test_datasets)
@@ -247,14 +253,16 @@ def get_all_dataset_all_splits(get_generated: bool = False, root: str = SAVE_BAS
     return dataset_train, dataset_val, dataset_test
 
 
-def get_all_dataset_test_split(get_generated: bool = False, root: str = SAVE_BASE_PATH, with_dataset_idx=True):
+def get_all_dataset_test_split(get_generated: bool = False, root: str = SAVE_BASE_PATH, with_dataset_idx=True,
+                               split_name: str = 'splits_v1'):
     dataset = BaselineGeneratedDataset if get_generated else BaselineDataset
 
     test_datasets = []
     for v_idx, (video_clazz, meta) in enumerate(zip(SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_VIDEO_META_CLASSES_LIST_FOR_NN)):
         for video_number in SDD_PER_CLASS_VIDEOS_LIST_FOR_NN[v_idx]:
             test_datasets.append(dataset(video_class=video_clazz, video_number=video_number,
-                                         split=NetworkMode.TEST, meta_label=meta, root=root))
+                                         split=NetworkMode.TEST, meta_label=meta, root=root,
+                                         split_name=split_name))
     if with_dataset_idx:
         dataset_test = ConcatenateDataset(datasets=test_datasets)
     else:

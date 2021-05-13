@@ -116,7 +116,10 @@ class BaselineGAN(pl.LightningModule):
 
     def setup_datasets(self):
         root = self.hparams.unsupervised_root if self.hparams.use_generated_dataset else self.hparams.supervised_root
-        self.train_dset, self.val_dset = get_all_dataset(get_generated=self.hparams.use_generated_dataset, root=root)
+        split_name = self.hparams.unsupervised_split \
+            if self.hparams.use_generated_dataset else self.hparams.supervised_split
+        self.train_dset, self.val_dset = get_all_dataset(get_generated=self.hparams.use_generated_dataset, root=root,
+                                                         split_name=split_name)
 
     def train_dataloader(self):
         return DataLoader(
@@ -734,14 +737,18 @@ def debug_model(cfg):
     #                      callbacks=[checkpoint_callback, bs_scheduler],
     #                      fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
     #                      num_sanity_val_steps=0)
+    trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
+                         callbacks=[checkpoint_callback],
+                         fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
+                         num_sanity_val_steps=0)
 
     # cfg.batch_size *= 2
-    trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
-                         callbacks=[checkpoint_callback], num_sanity_val_steps=0,
-                         fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
-                         resume_from_checkpoint='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/'
-                                                'stochastic/logs/lightning_logs/version_17/'
-                                                'checkpoints/epoch=108-step=929574.ckpt')
+    # trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
+    #                      callbacks=[checkpoint_callback], num_sanity_val_steps=0,
+    #                      fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
+    #                      resume_from_checkpoint='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/'
+    #                                             'stochastic/logs/lightning_logs/version_17/'
+    #                                             'checkpoints/epoch=108-step=929574.ckpt')
 
     trainer.fit(m)
     print()
@@ -981,10 +988,10 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
 
 
 if __name__ == '__main__':
-    # debug_model()
+    debug_model()
 
-    quick_eval_stochastic(plot=True, eval_on_gt=True, k=10, speedup_factor=32, filter_mode=True, moving_only=True,
-                          stationary_only=False, eval_for_worse=False)
+    # quick_eval_stochastic(plot=True, eval_on_gt=True, k=10, speedup_factor=32, filter_mode=True, moving_only=True,
+    #                       stationary_only=False, eval_for_worse=False)
 
     # quick_eval()
 

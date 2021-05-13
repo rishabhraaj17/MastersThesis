@@ -55,6 +55,9 @@ use_generated_dataset: True
 supervised_root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD_Features/"
 unsupervised_root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/baseline_v2/v0/"
 
+supervised_split: 'splits_v1'
+unsupervised_split: 'splits_v3'  # 'splits_v1'
+
 # plot
 plot_val: False
 
