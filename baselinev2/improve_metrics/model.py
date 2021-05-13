@@ -316,7 +316,8 @@ class PersonClassifier(LightningModule):
         self.collate_fn = collate_fn
 
         self.loss_fn = BCEWithLogitsLoss()
-        self.hparams = hparams
+        # self.hparams = hparams  # removed in 1.3.0
+        self.save_hyperparameters(hparams)
 
     def forward(self, x):
         out = self.conv_block(x)
