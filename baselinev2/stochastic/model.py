@@ -60,7 +60,8 @@ class BaselineGAN(pl.LightningModule):
         super().__init__()
 
         self.args = args
-        self.hparams = hparams
+        # self.hparams = hparams
+        self.save_hyperparameters(hparams)
         self.generator, self.discriminator = get_model(self.hparams)
         print(self.generator)
         print(self.discriminator)

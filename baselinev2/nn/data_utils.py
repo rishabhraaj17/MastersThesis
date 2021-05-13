@@ -12,6 +12,7 @@ from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost
+from average_image.constants import SDDVideoClasses
 from baselinev2.config import SPLIT_ANNOTATION_SAVE_PATH, TRAIN_SPLIT_PERCENTAGE, VALIDATION_SPLIT_PERCENTAGE, \
     TEST_SPLIT_PERCENTAGE, VIDEO_SAVE_PATH, SDD_VIDEO_CLASSES_RESUME_LIST, SDD_PER_CLASS_VIDEOS_RESUME_LIST, \
     SDD_ANNOTATIONS_ROOT_PATH, SAVE_BASE_PATH, BUNDLED_ANNOTATIONS_VIDEO_CLASSES_LIST, \
@@ -638,9 +639,28 @@ def generate_annotation_for_all_generated_tracks():
     logger.info('Finished generating all annotations!')
 
 
+def generate_annotation_for_all_filtered_generated_tracks():
+    video_clazzes = [SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.DEATH_CIRCLE,
+                     SDDVideoClasses.GATES, SDDVideoClasses.HYANG, SDDVideoClasses.LITTLE, SDDVideoClasses.NEXUS,
+                     SDDVideoClasses.QUAD]
+    video_numbers = [[i for i in range(7)], [i for i in range(4)], [i for i in range(5)], [i for i in range(9)],
+                     [i for i in range(15)], [i for i in range(4)], [i for i in range(12)], [i for i in range(4)]]
+    for idx, video_class in enumerate(video_clazzes):
+        for video_number in video_numbers[idx]:
+            logger.info(f'Processing filtered annotation for {video_class.value} - {video_number}')
+            # for one is mem efficient
+            split_annotations_and_save_as_generated_track_datasets_by_length_for_one(
+                annotation_path=f'{ROOT_PATH}Plots/baseline_v2/v{version}/{video_class.value}{video_number}/'
+                                f'csv_annotation/filtered_generated_annotations.csv',
+                path_to_save=f'{ROOT_PATH}Plots/baseline_v2/v{version}/{video_class.value}{video_number}/splits_v3/',
+                by_track=False)
+    logger.info('Finished generating all annotations!')
+
+
 if __name__ == '__main__':
     # generate_annotation_for_all()
-    generate_annotation_for_all_generated_tracks()
+    # generate_annotation_for_all_generated_tracks()
+    generate_annotation_for_all_filtered_generated_tracks()
     # ff = np.load('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/'
     #              'SDD_Features/nexus/video11/splits/train_distances.npy', allow_pickle=True, mmap_mode='r')
     # print()
