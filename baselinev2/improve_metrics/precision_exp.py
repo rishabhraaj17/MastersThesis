@@ -451,6 +451,7 @@ class PerTrajectoryPR(object):
 
     def filter_frames_with_classifier(self, plot: bool = False,
                                       plot_type: PLOT_TYPES = PLOT_TYPES.GENERATED_VS_BOOSTED_GENERATED):
+        logger.info('******* Filtered annotations extraction ******')
         track_ids_killed = []
         csv_data = []
 
@@ -683,6 +684,7 @@ class PerTrajectoryPR(object):
                                                             'fn': fn_boosted_list}}},
                        self.save_path_for_features)
             df.to_csv(self.save_path_for_filtered_annotations, index=False)
+            logger.info(f'Filtered annotations saved at {self.save_path_for_filtered_annotations}!')
         logger.info('Finished extracting metrics and annotations!')
 
     def calculate_precision_recall(self, frame_number, generated_boxes, generated_track_idx, gt_boxes, gt_track_idx,
@@ -1259,6 +1261,7 @@ if __name__ == '__main__':
     all_dataset_boosted = False
     combine_features = False
     plot_only = False
+    collect_csv = True
 
     video_clz = SDDVideoClasses.BOOKSTORE
     video_clz_meta = SDDVideoDatasets.BOOKSTORE
@@ -1319,5 +1322,26 @@ if __name__ == '__main__':
                 per_trajectory_pr.extract_metrics()
     elif all_dataset_boosted:
         boosted_precision_for_all_clips()
+    elif collect_csv:
+        v_clazzes = [SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.DEATH_CIRCLE,
+                     SDDVideoClasses.GATES, SDDVideoClasses.HYANG, SDDVideoClasses.LITTLE, SDDVideoClasses.NEXUS,
+                     SDDVideoClasses.QUAD]
+        v_metas = [SDDVideoDatasets.BOOKSTORE, SDDVideoDatasets.COUPA, SDDVideoDatasets.DEATH_CIRCLE,
+                   SDDVideoDatasets.GATES, SDDVideoDatasets.HYANG, SDDVideoDatasets.LITTLE, SDDVideoDatasets.NEXUS,
+                   SDDVideoDatasets.QUAD]
+        v_numbers = [[i for i in range(7)], [i for i in range(4)], [i for i in range(5)], [i for i in range(9)],
+                     [i for i in range(15)], [i for i in range(4)], [i for i in range(12)], [i for i in range(4)]]
+
+        for idx, (v_clz, v_meta) in tqdm(enumerate(zip(v_clazzes, v_metas))):
+            for v_num in v_numbers[idx]:
+                logger.info(
+                    f"************** Processing Features: {v_clz.name} - {v_num} *******************************")
+
+                feats_save_path = f'{SERVER_PATH}Plots/baseline_v2/v0/experimentsv3/feats_{v_clz.name}_{v_num}.pt'
+                annotation_save_path = f'{SERVER_PATH}Plots/baseline_v2/v0/{v_clz.value}{v_num}/csv_annotation/' \
+                                       f'filtered_generated_annotations.csv'
+                feats = torch.load(feats_save_path)
+                df = feats['filtered_annotations']
+                df.to_csv(annotation_save_path, index=False)
     else:
         boost_precision()
