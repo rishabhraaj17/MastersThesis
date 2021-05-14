@@ -61,6 +61,16 @@ unsupervised_split: 'splits_v3'  # 'splits_v1'
 # plot
 plot_val: False
 
+device: 'cuda:0'
+
+warm_restart:
+  enable: True
+  custom_load: True
+  checkpoint:
+    root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/stochastic/logs/"
+    path: "lightning_logs/version_"
+    version: 19
+
 
 
 

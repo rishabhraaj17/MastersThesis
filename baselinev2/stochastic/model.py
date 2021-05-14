@@ -59,6 +59,7 @@ class BaselineGAN(pl.LightningModule):
     def __init__(self, hparams: DictConfig = None, args: Namespace = None, loss_fns=None):
         super().__init__()
 
+        # self.automatic_optimization = False
         self.args = args
         # self.hparams = hparams
         self.save_hyperparameters(hparams)
@@ -141,7 +142,10 @@ class BaselineGAN(pl.LightningModule):
 
     def setup_test_dataset(self):
         root = self.hparams.unsupervised_root if self.hparams.use_generated_dataset else self.hparams.supervised_root
-        self.test_dset = get_all_dataset_test_split(self.hparams.use_generated_dataset, root=root)
+        split_name = self.hparams.unsupervised_split \
+            if self.hparams.use_generated_dataset else self.hparams.supervised_split
+        self.test_dset = get_all_dataset_test_split(self.hparams.use_generated_dataset, root=root,
+                                                    split_name=split_name)
 
     def test_dataloader(self):
         self.setup_test_dataset()
@@ -730,13 +734,39 @@ def debug_model(cfg):
                                       max_bs=cfg.max_batch_size,
                                       patience=cfg.patience)
 
-    m = BaselineGAN(hparams=cfg)
-    # m.setup_datasets()
+    if cfg.warm_restart.enable:
+        checkpoint_root_path = f'{cfg.warm_restart.checkpoint.root}{cfg.warm_restart.checkpoint.path}' \
+                               f'{cfg.warm_restart.checkpoint.version}/checkpoints/'
+        hparams_path = f'{cfg.warm_restart.checkpoint.root}{cfg.warm_restart.checkpoint.path}' \
+                       f'{cfg.warm_restart.checkpoint.version}/hparams.yaml'
+        model_path = checkpoint_root_path + os.listdir(checkpoint_root_path)[0]
+        logger.info(f'Resuming from : {model_path}')
+        if cfg.warm_restart.custom_load:
+            logger.info(f'Loading weights manually as custom load is {cfg.warm_restart.custom_load}')
+            m = BaselineGAN(hparams=cfg)
+            load_dict = torch.load(model_path)
 
-    # trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
-    #                      callbacks=[checkpoint_callback, bs_scheduler],
-    #                      fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
-    #                      num_sanity_val_steps=0)
+            m.load_state_dict(load_dict['state_dict'])
+            m.to(cfg.device)
+            m.train()
+            logger.info(f'Batch Size : {m.batch_size}')
+            logger.info(f'LR Discriminator : {cfg.lr_dis}')
+            logger.info(f'LR Generator : {cfg.lr_gen}')
+        else:
+            m = BaselineGAN.load_from_checkpoint(
+                checkpoint_path=model_path,
+                hparams_file=hparams_path,
+                map_location='cuda:0')
+            m.batch_size = cfg.batch_size
+            logger.info(f'Batch Size : {m.batch_size}')
+    else:
+        m = BaselineGAN(hparams=cfg)
+        # m.setup_datasets()
+
+        # trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
+        #                      callbacks=[checkpoint_callback, bs_scheduler],
+        #                      fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
+        #                      num_sanity_val_steps=0)
     trainer = pl.Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                          callbacks=[checkpoint_callback],
                          fast_dev_run=cfg.trainer.fast_dev_run, automatic_optimization=False,
@@ -802,13 +832,18 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
     # epoch = 64
     # step = 819129
 
-    version = 18
-    epoch = 109
-    step = 929623
+    # version = 18
+    # epoch = 109
+    # step = 929623
 
     # version = 0
     # epoch = 209
     # step = 2646419
+
+    # Filtered
+    version = 397155
+    epoch = 348
+    step = 68752
 
     # SUPERVISED
     # version = 7
@@ -988,14 +1023,27 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
 
 
 if __name__ == '__main__':
-    debug_model()
+    # debug_model()
 
-    # quick_eval_stochastic(plot=True, eval_on_gt=True, k=10, speedup_factor=32, filter_mode=True, moving_only=True,
-    #                       stationary_only=False, eval_for_worse=False)
+    quick_eval_stochastic(plot=False, eval_on_gt=True, k=10, speedup_factor=32, filter_mode=True, moving_only=False,
+                          stationary_only=True, eval_for_worse=False)
 
     # quick_eval()
 
     # On unsupervised
+
+    # filtered data
+    # k = 10
+    # no filter
+    # Model: ADE: 0.8893271395228705 | FDE: 1.9251465165561124
+    # Linear: ADE: 0.978251020929496 | FDE: 2.1439284148036917
+    # moving only
+    # Model: ADE: 0.9776758797384191 | FDE: 2.078646834115817
+    # Linear: ADE: 1.5111766537362 | FDE: 3.332864517927838
+    # stationary only
+    # Model: ADE: 0.48235866318575876 | FDE: 1.08501878345889
+    # Linear: ADE: 0.10649146886707163 | FDE: 0.19566083160127462
+
     # k = 10
     # Model: ADE: 0.9994683927553563 | FDE: 2.0943560366250256
 
