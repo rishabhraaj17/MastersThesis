@@ -891,6 +891,8 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
                                             stationary_only=stationary_only, threshold=threshold,
                                             relative_distance_filter_threshold=relative_distance_filter_threshold)
 
+        feasible_idx = batch['feasible_idx']
+
         batch = get_batch_k(batch, k)
         batch_size = batch["size"]
 
@@ -1022,27 +1024,269 @@ def quick_eval_stochastic(k=10, multi_batch=True, batch_s=32, plot=False, eval_o
           f'Linear: ADE: {np.mean(linear_ade_list).item()} | FDE: {np.mean(linear_fde_list).item()}')
 
 
+@torch.no_grad()
+def quick_eval_stochastic_linear_model_combined(
+        k=10, multi_batch=True, batch_s=32, plot=False, eval_on_gt=True, speedup_factor=1,
+        filter_mode=False, moving_only=False, stationary_only=False, threshold=1.0,
+        relative_distance_filter_threshold=100., device='cuda:0', eval_for_worse=False,
+        plot_4_way=False):
+    # UNSUPERVISED
+    # version = 5
+    # epoch = 64
+    # step = 819129
+
+    # version = 18
+    # epoch = 109
+    # step = 929623
+
+    # version = 0
+    # epoch = 209
+    # step = 2646419
+
+    # Filtered
+    version = 397155
+    epoch = 348
+    step = 68752
+
+    # SUPERVISED
+    # version = 7
+    # epoch = 3
+    # step = 2091035
+
+    # version = 9
+    # epoch = 10
+    # step = 6273108
+
+    # version = 12
+    # epoch = 17
+    # step = 7281281
+
+    base_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
+    model_path = 'stochastic/' + f'logs/lightning_logs/version_{version}/checkpoints/' \
+                                 f'epoch={epoch}-step={step}.ckpt'
+    hparam_path = 'stochastic/' + f'logs/lightning_logs/version_{version}/hparams.yaml'
+
+    m = BaselineGAN.load_from_checkpoint(checkpoint_path=model_path, hparams_file=hparam_path, map_location='cuda:0')
+    m.hparams.use_generated_dataset = False if eval_on_gt else True
+    m.setup_test_dataset()
+    m.eval()
+    m.to(device)
+    m.hparams.num_workers = 0 if plot else 12
+    if multi_batch and not plot:
+        batch_size = batch_s * speedup_factor
+    elif multi_batch and plot:
+        batch_size = batch_s
+        # filter_mode = False
+    else:
+        batch_size = 1
+    loader = DataLoader(m.test_dset, batch_size=batch_size, shuffle=True,
+                        num_workers=m.hparams.num_workers)
+
+    constant_linear_baseline_caller = ConstantLinearBaseline()
+
+    ade_list, fde_list = [], []
+
+    for data, dataset_idx in tqdm(loader):
+        data = [d.to(device) for d in data]
+        batch = preprocess_dataset_elements(data, batch_first=False, is_generated=m.hparams.use_generated_dataset,
+                                            filter_mode=filter_mode, moving_only=moving_only,
+                                            stationary_only=stationary_only, threshold=threshold,
+                                            relative_distance_filter_threshold=relative_distance_filter_threshold)
+
+        stationary_idx = batch['feasible_idx']
+        moving_idx = np.setdiff1d(np.arange(batch['in_xy'].shape[1]), stationary_idx)
+
+        linear_batch = {
+            'in_xy': batch['in_xy'][:, stationary_idx, ...],
+            'gt_xy': batch['gt_xy'][:, stationary_idx, ...],
+            'in_dxdy': batch['in_dxdy'][:, stationary_idx, ...],
+            'gt_dxdy': batch['gt_dxdy'][:, stationary_idx, ...],
+            'ratio': batch['ratio'][stationary_idx],
+        }
+        model_batch = {
+            'in_xy': batch['in_xy'][:, moving_idx, ...],
+            'gt_xy': batch['gt_xy'][:, moving_idx, ...],
+            'in_dxdy': batch['in_dxdy'][:, moving_idx, ...],
+            'gt_dxdy': batch['gt_dxdy'][:, moving_idx, ...],
+            'ratio': batch['ratio'][moving_idx],
+        }
+
+        linear_batch = get_batch_k(linear_batch, k)
+        linear_batch_size = linear_batch["size"]
+
+        model_batch = get_batch_k(model_batch, k)
+        model_batch_size = model_batch["size"]
+
+        out = m.test(model_batch)
+        constant_linear_baseline_pred_trajectory, constant_linear_baseline_ade, constant_linear_baseline_fde = \
+            constant_linear_baseline_caller.eval(
+                obs_trajectory=linear_batch['in_xy'].permute(1, 0, 2).cpu().numpy(),
+                obs_distances=linear_batch['in_dxdy'].permute(1, 0, 2).cpu().numpy(),
+                gt_trajectory=linear_batch['gt_xy'].permute(1, 0, 2).cpu().numpy()
+                , ratio=linear_batch['ratio'].squeeze()[0].unsqueeze(0)
+                if k == 1 else linear_batch['ratio'].squeeze()[0])
+
+        constant_linear_baseline_pred_trajectory = \
+            torch.from_numpy(constant_linear_baseline_pred_trajectory).permute(1, 0, 2)
+
+        if multi_batch:
+            im_idx = np.random.choice(model_batch_size, 1, replace=False).item()
+            # bypasses the error but samples diff!!
+            linear_im_idx = np.random.choice(linear_batch_size, 1, replace=False).item()
+
+            obs_traj = batch['in_xy'][:, :model_batch_size][:, im_idx, ...].squeeze()
+            gt_traj = batch['gt_xy'][:, :model_batch_size][:, im_idx, ...].squeeze()
+            pred_traj = out['out_xy'].view(out['out_xy'].shape[0], k,
+                                           -1, out['out_xy'].shape[2])[:, :, im_idx, ...].squeeze()
+            linear_traj = constant_linear_baseline_pred_trajectory[:, linear_im_idx, ...].squeeze()
+
+            frame_num = data[6][im_idx, 0].item()
+            track_id = data[4][im_idx, 0].item()
+            ratio = batch['ratio'].squeeze()[0]  # data[-1]
+
+            if plot:
+                feasible_idx = batch['feasible_idx']
+                dataset_idx = dataset_idx[feasible_idx]
+            video_dataset = loader.dataset.datasets[dataset_idx[im_idx].item()]
+            video_path = f'{base_path}videos/{video_dataset.video_class.value}/' \
+                         f'video{video_dataset.video_number}/video.mov'
+            # metrics
+            # p_traj = batch['gt_xy'].view(batch['gt_xy'].shape[0], -1, k, batch['gt_xy'].shape[2])
+            # p_traj_fake = out['out_xy'].view(out['out_xy'].shape[0], -1, k, out['out_xy'].shape[2])
+            # constant_linear_p_traj = constant_linear_baseline_pred_trajectory.view(
+            #     constant_linear_baseline_pred_trajectory.shape[0], -1, k,
+            #     constant_linear_baseline_pred_trajectory.shape[2])
+
+            p_traj = model_batch['gt_xy'].view(model_batch['gt_xy'].shape[0], k, -1, model_batch['gt_xy'].shape[2])
+            p_traj_fake = out['out_xy'].view(out['out_xy'].shape[0], k, -1, out['out_xy'].shape[2])
+
+            constant_linear_p_traj = linear_batch['gt_xy'].view(
+                linear_batch['gt_xy'].shape[0], k, -1, linear_batch['gt_xy'].shape[2])
+            constant_linear_pred_traj = constant_linear_baseline_pred_trajectory.view(
+                constant_linear_baseline_pred_trajectory.shape[0], k, -1,
+                constant_linear_baseline_pred_trajectory.shape[2])
+
+            # p_traj = batch['gt_xy'][:, :batch_size].unsqueeze(2).repeat(1, 1, k, 1)
+            # p_traj_fake = out['out_xy'][:, :batch_size].unsqueeze(2).repeat(1, 1, k, 1)
+            # constant_linear_p_traj = \
+            #     constant_linear_baseline_pred_trajectory[:, :batch_size].unsqueeze(2).repeat(1, 1, k, 1)
+
+            # ade = cal_ade_stochastic(p_traj, p_traj_fake, 'mean')
+            # fde = cal_fde_stochastic(p_traj, p_traj_fake, 'mean')
+
+            ade, fde, best_idx = cal_ade_fde_stochastic(p_traj, p_traj_fake) \
+                if not eval_for_worse else cal_ade_fde_stochastic_worse(p_traj, p_traj_fake)
+            linear_ade, linear_fde, linear_best_idx = cal_ade_fde_stochastic(
+                constant_linear_p_traj, constant_linear_pred_traj.to(device))
+
+            # meter
+            ade *= ratio
+            fde *= ratio
+
+            linear_ade *= ratio
+            linear_fde *= ratio
+
+            combined_ade = torch.cat((ade, linear_ade), dim=-1)
+            combined_fde = torch.cat((fde, linear_fde), dim=-1)
+
+            plot_ade = ade.squeeze()[im_idx]
+            plot_fde = fde.squeeze()[im_idx]
+            plot_best_idx = best_idx.squeeze()[im_idx]
+
+            plot_linear_ade = linear_ade.squeeze()[linear_im_idx]
+            plot_linear_fde = linear_fde.squeeze()[linear_im_idx]
+            plot_linear_best_idx = linear_best_idx.squeeze()[linear_im_idx]
+
+            # model_ade = ade.mean().item()
+            # model_fde = fde.mean().item()
+            #
+            # linear_ade = linear_ade.mean().item()
+            # linear_fde = linear_fde.mean().item()
+            #
+            # final_ade = (model_ade + linear_ade) / 2
+            # final_fde = (model_fde + linear_fde) / 2
+
+            final_ade = combined_ade.mean().item()
+            final_fde = combined_fde.mean().item()
+
+            ade_list.append(final_ade)
+            fde_list.append(final_fde)
+        else:
+            return NotImplemented
+            # obs_traj = batch['in_xy'][:, :batch_size].squeeze()
+            # gt_traj = batch['gt_xy'][:, :batch_size].squeeze()
+            # pred_traj = out['out_xy'].squeeze()
+            # linear_traj = constant_linear_baseline_pred_trajectory.squeeze()
+            #
+            # frame_num = data[6][0, 0].item()
+            # track_id = data[4][0, 0].item()
+            #
+            # video_dataset = loader.dataset.datasets[dataset_idx[0].item()]
+            # video_path = f'{base_path}videos/{video_dataset.video_class.value}/' \
+            #              f'video{video_dataset.video_number}/video.mov'
+            #
+            # # fixme
+            # plot_ade = 0.
+            # plot_fde = 0.
+            # plot_best_idx = 0.
+            #
+            # plot_linear_ade = 0.
+            # plot_linear_fde = 0.
+        if plot:
+            try:
+                if plot_4_way:
+                    plot_and_compare_trajectory_four_way_stochastic(
+                        frame=extract_frame_from_video(video_path, frame_num),
+                        obs_trajectory=obs_traj.cpu().numpy(),
+                        gt_trajectory=gt_traj.cpu().numpy(),
+                        model_pred_trajectory=pred_traj.cpu().numpy(),
+                        other_pred_trajectory=linear_traj,
+                        frame_number=frame_num,
+                        track_id=track_id,
+                        single_mode=k == 1,
+                        best_idx=plot_best_idx.item(),
+                        additional_text=f'Model: ADE: {plot_ade.item()} | FDE: {plot_fde.item()}\n'
+                                        f'Linear: ADE: {plot_linear_ade.item()} | FDE: {plot_linear_fde.item()}',
+                    )
+                else:
+                    plot_trajectory_alongside_frame_stochastic(obs_trajectory=obs_traj.cpu().numpy(),
+                                                               gt_trajectory=gt_traj.cpu().numpy(),
+                                                               pred_trajectory=pred_traj.cpu().numpy(),
+                                                               frame_number=frame_num,
+                                                               track_id=track_id,
+                                                               frame=extract_frame_from_video(video_path, frame_num),
+                                                               single_mode=k == 1,
+                                                               best_idx=plot_best_idx.item(),
+                                                               additional_text=f'ADE: {plot_ade} | FDE: {plot_fde}')
+            except InvalidFrameException:
+                logger.error('Frame not found!')
+    print(f'Model+Linear: ADE: {np.mean(ade_list).item()} | FDE: {np.mean(fde_list).item()}\n')
+
+
 if __name__ == '__main__':
     # debug_model()
 
-    quick_eval_stochastic(plot=False, eval_on_gt=True, k=10, speedup_factor=32, filter_mode=True, moving_only=False,
-                          stationary_only=True, eval_for_worse=False)
+    # quick_eval_stochastic(plot=False, eval_on_gt=True, k=10, speedup_factor=32, filter_mode=True, moving_only=False,
+    #                       stationary_only=False, eval_for_worse=False, relative_distance_filter_threshold=True)
+
+    quick_eval_stochastic_linear_model_combined(
+        plot=False, eval_on_gt=True, k=10, speedup_factor=32, filter_mode=True, moving_only=False,
+        stationary_only=False, eval_for_worse=False, relative_distance_filter_threshold=True)
 
     # quick_eval()
 
     # On unsupervised
 
     # filtered data
+    # Model+Linear: ADE: 0.5301352841026825 | FDE: 1.1355520253251676 - bad average
+    # Model+Linear: ADE: 0.8410700329685178 | FDE: 1.8075439942316476
     # k = 10
     # no filter
     # Model: ADE: 0.8893271395228705 | FDE: 1.9251465165561124
-    # Linear: ADE: 0.978251020929496 | FDE: 2.1439284148036917
     # moving only
     # Model: ADE: 0.9776758797384191 | FDE: 2.078646834115817
-    # Linear: ADE: 1.5111766537362 | FDE: 3.332864517927838
     # stationary only
     # Model: ADE: 0.48235866318575876 | FDE: 1.08501878345889
-    # Linear: ADE: 0.10649146886707163 | FDE: 0.19566083160127462
 
     # k = 10
     # Model: ADE: 0.9994683927553563 | FDE: 2.0943560366250256
