@@ -11,6 +11,7 @@ def print_hi(name):
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
+    #  ssh -f  rajr@atcremers51.in.tum.de -p 58022 -L 8082:localhost:8082 -N
     print_hi('PyCharm')
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
