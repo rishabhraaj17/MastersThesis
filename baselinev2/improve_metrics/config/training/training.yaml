@@ -1,0 +1,79 @@
+# @package _global_
+num_workers : 12
+make_checkpoint: True
+data_augmentation: True
+
+server_mode: False
+
+use_resnet: True
+use_pretrained: False
+smaller_resnet: True
+first_in_channel: 3
+first_stride: 2
+first_padding: 1
+
+device: "cuda:0"
+resume_mode: True
+resume:
+  checkpoint:
+    path: "lightning_logs/version_"
+    version: 10
+
+# trainer
+trainer:
+  max_epochs : 400
+  gpus : 1
+  fast_dev_run: False
+
+
+batch_size: 3
+shuffle: False
+pin_memory: True
+lr: 1e-4
+patience: 4
+monitor_val: 'val_loss'
+
+# dataset
+use_generated_dataset: True
+
+dataset:
+  name: 'stanford'
+  num_workers: 12
+  video_to_use: 0
+  video_class: 'DEATH_CIRCLE'
+  num_videos: [0, 1, 3, 4]  # [0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13] # [0, 1, 3, 4]  # -1
+  val_num_videos: [2]
+  test_num_videos: [3]
+  multiple_videos: True
+  merge_annotations: True
+  root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/"
+  # root: "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/"
+  only_long_trajectories: True
+  track_length_threshold: 150
+
+  all_train_videos: [[1, 2, 3, 4, 5], [0, 1, 2], [0, 1, 2, 4], [0, 1, 2, 3, 5, 6, 8],
+                     [0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13], [1, 2, 3],
+                     [0, 1, 2, 7, 8, 9, 10, 11], [1, 2, 3]]  # nexus 3, 4 are bad
+  all_val_videos: [[0], [3], [3], [4], [7], [0], [6], [0]]
+  all_test_videos: [[6], [3], [3], [7], [9, 14], [0], [6], [0]]
+
+  additional_h: 20
+  additional_w: 20
+#  aspect_ratios: [0.75, 0.5]
+  aspect_ratios: []
+#  scales: [2.0]
+  scales: []
+  track_length_threshold_for_random_crops: 5
+  radius_elimination: 160
+
+  ratio:
+    train: 0.8
+    test: 0.2
+    val: 0.2
+
+# plot
+plot_val: False
+
+
+
+
