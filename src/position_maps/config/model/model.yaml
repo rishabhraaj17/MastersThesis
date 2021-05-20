@@ -1,0 +1,11 @@
+# @package _global_
+dropout: 0.0
+batch_norm: False
+
+# model
+unet:
+  num_classes: 1
+  input_channels: 3
+  num_layers: 5
+  features_start: 64
+  bilinear: False

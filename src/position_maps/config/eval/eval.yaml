@@ -1,0 +1,4 @@
+# @package _global_
+
+eval:
+  batch_size : 32

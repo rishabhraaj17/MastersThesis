@@ -1,0 +1,56 @@
+# @package _global_
+
+device: 'cuda:0'
+data_augmentation: 1
+
+# optimizer
+# Adam
+lr: 5e-3
+weight_decay: 0
+amsgrad: False
+
+# scheduler
+# ReduceLROnPlateau
+patience: 5
+verbose: True
+factor: 0.1
+min_lr: 1e-10
+# extra
+monitor: 'val_loss_epoch'
+interval: 'epoch'
+frequency: 1
+
+# loaders
+batch_size: 4
+shuffle: True
+num_workers: 0
+pin_memory: True
+drop_last: False
+val_batch_size_factor: 2
+
+# trainer
+trainer:
+  max_epochs : 400
+  gpus : 1
+  fast_dev_run: False
+
+
+# dataset
+use_generated_dataset: True
+supervised_root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD_Features/"
+unsupervised_root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/baseline_v2/v0/"
+
+supervised_split: 'splits_v1'
+unsupervised_split: 'splits_v3'  # 'splits_v1'
+
+warm_restart:
+  enable: True
+  custom_load: True
+  checkpoint:
+    root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/stochastic/logs/"
+    path: "lightning_logs/version_"
+    version: 19
+
+
+
+

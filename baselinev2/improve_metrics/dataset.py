@@ -93,7 +93,7 @@ class SDDDatasetV0(Dataset):
             ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
             ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
             self.original_shape = [[r.shape[1], r.shape[2]] for r in ref_image]
-        if multiple_videos and (isinstance(num_videos, list) or isinstance(num_videos, ListConfig)):
+        elif multiple_videos and (isinstance(num_videos, list) or isinstance(num_videos, ListConfig)):
             # restricted to number of videos
             num_videos = list(num_videos)
             annotation_path = [self.annotation_list[n] for n in num_videos]
@@ -298,7 +298,7 @@ if __name__ == '__main__':
                              num_workers=n_workers, num_videos=-1, video_number_to_use=video_number,
                              step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
                              single_track_mode=False, track_id=5, multiple_videos=True,
-                             use_generated=False, plot=True, merge_annotations=True)
+                             use_generated=True, plot=True, merge_annotations=False, only_long_trajectories=True)
     loader = DataLoader(dataset, batch_size=8, num_workers=n_workers, shuffle=False, collate_fn=people_collate_fn)
     for data in loader:
         print()
