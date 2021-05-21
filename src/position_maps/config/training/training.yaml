@@ -75,6 +75,17 @@ resume:
     path: "lightning_logs/version_"
     version: 10
 
+overfit:
+  num_epochs: 500
+  batch_size: 1
+  num_workers: 0
+  pin_memory: True
+  drop_last: False
+
+  subset_indices: [0]
+
+  plot_checkpoint: 100
+
 
 
 

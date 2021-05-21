@@ -69,6 +69,27 @@ def plot_samples(img, mask, boxes, box_centers, plot_boxes=False, add_feats_to_m
     plt.show()
 
 
+def plot_predictions(img, mask, pred_mask, additional_text=''):
+    fig, axs = plt.subplots(1, 3, sharex='none', sharey='none', figsize=(12, 10))
+    img_axis, mask_axis, pred_mask_axis = axs
+    if img is not None:
+        img_axis.imshow(img)
+
+    if mask is not None:
+        mask_axis.imshow(mask, cmap='hot')
+
+    if pred_mask is not None:
+        pred_mask_axis.imshow(pred_mask, cmap='hot')
+
+    img_axis.set_title('RGB')
+    mask_axis.set_title('Mask')
+    pred_mask_axis.set_title('Predicted Mask')
+
+    fig.suptitle(additional_text)
+
+    plt.show()
+
+
 def gaussian_one_dimensional(grid, side_length, loc, sigma, normalized=True):
     if normalized:
         return 1 / (np.sqrt(2 * np.pi * sigma ** 2)) * np.exp(-(grid - loc) ** 2 / (2 * sigma ** 2))
