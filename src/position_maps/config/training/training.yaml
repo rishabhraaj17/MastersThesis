@@ -1,7 +1,7 @@
 # @package _global_
 
 device: 'cuda:0'
-data_augmentation: 1
+data_augmentation: True
 
 # optimizer
 # Adam
@@ -22,7 +22,7 @@ frequency: 1
 
 # loaders
 batch_size: 4
-shuffle: True
+shuffle: False  # keep it always False
 num_workers: 0
 pin_memory: True
 drop_last: False
@@ -52,7 +52,7 @@ val:
 dataset_workers: 8
 # keep one of them null at one time
 scale_factor: null # 0.25
-desired_size: [400, 400]
+desired_size: [490, 360]
 
 use_generated_dataset: True
 

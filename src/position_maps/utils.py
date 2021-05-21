@@ -42,7 +42,8 @@ def generate_position_map(shape: Tuple[int, int], bounding_boxes_centers: List[L
     return masks
 
 
-def plot_samples(img, mask, boxes, box_centers, plot_boxes=False, add_feats_to_mask=False, add_feats_to_img=False):
+def plot_samples(img, mask, boxes, box_centers, plot_boxes=False, add_feats_to_mask=False, add_feats_to_img=False,
+                 additional_text=''):
     fig, axs = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(12, 10))
     img_axis, mask_axis = axs
     if img is not None:
@@ -62,6 +63,8 @@ def plot_samples(img, mask, boxes, box_centers, plot_boxes=False, add_feats_to_m
 
     img_axis.set_title('RGB')
     mask_axis.set_title('Mask')
+
+    fig.suptitle(additional_text)
 
     plt.show()
 
@@ -137,6 +140,18 @@ def resize_transform(img, boxes, scale, desired_size, mode='bilinear'):
     new_centers = torch.from_numpy(new_centers)
 
     return resized_image, new_boxes, new_centers, original_shape, new_shape
+
+
+def heat_map_collate_fn(batch):
+    rgb_img_list, mask_list, meta_list = [], [], []
+    for batch_item in batch:
+        rgb, mask, meta = batch_item
+        rgb_img_list.append(rgb)
+        mask_list.append(mask)
+        meta_list.append(meta)
+    rgb_img_list = torch.cat(rgb_img_list)
+    mask_list = torch.stack(mask_list).unsqueeze(1)
+    return rgb_img_list, mask_list, meta_list
 
 
 if __name__ == '__main__':

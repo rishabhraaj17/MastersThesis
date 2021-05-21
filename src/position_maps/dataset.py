@@ -155,20 +155,20 @@ class SDDFrameAndAnnotationDataset(Dataset):
     def __getitem__(self, item):
         video, audio, info, video_idx = self.video_clips.get_clip(item)
         video = video.permute(0, 3, 1, 2)
+        original_shape = new_shape = (video.shape[-2], video.shape[-1])
 
-        bbox_centers, boxes, track_idx, class_labels = self.get_annotation_for_frame(item, video_idx)
+        bbox_centers, boxes, track_idx, class_labels = self.get_annotation_for_frame(item, video_idx, original_shape)
 
-        # while bbox_centers.nelement() == 0 and boxes.nelement() == 0:
         while bbox_centers.size == 0 and boxes.size == 0:
             random_frame_num = np.random.choice(len(self), 1, replace=False).item()
 
             video, audio, info, video_idx = self.video_clips.get_clip(random_frame_num)
             video = video.permute(0, 3, 1, 2)
 
-            bbox_centers, boxes, track_idx, class_labels = self.get_annotation_for_frame(item, video_idx)
+            bbox_centers, boxes, track_idx, class_labels = self.get_annotation_for_frame(item, video_idx,
+                                                                                         original_shape)
             item = random_frame_num
 
-        original_shape = new_shape = (video.shape[-2], video.shape[-1])
         video = video.float() / 255.0
         if self.transform is not None:
             out = self.transform(image=video.squeeze(0).permute(1, 2, 0).numpy(), keypoints=bbox_centers,
@@ -179,14 +179,12 @@ class SDDFrameAndAnnotationDataset(Dataset):
 
             video = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
             new_shape = (video.shape[-2], video.shape[-1])
-            # video, boxes, bbox_centers, original_shape, new_shape = self.transform(video, boxes,
-            #                                                                        scale=self.scale,
-            #                                                                        desired_size=self.desired_size)
 
         heat_mask = torch.from_numpy(
             generate_position_map(new_shape, bbox_centers, sigma=self.sigma))
         if self.plot:
-            plot_samples(video.squeeze().permute(1, 2, 0), heat_mask, boxes, bbox_centers, plot_boxes=True)
+            plot_samples(video.squeeze().permute(1, 2, 0), heat_mask, boxes, bbox_centers, plot_boxes=True,
+                         additional_text=f'Frame Number: {item} | Video Idx: {video_idx}')
 
         meta = {'boxes': boxes, 'bbox_centers': bbox_centers,
                 'track_idx': track_idx, 'item': item,
@@ -197,20 +195,22 @@ class SDDFrameAndAnnotationDataset(Dataset):
 
         return video, heat_mask, meta
 
-    def get_annotation_for_frame(self, item, video_idx):
+    def get_annotation_for_frame(self, item, video_idx, original_shape):
+        h, w = original_shape
         df = self.annotations_df[video_idx]
         frame_annotation = self.get_generated_frame_annotations(df, item)
-
-        # boxes = torch.from_numpy(frame_annotation[:, 1:5].astype(np.int))
-        # track_idx = torch.from_numpy(frame_annotation[:, 0].astype(np.int))
-        # bbox_centers = torch.from_numpy(frame_annotation[:, 7:9].astype(np.int))
 
         boxes = frame_annotation[:, 1:5].astype(np.int)
         track_idx = frame_annotation[:, 0].astype(np.int)
         bbox_centers = frame_annotation[:, 7:9].astype(np.int)
 
+        inside_boxes_idx = [b for b, box in enumerate(boxes)
+                            if (box[0] > 0 and box[2] < w) and (box[1] > 0 and box[3] < h)]
+
+        boxes = boxes[inside_boxes_idx]
+        track_idx = track_idx[inside_boxes_idx]
+        bbox_centers = bbox_centers[inside_boxes_idx]
+
         labels = ['object'] * boxes.shape[0]
-        # label = np.array(label).reshape(-1, 1)
-        # boxes = np.concatenate((boxes, label), axis=-1)
 
         return bbox_centers, boxes, track_idx, labels
