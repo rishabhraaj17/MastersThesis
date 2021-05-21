@@ -22,7 +22,7 @@ class PositionMapUNet(LightningModule):
                           input_channels=self.config.unet.input_channels,
                           num_layers=self.config.unet.num_layers,
                           features_start=self.config.unet.features_start,
-                          bilinear=self.config.unet.billinear)
+                          bilinear=self.config.unet.bilinear)
 
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
@@ -38,11 +38,10 @@ class PositionMapUNet(LightningModule):
         return self.u_net(x)
 
     def _one_step(self, batch):
-        frames, _ = batch
-        frames = frames.squeeze(1)
+        frames, heat_masks, meta = batch
         out = self(frames)
-        reconstruction_loss = self.loss_function(out, frames)
-        return reconstruction_loss
+        loss = self.loss_function(out, heat_masks)
+        return loss
 
     def training_step(self, batch, batch_idx):
         loss = self._one_step(batch)
@@ -73,7 +72,7 @@ class PositionMapUNet(LightningModule):
     def train_dataloader(self) -> DataLoader:
         return DataLoader(
             dataset=self.train_dataset, batch_size=self.config.batch_size,
-            shuffle=self.config.shuffle, num_workers=self.config.num_workers,
+            shuffle=False, num_workers=self.config.num_workers,
             collate_fn=self.collate_fn, pin_memory=self.config.pin_memory,
             drop_last=self.config.drop_last)
 

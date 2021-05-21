@@ -46,7 +46,7 @@ train:
 
 val:
   num_videos: -1
-  video_number_to_use: 0
+  video_number_to_use: 2
   multiple_videos: False
 
 dataset_workers: 8
@@ -56,18 +56,24 @@ desired_size: [490, 360]
 
 use_generated_dataset: True
 
-plot_samples: True
+plot_samples: False
 
 # gaussian
 sigma: 10
 
 warm_restart:
-  enable: True
-  custom_load: True
+  enable: False
+  custom_load: False
   checkpoint:
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
     path: "lightning_logs/version_"
     version: 0
+
+resume_mode: False
+resume:
+  checkpoint:
+    path: "lightning_logs/version_"
+    version: 10
 
 
 
