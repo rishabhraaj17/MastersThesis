@@ -173,7 +173,7 @@ def overfit(cfg):
 
                 plot_predictions(frames.squeeze().permute(1, 2, 0), heat_masks.squeeze(), out.squeeze())
 
-            logger.info(f"Validation Loss: {np.array(train_loss).mean()}")
+            logger.info(f"Validation Loss: {np.array(val_loss).mean()}")
 
 
 if __name__ == '__main__':
