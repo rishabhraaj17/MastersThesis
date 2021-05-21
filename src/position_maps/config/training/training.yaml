@@ -36,20 +36,38 @@ trainer:
 
 
 # dataset
-use_generated_dataset: True
-supervised_root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD_Features/"
-unsupervised_root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/baseline_v2/v0/"
+root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
+video_class: DEATH_CIRCLE
 
-supervised_split: 'splits_v1'
-unsupervised_split: 'splits_v3'  # 'splits_v1'
+train:
+  num_videos: -1
+  video_number_to_use: 2
+  multiple_videos: False
+
+val:
+  num_videos: -1
+  video_number_to_use: 0
+  multiple_videos: False
+
+dataset_workers: 8
+# keep one of them null at one time
+scale_factor: null # 0.25
+desired_size: [400, 400]
+
+use_generated_dataset: True
+
+plot_samples: True
+
+# gaussian
+sigma: 10
 
 warm_restart:
   enable: True
   custom_load: True
   checkpoint:
-    root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/stochastic/logs/"
+    root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
     path: "lightning_logs/version_"
-    version: 19
+    version: 0
 
 
 
