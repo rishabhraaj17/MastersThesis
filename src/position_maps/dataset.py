@@ -193,6 +193,16 @@ class SDDFrameAndAnnotationDataset(Dataset):
 
         heat_mask = heat_mask.float()
 
+        position_map = torch.zeros_like(heat_mask)
+        key_points = torch.round(torch.from_numpy(bbox_centers)).long()
+        position_map[key_points[:, 1], key_points[:, 0]] = 1
+
+        # import matplotlib as mpl
+        # mpl.use('module://backend_interagg')
+        import matplotlib.pyplot as plt
+        plt.imshow(position_map)
+        plt.show()
+
         return video, heat_mask, meta
 
     def get_annotation_for_frame(self, item, video_idx, original_shape):
