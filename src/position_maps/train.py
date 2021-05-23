@@ -146,9 +146,17 @@ def overfit(cfg):
         for data in train_loader:
             opt.zero_grad()
 
-            frames, heat_masks, meta = data
-            frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+            frames, heat_masks, position_map, distribution_map, meta = data
+            frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
             out = model(frames)
+
+            position_map = position_map.view(cfg.overfit.batch_size, -1)
+            out = out.view(cfg.overfit.batch_size, -1)
+
+            loss = []
+            for idx in range(position_map.shape[0]):
+                loss.append(loss_fn(out[idx], torch.where(position_map[idx])[0]))
+
             loss = loss_fn(out, heat_masks)
 
             train_loss.append(loss.item())
@@ -163,10 +171,12 @@ def overfit(cfg):
             val_loss = []
 
             for data in train_loader:
-                frames, heat_masks, meta = data
-                frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+                frames, heat_masks, position_map, distribution_map, meta = data
+                frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
+
                 with torch.no_grad():
                     out = model(frames)
+
                 loss = loss_fn(out, heat_masks)
 
                 val_loss.append(loss.item())

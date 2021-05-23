@@ -197,13 +197,12 @@ class SDDFrameAndAnnotationDataset(Dataset):
         key_points = torch.round(torch.from_numpy(bbox_centers)).long()
         position_map[key_points[:, 1], key_points[:, 0]] = 1
 
-        # import matplotlib as mpl
-        # mpl.use('module://backend_interagg')
-        import matplotlib.pyplot as plt
-        plt.imshow(position_map)
-        plt.show()
+        distribution_map = torch.zeros(size=(heat_mask.shape[0], heat_mask.shape[1], 3))
+        variance_list = torch.tensor([self.sigma] * key_points.shape[0])
+        distribution_map[key_points[:, 1], key_points[:, 0]] = torch.stack(
+            (key_points[:, 1], key_points[:, 0], variance_list)).t().float()
 
-        return video, heat_mask, meta
+        return video, heat_mask, position_map, distribution_map, meta
 
     def get_annotation_for_frame(self, item, video_idx, original_shape):
         h, w = original_shape

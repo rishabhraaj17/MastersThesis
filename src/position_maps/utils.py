@@ -164,15 +164,21 @@ def resize_transform(img, boxes, scale, desired_size, mode='bilinear'):
 
 
 def heat_map_collate_fn(batch):
-    rgb_img_list, mask_list, meta_list = [], [], []
+    rgb_img_list, mask_list, position_map_list, distribution_map_list, meta_list = [], [], [], [], []
     for batch_item in batch:
-        rgb, mask, meta = batch_item
+        rgb, mask, position_map, distribution_map, meta = batch_item
         rgb_img_list.append(rgb)
         mask_list.append(mask)
         meta_list.append(meta)
+        position_map_list.append(position_map)
+        distribution_map_list.append(distribution_map)
+
     rgb_img_list = torch.cat(rgb_img_list)
     mask_list = torch.stack(mask_list).unsqueeze(1)
-    return rgb_img_list, mask_list, meta_list
+    position_map_list = torch.stack(position_map_list).unsqueeze(1)
+    distribution_map_list = torch.stack(distribution_map_list)
+
+    return rgb_img_list, mask_list, position_map_list, distribution_map_list, meta_list
 
 
 if __name__ == '__main__':

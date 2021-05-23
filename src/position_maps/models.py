@@ -5,6 +5,7 @@ from omegaconf import DictConfig
 # from pl_bolts.models.vision import UNet  # has some matplotlib issue
 from pytorch_lightning import LightningModule
 from torch import nn
+import torch.nn.functional as F
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 
@@ -34,12 +35,12 @@ class UNet(nn.Module):
     """
 
     def __init__(
-        self,
-        num_classes: int,
-        input_channels: int = 3,
-        num_layers: int = 5,
-        features_start: int = 64,
-        bilinear: bool = False
+            self,
+            num_classes: int,
+            input_channels: int = 3,
+            num_layers: int = 5,
+            features_start: int = 64,
+            bilinear: bool = False
     ):
 
         if num_layers < 1:
@@ -136,7 +137,6 @@ class Up(nn.Module):
         return self.conv(x)
 
 
-
 class PositionMapUNet(LightningModule):
     def __init__(self, config: 'DictConfig', train_dataset: 'Dataset', val_dataset: 'Dataset',
                  loss_function: 'nn.Module' = None, collate_fn: Optional[Callable] = None):
@@ -162,7 +162,7 @@ class PositionMapUNet(LightningModule):
         return self.u_net(x)
 
     def _one_step(self, batch):
-        frames, heat_masks, meta = batch
+        frames, heat_masks, position_map, distribution_map, meta = batch
         out = self(frames)
         loss = self.loss_function(out, heat_masks)
         return loss
