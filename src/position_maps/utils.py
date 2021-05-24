@@ -70,7 +70,7 @@ def plot_samples(img, mask, boxes, box_centers, plot_boxes=False, add_feats_to_m
 
 
 def plot_predictions(img, mask, pred_mask, additional_text=''):
-    fig, axs = plt.subplots(1, 3, sharex='none', sharey='none', figsize=(12, 10))
+    fig, axs = plt.subplots(1, 3, sharex='none', sharey='none', figsize=(16, 8))
     img_axis, mask_axis, pred_mask_axis = axs
     if img is not None:
         img_axis.imshow(img)

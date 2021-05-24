@@ -201,6 +201,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
         variance_list = torch.tensor([self.sigma] * key_points.shape[0])
         distribution_map[key_points[:, 1], key_points[:, 0]] = torch.stack(
             (key_points[:, 1], key_points[:, 0], variance_list)).t().float()
+        distribution_map = distribution_map.permute(2, 0, 1)
 
         return video, heat_mask, position_map, distribution_map, meta
 

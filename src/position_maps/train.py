@@ -1,11 +1,12 @@
 import os
+import warnings
 
 import albumentations as A
 import hydra
 import numpy as np
 import torch
 from pytorch_lightning import seed_everything, Trainer
-from torch.nn import CrossEntropyLoss
+from torch.nn import CrossEntropyLoss, MSELoss
 from torch.utils.data import DataLoader, Subset
 
 from average_image.constants import SDDVideoClasses
@@ -128,7 +129,8 @@ def overfit(cfg):
 
     train_dataset, val_dataset = setup_dataset(cfg, transform)
 
-    loss_fn = CrossEntropyLoss()
+    # loss_fn = CrossEntropyLoss()
+    loss_fn = MSELoss()
     model = PositionMapUNet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
                             loss_function=loss_fn, collate_fn=heat_map_collate_fn)
     model.to(cfg.device)
@@ -147,24 +149,26 @@ def overfit(cfg):
             opt.zero_grad()
 
             frames, heat_masks, position_map, distribution_map, meta = data
-            frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
+            frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+            # frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
             out = model(frames)
 
-            position_map = position_map.view(cfg.overfit.batch_size, -1)
-            out = out.view(cfg.overfit.batch_size, -1)
+            # position_map = position_map.view(cfg.overfit.batch_size, -1)
+            # out = out.view(cfg.overfit.batch_size, -1)
 
-            loss = []
-            for idx in range(position_map.shape[0]):
-                loss.append(loss_fn(out[idx], torch.where(position_map[idx])[0]))
+            # loss = []
+            # for idx in range(position_map.shape[0]):
+            #     loss.append(loss_fn(out[idx], torch.where(position_map[idx])[0]))
 
             loss = loss_fn(out, heat_masks)
+            # loss = loss_fn(out, position_map)
 
             train_loss.append(loss.item())
 
             loss.backward()
             opt.step()
 
-        logger.info(f"Train Loss: {np.array(train_loss).mean()}")
+        logger.info(f"Epoch: {epoch} | Train Loss: {np.array(train_loss).mean()}")
 
         if epoch % cfg.overfit.plot_checkpoint == 0:
             model.eval()
@@ -172,19 +176,28 @@ def overfit(cfg):
 
             for data in train_loader:
                 frames, heat_masks, position_map, distribution_map, meta = data
-                frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
+                frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+                # frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
 
                 with torch.no_grad():
                     out = model(frames)
 
                 loss = loss_fn(out, heat_masks)
+                # loss = loss_fn(out, position_map)
 
                 val_loss.append(loss.item())
 
-                plot_predictions(frames.squeeze().permute(1, 2, 0), heat_masks.squeeze(), out.squeeze())
+                random_idx = np.random.choice(cfg.overfit.batch_size, 1, replace=False).item()
+                plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                 heat_masks[random_idx].squeeze().cpu(),
+                                 out[random_idx].squeeze().cpu(),
+                                 additional_text=f"Epoch: {epoch}")
 
-            logger.info(f"Validation Loss: {np.array(val_loss).mean()}")
+            logger.info(f"Epoch: {epoch} | Validation Loss: {np.array(val_loss).mean()}")
 
 
 if __name__ == '__main__':
-    overfit()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+
+        overfit()
