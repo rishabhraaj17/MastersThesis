@@ -63,6 +63,8 @@ heatmap_shape: null
 return_combined_heatmaps: True
 sigma: 1.5
 
+seg_map_objectness_threshold: 0.5
+
 warm_restart:
   enable: False
   custom_load: False
@@ -77,16 +79,19 @@ resume:
     path: "lightning_logs/version_"
     version: 10
 
+use_cross_entropy: True
+
 overfit:
-  num_epochs: 3000
+  num_epochs: 6000
   batch_size: 1
   num_workers: 0
   pin_memory: True
   drop_last: False
 
+#  subset_indices: [0, 85, 32, 5, 125, 200]
   subset_indices: [0]
 
-  plot_checkpoint: 100
+  plot_checkpoint: 49
 
 
 

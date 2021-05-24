@@ -25,7 +25,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
             _video_min_dimension: int = 0, _audio_samples: int = 0, scale: float = 1.0, video_number_to_use: int = 0,
             multiple_videos: bool = False, use_generated: bool = False, sigma: int = 10, plot: bool = False,
             desired_size: Tuple[int, int] = None, heatmap_shape: Tuple[int, int] = None,
-            return_combined_heatmaps: bool = True):
+            return_combined_heatmaps: bool = True, seg_map_objectness_threshold: float = 0.5):
         super(SDDFrameAndAnnotationDataset, self).__init__()
 
         _mid_path = video_label.value
@@ -135,6 +135,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
         self.desired_size = desired_size
         self.heatmap_shape = heatmap_shape
         self.return_combined_heatmaps = return_combined_heatmaps
+        self.seg_map_objectness_threshold = seg_map_objectness_threshold
 
     @property
     def metadata(self):
@@ -197,17 +198,19 @@ class SDDFrameAndAnnotationDataset(Dataset):
 
         heat_mask = heat_mask.float()
 
-        position_map = torch.zeros_like(heat_mask)
         key_points = torch.round(torch.from_numpy(bbox_centers)).long()
-        position_map[key_points[:, 1], key_points[:, 0]] = 1
+        position_map = heat_mask.clone().clamp(min=0, max=1).int().float()
 
-        distribution_map = torch.zeros(size=(heat_mask.shape[0], heat_mask.shape[1], 3))
+        class_maps = heat_mask.clone()
+        class_maps = torch.where(class_maps > self.seg_map_objectness_threshold, 1.0, 0.0)
+
+        distribution_map = torch.zeros(size=(heat_mask.shape[-2], heat_mask.shape[-1], 3))
         variance_list = torch.tensor([self.sigma] * key_points.shape[0])
         distribution_map[key_points[:, 1], key_points[:, 0]] = torch.stack(
             (key_points[:, 1], key_points[:, 0], variance_list)).t().float()
         distribution_map = distribution_map.permute(2, 0, 1)
 
-        return video, heat_mask, position_map, distribution_map, meta
+        return video, heat_mask, position_map, distribution_map, class_maps, meta
 
     def get_annotation_for_frame(self, item, video_idx, original_shape):
         h, w = original_shape

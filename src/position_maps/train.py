@@ -31,7 +31,8 @@ def setup_dataset(cfg, transform):
         plot=cfg.plot_samples,
         desired_size=cfg.desired_size,
         heatmap_shape=cfg.heatmap_shape,
-        return_combined_heatmaps=cfg.return_combined_heatmaps
+        return_combined_heatmaps=cfg.return_combined_heatmaps,
+        seg_map_objectness_threshold=cfg.seg_map_objectness_threshold
     )
     val_dataset = SDDFrameAndAnnotationDataset(
         root=cfg.root, video_label=getattr(SDDVideoClasses, cfg.video_class),
@@ -44,7 +45,8 @@ def setup_dataset(cfg, transform):
         plot=cfg.plot_samples,
         desired_size=cfg.desired_size,
         heatmap_shape=cfg.heatmap_shape,
-        return_combined_heatmaps=cfg.return_combined_heatmaps
+        return_combined_heatmaps=cfg.return_combined_heatmaps,
+        seg_map_objectness_threshold=cfg.seg_map_objectness_threshold
     )
     return train_dataset, val_dataset
 
@@ -133,8 +135,11 @@ def overfit(cfg):
 
     train_dataset, val_dataset = setup_dataset(cfg, transform)
 
-    # loss_fn = CrossEntropyLoss()
-    loss_fn = MSELoss()
+    if cfg.use_cross_entropy:
+        loss_fn = CrossEntropyLoss()
+    else:
+        loss_fn = MSELoss()
+        
     model = PositionMapUNet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
                             loss_function=loss_fn, collate_fn=heat_map_collate_fn)
     model.to(cfg.device)
@@ -152,20 +157,19 @@ def overfit(cfg):
         for data in train_loader:
             opt.zero_grad()
 
-            frames, heat_masks, position_map, distribution_map, meta = data
-            frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
-            # frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
+            frames, heat_masks, position_map, distribution_map, class_maps, meta = data
+
+            if cfg.use_cross_entropy:
+                frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
+            else:
+                frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+
             out = model(frames)
 
-            # position_map = position_map.view(cfg.overfit.batch_size, -1)
-            # out = out.view(cfg.overfit.batch_size, -1)
-
-            # loss = []
-            # for idx in range(position_map.shape[0]):
-            #     loss.append(loss_fn(out[idx], torch.where(position_map[idx])[0]))
-
-            loss = loss_fn(out, heat_masks)
-            # loss = loss_fn(out, position_map)
+            if cfg.use_cross_entropy:
+                loss = loss_fn(out, position_map.long().squeeze(dim=1))
+            else:
+                loss = loss_fn(out, heat_masks)
 
             train_loss.append(loss.item())
 
@@ -179,23 +183,38 @@ def overfit(cfg):
             val_loss = []
 
             for data in train_loader:
-                frames, heat_masks, position_map, distribution_map, meta = data
-                frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
-                # frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
+                frames, heat_masks, position_map, distribution_map, class_maps, meta = data
+
+                if cfg.use_cross_entropy:
+                    frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
+                else:
+                    frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
                 with torch.no_grad():
                     out = model(frames)
 
-                loss = loss_fn(out, heat_masks)
-                # loss = loss_fn(out, position_map)
+                if cfg.use_cross_entropy:
+                    loss = loss_fn(out, position_map.long().squeeze(dim=1))
+                else:
+                    loss = loss_fn(out, heat_masks)
 
                 val_loss.append(loss.item())
 
                 random_idx = np.random.choice(cfg.overfit.batch_size, 1, replace=False).item()
-                plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                 heat_masks[random_idx].squeeze().cpu(),
-                                 out[random_idx].squeeze().cpu(),
-                                 additional_text=f"Epoch: {epoch}")
+
+                if cfg.use_cross_entropy:
+                    pred_mask = torch.cat((torch.softmax(out, dim=1),
+                                           torch.zeros(size=(out.shape[0], 1, out.shape[2], out.shape[3]),
+                                                       device=cfg.device)), dim=1)
+                    plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                     heat_masks[random_idx].squeeze().cpu(),
+                                     pred_mask[random_idx].squeeze().cpu().permute(1, 2, 0).int() * 255,
+                                     additional_text=f"CrossEntropy | Epoch: {epoch}")
+                else:
+                    plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                     heat_masks[random_idx].squeeze().cpu(),
+                                     out[random_idx].squeeze().cpu(),
+                                     additional_text=f"MSE | Epoch: {epoch}")
 
             logger.info(f"Epoch: {epoch} | Validation Loss: {np.array(val_loss).mean()}")
 
