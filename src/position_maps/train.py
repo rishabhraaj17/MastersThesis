@@ -5,6 +5,7 @@ import albumentations as A
 import hydra
 import numpy as np
 import torch
+from kornia.losses import FocalLoss, BinaryFocalLossWithLogits
 from pytorch_lightning import seed_everything, Trainer
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.utils.data import DataLoader, Subset
@@ -136,7 +137,9 @@ def overfit(cfg):
     train_dataset, val_dataset = setup_dataset(cfg, transform)
 
     if cfg.use_cross_entropy:
-        loss_fn = CrossEntropyLoss()
+        # loss_fn = CrossEntropyLoss()
+        # loss_fn = FocalLoss(alpha=0.9, reduction='mean')
+        loss_fn = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean')
     else:
         loss_fn = MSELoss()
         
@@ -160,14 +163,14 @@ def overfit(cfg):
             frames, heat_masks, position_map, distribution_map, class_maps, meta = data
 
             if cfg.use_cross_entropy:
-                frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
+                frames, class_maps = frames.to(cfg.device), class_maps.to(cfg.device)
             else:
                 frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
             out = model(frames)
 
             if cfg.use_cross_entropy:
-                loss = loss_fn(out, position_map.long().squeeze(dim=1))
+                loss = loss_fn(out, class_maps.long().squeeze(dim=1))
             else:
                 loss = loss_fn(out, heat_masks)
 
@@ -186,7 +189,7 @@ def overfit(cfg):
                 frames, heat_masks, position_map, distribution_map, class_maps, meta = data
 
                 if cfg.use_cross_entropy:
-                    frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
+                    frames, class_maps = frames.to(cfg.device), class_maps.to(cfg.device)
                 else:
                     frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
@@ -194,7 +197,7 @@ def overfit(cfg):
                     out = model(frames)
 
                 if cfg.use_cross_entropy:
-                    loss = loss_fn(out, position_map.long().squeeze(dim=1))
+                    loss = loss_fn(out, class_maps.long().squeeze(dim=1))
                 else:
                     loss = loss_fn(out, heat_masks)
 
@@ -203,18 +206,19 @@ def overfit(cfg):
                 random_idx = np.random.choice(cfg.overfit.batch_size, 1, replace=False).item()
 
                 if cfg.use_cross_entropy:
-                    pred_mask = torch.cat((torch.softmax(out, dim=1),
-                                           torch.zeros(size=(out.shape[0], 1, out.shape[2], out.shape[3]),
-                                                       device=cfg.device)), dim=1)
+                    # pred_mask = torch.cat((torch.softmax(out, dim=1),
+                    #                        torch.zeros(size=(out.shape[0], 1, out.shape[2], out.shape[3]),
+                    #                                    device=cfg.device)), dim=1).squeeze().cpu().permute(1, 2, 0)
+                    pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
                     plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                     heat_masks[random_idx].squeeze().cpu(),
-                                     pred_mask[random_idx].squeeze().cpu().permute(1, 2, 0).int() * 255,
-                                     additional_text=f"CrossEntropy | Epoch: {epoch}")
+                                     class_maps[random_idx].squeeze().cpu(),
+                                     pred_mask[random_idx].int() * 255,
+                                     additional_text=f"{loss_fn._get_name()} | Epoch: {epoch}")
                 else:
                     plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                      heat_masks[random_idx].squeeze().cpu(),
                                      out[random_idx].squeeze().cpu(),
-                                     additional_text=f"MSE | Epoch: {epoch}")
+                                     additional_text=f"{loss_fn._get_name()} | Epoch: {epoch}")
 
             logger.info(f"Epoch: {epoch} | Validation Loss: {np.array(val_loss).mean()}")
 
@@ -223,4 +227,5 @@ if __name__ == '__main__':
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
-        overfit()
+        # overfit()
+        train()

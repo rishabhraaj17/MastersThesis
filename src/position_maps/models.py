@@ -162,9 +162,9 @@ class PositionMapUNet(LightningModule):
         return self.u_net(x)
 
     def _one_step(self, batch):
-        frames, heat_masks, position_map, distribution_map, meta = batch
+        frames, _, _, _, class_maps, _ = batch
         out = self(frames)
-        loss = self.loss_function(out, heat_masks)
+        loss = self.loss_function(out, class_maps.long().squeeze(dim=1))
         return loss
 
     def training_step(self, batch, batch_idx):
