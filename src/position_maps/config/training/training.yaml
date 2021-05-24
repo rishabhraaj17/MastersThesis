@@ -59,7 +59,9 @@ use_generated_dataset: True
 plot_samples: False
 
 # gaussian
-sigma: 10
+heatmap_shape: null
+return_combined_heatmaps: True
+sigma: 1.5
 
 warm_restart:
   enable: False

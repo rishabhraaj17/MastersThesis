@@ -24,7 +24,8 @@ class SDDFrameAndAnnotationDataset(Dataset):
             _precomputed_metadata: bool = None, num_workers: int = 1, _video_width: int = 0, _video_height: int = 0,
             _video_min_dimension: int = 0, _audio_samples: int = 0, scale: float = 1.0, video_number_to_use: int = 0,
             multiple_videos: bool = False, use_generated: bool = False, sigma: int = 10, plot: bool = False,
-            desired_size: Tuple[int, int] = None):
+            desired_size: Tuple[int, int] = None, heatmap_shape: Tuple[int, int] = None,
+            return_combined_heatmaps: bool = True):
         super(SDDFrameAndAnnotationDataset, self).__init__()
 
         _mid_path = video_label.value
@@ -132,6 +133,8 @@ class SDDFrameAndAnnotationDataset(Dataset):
         self.sigma = sigma
         self.plot = plot
         self.desired_size = desired_size
+        self.heatmap_shape = heatmap_shape
+        self.return_combined_heatmaps = return_combined_heatmaps
 
     @property
     def metadata(self):
@@ -181,7 +184,8 @@ class SDDFrameAndAnnotationDataset(Dataset):
             new_shape = (video.shape[-2], video.shape[-1])
 
         heat_mask = torch.from_numpy(
-            generate_position_map(new_shape, bbox_centers, sigma=self.sigma))
+            generate_position_map(list(new_shape), bbox_centers, sigma=self.sigma, heatmap_shape=self.heatmap_shape,
+                                  return_combined=self.return_combined_heatmaps, hw_mode=True))
         if self.plot:
             plot_samples(video.squeeze().permute(1, 2, 0), heat_mask, boxes, bbox_centers, plot_boxes=True,
                          additional_text=f'Frame Number: {item} | Video Idx: {video_idx}')

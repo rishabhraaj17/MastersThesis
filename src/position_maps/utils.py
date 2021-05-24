@@ -1,3 +1,4 @@
+import copy
 import os
 import shutil
 from typing import Tuple, List, Union
@@ -20,10 +21,10 @@ def gaussian_v0(x: int, y: int, height: int, width: int, sigma: int = 5) -> 'np.
     return channel
 
 
-def generate_position_map(shape: Tuple[int, int], bounding_boxes_centers: List[List[int]],
-                          sigma: int = 2, return_as_one: bool = True,
-                          normalized: bool = True,
-                          gaussian_to_use: str = 'v2') -> Union[List['np.ndarray'], 'np.ndarray']:
+def generate_position_map_v0(shape: Tuple[int, int], bounding_boxes_centers: List[List[int]],
+                             sigma: int = 2, return_as_one: bool = True,
+                             normalized: bool = True,
+                             gaussian_to_use: str = 'v2') -> Union[List['np.ndarray'], 'np.ndarray']:
     if gaussian_to_use == 'v0':
         core = gaussian_v0
     elif gaussian_to_use == 'v1':
@@ -109,6 +110,82 @@ def gaussian_v2(x: int, y: int, height: int, width: int, sigma: int = 5, seed: i
     return rv.pdf(img)
 
 
+# not usable
+def gaussian_v3(empty_map, x, y, stride, sigma):
+    n_sigma = 4
+    tl = [int(x - n_sigma * sigma), int(y - n_sigma * sigma)]
+    tl[0] = max(tl[0], 0)
+    tl[1] = max(tl[1], 0)
+
+    br = [int(x + n_sigma * sigma), int(y + n_sigma * sigma)]
+    map_h, map_w = empty_map.shape
+    br[0] = min(br[0], map_w * stride)
+    br[1] = min(br[1], map_h * stride)
+
+    shift = stride / 2 - 0.5
+    for map_y in range(tl[1] // stride, br[1] // stride):
+        for map_x in range(tl[0] // stride, br[0] // stride):
+            d2 = (map_x * stride + shift - x) * (map_x * stride + shift - x) + \
+                 (map_y * stride + shift - y) * (map_y * stride + shift - y)
+            exponent = d2 / 2 / sigma / sigma
+            if exponent > 4.6052:  # threshold, ln(100), ~0.01
+                continue
+            empty_map[map_y, map_x] += np.exp(-exponent)
+            if empty_map[map_y, map_x] > 1:
+                empty_map[map_y, map_x] = 1
+    return empty_map
+
+
+def generate_position_map(image_shape, object_locations, sigma: float, heatmap_shape=None, return_combined=False,
+                          hw_mode=True):
+    heatmap_shape = copy.copy(image_shape) if heatmap_shape is None else heatmap_shape
+    if hw_mode:
+        image_shape[0], image_shape[1] = image_shape[1], image_shape[0]
+        heatmap_shape[0], heatmap_shape[1] = heatmap_shape[1], heatmap_shape[0]
+    heatmap_shape, image_shape = np.array(heatmap_shape), np.array(image_shape)
+    num_objects = object_locations.shape[0]
+    heatmaps = np.zeros((num_objects,
+                         heatmap_shape[1],
+                         heatmap_shape[0]),
+                        dtype=np.float32)
+
+    tmp_size = sigma * 3
+
+    for joint_id in range(num_objects):
+        feat_stride = image_shape / heatmap_shape
+        mu_x = int(object_locations[joint_id][0] / feat_stride[0] + 0.5)
+        mu_y = int(object_locations[joint_id][1] / feat_stride[1] + 0.5)
+        # Check that any part of the gaussian is in-bounds
+        ul = [int(mu_x - tmp_size), int(mu_y - tmp_size)]
+        br = [int(mu_x + tmp_size + 1), int(mu_y + tmp_size + 1)]
+        if ul[0] >= heatmap_shape[0] or ul[1] >= heatmap_shape[1] \
+                or br[0] < 0 or br[1] < 0:
+            # If not, just return the image as is
+            continue
+
+        # # Generate gaussian
+        size = 2 * tmp_size + 1
+        x = np.arange(0, size, 1, np.float32)
+        y = x[:, np.newaxis]
+        x0 = y0 = size // 2
+        # The gaussian is not normalized, we want the center value to equal 1
+        g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2))
+
+        # Usable gaussian range
+        g_x = max(0, -ul[0]), min(br[0], heatmap_shape[0]) - ul[0]
+        g_y = max(0, -ul[1]), min(br[1], heatmap_shape[1]) - ul[1]
+        # Image range
+        img_x = max(0, ul[0]), min(br[0], heatmap_shape[0])
+        img_y = max(0, ul[1]), min(br[1], heatmap_shape[1])
+
+        heatmaps[joint_id][img_y[0]:img_y[1], img_x[0]:img_x[1]] = \
+            g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
+
+    if return_combined:
+        return heatmaps.sum(axis=0)
+    return heatmaps
+
+
 def copy_filtered_annotations(root_path, other_root_path):
     filtered_generated_path = root_path + '/filtered_generated_annotations'
     v_clazzes = [SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.DEATH_CIRCLE,
@@ -182,13 +259,13 @@ def heat_map_collate_fn(batch):
 
 
 if __name__ == '__main__':
-    s = (480, 320)
+    s = [480, 320]
     b_centers = [[50, 50], [76, 82], [12, 67], [198, 122]]
-    out1 = generate_position_map(s, b_centers, sigma=5, gaussian_to_use='v1')
+    out1 = generate_position_map(s, b_centers, sigma=5)
     plt.imshow(out1)
     plt.show()
 
-    out2 = generate_position_map(s, b_centers, sigma=5, gaussian_to_use='v2')
+    out2 = generate_position_map(s, b_centers, sigma=5)
     plt.imshow(out2)
     plt.show()
 

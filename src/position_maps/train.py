@@ -29,7 +29,9 @@ def setup_dataset(cfg, transform):
         use_generated=cfg.use_generated_dataset,
         sigma=cfg.sigma,
         plot=cfg.plot_samples,
-        desired_size=cfg.desired_size
+        desired_size=cfg.desired_size,
+        heatmap_shape=cfg.heatmap_shape,
+        return_combined_heatmaps=cfg.return_combined_heatmaps
     )
     val_dataset = SDDFrameAndAnnotationDataset(
         root=cfg.root, video_label=getattr(SDDVideoClasses, cfg.video_class),
@@ -40,7 +42,9 @@ def setup_dataset(cfg, transform):
         use_generated=cfg.use_generated_dataset,
         sigma=cfg.sigma,
         plot=cfg.plot_samples,
-        desired_size=cfg.desired_size
+        desired_size=cfg.desired_size,
+        heatmap_shape=cfg.heatmap_shape,
+        return_combined_heatmaps=cfg.return_combined_heatmaps
     )
     return train_dataset, val_dataset
 
