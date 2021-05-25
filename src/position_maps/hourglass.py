@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from torch.nn.functional import interpolate
 
 Pool = nn.MaxPool2d
 
@@ -90,7 +91,15 @@ class Hourglass(nn.Module):
         low2 = self.low2(low1)
         low3 = self.low3(low2)
         up2 = self.up2(low3)
-        return up1 + up2
+
+        try:
+            out = up1 + up2
+        except RuntimeError:
+            # for non-square images
+            up1 = interpolate(up1, size=(x.shape[-2], x.shape[-1]), mode='bilinear')
+            up2 = interpolate(up2, size=(x.shape[-2], x.shape[-1]), mode='bilinear')
+            out = up1 + up2
+        return out
 
 
 class UnFlatten(nn.Module):
@@ -164,7 +173,7 @@ class PoseNet(nn.Module):
 
 
 if __name__ == '__main__':
-    inp = torch.randn((2, 3, 321, 320))
+    inp = torch.randn((2, 3, 490, 320))
     net = PoseNet(num_stack=3, inp_dim=3, out_dim=1)
     o = net(inp)
     print()
