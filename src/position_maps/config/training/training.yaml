@@ -95,7 +95,7 @@ overfit:
   subset_indices: [0, 85, 32, 5, 125, 200]
 #  subset_indices: [0]
 
-  plot_checkpoint: 49
+  plot_checkpoint: 99
 
 
 
