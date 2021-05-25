@@ -79,7 +79,8 @@ resume:
     path: "lightning_logs/version_"
     version: 10
 
-use_cross_entropy: True
+class_map_segmentation: False
+position_map_segmentation: True
 
 overfit:
   num_epochs: 6000

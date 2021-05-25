@@ -107,7 +107,7 @@ def train(cfg):
 
     train_dataset, val_dataset = setup_dataset(cfg, transform)
 
-    loss_fn = CrossEntropyLoss()
+    loss_fn = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean')  # CrossEntropyLoss()
     model = PositionMapUNet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
                             loss_function=loss_fn, collate_fn=heat_map_collate_fn)
 
@@ -136,7 +136,7 @@ def overfit(cfg):
 
     train_dataset, val_dataset = setup_dataset(cfg, transform)
 
-    if cfg.use_cross_entropy:
+    if cfg.class_map_segmentation or cfg.position_map_segmentation:
         # loss_fn = CrossEntropyLoss()
         # loss_fn = FocalLoss(alpha=0.9, reduction='mean')
         loss_fn = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean')
@@ -162,15 +162,19 @@ def overfit(cfg):
 
             frames, heat_masks, position_map, distribution_map, class_maps, meta = data
 
-            if cfg.use_cross_entropy:
+            if cfg.class_map_segmentation:
                 frames, class_maps = frames.to(cfg.device), class_maps.to(cfg.device)
+            elif cfg.position_map_segmentation:
+                frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
             else:
                 frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
             out = model(frames)
 
-            if cfg.use_cross_entropy:
+            if cfg.class_map_segmentation:
                 loss = loss_fn(out, class_maps.long().squeeze(dim=1))
+            elif cfg.position_map_segmentation:
+                loss = loss_fn(out, position_map.long().squeeze(dim=1))
             else:
                 loss = loss_fn(out, heat_masks)
 
@@ -188,16 +192,20 @@ def overfit(cfg):
             for data in train_loader:
                 frames, heat_masks, position_map, distribution_map, class_maps, meta = data
 
-                if cfg.use_cross_entropy:
+                if cfg.class_map_segmentation:
                     frames, class_maps = frames.to(cfg.device), class_maps.to(cfg.device)
+                elif cfg.position_map_segmentation:
+                    frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
                 else:
                     frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
                 with torch.no_grad():
                     out = model(frames)
 
-                if cfg.use_cross_entropy:
+                if cfg.class_map_segmentation:
                     loss = loss_fn(out, class_maps.long().squeeze(dim=1))
+                elif cfg.position_map_segmentation:
+                    loss = loss_fn(out, position_map.long().squeeze(dim=1))
                 else:
                     loss = loss_fn(out, heat_masks)
 
@@ -205,13 +213,14 @@ def overfit(cfg):
 
                 random_idx = np.random.choice(cfg.overfit.batch_size, 1, replace=False).item()
 
-                if cfg.use_cross_entropy:
+                if cfg.class_map_segmentation or cfg.position_map_segmentation:
                     # pred_mask = torch.cat((torch.softmax(out, dim=1),
                     #                        torch.zeros(size=(out.shape[0], 1, out.shape[2], out.shape[3]),
                     #                                    device=cfg.device)), dim=1).squeeze().cpu().permute(1, 2, 0)
                     pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
                     plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                     class_maps[random_idx].squeeze().cpu(),
+                                     class_maps[random_idx].squeeze().cpu()
+                                     if cfg.class_map_segmentation else position_map[random_idx].squeeze().cpu(),
                                      pred_mask[random_idx].int() * 255,
                                      additional_text=f"{loss_fn._get_name()} | Epoch: {epoch}")
                 else:
@@ -227,5 +236,5 @@ if __name__ == '__main__':
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
-        # overfit()
-        train()
+        overfit()
+        # train()
