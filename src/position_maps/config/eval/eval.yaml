@@ -1,4 +1,46 @@
 # @package _global_
 
 eval:
-  batch_size : 32
+  batch_size : 2
+  num_workers: 0
+  pin_memory: True
+  drop_last: False
+
+  device: 'cuda:0'
+  data_augmentation: True
+  resize_transform_only: False
+
+  # dataset
+  root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
+  video_class: DEATH_CIRCLE
+
+  test:
+    num_videos: -1
+    video_number_to_use: 2
+    multiple_videos: False
+
+  dataset_workers: 8
+  # keep one of them null at one time
+  scale_factor: null # 0.25
+  desired_size: [ 490, 360 ]
+
+  use_generated_dataset: True
+
+  plot_samples: False
+
+  # gaussian
+  heatmap_shape: null
+  return_combined_heatmaps: True
+  sigma: 1.5
+
+  seg_map_objectness_threshold: 0.5
+
+  # one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation'
+  postion_map_network_type: 'PositionMapUNetClassMapSegmentation'
+
+  plot_checkpoint: 20
+
+  checkpoint:
+    root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+    path: "lightning_logs/version_"
+    version: 419668
