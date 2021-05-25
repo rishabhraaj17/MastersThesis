@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from torch.nn import MSELoss
 from torch.nn.functional import interpolate
 
 Pool = nn.MaxPool2d
@@ -120,7 +121,7 @@ class Merge(nn.Module):
 
 
 class PoseNet(nn.Module):
-    def __init__(self, num_stack, inp_dim, out_dim, bn=False, increase=0, **kwargs):
+    def __init__(self, num_stack, inp_dim, out_dim, loss_fn, bn=False, increase=0, **kwargs):
         super(PoseNet, self).__init__()
 
         self.num_stack = num_stack
@@ -147,6 +148,7 @@ class PoseNet(nn.Module):
         self.merge_features = nn.ModuleList([Merge(inp_dim, inp_dim) for i in range(num_stack - 1)])
         self.merge_preds = nn.ModuleList([Merge(out_dim, inp_dim) for i in range(num_stack - 1)])
         self.num_stack = num_stack
+        self.loss_fn = loss_fn
 
     def forward(self, imgs):
         x = self.pre(imgs)
@@ -161,19 +163,22 @@ class PoseNet(nn.Module):
             if i < self.num_stack - 1:
                 x = x + self.merge_preds[i](preds) + self.merge_features[i](feature)
 
-        return torch.stack(combined_hm_preds, 1)
+        return torch.stack(combined_hm_preds, dim=0)
 
     def calc_loss(self, combined_hm_preds, heatmaps):
         combined_loss = []
         for i in range(self.num_stack):
-            combined_loss.append(self.loss(combined_hm_preds[0][:, i], heatmaps))
-        combined_loss = torch.stack(combined_loss, dim=1)
+            # combined_loss.append(self.loss(combined_hm_preds[0][:, i], heatmaps))
+            combined_loss.append(self.loss_fn(combined_hm_preds[i], heatmaps))
+        combined_loss = torch.stack(combined_loss, dim=0)
 
         return combined_loss
 
 
 if __name__ == '__main__':
     inp = torch.randn((2, 3, 490, 320))
-    net = PoseNet(num_stack=3, inp_dim=3, out_dim=1)
+    target = torch.randn((2, 1, 490, 320))
+    net = PoseNet(num_stack=3, inp_dim=3, out_dim=1, loss_fn=MSELoss())
     o = net(inp)
+    loss = net.calc_loss(o, target)
     print()
