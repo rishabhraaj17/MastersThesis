@@ -12,9 +12,9 @@ from torch.utils.data import DataLoader, Subset
 
 from average_image.constants import SDDVideoClasses
 from log import get_logger
-from position_maps.dataset import SDDFrameAndAnnotationDataset
-from position_maps.models import PositionMapUNet
-from position_maps.utils import heat_map_collate_fn, plot_predictions
+from dataset import SDDFrameAndAnnotationDataset
+from models import PositionMapUNet
+from utils import heat_map_collate_fn, plot_predictions
 
 seed_everything(42)
 logger = get_logger(__name__)

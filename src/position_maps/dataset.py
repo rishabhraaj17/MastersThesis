@@ -13,7 +13,7 @@ from torchvision.datasets.video_utils import VideoClips
 
 from average_image.constants import SDDVideoClasses
 from average_image.utils import SDDMeta
-from position_maps.utils import generate_position_map, plot_samples
+from utils import generate_position_map, plot_samples
 from unsupervised_tp_0.dataset import sort_list
 
 
