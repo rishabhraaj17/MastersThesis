@@ -1,11 +1,13 @@
 from typing import Union, List, Callable, Optional
 
 import torch
+from kornia.losses import BinaryFocalLossWithLogits
 from omegaconf import DictConfig
 # from pl_bolts.models.vision import UNet  # has some matplotlib issue
 from pytorch_lightning import LightningModule
 from torch import nn
 import torch.nn.functional as F
+from torch.nn import MSELoss
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 
@@ -137,10 +139,10 @@ class Up(nn.Module):
         return self.conv(x)
 
 
-class PositionMapUNet(LightningModule):
+class PositionMapUNetBase(LightningModule):
     def __init__(self, config: 'DictConfig', train_dataset: 'Dataset', val_dataset: 'Dataset',
                  loss_function: 'nn.Module' = None, collate_fn: Optional[Callable] = None):
-        super(PositionMapUNet, self).__init__()
+        super(PositionMapUNetBase, self).__init__()
         self.config = config
         self.u_net = UNet(num_classes=self.config.unet.num_classes,
                           input_channels=self.config.unet.input_channels,
@@ -162,10 +164,7 @@ class PositionMapUNet(LightningModule):
         return self.u_net(x)
 
     def _one_step(self, batch):
-        frames, _, _, _, class_maps, _ = batch
-        out = self(frames)
-        loss = self.loss_function(out, class_maps.long().squeeze(dim=1))
-        return loss
+        return NotImplementedError
 
     def training_step(self, batch, batch_idx):
         loss = self._one_step(batch)
@@ -219,3 +218,47 @@ class PositionMapUNet(LightningModule):
                 m.bias.data.fill_(0.01)
 
         self.apply(init_kaiming)
+
+
+class PositionMapUNetHeatmapRegression(PositionMapUNetBase):
+    def __init__(self, config: 'DictConfig', train_dataset: 'Dataset', val_dataset: 'Dataset',
+                 loss_function: 'nn.Module' = MSELoss(), collate_fn: Optional[Callable] = None):
+        super(PositionMapUNetHeatmapRegression, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_function,
+            collate_fn=collate_fn)
+
+    def _one_step(self, batch):
+        frames, heat_masks, _, _, _, _ = batch
+        out = self(frames)
+        loss = self.loss_function(out, heat_masks)
+        return loss
+
+
+class PositionMapUNetPositionMapSegmentation(PositionMapUNetBase):
+    def __init__(self, config: 'DictConfig', train_dataset: 'Dataset', val_dataset: 'Dataset',
+                 loss_function: 'nn.Module' = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean'),
+                 collate_fn: Optional[Callable] = None):
+        super(PositionMapUNetPositionMapSegmentation, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_function,
+            collate_fn=collate_fn)
+
+    def _one_step(self, batch):
+        frames, _, position_map, _, _, _ = batch
+        out = self(frames)
+        loss = self.loss_function(out, position_map.long().squeeze(dim=1))
+        return loss
+
+
+class PositionMapUNetClassMapSegmentation(PositionMapUNetBase):
+    def __init__(self, config: 'DictConfig', train_dataset: 'Dataset', val_dataset: 'Dataset',
+                 loss_function: 'nn.Module' = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean'),
+                 collate_fn: Optional[Callable] = None):
+        super(PositionMapUNetClassMapSegmentation, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_function,
+            collate_fn=collate_fn)
+
+    def _one_step(self, batch):
+        frames, _, _, _, class_maps, _ = batch
+        out = self(frames)
+        loss = self.loss_function(out, class_maps.long().squeeze(dim=1))
+        return loss

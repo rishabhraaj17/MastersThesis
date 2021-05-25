@@ -11,4 +11,4 @@ general:
 
 hydra:
   run:
-    dir: ./position_maps/logs
+    dir: ./logs

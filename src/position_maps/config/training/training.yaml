@@ -82,6 +82,9 @@ resume:
 class_map_segmentation: False
 position_map_segmentation: True
 
+# one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation'
+postion_map_network_type: 'PositionMapUNetPositionMapSegmentation'
+
 overfit:
   num_epochs: 6000
   batch_size: 2

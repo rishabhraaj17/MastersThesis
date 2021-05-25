@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, Subset
 from average_image.constants import SDDVideoClasses
 from log import get_logger
 from dataset import SDDFrameAndAnnotationDataset
-from models import PositionMapUNet
+import models as model_zoo
 from utils import heat_map_collate_fn, plot_predictions
 
 seed_everything(42)
@@ -68,7 +68,8 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
             model.to(cfg.device)
             model.train()
         else:
-            model = PositionMapUNet.load_from_checkpoint(
+            network_type = getattr(model_zoo, cfg.postion_map_network_type)
+            model = network_type.load_from_checkpoint(
                 checkpoint_path=model_path,
                 hparams_file=hparams_path,
                 map_location='cuda:0',
@@ -107,9 +108,15 @@ def train(cfg):
 
     train_dataset, val_dataset = setup_dataset(cfg, transform)
 
-    loss_fn = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean')  # CrossEntropyLoss()
-    model = PositionMapUNet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
-                            loss_function=loss_fn, collate_fn=heat_map_collate_fn)
+    network_type = getattr(model_zoo, cfg.postion_map_network_type)
+
+    if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation']:
+        loss_fn = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean')  # CrossEntropyLoss()
+    else:
+        loss_fn = MSELoss()
+
+    model = network_type(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+                         loss_function=loss_fn, collate_fn=heat_map_collate_fn)
 
     logger.info(f'Setting up Trainer...')
 
@@ -136,15 +143,17 @@ def overfit(cfg):
 
     train_dataset, val_dataset = setup_dataset(cfg, transform)
 
+    network_type = getattr(model_zoo, cfg.postion_map_network_type)
+
     if cfg.class_map_segmentation or cfg.position_map_segmentation:
         # loss_fn = CrossEntropyLoss()
         # loss_fn = FocalLoss(alpha=0.9, reduction='mean')
         loss_fn = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean')
     else:
         loss_fn = MSELoss()
-        
-    model = PositionMapUNet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
-                            loss_function=loss_fn, collate_fn=heat_map_collate_fn)
+
+    model = network_type(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+                         loss_function=loss_fn, collate_fn=heat_map_collate_fn)
     model.to(cfg.device)
 
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay, amsgrad=cfg.amsgrad)
