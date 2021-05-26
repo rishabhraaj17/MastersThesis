@@ -80,7 +80,9 @@ def setup_eval(cfg):
                              pin_memory=cfg.eval.pin_memory, drop_last=cfg.eval.drop_last)
 
     network_type = getattr(model_zoo, cfg.eval.postion_map_network_type)
-    if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation']:
+    if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation',
+                                 'PositionMapUNetClassMapSegmentation',
+                                 'PositionMapUNetHeatmapSegmentation']:
         loss_fn = BinaryFocalLossWithLogits(alpha=cfg.eval.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
     else:
         loss_fn = MSELoss()
@@ -116,6 +118,8 @@ def evaluate(cfg):
             frames, class_maps = frames.to(cfg.device), class_maps.to(cfg.device)
         elif network_type.__name__ == 'PositionMapUNetPositionMapSegmentation':
             frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
+        elif network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
+            frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
         else:
             frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
@@ -126,6 +130,8 @@ def evaluate(cfg):
             loss = loss_fn(out, class_maps.long().squeeze(dim=1))
         elif network_type.__name__ == 'PositionMapUNetPositionMapSegmentation':
             loss = loss_fn(out, position_map.long().squeeze(dim=1))
+        elif network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
+            loss = loss_fn(out, position_map.long().squeeze(dim=1))
         else:
             loss = loss_fn(out, heat_masks)
 
@@ -135,7 +141,8 @@ def evaluate(cfg):
 
         if idx % cfg.eval.plot_checkpoint == 0:
             if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation',
-                                         'PositionMapUNetClassMapSegmentation']:
+                                         'PositionMapUNetClassMapSegmentation',
+                                         'PositionMapUNetHeatmapSegmentation']:
                 pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
                 plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                  class_maps[random_idx].squeeze().cpu()
@@ -143,11 +150,9 @@ def evaluate(cfg):
                                  pred_mask[random_idx].int() * 255,
                                  additional_text=f"{network_type.__name__} | {loss_fn._get_name()} | Frame: {idx}")
             else:
-                pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
                 plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                  heat_masks[random_idx].squeeze().cpu(),
-                                 # out[random_idx].squeeze().cpu(),
-                                 pred_mask[random_idx].int() * 255,
+                                 out[random_idx].squeeze().cpu(),
                                  additional_text=f"{network_type.__name__} | {loss_fn._get_name()} | Frame: {idx}")
 
     logger.info(f"Test Loss: {np.array(total_loss).mean()}")
