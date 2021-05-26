@@ -81,7 +81,7 @@ def setup_eval(cfg):
 
     network_type = getattr(model_zoo, cfg.eval.postion_map_network_type)
     if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation']:
-        loss_fn = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean')  # CrossEntropyLoss()
+        loss_fn = BinaryFocalLossWithLogits(alpha=cfg.eval.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
     else:
         loss_fn = MSELoss()
 
@@ -143,9 +143,11 @@ def evaluate(cfg):
                                  pred_mask[random_idx].int() * 255,
                                  additional_text=f"{network_type.__name__} | {loss_fn._get_name()} | Frame: {idx}")
             else:
+                pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
                 plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                  heat_masks[random_idx].squeeze().cpu(),
-                                 out[random_idx].squeeze().cpu(),
+                                 # out[random_idx].squeeze().cpu(),
+                                 pred_mask[random_idx].int() * 255,
                                  additional_text=f"{network_type.__name__} | {loss_fn._get_name()} | Frame: {idx}")
 
     logger.info(f"Test Loss: {np.array(total_loss).mean()}")

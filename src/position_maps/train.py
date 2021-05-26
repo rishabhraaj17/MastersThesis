@@ -96,7 +96,7 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
             model = network_type.load_from_checkpoint(
                 checkpoint_path=model_path,
                 hparams_file=hparams_path,
-                map_location='cuda:0',
+                map_location=cfg.device,
                 train_dataset=train_dataset, val_dataset=val_dataset,
                 loss_function=loss_fn, collate_fn=heat_map_collate_fn)
 
@@ -145,7 +145,7 @@ def train(cfg):
 
     if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation',
                                  'PositionMapUNetHeatmapSegmentation']:
-        loss_fn = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean')  # CrossEntropyLoss()
+        loss_fn = BinaryFocalLossWithLogits(alpha=cfg.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
     else:
         loss_fn = MSELoss()
 
@@ -191,10 +191,10 @@ def overfit(cfg):
     if cfg.class_map_segmentation or cfg.position_map_segmentation:
         # loss_fn = CrossEntropyLoss()
         # loss_fn = FocalLoss(alpha=0.9, reduction='mean')
-        loss_fn = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean')
+        loss_fn = BinaryFocalLossWithLogits(alpha=cfg.focal_loss_alpha, reduction='mean')
     else:
         # loss_fn = MSELoss()
-        loss_fn = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean')
+        loss_fn = BinaryFocalLossWithLogits(alpha=cfg.focal_loss_alpha, reduction='mean')
 
     model = network_type(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
                          loss_function=loss_fn, collate_fn=heat_map_collate_fn)

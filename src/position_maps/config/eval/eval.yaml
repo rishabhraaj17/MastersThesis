@@ -37,6 +37,7 @@ eval:
 
   seg_map_objectness_threshold: 0.5
   heatmap_region_limit_threshold: 0.5
+  focal_loss_alpha: 0.8
 
   # one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation', 'PositionMapUNetHeatmapSegmentation'
   postion_map_network_type: 'PositionMapUNetHeatmapSegmentation'
