@@ -11,6 +11,7 @@ from torch.nn import CrossEntropyLoss, MSELoss
 from torch.utils.data import DataLoader, Subset
 
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
+from average_image.utils import SDDMeta
 from log import get_logger
 from dataset import SDDFrameAndAnnotationDataset
 import models as model_zoo
@@ -20,10 +21,29 @@ seed_everything(42)
 logger = get_logger(__name__)
 
 
-def setup_dataset(cfg, transform):
+def get_resize_dims(cfg):
+    meta = SDDMeta(cfg.root + 'H_SDD.txt')
+
+    train_reference_img_path = f'{cfg.root}annotations/{getattr(SDDVideoClasses, cfg.video_class).value}/' \
+                               f'video{cfg.train.video_number_to_use}/reference.jpg'
+    train_w, train_h = meta.get_new_scale(img_path=train_reference_img_path,
+                                          dataset=getattr(SDDVideoDatasets, cfg.video_meta_class),
+                                          sequence=cfg.train.video_number_to_use,
+                                          desired_ratio=cfg.desired_pixel_to_meter_ratio)
+
+    val_reference_img_path = f'{cfg.root}annotations/{getattr(SDDVideoClasses, cfg.video_class).value}/' \
+                             f'video{cfg.val.video_number_to_use}/reference.jpg'
+    val_w, val_h = meta.get_new_scale(img_path=val_reference_img_path,
+                                      dataset=getattr(SDDVideoDatasets, cfg.video_meta_class),
+                                      sequence=cfg.val.video_number_to_use,
+                                      desired_ratio=cfg.desired_pixel_to_meter_ratio)
+    return [int(train_w), int(train_h)], [int(val_w), int(val_h)]
+
+
+def setup_dataset(cfg, train_transform, val_transform):
     train_dataset = SDDFrameAndAnnotationDataset(
         root=cfg.root, video_label=getattr(SDDVideoClasses, cfg.video_class),
-        num_videos=cfg.train.num_videos, transform=transform if cfg.data_augmentation else None,
+        num_videos=cfg.train.num_videos, transform=train_transform if cfg.data_augmentation else None,
         num_workers=cfg.dataset_workers, scale=cfg.scale_factor,
         video_number_to_use=cfg.train.video_number_to_use,
         multiple_videos=cfg.train.multiple_videos,
@@ -38,7 +58,7 @@ def setup_dataset(cfg, transform):
     )
     val_dataset = SDDFrameAndAnnotationDataset(
         root=cfg.root, video_label=getattr(SDDVideoClasses, cfg.video_class),
-        num_videos=cfg.val.num_videos, transform=transform if cfg.data_augmentation else None,
+        num_videos=cfg.val.num_videos, transform=val_transform if cfg.data_augmentation else None,
         num_workers=cfg.dataset_workers, scale=cfg.scale_factor,
         video_number_to_use=cfg.val.video_number_to_use,
         multiple_videos=cfg.val.multiple_videos,
@@ -97,9 +117,18 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
 def train(cfg):
     logger.info(f'Setting up DataLoader and Model...')
 
-    height, width = cfg.desired_size
-    transform = A.Compose(
-        [A.Resize(height=height, width=width),
+    (train_w, train_h), (val_w, val_h) = get_resize_dims(cfg)
+    train_transform = A.Compose(
+        [A.Resize(height=train_h, width=train_w),
+         A.RandomBrightnessContrast(p=0.3),
+         # A.RandomRotate90(p=0.3),  # possible on square images
+         A.VerticalFlip(p=0.3),
+         A.HorizontalFlip(p=0.3)],
+        bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']),
+        keypoint_params=A.KeypointParams(format='xy')
+    )
+    val_transform = A.Compose(
+        [A.Resize(height=val_h, width=val_w),
          A.RandomBrightnessContrast(p=0.3),
          # A.RandomRotate90(p=0.3),  # possible on square images
          A.VerticalFlip(p=0.3),
@@ -108,7 +137,7 @@ def train(cfg):
         keypoint_params=A.KeypointParams(format='xy')
     )
 
-    train_dataset, val_dataset = setup_dataset(cfg, transform)
+    train_dataset, val_dataset = setup_dataset(cfg, train_transform=train_transform, val_transform=val_transform)
 
     network_type = getattr(model_zoo, cfg.postion_map_network_type)
 

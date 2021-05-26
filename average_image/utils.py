@@ -1143,7 +1143,7 @@ class SDDMeta(object):
 
     def get_new_scale(self, img_path, dataset: SDDVideoDatasets, sequence: int, desired_ratio: float = 0.1,
                       version: str = 'A'):
-        ratio = self.get_meta(dataset, sequence, version)[0]['Ratio']
+        ratio = float(self.get_meta(dataset, sequence, version)[0]['Ratio'].to_numpy()[0])
         im: Image = Image.open(img_path)
         w, h = im.width, im.height
         out_w, out_h = self.calculate_scale(w, h, ratio, desired_ratio)

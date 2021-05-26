@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
+from average_image.utils import SDDMeta
 from log import get_logger
 import models as model_zoo
 from dataset import SDDFrameAndAnnotationDataset
@@ -19,6 +20,18 @@ from utils import heat_map_collate_fn, plot_predictions
 
 seed_everything(42)
 logger = get_logger(__name__)
+
+
+def get_resize_dims(cfg):
+    meta = SDDMeta(cfg.eval.root + 'H_SDD.txt')
+
+    test_reference_img_path = f'{cfg.eval.root}annotations/{getattr(SDDVideoClasses, cfg.eval.video_class).value}/' \
+                              f'video{cfg.eval.test.video_number_to_use}/reference.jpg'
+    test_w, test_h = meta.get_new_scale(img_path=test_reference_img_path,
+                                        dataset=getattr(SDDVideoDatasets, cfg.eval.video_meta_class),
+                                        sequence=cfg.eval.test.video_number_to_use,
+                                        desired_ratio=cfg.eval.desired_pixel_to_meter_ratio)
+    return [int(test_w), int(test_h)]
 
 
 def setup_dataset(cfg, transform):
@@ -42,17 +55,17 @@ def setup_dataset(cfg, transform):
 
 def setup_eval(cfg):
     logger.info(f'Setting up DataLoader')
-    height, width = cfg.eval.desired_size
+    test_w, test_h = get_resize_dims(cfg)
 
     if cfg.eval.resize_transform_only:
         transform = A.Compose(
-            [A.Resize(height=height, width=width)],
+            [A.Resize(height=test_h, width=test_w)],
             bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']),
             keypoint_params=A.KeypointParams(format='xy')
         )
     else:
         transform = A.Compose(
-            [A.Resize(height=height, width=width),
+            [A.Resize(height=test_h, width=test_w),
              A.RandomBrightnessContrast(p=0.3),
              A.VerticalFlip(p=0.3),
              A.HorizontalFlip(p=0.3)],

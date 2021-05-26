@@ -14,6 +14,7 @@ eval:
   root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
   video_class: DEATH_CIRCLE
   video_meta_class: DEATH_CIRCLE
+  desired_pixel_to_meter_ratio: 0.25
 
   test:
     num_videos: -1
