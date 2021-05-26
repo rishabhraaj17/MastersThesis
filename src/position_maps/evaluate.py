@@ -16,6 +16,7 @@ from average_image.utils import SDDMeta
 from log import get_logger
 import models as model_zoo
 from dataset import SDDFrameAndAnnotationDataset
+from train import setup_multiple_datasets_core
 from utils import heat_map_collate_fn, plot_predictions
 
 seed_everything(42)
@@ -34,7 +35,11 @@ def get_resize_dims(cfg):
     return [int(test_w), int(test_h)]
 
 
-def setup_dataset(cfg, transform):
+def setup_dataset(cfg):
+    test_w, test_h = get_resize_dims(cfg)
+
+    transform = setup_test_transform(cfg, test_h, test_w)
+
     test_dataset = SDDFrameAndAnnotationDataset(
         root=cfg.eval.root, video_label=getattr(SDDVideoClasses, cfg.eval.video_class),
         num_videos=cfg.eval.test.num_videos, transform=transform if cfg.eval.data_augmentation else None,
@@ -54,10 +59,7 @@ def setup_dataset(cfg, transform):
     return test_dataset
 
 
-def setup_eval(cfg):
-    logger.info(f'Setting up DataLoader')
-    test_w, test_h = get_resize_dims(cfg)
-
+def setup_test_transform(cfg, test_h, test_w):
     if cfg.eval.resize_transform_only:
         transform = A.Compose(
             [A.Resize(height=test_h, width=test_w)],
@@ -73,8 +75,21 @@ def setup_eval(cfg):
             bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']),
             keypoint_params=A.KeypointParams(format='xy')
         )
+    return transform
 
-    test_dataset = setup_dataset(cfg, transform)
+
+def setup_multiple_test_datasets(cfg):
+    meta = SDDMeta(cfg.root + 'H_SDD.txt')
+    datasets = setup_multiple_datasets_core(cfg, meta, video_classes_to_use=cfg.eval.test.video_classes_to_use,
+                                            video_numbers_to_use=cfg.eval.test.video_numbers_to_use,
+                                            num_videos=cfg.eval.test.num_videos,
+                                            multiple_videos=cfg.eval.test.multiple_videos)
+    return datasets
+
+
+def setup_eval(cfg):
+    logger.info(f'Setting up DataLoader')
+    test_dataset = setup_dataset(cfg)
     test_loader = DataLoader(test_dataset, batch_size=cfg.eval.batch_size, shuffle=False,
                              num_workers=cfg.eval.num_workers, collate_fn=heat_map_collate_fn,
                              pin_memory=cfg.eval.pin_memory, drop_last=cfg.eval.drop_last)

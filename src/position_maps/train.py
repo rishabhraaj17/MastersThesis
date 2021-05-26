@@ -8,7 +8,7 @@ import torch
 from kornia.losses import FocalLoss, BinaryFocalLossWithLogits
 from pytorch_lightning import seed_everything, Trainer
 from torch.nn import CrossEntropyLoss, MSELoss
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Subset, ConcatDataset
 
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from average_image.utils import SDDMeta
@@ -40,40 +40,97 @@ def get_resize_dims(cfg):
     return [int(train_w), int(train_h)], [int(val_w), int(val_h)]
 
 
-def setup_dataset(cfg, train_transform, val_transform):
-    train_dataset = SDDFrameAndAnnotationDataset(
-        root=cfg.root, video_label=getattr(SDDVideoClasses, cfg.video_class),
-        num_videos=cfg.train.num_videos, transform=train_transform if cfg.data_augmentation else None,
-        num_workers=cfg.dataset_workers, scale=cfg.scale_factor,
-        video_number_to_use=cfg.train.video_number_to_use,
-        multiple_videos=cfg.train.multiple_videos,
-        use_generated=cfg.use_generated_dataset,
-        sigma=cfg.sigma,
-        plot=cfg.plot_samples,
-        desired_size=cfg.desired_size,
-        heatmap_shape=cfg.heatmap_shape,
-        return_combined_heatmaps=cfg.return_combined_heatmaps,
-        seg_map_objectness_threshold=cfg.seg_map_objectness_threshold,
-        meta_label=getattr(SDDVideoDatasets, cfg.video_meta_class),
-        heatmap_region_limit_threshold=cfg.heatmap_region_limit_threshold
-    )
-    val_dataset = SDDFrameAndAnnotationDataset(
-        root=cfg.root, video_label=getattr(SDDVideoClasses, cfg.video_class),
-        num_videos=cfg.val.num_videos, transform=val_transform if cfg.data_augmentation else None,
-        num_workers=cfg.dataset_workers, scale=cfg.scale_factor,
-        video_number_to_use=cfg.val.video_number_to_use,
-        multiple_videos=cfg.val.multiple_videos,
-        use_generated=cfg.use_generated_dataset,
-        sigma=cfg.sigma,
-        plot=cfg.plot_samples,
-        desired_size=cfg.desired_size,
-        heatmap_shape=cfg.heatmap_shape,
-        return_combined_heatmaps=cfg.return_combined_heatmaps,
-        seg_map_objectness_threshold=cfg.seg_map_objectness_threshold,
-        meta_label=getattr(SDDVideoDatasets, cfg.video_meta_class),
-        heatmap_region_limit_threshold=cfg.heatmap_region_limit_threshold
-    )
+def get_resize_shape(cfg, sdd_meta, video_class, video_number, desired_ratio):
+    reference_img_path = f'{cfg.root}annotations/{getattr(SDDVideoClasses, video_class).value}/' \
+                         f'video{video_number}/reference.jpg'
+    w, h = sdd_meta.get_new_scale(img_path=reference_img_path,
+                                  dataset=getattr(SDDVideoDatasets, video_class),
+                                  sequence=video_number,
+                                  desired_ratio=desired_ratio)
+    return w, h
+
+
+def setup_dataset(cfg):
+    (train_w, train_h), (val_w, val_h) = get_resize_dims(cfg)
+
+    train_transform, val_transform = setup_transforms_for_single_instance(train_h, train_w, val_h, val_w)
+
+    train_dataset = setup_single_dataset_instance(cfg, train_transform, video_class=cfg.video_class,
+                                                  num_videos=cfg.train.num_videos,
+                                                  video_number_to_use=cfg.train.video_number_to_use,
+                                                  multiple_videos=cfg.train.multiple_videos)
+    val_dataset = setup_single_dataset_instance(cfg, val_transform, video_class=cfg.video_class,
+                                                num_videos=cfg.val.num_videos,
+                                                video_number_to_use=cfg.val.video_number_to_use,
+                                                multiple_videos=cfg.val.multiple_videos)
     return train_dataset, val_dataset
+
+
+def setup_single_dataset_instance(cfg, transform, video_class, num_videos, video_number_to_use, multiple_videos):
+    dataset = SDDFrameAndAnnotationDataset(
+        root=cfg.root, video_label=getattr(SDDVideoClasses, video_class),
+        num_videos=num_videos, transform=transform if cfg.data_augmentation else None,
+        num_workers=cfg.dataset_workers, scale=cfg.scale_factor,
+        video_number_to_use=video_number_to_use,
+        multiple_videos=multiple_videos,
+        use_generated=cfg.use_generated_dataset,
+        sigma=cfg.sigma,
+        plot=cfg.plot_samples,
+        desired_size=cfg.desired_size,
+        heatmap_shape=cfg.heatmap_shape,
+        return_combined_heatmaps=cfg.return_combined_heatmaps,
+        seg_map_objectness_threshold=cfg.seg_map_objectness_threshold,
+        meta_label=getattr(SDDVideoDatasets, video_class),
+        heatmap_region_limit_threshold=cfg.heatmap_region_limit_threshold
+    )
+    return dataset
+
+
+def setup_transforms_for_single_instance(train_h, train_w, val_h, val_w):
+    train_transform = setup_single_transform(train_h, train_w)
+    val_transform = setup_single_transform(val_h, val_w)
+    return train_transform, val_transform
+
+
+def setup_single_transform(height, width):
+    transform = A.Compose(
+        [A.Resize(height=height, width=width),
+         A.RandomBrightnessContrast(p=0.3),
+         # A.RandomRotate90(p=0.3),  # possible on square images
+         A.VerticalFlip(p=0.3),
+         A.HorizontalFlip(p=0.3)],
+        bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']),
+        keypoint_params=A.KeypointParams(format='xy')
+    )
+    return transform
+
+
+def setup_multiple_datasets(cfg):
+    meta = SDDMeta(cfg.root + 'H_SDD.txt')
+    train_datasets = setup_multiple_datasets_core(cfg, meta, video_classes_to_use=cfg.train.video_classes_to_use,
+                                                  video_numbers_to_use=cfg.train.video_numbers_to_use,
+                                                  num_videos=cfg.train.num_videos,
+                                                  multiple_videos=cfg.train.multiple_videos)
+    val_datasets = setup_multiple_datasets_core(cfg, meta, video_classes_to_use=cfg.val.video_classes_to_use,
+                                                video_numbers_to_use=cfg.val.video_numbers_to_use,
+                                                num_videos=cfg.val.num_videos,
+                                                multiple_videos=cfg.val.multiple_videos)
+    return train_datasets, val_datasets
+
+
+def setup_multiple_datasets_core(cfg, meta, video_classes_to_use, video_numbers_to_use, num_videos, multiple_videos):
+    datasets = []
+    for v_clz in video_classes_to_use:
+        for v_num in video_numbers_to_use:
+            w, h = get_resize_shape(cfg=cfg, sdd_meta=meta, video_class=v_clz, video_number=v_num,
+                                    desired_ratio=cfg.desired_pixel_to_meter_ratio)
+            transform = setup_single_transform(height=h, width=w)
+            datasets.append(setup_single_dataset_instance(cfg=cfg, transform=transform,
+                                                          video_class=v_clz,
+                                                          num_videos=num_videos,
+                                                          video_number_to_use=v_num,
+                                                          multiple_videos=multiple_videos))
+    return ConcatDataset(datasets)
 
 
 def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
@@ -119,27 +176,7 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
 def train(cfg):
     logger.info(f'Setting up DataLoader and Model...')
 
-    (train_w, train_h), (val_w, val_h) = get_resize_dims(cfg)
-    train_transform = A.Compose(
-        [A.Resize(height=train_h, width=train_w),
-         A.RandomBrightnessContrast(p=0.3),
-         # A.RandomRotate90(p=0.3),  # possible on square images
-         A.VerticalFlip(p=0.3),
-         A.HorizontalFlip(p=0.3)],
-        bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']),
-        keypoint_params=A.KeypointParams(format='xy')
-    )
-    val_transform = A.Compose(
-        [A.Resize(height=val_h, width=val_w),
-         A.RandomBrightnessContrast(p=0.3),
-         # A.RandomRotate90(p=0.3),  # possible on square images
-         A.VerticalFlip(p=0.3),
-         A.HorizontalFlip(p=0.3)],
-        bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']),
-        keypoint_params=A.KeypointParams(format='xy')
-    )
-
-    train_dataset, val_dataset = setup_dataset(cfg, train_transform=train_transform, val_transform=val_transform)
+    train_dataset, val_dataset = setup_dataset(cfg)
 
     network_type = getattr(model_zoo, cfg.postion_map_network_type)
 
@@ -164,27 +201,7 @@ def train(cfg):
 def overfit(cfg):
     logger.info(f'Setting up DataLoader and Model...')
 
-    (train_w, train_h), (val_w, val_h) = get_resize_dims(cfg)
-    train_transform = A.Compose(
-        [A.Resize(height=train_h, width=train_w),
-         A.RandomBrightnessContrast(p=0.3),
-         # A.RandomRotate90(p=0.3),  # possible on square images
-         A.VerticalFlip(p=0.3),
-         A.HorizontalFlip(p=0.3)],
-        bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']),
-        keypoint_params=A.KeypointParams(format='xy')
-    )
-    val_transform = A.Compose(
-        [A.Resize(height=val_h, width=val_w),
-         A.RandomBrightnessContrast(p=0.3),
-         # A.RandomRotate90(p=0.3),  # possible on square images
-         A.VerticalFlip(p=0.3),
-         A.HorizontalFlip(p=0.3)],
-        bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']),
-        keypoint_params=A.KeypointParams(format='xy')
-    )
-
-    train_dataset, val_dataset = setup_dataset(cfg, train_transform=train_transform, val_transform=val_transform)
+    train_dataset, val_dataset = setup_dataset(cfg)
 
     network_type = getattr(model_zoo, cfg.postion_map_network_type)
 

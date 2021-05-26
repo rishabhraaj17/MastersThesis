@@ -19,6 +19,8 @@ eval:
   test:
     num_videos: -1
     video_number_to_use: 2
+    video_classes_to_use: [ DEATH_CIRCLE, LITTLE ]
+    video_numbers_to_use: [ [ 2, 4 ], [ 0, 3 ] ]
     multiple_videos: False
 
   dataset_workers: 8
