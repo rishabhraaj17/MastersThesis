@@ -10,7 +10,7 @@ from pytorch_lightning import seed_everything, Trainer
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.utils.data import DataLoader, Subset
 
-from average_image.constants import SDDVideoClasses
+from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from log import get_logger
 from dataset import SDDFrameAndAnnotationDataset
 import models as model_zoo
@@ -33,7 +33,8 @@ def setup_dataset(cfg, transform):
         desired_size=cfg.desired_size,
         heatmap_shape=cfg.heatmap_shape,
         return_combined_heatmaps=cfg.return_combined_heatmaps,
-        seg_map_objectness_threshold=cfg.seg_map_objectness_threshold
+        seg_map_objectness_threshold=cfg.seg_map_objectness_threshold,
+        meta_label=getattr(SDDVideoDatasets, cfg.video_meta_class)
     )
     val_dataset = SDDFrameAndAnnotationDataset(
         root=cfg.root, video_label=getattr(SDDVideoClasses, cfg.video_class),
@@ -47,7 +48,8 @@ def setup_dataset(cfg, transform):
         desired_size=cfg.desired_size,
         heatmap_shape=cfg.heatmap_shape,
         return_combined_heatmaps=cfg.return_combined_heatmaps,
-        seg_map_objectness_threshold=cfg.seg_map_objectness_threshold
+        seg_map_objectness_threshold=cfg.seg_map_objectness_threshold,
+        meta_label=getattr(SDDVideoDatasets, cfg.video_meta_class)
     )
     return train_dataset, val_dataset
 

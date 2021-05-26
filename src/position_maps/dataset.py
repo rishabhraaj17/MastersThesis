@@ -11,7 +11,7 @@ from torchvision.datasets.folder import make_dataset
 from torchvision.datasets.utils import list_dir
 from torchvision.datasets.video_utils import VideoClips
 
-from average_image.constants import SDDVideoClasses
+from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from average_image.utils import SDDMeta
 from utils import generate_position_map, plot_samples
 from unsupervised_tp_0.dataset import sort_list
@@ -19,11 +19,12 @@ from unsupervised_tp_0.dataset import sort_list
 
 class SDDFrameAndAnnotationDataset(Dataset):
     def __init__(
-            self, root: str, video_label: SDDVideoClasses, frames_per_clip: int = 1, num_videos=-1,
-            step_between_clips: int = 1, frame_rate: Optional[float] = 30., transform: Optional[Callable] = None,
-            _precomputed_metadata: bool = None, num_workers: int = 1, _video_width: int = 0, _video_height: int = 0,
-            _video_min_dimension: int = 0, _audio_samples: int = 0, scale: float = 1.0, video_number_to_use: int = 0,
-            multiple_videos: bool = False, use_generated: bool = False, sigma: int = 10, plot: bool = False,
+            self, root: str, video_label: SDDVideoClasses, meta_label: SDDVideoDatasets,
+            frames_per_clip: int = 1, num_videos=-1, step_between_clips: int = 1, frame_rate: Optional[float] = 30.,
+            transform: Optional[Callable] = None, _precomputed_metadata: bool = None, num_workers: int = 1,
+            _video_width: int = 0, _video_height: int = 0, _video_min_dimension: int = 0, _audio_samples: int = 0,
+            scale: float = 1.0, video_number_to_use: int = 0, multiple_videos: bool = False,
+            use_generated: bool = False, sigma: int = 10, plot: bool = False,
             desired_size: Tuple[int, int] = None, heatmap_shape: Tuple[int, int] = None,
             return_combined_heatmaps: bool = True, seg_map_objectness_threshold: float = 0.5):
         super(SDDFrameAndAnnotationDataset, self).__init__()
@@ -136,10 +137,16 @@ class SDDFrameAndAnnotationDataset(Dataset):
         self.heatmap_shape = heatmap_shape
         self.return_combined_heatmaps = return_combined_heatmaps
         self.seg_map_objectness_threshold = seg_map_objectness_threshold
+        self.meta_label = meta_label
 
     @property
     def metadata(self):
         return self.video_clips.metadata
+
+    def get_ratio_from_sdd_meta(self):
+        pixel_to_meter_ratio = float(self.sdd_meta.get_meta(
+            self.meta_label, self.video_number_to_use)[0]['Ratio'].to_numpy()[0])
+        return pixel_to_meter_ratio
 
     @staticmethod
     def get_generated_frame_annotations(df: pd.DataFrame, frame_number: int):

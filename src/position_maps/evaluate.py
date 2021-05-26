@@ -11,7 +11,7 @@ from torch.nn import MSELoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from average_image.constants import SDDVideoClasses
+from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from log import get_logger
 import models as model_zoo
 from dataset import SDDFrameAndAnnotationDataset
@@ -34,7 +34,8 @@ def setup_dataset(cfg, transform):
         desired_size=cfg.eval.desired_size,
         heatmap_shape=cfg.eval.heatmap_shape,
         return_combined_heatmaps=cfg.eval.return_combined_heatmaps,
-        seg_map_objectness_threshold=cfg.eval.seg_map_objectness_threshold
+        seg_map_objectness_threshold=cfg.eval.seg_map_objectness_threshold,
+        meta_label=getattr(SDDVideoDatasets, cfg.eval.video_meta_class)
     )
     return test_dataset
 
