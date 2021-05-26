@@ -143,7 +143,8 @@ def train(cfg):
 
     network_type = getattr(model_zoo, cfg.postion_map_network_type)
 
-    if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation']:
+    if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation',
+                                 'PositionMapUNetHeatmapSegmentation']:
         loss_fn = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean')  # CrossEntropyLoss()
     else:
         loss_fn = MSELoss()
