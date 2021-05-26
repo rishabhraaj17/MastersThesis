@@ -38,8 +38,8 @@ eval:
   seg_map_objectness_threshold: 0.5
   heatmap_region_limit_threshold: 0.5
 
-  # one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation'
-  postion_map_network_type: 'PositionMapUNetClassMapSegmentation'
+  # one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation', 'PositionMapUNetHeatmapSegmentation'
+  postion_map_network_type: 'PositionMapUNetHeatmapSegmentation'
 
   plot_checkpoint: 20
 

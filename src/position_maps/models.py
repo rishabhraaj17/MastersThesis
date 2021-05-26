@@ -262,3 +262,18 @@ class PositionMapUNetClassMapSegmentation(PositionMapUNetBase):
         out = self(frames)
         loss = self.loss_function(out, class_maps.long().squeeze(dim=1))
         return loss
+
+
+class PositionMapUNetHeatmapSegmentation(PositionMapUNetBase):
+    def __init__(self, config: 'DictConfig', train_dataset: 'Dataset', val_dataset: 'Dataset',
+                 loss_function: 'nn.Module' = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean'),
+                 collate_fn: Optional[Callable] = None):
+        super(PositionMapUNetHeatmapSegmentation, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_function,
+            collate_fn=collate_fn)
+
+    def _one_step(self, batch):
+        frames, heat_masks, _, _, _, _ = batch
+        out = self(frames)
+        loss = self.loss_function(out, heat_masks)
+        return loss

@@ -196,9 +196,6 @@ class SDDFrameAndAnnotationDataset(Dataset):
         heat_mask = torch.from_numpy(
             generate_position_map(list(new_shape), bbox_centers, sigma=self.sigma, heatmap_shape=self.heatmap_shape,
                                   return_combined=self.return_combined_heatmaps, hw_mode=True))
-        if self.plot:
-            plot_samples(video.squeeze().permute(1, 2, 0), heat_mask, boxes, bbox_centers, plot_boxes=True,
-                         additional_text=f'Frame Number: {item} | Video Idx: {video_idx}')
 
         meta = {'boxes': boxes, 'bbox_centers': bbox_centers,
                 'track_idx': track_idx, 'item': item,
@@ -220,6 +217,10 @@ class SDDFrameAndAnnotationDataset(Dataset):
         heat_mask = heat_mask.to(dtype=torch.float64)
         heat_mask = torch.where(heat_mask > self.heatmap_region_limit_threshold, heat_mask, 0.0)
         heat_mask = heat_mask.float()
+
+        if self.plot:
+            plot_samples(video.squeeze().permute(1, 2, 0), heat_mask, boxes, bbox_centers, plot_boxes=True,
+                         additional_text=f'Frame Number: {item} | Video Idx: {video_idx}')
 
         return video, heat_mask, position_map, distribution_map, class_maps, meta
 

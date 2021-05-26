@@ -83,10 +83,10 @@ resume:
     version: 10
 
 class_map_segmentation: False
-position_map_segmentation: True
+position_map_segmentation: False
 
-# one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation'
-postion_map_network_type: 'PositionMapUNetPositionMapSegmentation'
+# one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation', 'PositionMapUNetHeatmapSegmentation'
+postion_map_network_type: 'PositionMapUNetHeatmapSegmentation'
 
 overfit:
   num_epochs: 6000

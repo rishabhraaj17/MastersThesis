@@ -192,7 +192,8 @@ def overfit(cfg):
         # loss_fn = FocalLoss(alpha=0.9, reduction='mean')
         loss_fn = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean')
     else:
-        loss_fn = MSELoss()
+        # loss_fn = MSELoss()
+        loss_fn = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean')
 
     model = network_type(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
                          loss_function=loss_fn, collate_fn=heat_map_collate_fn)
