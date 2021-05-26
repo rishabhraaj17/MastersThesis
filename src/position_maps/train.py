@@ -277,9 +277,11 @@ def overfit(cfg):
                                      additional_text=f"{network_type.__name__} | "
                                                      f"{loss_fn._get_name()} | Epoch: {epoch}")
                 else:
+                    pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
                     plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                      heat_masks[random_idx].squeeze().cpu(),
-                                     out[random_idx].squeeze().cpu(),
+                                     # out[random_idx].squeeze().cpu(),
+                                     pred_mask[random_idx].int() * 255,
                                      additional_text=f"{network_type.__name__} | "
                                                      f"{loss_fn._get_name()} | Epoch: {epoch}")
 
