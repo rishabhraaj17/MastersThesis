@@ -131,7 +131,7 @@ def evaluate(cfg):
         elif network_type.__name__ == 'PositionMapUNetPositionMapSegmentation':
             loss = loss_fn(out, position_map.long().squeeze(dim=1))
         elif network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
-            loss = loss_fn(out, position_map.long().squeeze(dim=1))
+            loss = loss_fn(out, heat_masks)
         else:
             loss = loss_fn(out, heat_masks)
 
