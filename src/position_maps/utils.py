@@ -70,11 +70,14 @@ def plot_samples(img, mask, boxes, box_centers, plot_boxes=False, add_feats_to_m
     plt.show()
 
 
-def plot_predictions(img, mask, pred_mask, additional_text=''):
+def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=False):
     fig, axs = plt.subplots(1, 3, sharex='none', sharey='none', figsize=(16, 8))
     img_axis, mask_axis, pred_mask_axis = axs
     if img is not None:
-        img_axis.imshow(img)
+        if all_heatmaps:
+            img_axis.imshow(img, cmap='hot')
+        else:
+            img_axis.imshow(img)
 
     if mask is not None:
         mask_axis.imshow(mask, cmap='hot')
@@ -82,9 +85,14 @@ def plot_predictions(img, mask, pred_mask, additional_text=''):
     if pred_mask is not None:
         pred_mask_axis.imshow(pred_mask, cmap='hot')
 
-    img_axis.set_title('RGB')
-    mask_axis.set_title('Mask')
-    pred_mask_axis.set_title('Predicted Mask')
+    if all_heatmaps:
+        img_axis.set_title('Predicted Mask -3')
+        mask_axis.set_title('Predicted Mask -2')
+        pred_mask_axis.set_title('Predicted Mask -1')
+    else:
+        img_axis.set_title('RGB')
+        mask_axis.set_title('Mask')
+        pred_mask_axis.set_title('Predicted Mask')
 
     fig.suptitle(additional_text)
 

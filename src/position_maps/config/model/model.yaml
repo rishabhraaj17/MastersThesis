@@ -9,3 +9,10 @@ unet:
   num_layers: 5
   features_start: 64
   bilinear: False
+
+stacked_hourglass:
+  num_stacks: 3
+  num_classes: 1
+  input_channels: 3
+  batch_norm: False
+  increase: 0

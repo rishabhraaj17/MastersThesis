@@ -90,7 +90,8 @@ resume:
 class_map_segmentation: False
 position_map_segmentation: False
 
-# one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation', 'PositionMapUNetHeatmapSegmentation'
+# one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation',
+# 'PositionMapUNetClassMapSegmentation', 'PositionMapUNetHeatmapSegmentation', 'PositionMapStackedHourGlass'
 postion_map_network_type: 'PositionMapUNetHeatmapSegmentation'
 
 overfit:
@@ -99,6 +100,9 @@ overfit:
   num_workers: 0
   pin_memory: True
   drop_last: False
+
+  postion_map_network_type: 'PositionMapStackedHourGlass'
+  focal_loss_alpha: 0.9
 
   subset_indices: [0, 85, 32, 5, 125, 200]
 #  subset_indices: [0]

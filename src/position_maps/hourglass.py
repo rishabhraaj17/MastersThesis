@@ -121,7 +121,7 @@ class Merge(nn.Module):
 
 
 class PoseNet(nn.Module):
-    def __init__(self, num_stack, inp_dim, out_dim, loss_fn, bn=False, increase=0, **kwargs):
+    def __init__(self, num_stack, input_channels, num_classes, loss_fn, bn=False, increase=0, **kwargs):
         super(PoseNet, self).__init__()
 
         self.num_stack = num_stack
@@ -130,23 +130,23 @@ class PoseNet(nn.Module):
             Residual(64, 128),
             # Pool(2, 2),
             Residual(128, 128),
-            Residual(128, inp_dim)
+            Residual(128, input_channels)
         )
 
         self.hgs = nn.ModuleList([
             nn.Sequential(
-                Hourglass(4, inp_dim, bn, increase),
+                Hourglass(4, input_channels, bn, increase),
             ) for _ in range(num_stack)])
 
         self.features = nn.ModuleList([
             nn.Sequential(
-                Residual(inp_dim, inp_dim),
-                Conv(inp_dim, inp_dim, 1, bn=True, relu=True)
+                Residual(input_channels, input_channels),
+                Conv(input_channels, input_channels, 1, bn=True, relu=True)
             ) for _ in range(num_stack)])
 
-        self.outs = nn.ModuleList([Conv(inp_dim, out_dim, 1, relu=False, bn=False) for i in range(num_stack)])
-        self.merge_features = nn.ModuleList([Merge(inp_dim, inp_dim) for i in range(num_stack - 1)])
-        self.merge_preds = nn.ModuleList([Merge(out_dim, inp_dim) for i in range(num_stack - 1)])
+        self.outs = nn.ModuleList([Conv(input_channels, num_classes, 1, relu=False, bn=False) for i in range(num_stack)])
+        self.merge_features = nn.ModuleList([Merge(input_channels, input_channels) for i in range(num_stack - 1)])
+        self.merge_preds = nn.ModuleList([Merge(num_classes, input_channels) for i in range(num_stack - 1)])
         self.num_stack = num_stack
         self.loss_fn = loss_fn
 
@@ -178,7 +178,7 @@ class PoseNet(nn.Module):
 if __name__ == '__main__':
     inp = torch.randn((2, 3, 490, 320))
     target = torch.randn((2, 1, 490, 320))
-    net = PoseNet(num_stack=3, inp_dim=3, out_dim=1, loss_fn=MSELoss())
+    net = PoseNet(num_stack=3, input_channels=3, num_classes=1, loss_fn=MSELoss())
     o = net(inp)
     loss = net.calc_loss(o, target)
     print()

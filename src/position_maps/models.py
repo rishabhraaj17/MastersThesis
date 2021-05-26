@@ -12,6 +12,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 
 from log import get_logger
+from hourglass import PoseNet
 
 logger = get_logger(__name__)
 
@@ -144,6 +145,7 @@ class PositionMapUNetBase(LightningModule):
                  loss_function: 'nn.Module' = None, collate_fn: Optional[Callable] = None):
         super(PositionMapUNetBase, self).__init__()
         self.config = config
+        # fixme: update u_net to network for next trainings
         self.u_net = UNet(num_classes=self.config.unet.num_classes,
                           input_channels=self.config.unet.input_channels,
                           num_layers=self.config.unet.num_layers,
@@ -277,3 +279,25 @@ class PositionMapUNetHeatmapSegmentation(PositionMapUNetBase):
         out = self(frames)
         loss = self.loss_function(out, heat_masks)
         return loss
+
+
+class PositionMapStackedHourGlass(PositionMapUNetBase):
+    def __init__(self, config: 'DictConfig', train_dataset: 'Dataset', val_dataset: 'Dataset',
+                 loss_function: 'nn.Module' = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean'),
+                 collate_fn: Optional[Callable] = None):
+        super(PositionMapStackedHourGlass, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_function,
+            collate_fn=collate_fn)
+        self.network = PoseNet(num_stack=self.config.stacked_hourglass.num_stacks,
+                               input_channels=self.config.stacked_hourglass.input_channels,
+                               num_classes=self.config.stacked_hourglass.num_classes,
+                               loss_fn=self.loss_function,
+                               bn=self.config.stacked_hourglass.batch_norm,
+                               increase=self.config.stacked_hourglass.increase)
+        self.u_net = self.network
+
+    def _one_step(self, batch):
+        frames, heat_masks, _, _, _, _ = batch
+        out = self(frames)
+        loss = self.network.calc_loss(combined_hm_preds=out, heatmaps=heat_masks)
+        return loss.mean()
