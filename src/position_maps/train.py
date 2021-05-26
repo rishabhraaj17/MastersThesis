@@ -54,7 +54,8 @@ def setup_dataset(cfg, train_transform, val_transform):
         heatmap_shape=cfg.heatmap_shape,
         return_combined_heatmaps=cfg.return_combined_heatmaps,
         seg_map_objectness_threshold=cfg.seg_map_objectness_threshold,
-        meta_label=getattr(SDDVideoDatasets, cfg.video_meta_class)
+        meta_label=getattr(SDDVideoDatasets, cfg.video_meta_class),
+        heatmap_region_limit_threshold=cfg.heatmap_region_limit_threshold
     )
     val_dataset = SDDFrameAndAnnotationDataset(
         root=cfg.root, video_label=getattr(SDDVideoClasses, cfg.video_class),
@@ -69,7 +70,8 @@ def setup_dataset(cfg, train_transform, val_transform):
         heatmap_shape=cfg.heatmap_shape,
         return_combined_heatmaps=cfg.return_combined_heatmaps,
         seg_map_objectness_threshold=cfg.seg_map_objectness_threshold,
-        meta_label=getattr(SDDVideoDatasets, cfg.video_meta_class)
+        meta_label=getattr(SDDVideoDatasets, cfg.video_meta_class),
+        heatmap_region_limit_threshold=cfg.heatmap_region_limit_threshold
     )
     return train_dataset, val_dataset
 
@@ -161,9 +163,18 @@ def train(cfg):
 def overfit(cfg):
     logger.info(f'Setting up DataLoader and Model...')
 
-    height, width = cfg.desired_size
-    transform = A.Compose(
-        [A.Resize(height=height, width=width),
+    (train_w, train_h), (val_w, val_h) = get_resize_dims(cfg)
+    train_transform = A.Compose(
+        [A.Resize(height=train_h, width=train_w),
+         A.RandomBrightnessContrast(p=0.3),
+         # A.RandomRotate90(p=0.3),  # possible on square images
+         A.VerticalFlip(p=0.3),
+         A.HorizontalFlip(p=0.3)],
+        bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']),
+        keypoint_params=A.KeypointParams(format='xy')
+    )
+    val_transform = A.Compose(
+        [A.Resize(height=val_h, width=val_w),
          A.RandomBrightnessContrast(p=0.3),
          # A.RandomRotate90(p=0.3),  # possible on square images
          A.VerticalFlip(p=0.3),
@@ -172,7 +183,7 @@ def overfit(cfg):
         keypoint_params=A.KeypointParams(format='xy')
     )
 
-    train_dataset, val_dataset = setup_dataset(cfg, transform)
+    train_dataset, val_dataset = setup_dataset(cfg, train_transform=train_transform, val_transform=val_transform)
 
     network_type = getattr(model_zoo, cfg.postion_map_network_type)
 

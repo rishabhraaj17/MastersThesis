@@ -48,7 +48,8 @@ def setup_dataset(cfg, transform):
         heatmap_shape=cfg.eval.heatmap_shape,
         return_combined_heatmaps=cfg.eval.return_combined_heatmaps,
         seg_map_objectness_threshold=cfg.eval.seg_map_objectness_threshold,
-        meta_label=getattr(SDDVideoDatasets, cfg.eval.video_meta_class)
+        meta_label=getattr(SDDVideoDatasets, cfg.eval.video_meta_class),
+        heatmap_region_limit_threshold=cfg.eval.heatmap_region_limit_threshold
     )
     return test_dataset
 

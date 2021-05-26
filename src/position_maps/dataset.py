@@ -26,7 +26,8 @@ class SDDFrameAndAnnotationDataset(Dataset):
             scale: float = 1.0, video_number_to_use: int = 0, multiple_videos: bool = False,
             use_generated: bool = False, sigma: int = 10, plot: bool = False,
             desired_size: Tuple[int, int] = None, heatmap_shape: Tuple[int, int] = None,
-            return_combined_heatmaps: bool = True, seg_map_objectness_threshold: float = 0.5):
+            return_combined_heatmaps: bool = True, seg_map_objectness_threshold: float = 0.5,
+            heatmap_region_limit_threshold: float = 0.4):
         super(SDDFrameAndAnnotationDataset, self).__init__()
 
         _mid_path = video_label.value
@@ -138,6 +139,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
         self.return_combined_heatmaps = return_combined_heatmaps
         self.seg_map_objectness_threshold = seg_map_objectness_threshold
         self.meta_label = meta_label
+        self.heatmap_region_limit_threshold = heatmap_region_limit_threshold
 
     @property
     def metadata(self):
@@ -203,8 +205,6 @@ class SDDFrameAndAnnotationDataset(Dataset):
                 'original_shape': original_shape, 'new_shape': new_shape,
                 'video_idx': video_idx}
 
-        heat_mask = heat_mask.float()
-
         key_points = torch.round(torch.from_numpy(bbox_centers)).long()
         position_map = heat_mask.clone().clamp(min=0, max=1).int().float()
 
@@ -216,6 +216,10 @@ class SDDFrameAndAnnotationDataset(Dataset):
         distribution_map[key_points[:, 1], key_points[:, 0]] = torch.stack(
             (key_points[:, 1], key_points[:, 0], variance_list)).t().float()
         distribution_map = distribution_map.permute(2, 0, 1)
+
+        heat_mask = heat_mask.to(dtype=torch.float64)
+        heat_mask = torch.where(heat_mask > self.heatmap_region_limit_threshold, heat_mask, 0.0)
+        heat_mask = heat_mask.float()
 
         return video, heat_mask, position_map, distribution_map, class_maps, meta
 

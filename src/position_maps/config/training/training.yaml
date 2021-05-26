@@ -66,6 +66,7 @@ return_combined_heatmaps: True
 sigma: 1.5
 
 seg_map_objectness_threshold: 0.5
+heatmap_region_limit_threshold: 0.5
 
 warm_restart:
   enable: False

@@ -36,6 +36,7 @@ eval:
   sigma: 1.5
 
   seg_map_objectness_threshold: 0.5
+  heatmap_region_limit_threshold: 0.5
 
   # one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation'
   postion_map_network_type: 'PositionMapUNetClassMapSegmentation'
