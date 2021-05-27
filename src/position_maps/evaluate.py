@@ -164,6 +164,8 @@ def evaluate(cfg):
 
         if idx % cfg.eval.plot_checkpoint == 0:
             current_random_frame = meta[random_idx]['item']
+            unsupervised_boxes = meta[random_idx]['boxes']
+            supervised_boxes = None
             save_dir = f'{cfg.eval.plot_save_dir}{network_type.__name__}_{loss_fn._get_name()}/' \
                        f'version_{cfg.eval.checkpoint.version}/{os.path.split(checkpoint_file)[-1][:-5]}/'
             save_image_name = f'frame_{current_random_frame}'
@@ -198,7 +200,9 @@ def evaluate(cfg):
                         overlay_image=superimposed_image,
                         additional_text=additional_text,
                         save_dir=save_dir + 'overlay/',
-                        img_name=save_image_name)
+                        img_name=save_image_name,
+                        supervised_boxes=supervised_boxes,
+                        unsupervised_boxes=unsupervised_boxes)
                 else:
                     plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                      heat_masks[random_idx].squeeze().cpu(),

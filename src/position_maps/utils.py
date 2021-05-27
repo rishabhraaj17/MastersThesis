@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import torch
 from PIL import Image
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt, patches, lines
 from scipy.stats import multivariate_normal
 from torch.nn.functional import interpolate
 from tqdm import tqdm
@@ -107,7 +107,7 @@ def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=Fals
         plt.close()
 
 
-def plot_predictions_with_overlay(img, mask, pred_mask, overlay_image,
+def plot_predictions_with_overlay(img, mask, pred_mask, overlay_image, supervised_boxes=None, unsupervised_boxes=None,
                                   additional_text='', all_heatmaps=False, save_dir=None, img_name=''):
     fig, axs = plt.subplots(2, 2, sharex='none', sharey='none', figsize=(16, 16))
     img_axis, mask_axis, overlay_axis, pred_mask_axis = axs[0, 0], axs[0, 1], axs[1, 0], axs[1, 1]
@@ -129,6 +129,19 @@ def plot_predictions_with_overlay(img, mask, pred_mask, overlay_image,
     if pred_mask is not None:
         pred_mask_axis.imshow(pred_mask, cmap='hot')
 
+    legends_dict = {}
+    if supervised_boxes is not None:
+        add_box_to_axes(img_axis, supervised_boxes)
+        add_box_to_axes(overlay_axis, supervised_boxes)
+
+        legends_dict.update({'r': 'Supervised Bounding Box'})
+
+    if unsupervised_boxes is not None:
+        add_box_to_axes(img_axis, unsupervised_boxes, edge_color='g')
+        add_box_to_axes(overlay_axis, unsupervised_boxes, edge_color='g')
+
+        legends_dict.update({'g': 'Unsupervised Bounding Box'})
+
     if all_heatmaps:
         img_axis.set_title('Predicted Mask -4')
         mask_axis.set_title('Predicted Mask -3')
@@ -141,6 +154,11 @@ def plot_predictions_with_overlay(img, mask, pred_mask, overlay_image,
         overlay_axis.set_title('RGB/Prediction Overlay')
 
     fig.suptitle(additional_text)
+    fig.subplots_adjust(wspace=0.1, hspace=0.1)
+    plt.tight_layout()
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
 
     if save_dir is None:
         plt.show()
