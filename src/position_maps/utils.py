@@ -1,6 +1,7 @@
 import copy
 import os
 import shutil
+from pathlib import Path
 from typing import Tuple, List, Union
 
 import cv2
@@ -71,7 +72,7 @@ def plot_samples(img, mask, boxes, box_centers, plot_boxes=False, add_feats_to_m
     plt.show()
 
 
-def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=False):
+def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=False, save_dir=None, img_name=''):
     fig, axs = plt.subplots(1, 3, sharex='none', sharey='none', figsize=(16, 8))
     img_axis, mask_axis, pred_mask_axis = axs
     if img is not None:
@@ -97,7 +98,12 @@ def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=Fals
 
     fig.suptitle(additional_text)
 
-    plt.show()
+    if save_dir is None:
+        plt.show()
+    else:
+        Path(save_dir).mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_dir + f'{img_name}.png')
+        plt.close()
 
 
 def gaussian_one_dimensional(grid, side_length, loc, sigma, normalized=True):
@@ -269,6 +275,8 @@ def heat_map_collate_fn(batch):
     return rgb_img_list, mask_list, position_map_list, distribution_map_list, cm_list, meta_list
 
 
+# https://stackoverflow.com/questions/58125495/how-to-count-how-many-white-balls-there-are-in-an-image-with-opencv-python
+# https://scikit-image.org/docs/dev/auto_examples/features_detection/plot_blob.html
 def get_blob_count(image, kernel_size=(1, 1), plot=False):
     thresh = cv2.threshold(image, 0, 255, cv2.THRESH_OTSU + cv2.THRESH_BINARY)[1]
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, kernel_size)

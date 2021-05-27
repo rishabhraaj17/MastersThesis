@@ -46,6 +46,7 @@ eval:
   postion_map_network_type: 'PositionMapUNetHeatmapSegmentation'
 
   plot_checkpoint: 20
+  plot_save_dir: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/proposed_method/v0/position_maps/'
 
   max_pool:
     kernel_size: 2
@@ -54,7 +55,7 @@ eval:
 
   blob_counter:
     kernel: [1, 1]
-    plot: True
+    plot: False
 
   checkpoint:
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"

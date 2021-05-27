@@ -7,13 +7,11 @@ import numpy as np
 import torch
 from kornia.losses import BinaryFocalLossWithLogits
 from pytorch_lightning import seed_everything
-from torch.nn import MSELoss, MaxPool2d
-from torch.nn.functional import interpolate
+from torch.nn import MSELoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
-from average_image.layers import MinPool2D
 from average_image.utils import SDDMeta
 from log import get_logger
 import models as model_zoo
@@ -119,16 +117,12 @@ def setup_eval(cfg):
     model.to(cfg.eval.device)
     model.eval()
 
-    return loss_fn, model, network_type, test_loader
+    return loss_fn, model, network_type, test_loader, checkpoint_file
 
 
 @hydra.main(config_path="config", config_name="config")
 def evaluate(cfg):
-    min_pool = MinPool2D(kernel_size=cfg.eval.max_pool.kernel_size + 1,
-                         stride=cfg.eval.max_pool.stride,
-                         padding=cfg.eval.max_pool.padding)
-
-    loss_fn, model, network_type, test_loader = setup_eval(cfg)
+    loss_fn, model, network_type, test_loader, checkpoint_file = setup_eval(cfg)
 
     logger.info(f'Starting evaluation...')
 
@@ -166,6 +160,7 @@ def evaluate(cfg):
         random_idx = np.random.choice(cfg.eval.batch_size, 1, replace=False).item()
 
         if idx % cfg.eval.plot_checkpoint == 0:
+            current_random_frame = meta[random_idx]['item']
             if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation',
                                          'PositionMapUNetClassMapSegmentation']:
                 pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
@@ -173,25 +168,29 @@ def evaluate(cfg):
                                  class_maps[random_idx].squeeze().cpu()
                                  if cfg.class_map_segmentation else position_map[random_idx].squeeze().cpu(),
                                  pred_mask[random_idx].int() * 255,
-                                 additional_text=f"{network_type.__name__} | {loss_fn._get_name()} | Frame: {idx}")
+                                 additional_text=f"{network_type.__name__} | {loss_fn._get_name()} | "
+                                                 f"Frame: {current_random_frame}")
             elif network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
-                mun_objects_gt = meta[random_idx]['bbox_centers'].shape[0]
-                # out_heat_map = out.cpu().clone().to(dtype=torch.float64)
-                # pred_heat_map = torch.where(out_heat_map > 0.0, out_heat_map, 0.0)
-                # pred_heat_map_pooled = min_pool(pred_heat_map)
-                # pred_heat_map_pooled = interpolate(pred_heat_map_pooled,
-                #                                    size=(pred_heat_map.shape[-2], pred_heat_map.shape[-1]),
-                #                                    mode='nearest')
+                num_objects_gt = meta[random_idx]['bbox_centers'].shape[0]
 
                 pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
-                mun_objects_pred = get_blob_count(
+
+                num_objects_pred = get_blob_count(
                     pred_mask[random_idx].numpy().astype(np.uint8) * 255,
                     kernel_size=(cfg.eval.blob_counter.kernel[0], cfg.eval.blob_counter.kernel[1]),
                     plot=cfg.eval.blob_counter.plot)
+
                 plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                  heat_masks[random_idx].squeeze().cpu(),
                                  pred_mask[random_idx].int() * 255,
-                                 additional_text=f"{network_type.__name__} | {loss_fn._get_name()} | Frame: {idx}")
+                                 additional_text=f"{network_type.__name__} | {loss_fn._get_name()} | "
+                                                 f"Frame: {current_random_frame}\n"
+                                                 f"Agent Count : [GT: {num_objects_gt}| "
+                                                 f"Prediction: {num_objects_pred}]",
+                                 save_dir=f'{cfg.eval.plot_save_dir}{network_type.__name__}_{loss_fn._get_name()}/'
+                                          f'version_{cfg.eval.checkpoint.version}/'
+                                          f'{os.path.split(checkpoint_file)[-1][:-5]}/',
+                                 img_name=f'frame_{current_random_frame}')
             elif network_type.__name__ == 'PositionMapStackedHourGlass':
                 pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
                 plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
@@ -199,17 +198,18 @@ def evaluate(cfg):
                                  if cfg.class_map_segmentation else position_map[random_idx].squeeze().cpu(),
                                  pred_mask[-1][random_idx].int().squeeze(dim=0) * 255,
                                  additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
-                                                 f"| Frame: {idx}")
+                                                 f"| Frame: {current_random_frame}")
                 plot_predictions(pred_mask[-3][random_idx].int().squeeze(dim=0) * 255,
                                  pred_mask[-2][random_idx].int().squeeze(dim=0) * 255,
                                  pred_mask[-1][random_idx].int().squeeze(dim=0) * 255,
                                  additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
-                                                 f"| Frame: {idx}\nLast 3 HeatMaps", all_heatmaps=True)
+                                                 f"| Frame: {current_random_frame}\nLast 3 HeatMaps", all_heatmaps=True)
             else:
                 plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                  heat_masks[random_idx].squeeze().cpu(),
                                  out[random_idx].squeeze().cpu(),
-                                 additional_text=f"{network_type.__name__} | {loss_fn._get_name()} | Frame: {idx}")
+                                 additional_text=f"{network_type.__name__} | {loss_fn._get_name()} |"
+                                                 f" Frame: {current_random_frame}")
 
     logger.info(f"Test Loss: {np.array(total_loss).mean()}")
 
