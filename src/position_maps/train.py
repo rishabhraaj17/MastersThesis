@@ -63,7 +63,7 @@ def setup_dataset(cfg):
                                                 num_videos=cfg.val.num_videos,
                                                 video_number_to_use=cfg.val.video_number_to_use,
                                                 multiple_videos=cfg.val.multiple_videos)
-    return train_dataset, val_dataset
+    return train_dataset, val_dataset, [(train_w, train_h), (val_w, val_h)]
 
 
 def setup_single_dataset_instance(cfg, transform, video_class, num_videos, video_number_to_use, multiple_videos):
@@ -177,7 +177,7 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
 def train(cfg):
     logger.info(f'Setting up DataLoader and Model...')
 
-    train_dataset, val_dataset = setup_dataset(cfg)
+    train_dataset, val_dataset, ((train_w, train_h), (val_w, val_h)) = setup_dataset(cfg)
 
     network_type = getattr(model_zoo, cfg.postion_map_network_type)
 
@@ -202,7 +202,7 @@ def train(cfg):
 def overfit(cfg):
     logger.info(f'Overfit - Setting up DataLoader and Model...')
 
-    train_dataset, val_dataset = setup_dataset(cfg)
+    train_dataset, val_dataset, ((train_w, train_h), (val_w, val_h)) = setup_dataset(cfg)
 
     network_type = getattr(model_zoo, cfg.overfit.postion_map_network_type)
     if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation',
