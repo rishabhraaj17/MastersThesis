@@ -11,6 +11,8 @@ from torch.nn import MSELoss
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 
+from average_image.constants import SDDVideoDatasets
+from average_image.utils import SDDMeta
 from log import get_logger
 from hourglass import PoseNet
 
@@ -41,6 +43,7 @@ class UNet(nn.Module):
 
     def __init__(
             self,
+            config: DictConfig,
             num_classes: int,
             desired_output_scale_ratio: float = None,
             input_channels: int = 3,
@@ -57,6 +60,8 @@ class UNet(nn.Module):
         self.num_layers = num_layers
         self.num_additional_double_conv_layers = num_additional_double_conv_layers
         self.desired_output_scale_ratio = desired_output_scale_ratio
+        self.config = config
+        self.sdd_meta = SDDMeta(self.config.root + 'H_SDD.txt')
 
         layers = [DoubleConv(input_channels, features_start)]
 
@@ -77,7 +82,7 @@ class UNet(nn.Module):
 
         self.layers = nn.ModuleList(layers)
 
-    def forward(self, x):
+    def forward(self, x, desired_ratio=None):
         xi = [self.layers[0](x)]
         # Extra DownScale
         for layer in self.layers[1:self.num_additional_double_conv_layers + 1]:
@@ -89,7 +94,17 @@ class UNet(nn.Module):
         # Up path
         for i, layer in enumerate(self.layers[self.num_layers + self.num_additional_double_conv_layers: -1]):
             xi[-1] = layer(xi[-1], xi[-2 - i])
-        return self.layers[-1](xi[-1])
+
+        up_scaled = xi[-1]
+        if desired_ratio is not None:
+            w, h = self.sdd_meta.get_new_scale_from_tensor(img=x,
+                                                           dataset=getattr(SDDVideoDatasets,
+                                                                           self.config.video_class),
+                                                           sequence=self.config.train.video_number_to_use,
+                                                           desired_ratio=desired_ratio)
+            up_scaled = F.upsample_bilinear(up_scaled, size=(h, w))
+        out = self.layers[-1](up_scaled)
+        return out
 
 
 class DoubleConv(nn.Module):
@@ -172,7 +187,8 @@ class PositionMapUNetBase(LightningModule):
                           num_additional_double_conv_layers=self.config.unet.num_additional_double_conv_layers,
                           features_start=self.config.unet.features_start,
                           bilinear=self.config.unet.bilinear,
-                          desired_output_scale_ratio=desired_output_scale_ratio)
+                          desired_output_scale_ratio=desired_output_scale_ratio,
+                          config=self.config)
 
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
@@ -185,8 +201,8 @@ class PositionMapUNetBase(LightningModule):
 
         self.init_weights()
 
-    def forward(self, x):
-        return self.u_net(x)
+    def forward(self, x, desired_ratio=None):
+        return self.u_net(x, desired_ratio)
 
     def _one_step(self, batch):
         return NotImplementedError

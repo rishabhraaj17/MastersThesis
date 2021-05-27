@@ -1156,6 +1156,13 @@ class SDDMeta(object):
         out_w, out_h = self.calculate_scale(w, h, ratio, desired_ratio)
         return int(out_w), int(out_h)  # Quantization
 
+    def get_new_scale_from_tensor(self, img, dataset: SDDVideoDatasets, sequence: int, desired_ratio: float = 0.1,
+                                  version: str = 'A'):
+        ratio = float(self.get_meta(dataset, sequence, version)[0]['Ratio'].to_numpy()[0])
+        w, h = img.shape[-1], img.shape[-2]
+        out_w, out_h = self.calculate_scale(w, h, ratio, desired_ratio)
+        return int(out_w), int(out_h)  # Quantization
+
     @staticmethod
     def calculate_scale(w, h, ratio, desired_ratio):
         img_x = w * ratio
