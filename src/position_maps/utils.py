@@ -6,6 +6,7 @@ from typing import Tuple, List, Union
 
 import cv2
 import numpy as np
+import pandas as pd
 import torch
 from PIL import Image
 from matplotlib import pyplot as plt, patches, lines
@@ -279,6 +280,26 @@ def copy_filtered_annotations(root_path, other_root_path):
             annotation_save_path = f'{other_root_path}Plots/baseline_v2/v0/{v_clz.value}{v_num}/csv_annotation/' \
                                    f'filtered_generated_annotations.csv'
             shutil.copyfile(annotation_save_path, to_move_path)
+    print("Done!")
+
+
+def get_each_dims(root_path):
+    filtered_generated_path = root_path + '/annotations'
+    v_clazzes = [SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.DEATH_CIRCLE,
+                 SDDVideoClasses.GATES, SDDVideoClasses.HYANG, SDDVideoClasses.LITTLE, SDDVideoClasses.NEXUS,
+                 SDDVideoClasses.QUAD]
+    v_numbers = [[i for i in range(7)], [i for i in range(4)], [i for i in range(5)], [i for i in range(9)],
+                 [i for i in range(15)], [i for i in range(4)], [i for i in range(12)], [i for i in range(4)]]
+
+    vid_list, vid_num_list, vid_shape_list = [], [], []
+    for idx, v_clz in enumerate(tqdm(v_clazzes)):
+        for v_num in v_numbers[idx]:
+            print(f"************** Processing Features: {v_clz.name} - {v_num} *******************************")
+            img = Image.open(f"{filtered_generated_path}/{v_clz.value}/video{v_num}/reference.jpg")
+            vid_list.append(v_clz.name)
+            vid_num_list.append(v_num)
+            vid_shape_list.append((img.height, img.width))
+    df = pd.DataFrame.from_dict({'CLASS': vid_list, "NUMBER": vid_num_list, 'SHAPE': vid_shape_list})
     print("Done!")
 
 
