@@ -27,7 +27,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
             use_generated: bool = False, sigma: int = 10, plot: bool = False,
             desired_size: Tuple[int, int] = None, heatmap_shape: Tuple[int, int] = None,
             return_combined_heatmaps: bool = True, seg_map_objectness_threshold: float = 0.5,
-            heatmap_region_limit_threshold: float = 0.4):
+            heatmap_region_limit_threshold: float = 0.4, downscale_only_target_maps: bool = True):
         super(SDDFrameAndAnnotationDataset, self).__init__()
 
         _mid_path = video_label.value
@@ -140,6 +140,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
         self.seg_map_objectness_threshold = seg_map_objectness_threshold
         self.meta_label = meta_label
         self.heatmap_region_limit_threshold = heatmap_region_limit_threshold
+        self.downscale_only_target_maps = downscale_only_target_maps
 
     @property
     def metadata(self):
@@ -168,7 +169,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
     def __getitem__(self, item):
         video, audio, info, video_idx = self.video_clips.get_clip(item)
         video = video.permute(0, 3, 1, 2)
-        original_shape = new_shape = (video.shape[-2], video.shape[-1])
+        original_shape = new_shape = downscale_shape = (video.shape[-2], video.shape[-1])
 
         bbox_centers, boxes, track_idx, class_labels = self.get_annotation_for_frame(item, video_idx, original_shape)
 
@@ -190,16 +191,21 @@ class SDDFrameAndAnnotationDataset(Dataset):
             boxes = np.stack(out['bboxes'])
             bbox_centers = np.stack(out['keypoints'])
 
-            video = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
-            new_shape = (video.shape[-2], video.shape[-1])
+            if not self.downscale_only_target_maps:
+                video = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
+                new_shape = (video.shape[-2], video.shape[-1])
+
+            downscale_shape = (img.shape[0], img.shape[1])
 
         heat_mask = torch.from_numpy(
-            generate_position_map(list(new_shape), bbox_centers, sigma=self.sigma, heatmap_shape=self.heatmap_shape,
+            generate_position_map(list(downscale_shape), bbox_centers, sigma=self.sigma,
+                                  heatmap_shape=self.heatmap_shape,
                                   return_combined=self.return_combined_heatmaps, hw_mode=True))
 
         meta = {'boxes': boxes, 'bbox_centers': bbox_centers,
                 'track_idx': track_idx, 'item': item,
                 'original_shape': original_shape, 'new_shape': new_shape,
+                'downscale_shape': downscale_shape,
                 'video_idx': video_idx}
 
         key_points = torch.round(torch.from_numpy(bbox_centers)).long()

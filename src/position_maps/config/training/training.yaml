@@ -40,6 +40,7 @@ root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
 video_class: DEATH_CIRCLE
 video_meta_class: DEATH_CIRCLE
 desired_pixel_to_meter_ratio: 0.25
+downscale_only_target_maps: True
 
 train:
   num_videos: -1
@@ -96,12 +97,12 @@ postion_map_network_type: 'PositionMapUNetHeatmapSegmentation'
 
 overfit:
   num_epochs: 6000
-  batch_size: 2
+  batch_size: 1
   num_workers: 0
   pin_memory: True
   drop_last: False
 
-  postion_map_network_type: 'PositionMapStackedHourGlass'
+  postion_map_network_type: 'PositionMapUNetHeatmapSegmentation'
   focal_loss_alpha: 0.9
 
   subset_indices: [0, 85, 32, 5, 125, 200]

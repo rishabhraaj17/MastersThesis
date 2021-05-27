@@ -85,7 +85,8 @@ def setup_dataset(cfg):
         return_combined_heatmaps=cfg.eval.return_combined_heatmaps,
         seg_map_objectness_threshold=cfg.eval.seg_map_objectness_threshold,
         meta_label=getattr(SDDVideoDatasets, cfg.eval.video_meta_class),
-        heatmap_region_limit_threshold=cfg.eval.heatmap_region_limit_threshold
+        heatmap_region_limit_threshold=cfg.eval.heatmap_region_limit_threshold,
+        downscale_only_target_maps=cfg.eval.downscale_only_target_maps
     )
     return test_dataset, transform
 
@@ -111,6 +112,7 @@ def setup_test_transform(cfg, test_h, test_w):
 
 def setup_multiple_test_datasets(cfg):
     meta = SDDMeta(cfg.root + 'H_SDD.txt')
+    # note: downscale_only_target_maps=cfg.downscale_only_target_maps may not point to eval cfg
     datasets = setup_multiple_datasets_core(cfg, meta, video_classes_to_use=cfg.eval.test.video_classes_to_use,
                                             video_numbers_to_use=cfg.eval.test.video_numbers_to_use,
                                             num_videos=cfg.eval.test.num_videos,

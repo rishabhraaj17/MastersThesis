@@ -81,7 +81,8 @@ def setup_single_dataset_instance(cfg, transform, video_class, num_videos, video
         return_combined_heatmaps=cfg.return_combined_heatmaps,
         seg_map_objectness_threshold=cfg.seg_map_objectness_threshold,
         meta_label=getattr(SDDVideoDatasets, video_class),
-        heatmap_region_limit_threshold=cfg.heatmap_region_limit_threshold
+        heatmap_region_limit_threshold=cfg.heatmap_region_limit_threshold,
+        downscale_only_target_maps=cfg.downscale_only_target_maps
     )
     return dataset
 
