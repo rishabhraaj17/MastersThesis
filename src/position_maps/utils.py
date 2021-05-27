@@ -7,6 +7,7 @@ from typing import Tuple, List, Union
 import cv2
 import numpy as np
 import torch
+from PIL import Image
 from matplotlib import pyplot as plt
 from scipy.stats import multivariate_normal
 from torch.nn.functional import interpolate
@@ -95,6 +96,49 @@ def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=Fals
         img_axis.set_title('RGB')
         mask_axis.set_title('Mask')
         pred_mask_axis.set_title('Predicted Mask')
+
+    fig.suptitle(additional_text)
+
+    if save_dir is None:
+        plt.show()
+    else:
+        Path(save_dir).mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_dir + f'{img_name}.png')
+        plt.close()
+
+
+def plot_predictions_with_overlay(img, mask, pred_mask, overlay_image,
+                                  additional_text='', all_heatmaps=False, save_dir=None, img_name=''):
+    fig, axs = plt.subplots(2, 2, sharex='none', sharey='none', figsize=(16, 16))
+    img_axis, mask_axis, overlay_axis, pred_mask_axis = axs[0, 0], axs[0, 1], axs[1, 0], axs[1, 1]
+    if img is not None:
+        if all_heatmaps:
+            img_axis.imshow(img, cmap='hot')
+        else:
+            img_axis.imshow(img)
+
+    if overlay_image is not None:
+        if all_heatmaps:
+            overlay_axis.imshow(overlay_image, cmap='hot')
+        else:
+            overlay_axis.imshow(overlay_image)
+
+    if mask is not None:
+        mask_axis.imshow(mask, cmap='hot')
+
+    if pred_mask is not None:
+        pred_mask_axis.imshow(pred_mask, cmap='hot')
+
+    if all_heatmaps:
+        img_axis.set_title('Predicted Mask -4')
+        mask_axis.set_title('Predicted Mask -3')
+        overlay_axis.set_title('Predicted Mask -2')
+        pred_mask_axis.set_title('Predicted Mask -1')
+    else:
+        img_axis.set_title('RGB')
+        mask_axis.set_title('Mask')
+        pred_mask_axis.set_title('Predicted Mask')
+        overlay_axis.set_title('RGB/Prediction Overlay')
 
     fig.suptitle(additional_text)
 
@@ -305,6 +349,17 @@ def get_blob_count(image, kernel_size=(1, 1), plot=False):
         plt.show()
 
     return blobs
+
+
+def overlay_images(transformer, background, overlay):
+    background = transformer(background)
+    overlay = transformer(overlay)
+
+    background = background.convert("RGBA")
+    overlay = overlay.convert("RGBA")
+
+    new_img = Image.blend(background, overlay, 0.5)
+    return np.array(new_img)
 
 
 if __name__ == '__main__':

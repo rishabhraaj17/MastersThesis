@@ -47,6 +47,7 @@ eval:
 
   plot_checkpoint: 20
   plot_save_dir: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/proposed_method/v0/position_maps/'
+  plot_with_overlay: True
 
   max_pool:
     kernel_size: 2

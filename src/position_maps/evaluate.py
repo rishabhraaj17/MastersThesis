@@ -9,6 +9,7 @@ from kornia.losses import BinaryFocalLossWithLogits
 from pytorch_lightning import seed_everything
 from torch.nn import MSELoss
 from torch.utils.data import DataLoader
+from torchvision.transforms import ToPILImage
 from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
@@ -17,7 +18,7 @@ from log import get_logger
 import models as model_zoo
 from dataset import SDDFrameAndAnnotationDataset
 from train import setup_multiple_datasets_core
-from utils import heat_map_collate_fn, plot_predictions, get_blob_count
+from utils import heat_map_collate_fn, plot_predictions, get_blob_count, overlay_images, plot_predictions_with_overlay
 
 seed_everything(42)
 logger = get_logger(__name__)
@@ -122,6 +123,8 @@ def setup_eval(cfg):
 
 @hydra.main(config_path="config", config_name="config")
 def evaluate(cfg):
+    to_pil = ToPILImage()
+
     loss_fn, model, network_type, test_loader, checkpoint_file = setup_eval(cfg)
 
     logger.info(f'Starting evaluation...')
@@ -161,6 +164,9 @@ def evaluate(cfg):
 
         if idx % cfg.eval.plot_checkpoint == 0:
             current_random_frame = meta[random_idx]['item']
+            save_dir = f'{cfg.eval.plot_save_dir}{network_type.__name__}_{loss_fn._get_name()}/' \
+                       f'version_{cfg.eval.checkpoint.version}/{os.path.split(checkpoint_file)[-1][:-5]}/'
+            save_image_name = f'frame_{current_random_frame}'
             if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation',
                                          'PositionMapUNetClassMapSegmentation']:
                 pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
@@ -180,17 +186,26 @@ def evaluate(cfg):
                     kernel_size=(cfg.eval.blob_counter.kernel[0], cfg.eval.blob_counter.kernel[1]),
                     plot=cfg.eval.blob_counter.plot)
 
-                plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                 heat_masks[random_idx].squeeze().cpu(),
-                                 pred_mask[random_idx].int() * 255,
-                                 additional_text=f"{network_type.__name__} | {loss_fn._get_name()} | "
-                                                 f"Frame: {current_random_frame}\n"
-                                                 f"Agent Count : [GT: {num_objects_gt}| "
-                                                 f"Prediction: {num_objects_pred}]",
-                                 save_dir=f'{cfg.eval.plot_save_dir}{network_type.__name__}_{loss_fn._get_name()}/'
-                                          f'version_{cfg.eval.checkpoint.version}/'
-                                          f'{os.path.split(checkpoint_file)[-1][:-5]}/',
-                                 img_name=f'frame_{current_random_frame}')
+                additional_text = f"{network_type.__name__} | {loss_fn._get_name()} | Frame: {current_random_frame}\n" \
+                                  f"Agent Count : [GT: {num_objects_gt}| Prediction: {num_objects_pred}]"
+                if cfg.eval.plot_with_overlay:
+                    superimposed_image = overlay_images(transformer=to_pil, background=frames[random_idx],
+                                                        overlay=pred_mask[random_idx])
+                    plot_predictions_with_overlay(
+                        img=frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                        mask=heat_masks[random_idx].squeeze().cpu(),
+                        pred_mask=pred_mask[random_idx].int() * 255,
+                        overlay_image=superimposed_image,
+                        additional_text=additional_text,
+                        save_dir=save_dir + 'overlay/',
+                        img_name=save_image_name)
+                else:
+                    plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                     heat_masks[random_idx].squeeze().cpu(),
+                                     pred_mask[random_idx].int() * 255,
+                                     additional_text=additional_text,
+                                     save_dir=save_dir + 'simple/',
+                                     img_name=save_image_name)
             elif network_type.__name__ == 'PositionMapStackedHourGlass':
                 pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
                 plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
