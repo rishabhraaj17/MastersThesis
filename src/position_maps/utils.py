@@ -3,6 +3,7 @@ import os
 import shutil
 from typing import Tuple, List, Union
 
+import cv2
 import numpy as np
 import torch
 from matplotlib import pyplot as plt
@@ -266,6 +267,36 @@ def heat_map_collate_fn(batch):
     cm_list = torch.stack(cm_list).unsqueeze(1)
 
     return rgb_img_list, mask_list, position_map_list, distribution_map_list, cm_list, meta_list
+
+
+def get_blob_count(image, kernel_size=(1, 1), plot=False):
+    thresh = cv2.threshold(image, 0, 255, cv2.THRESH_OTSU + cv2.THRESH_BINARY)[1]
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, kernel_size)
+    opening = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=5)
+
+    contours = cv2.findContours(opening, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours = contours[0] if len(contours) == 2 else contours[1]
+
+    blobs = 0
+    for c in contours:
+        area = cv2.contourArea(c)
+        cv2.drawContours(image, [c], -1, (36, 255, 12), -1)
+        if area > 13000:
+            blobs += 2
+        else:
+            blobs += 1
+
+    if plot:
+        plt.imshow(image)
+        plt.show()
+
+        plt.imshow(thresh)
+        plt.show()
+
+        plt.imshow(opening)
+        plt.show()
+
+    return blobs
 
 
 if __name__ == '__main__':

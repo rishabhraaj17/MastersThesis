@@ -41,10 +41,20 @@ eval:
   heatmap_region_limit_threshold: 0.5
   focal_loss_alpha: 0.8
 
-  # one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation', 'PositionMapUNetHeatmapSegmentation', 'PositionMapStackedHourGlass'
+  # one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation',
+  # 'PositionMapUNetClassMapSegmentation', 'PositionMapUNetHeatmapSegmentation', 'PositionMapStackedHourGlass'
   postion_map_network_type: 'PositionMapUNetHeatmapSegmentation'
 
   plot_checkpoint: 20
+
+  max_pool:
+    kernel_size: 2
+    stride: 1
+    padding: 1
+
+  blob_counter:
+    kernel: [1, 1]
+    plot: True
 
   checkpoint:
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"

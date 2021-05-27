@@ -7,17 +7,19 @@ import numpy as np
 import torch
 from kornia.losses import BinaryFocalLossWithLogits
 from pytorch_lightning import seed_everything
-from torch.nn import MSELoss
+from torch.nn import MSELoss, MaxPool2d
+from torch.nn.functional import interpolate
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
+from average_image.layers import MinPool2D
 from average_image.utils import SDDMeta
 from log import get_logger
 import models as model_zoo
 from dataset import SDDFrameAndAnnotationDataset
 from train import setup_multiple_datasets_core
-from utils import heat_map_collate_fn, plot_predictions
+from utils import heat_map_collate_fn, plot_predictions, get_blob_count
 
 seed_everything(42)
 logger = get_logger(__name__)
@@ -122,6 +124,10 @@ def setup_eval(cfg):
 
 @hydra.main(config_path="config", config_name="config")
 def evaluate(cfg):
+    min_pool = MinPool2D(kernel_size=cfg.eval.max_pool.kernel_size + 1,
+                         stride=cfg.eval.max_pool.stride,
+                         padding=cfg.eval.max_pool.padding)
+
     loss_fn, model, network_type, test_loader = setup_eval(cfg)
 
     logger.info(f'Starting evaluation...')
@@ -169,7 +175,19 @@ def evaluate(cfg):
                                  pred_mask[random_idx].int() * 255,
                                  additional_text=f"{network_type.__name__} | {loss_fn._get_name()} | Frame: {idx}")
             elif network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
+                mun_objects_gt = meta[random_idx]['bbox_centers'].shape[0]
+                # out_heat_map = out.cpu().clone().to(dtype=torch.float64)
+                # pred_heat_map = torch.where(out_heat_map > 0.0, out_heat_map, 0.0)
+                # pred_heat_map_pooled = min_pool(pred_heat_map)
+                # pred_heat_map_pooled = interpolate(pred_heat_map_pooled,
+                #                                    size=(pred_heat_map.shape[-2], pred_heat_map.shape[-1]),
+                #                                    mode='nearest')
+
                 pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
+                mun_objects_pred = get_blob_count(
+                    pred_mask[random_idx].numpy().astype(np.uint8) * 255,
+                    kernel_size=(cfg.eval.blob_counter.kernel[0], cfg.eval.blob_counter.kernel[1]),
+                    plot=cfg.eval.blob_counter.plot)
                 plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                  heat_masks[random_idx].squeeze().cpu(),
                                  pred_mask[random_idx].int() * 255,
