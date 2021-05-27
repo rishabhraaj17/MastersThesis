@@ -4,14 +4,17 @@ import warnings
 import albumentations as A
 import hydra
 import numpy as np
+import pandas as pd
 import torch
 from kornia.losses import BinaryFocalLossWithLogits
 from pytorch_lightning import seed_everything
 from torch.nn import MSELoss
+from torch.nn.functional import interpolate
 from torch.utils.data import DataLoader
 from torchvision.transforms import ToPILImage
 from tqdm import tqdm
 
+from average_image.bbox_utils import get_frame_annotations_and_skip_lost, scale_annotations
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from average_image.utils import SDDMeta
 from log import get_logger
@@ -22,6 +25,33 @@ from utils import heat_map_collate_fn, plot_predictions, get_blob_count, overlay
 
 seed_everything(42)
 logger = get_logger(__name__)
+
+
+def get_supervised_boxes(cfg, current_random_frame, meta, random_idx, test_loader, test_transform, frame):
+    gt_annotation_path = f'{cfg.root}annotations/{test_loader.dataset.video_label.value}/' \
+                         f'video{test_loader.dataset.video_number_to_use}/annotation_augmented.csv'
+    gt_annotation_df = pd.read_csv(gt_annotation_path)
+    gt_annotation_df = gt_annotation_df.drop(gt_annotation_df.columns[[0]], axis=1)
+    frame_annotation = get_frame_annotations_and_skip_lost(gt_annotation_df, current_random_frame)
+    gt_annotations, gt_bbox_centers = scale_annotations(frame_annotation,
+                                                        original_scale=meta[random_idx]['original_shape'],
+                                                        new_scale=meta[random_idx]['original_shape'],
+                                                        return_track_id=False,
+                                                        tracks_with_annotations=True)
+    supervised_boxes = gt_annotations[:, :-1]
+    inside_boxes_idx = [b for b, box in enumerate(supervised_boxes)
+                        if (box[0] > 0 and box[2] < meta[random_idx]['original_shape'][1])
+                        and (box[1] > 0 and box[3] < meta[random_idx]['original_shape'][0])]
+    supervised_boxes = supervised_boxes[inside_boxes_idx]
+    gt_bbox_centers = gt_bbox_centers[inside_boxes_idx]
+    class_labels = ['object'] * supervised_boxes.shape[0]
+
+    frame = interpolate(frame.unsqueeze(0), size=meta[random_idx]['original_shape'])
+
+    out = test_transform(image=frame.squeeze(dim=0).permute(1, 2, 0).numpy(), bboxes=supervised_boxes,
+                         keypoints=gt_bbox_centers,
+                         class_labels=class_labels)
+    return out['bboxes']
 
 
 def get_resize_dims(cfg):
@@ -57,7 +87,7 @@ def setup_dataset(cfg):
         meta_label=getattr(SDDVideoDatasets, cfg.eval.video_meta_class),
         heatmap_region_limit_threshold=cfg.eval.heatmap_region_limit_threshold
     )
-    return test_dataset
+    return test_dataset, transform
 
 
 def setup_test_transform(cfg, test_h, test_w):
@@ -90,7 +120,7 @@ def setup_multiple_test_datasets(cfg):
 
 def setup_eval(cfg):
     logger.info(f'Setting up DataLoader')
-    test_dataset = setup_dataset(cfg)
+    test_dataset, test_transform = setup_dataset(cfg)
     test_loader = DataLoader(test_dataset, batch_size=cfg.eval.batch_size, shuffle=False,
                              num_workers=cfg.eval.num_workers, collate_fn=heat_map_collate_fn,
                              pin_memory=cfg.eval.pin_memory, drop_last=cfg.eval.drop_last)
@@ -118,14 +148,14 @@ def setup_eval(cfg):
     model.to(cfg.eval.device)
     model.eval()
 
-    return loss_fn, model, network_type, test_loader, checkpoint_file
+    return loss_fn, model, network_type, test_loader, checkpoint_file, test_transform
 
 
 @hydra.main(config_path="config", config_name="config")
 def evaluate(cfg):
     to_pil = ToPILImage()
 
-    loss_fn, model, network_type, test_loader, checkpoint_file = setup_eval(cfg)
+    loss_fn, model, network_type, test_loader, checkpoint_file, test_transform = setup_eval(cfg)
 
     logger.info(f'Starting evaluation...')
 
@@ -164,11 +194,11 @@ def evaluate(cfg):
 
         if idx % cfg.eval.plot_checkpoint == 0:
             current_random_frame = meta[random_idx]['item']
-            unsupervised_boxes = meta[random_idx]['boxes']
-            supervised_boxes = None
+
             save_dir = f'{cfg.eval.plot_save_dir}{network_type.__name__}_{loss_fn._get_name()}/' \
                        f'version_{cfg.eval.checkpoint.version}/{os.path.split(checkpoint_file)[-1][:-5]}/'
             save_image_name = f'frame_{current_random_frame}'
+
             if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation',
                                          'PositionMapUNetClassMapSegmentation']:
                 pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
@@ -189,8 +219,12 @@ def evaluate(cfg):
                     plot=cfg.eval.blob_counter.plot)
 
                 additional_text = f"{network_type.__name__} | {loss_fn._get_name()} | Frame: {current_random_frame}\n" \
-                                  f"Agent Count : [GT: {num_objects_gt}| Prediction: {num_objects_pred}]"
+                                  f"Agent Count : [GT: {num_objects_gt} | Prediction: {num_objects_pred}]"
                 if cfg.eval.plot_with_overlay:
+                    unsupervised_boxes = meta[random_idx]['boxes']
+                    supervised_boxes = get_supervised_boxes(cfg, current_random_frame, meta, random_idx, test_loader,
+                                                            test_transform, frames[random_idx].cpu()) \
+                        if cfg.eval.resize_transform_only else None
                     superimposed_image = overlay_images(transformer=to_pil, background=frames[random_idx],
                                                         overlay=pred_mask[random_idx])
                     plot_predictions_with_overlay(

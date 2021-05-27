@@ -8,7 +8,7 @@ eval:
 
   device: 'cuda:0'
   data_augmentation: True
-  resize_transform_only: False
+  resize_transform_only: False  # set true to plot both supervised and unsupervised boxes
 
   # dataset
   root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
