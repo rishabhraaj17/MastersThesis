@@ -1142,42 +1142,49 @@ class SDDMeta(object):
         return out, out.to_numpy()
 
     def get_new_scale(self, img_path, dataset: SDDVideoDatasets, sequence: int, desired_ratio: float = 0.1,
-                      version: str = 'A'):
+                      version: str = 'A', return_original_ratio: bool = False, use_v2=False):
         ratio = float(self.get_meta(dataset, sequence, version)[0]['Ratio'].to_numpy()[0])
         im: Image = Image.open(img_path)
         w, h = im.width, im.height
-        out_w, out_h = self.calculate_scale(w, h, ratio, desired_ratio)
+        out_w, out_h = self.calculate_scale(w, h, ratio, desired_ratio, use_v2=use_v2)
+        if return_original_ratio:
+            return (out_w, out_h), ratio
         return out_w, out_h
 
     def get_new_scale_from_img(self, img, dataset: SDDVideoDatasets, sequence: int, desired_ratio: float = 0.1,
-                               version: str = 'A'):
+                               version: str = 'A', use_v2=False):
         ratio = float(self.get_meta(dataset, sequence, version)[0]['Ratio'].to_numpy()[0])
         w, h = img.shape[0], img.shape[1]
-        out_w, out_h = self.calculate_scale(w, h, ratio, desired_ratio)
-        return int(out_w), int(out_h)  # Quantization
+        out_w, out_h = self.calculate_scale(w, h, ratio, desired_ratio, use_v2=use_v2)
+        return round(out_w), round(out_h)  # Quantization
 
     def get_new_scale_from_tensor(self, img, dataset: SDDVideoDatasets, sequence: int, desired_ratio: float = 0.1,
-                                  version: str = 'A'):
+                                  version: str = 'A', use_v2=False):
         ratio = float(self.get_meta(dataset, sequence, version)[0]['Ratio'].to_numpy()[0])
         w, h = img.shape[-1], img.shape[-2]
-        out_w, out_h = self.calculate_scale(w, h, ratio, desired_ratio)
-        return int(out_w), int(out_h)  # Quantization
+        out_w, out_h = self.calculate_scale(w, h, ratio, desired_ratio, use_v2=use_v2)
+        return round(out_w), round(out_h)  # Quantization
 
     @staticmethod
-    def calculate_scale(w, h, ratio, desired_ratio):
-        img_x = w * ratio
-        img_y = h * ratio
-        out_w = img_x / desired_ratio
-        out_h = img_y / desired_ratio
+    def calculate_scale(w, h, ratio, desired_ratio, use_v2=False):
+        if use_v2:
+            scale_factor = ratio / desired_ratio
+            out_w = w * scale_factor
+            out_h = h * scale_factor
+        else:
+            img_x = w * ratio
+            img_y = h * ratio
+            out_w = img_x / desired_ratio
+            out_h = img_y / desired_ratio
         return out_w, out_h
 
-    def test_scale_logic(self):
+    def test_scale_logic(self, use_v2=False):
         ratio = 0.03976968
         desired_ratio = 0.1
         w, h = 1325, 1973
-        out_w, out_h = self.calculate_scale(w, h, ratio, desired_ratio)
+        out_w, out_h = self.calculate_scale(w, h, ratio, desired_ratio, use_v2=use_v2)
         print(out_w, out_h)
-        out_w, out_h = self.calculate_scale(out_w, out_h, desired_ratio, ratio)
+        out_w, out_h = self.calculate_scale(out_w, out_h, desired_ratio, ratio, use_v2=use_v2)
         print(out_w, out_h)
 
 
@@ -1244,7 +1251,7 @@ if __name__ == '__main__':
     print(m[0]['Ratio'].to_numpy())
     # print(float(m[1][-1, -1]))
     # # print(meta.get_meta(SDDVideoClasses.GATES, 0, 'A')[0])
-    # meta.test_scale_logic()
+    # meta.test_scale_logic(use_v2=True)
 
     # im_path = '/home/rishabh/TrajectoryPrediction/Datasets/SDD/annotations/gates/video0/reference.jpg'
     #

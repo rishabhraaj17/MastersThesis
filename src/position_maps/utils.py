@@ -15,7 +15,8 @@ from torch.nn.functional import interpolate
 from tqdm import tqdm
 
 from average_image.bbox_utils import _process_scale, cal_centers
-from average_image.constants import SDDVideoClasses
+from average_image.constants import SDDVideoClasses, SDDVideoDatasets
+from average_image.utils import SDDMeta
 from baselinev2.plot_utils import add_box_to_axes, add_features_to_axis
 
 
@@ -283,23 +284,44 @@ def copy_filtered_annotations(root_path, other_root_path):
     print("Done!")
 
 
-def get_each_dims(root_path):
+def get_each_dims(root_path, desired_ratio=0.25):
     filtered_generated_path = root_path + '/annotations'
+    meta = SDDMeta(root_path + '/H_SDD.txt')
     v_clazzes = [SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.DEATH_CIRCLE,
                  SDDVideoClasses.GATES, SDDVideoClasses.HYANG, SDDVideoClasses.LITTLE, SDDVideoClasses.NEXUS,
                  SDDVideoClasses.QUAD]
     v_numbers = [[i for i in range(7)], [i for i in range(4)], [i for i in range(5)], [i for i in range(9)],
                  [i for i in range(15)], [i for i in range(4)], [i for i in range(12)], [i for i in range(4)]]
 
-    vid_list, vid_num_list, vid_shape_list = [], [], []
+    vid_list, vid_num_list, vid_shape_list, ratio_list = [], [], [], []
+    desired_ratio_list, new_shape_list, orientation = [], [], []
     for idx, v_clz in enumerate(tqdm(v_clazzes)):
         for v_num in v_numbers[idx]:
             print(f"************** Processing Features: {v_clz.name} - {v_num} *******************************")
-            img = Image.open(f"{filtered_generated_path}/{v_clz.value}/video{v_num}/reference.jpg")
+            im_path = f"{filtered_generated_path}/{v_clz.value}/video{v_num}/reference.jpg"
+
+            (new_w, new_h), ratio = meta.get_new_scale(img_path=im_path, dataset=getattr(SDDVideoDatasets, v_clz.name),
+                                                       sequence=v_num, desired_ratio=desired_ratio,
+                                                       return_original_ratio=True, use_v2=True)
+
+            img = Image.open(im_path)
+
             vid_list.append(v_clz.name)
             vid_num_list.append(v_num)
             vid_shape_list.append((img.height, img.width))
-    df = pd.DataFrame.from_dict({'CLASS': vid_list, "NUMBER": vid_num_list, 'SHAPE': vid_shape_list})
+            ratio_list.append(ratio)
+
+            desired_ratio_list.append(desired_ratio)
+            new_shape_list.append((round(new_h), round(new_w)))
+            orientation.append("Portrait" if img.height > img.width else "Landscape")
+
+    df = pd.DataFrame.from_dict({'CLASS': vid_list, "NUMBER": vid_num_list,
+                                 'ORIENTATION': orientation, 'SHAPE': vid_shape_list,
+                                 'ORIGINAL_RATIO': ratio_list, 'DESIRED_RATIO': desired_ratio_list,
+                                 'RESCALED_SHAPE': new_shape_list})
+    portrait_df = df[df.ORIENTATION == "Portrait"]
+    landscape_df = df[df.ORIENTATION == "Landscape"]
+    df.to_csv(f"{root_path}/shapes_summary.csv", index=False)
     print("Done!")
 
 
@@ -402,6 +424,7 @@ def overlay_images(transformer, background, overlay):
 
 
 if __name__ == '__main__':
+    get_each_dims('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD', 0.05)
     s = [480, 320]
     b_centers = [[50, 50], [76, 82], [12, 67], [198, 122]]
     out1 = generate_position_map(s, b_centers, sigma=5)

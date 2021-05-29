@@ -59,7 +59,7 @@ class UNet(nn.Module):
         super().__init__()
         self.num_layers = num_layers
         self.num_additional_double_conv_layers = num_additional_double_conv_layers
-        self.desired_output_scale_ratio = desired_output_scale_ratio
+        self.desired_output_scale_ratio = desired_output_scale_ratio  # unused
         self.config = config
         self.sdd_meta = SDDMeta(self.config.root + 'H_SDD.txt')
 
