@@ -49,8 +49,8 @@ def generate_position_map_v0(shape: Tuple[int, int], bounding_boxes_centers: Lis
     return masks
 
 
-def plot_samples(img, mask, boxes, box_centers, plot_boxes=False, add_feats_to_mask=False, add_feats_to_img=False,
-                 additional_text=''):
+def plot_samples(img, mask, rgb_boxes, rgb_box_centers, boxes, box_centers, plot_boxes=False,
+                 add_feats_to_mask=False, add_feats_to_img=False, additional_text=''):
     fig, axs = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(12, 10))
     img_axis, mask_axis = axs
     if img is not None:
@@ -60,11 +60,11 @@ def plot_samples(img, mask, boxes, box_centers, plot_boxes=False, add_feats_to_m
         mask_axis.imshow(mask, cmap='hot')
 
     if boxes is not None and plot_boxes:
-        add_box_to_axes(img_axis, boxes)
+        add_box_to_axes(img_axis, rgb_boxes)
         add_box_to_axes(mask_axis, boxes)
 
     if add_feats_to_img:
-        add_features_to_axis(img_axis, box_centers)
+        add_features_to_axis(img_axis, rgb_box_centers)
     if add_feats_to_mask:
         add_features_to_axis(mask_axis, box_centers)
 
@@ -296,9 +296,9 @@ def get_each_dims(root_path, desired_ratio=0.25, save_csv=False):
 
     vid_list, vid_num_list, vid_shape_list, ratio_list = [], [], [], []
     desired_ratio_list, new_shape_list, orientation = [], [], []
-    for idx, v_clz in enumerate(tqdm(v_clazzes)):
+    for idx, v_clz in enumerate(v_clazzes):
         for v_num in v_numbers[idx]:
-            print(f"************** Processing Features: {v_clz.name} - {v_num} *******************************")
+            # print(f"************** Processing Features: {v_clz.name} - {v_num} *******************************")
             im_path = f"{filtered_generated_path}/{v_clz.value}/video{v_num}/reference.jpg"
 
             (new_w, new_h), ratio = meta.get_new_scale(img_path=im_path, dataset=getattr(SDDVideoDatasets, v_clz.name),
@@ -349,7 +349,7 @@ def get_scaled_shapes_with_pad_values(root_path, video_classes, video_numbers, d
 
     # df.insert(loc=-1, column='PAD_VALUES', value=pad_params_list, allow_duplicates=True)
     df['PAD_VALUES'] = pad_params_list
-    return df
+    return df, max_shape
 
 
 def resize_and_pad(root_path, video_class, video_number, desired_shape, plot=False):
@@ -392,6 +392,12 @@ def get_pad_parameters_with_shapes(original_shape, desired_shape):
     diff_w = desired_width - original_width
 
     return [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2]
+
+
+def rgb_transform(img, new_shape, pad_values):
+    img = interpolate(img, size=new_shape, mode='bilinear')
+    img = pad(img, pad_values)
+    return img
 
 
 def scale_annotations(bbox, original_shape, new_shape):

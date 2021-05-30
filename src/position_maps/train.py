@@ -15,7 +15,7 @@ from average_image.utils import SDDMeta
 from log import get_logger
 from dataset import SDDFrameAndAnnotationDataset
 import models as model_zoo
-from utils import heat_map_collate_fn, plot_predictions
+from utils import heat_map_collate_fn, plot_predictions, get_scaled_shapes_with_pad_values, rgb_transform
 
 seed_everything(42)
 logger = get_logger(__name__)
@@ -51,22 +51,74 @@ def get_resize_shape(cfg, sdd_meta, video_class, video_number, desired_ratio):
 
 
 def setup_dataset(cfg):
-    (train_w, train_h), (val_w, val_h) = get_resize_dims(cfg)
+    df, rgb_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=[cfg.video_class, cfg.video_class],
+        video_numbers=[[cfg.train.video_number_to_use], [cfg.val.video_number_to_use]],
+        desired_ratio=cfg.desired_pixel_to_meter_ratio_rgb)
 
-    train_transform, val_transform = setup_transforms_for_single_instance(train_h, train_w, val_h, val_w)
+    df_target, _ = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=[cfg.video_class, cfg.video_class],
+        video_numbers=[[cfg.train.video_number_to_use], [cfg.val.video_number_to_use]],
+        desired_ratio=cfg.desired_pixel_to_meter_ratio)
+
+    train_condition = (df.CLASS == cfg.video_class) & (df.NUMBER == cfg.train.video_number_to_use)
+    train_h, train_w = df[train_condition].RESCALED_SHAPE.values.item()
+    train_pad_values = df[train_condition].PAD_VALUES.values.item()
+
+    target_train_h, target_train_w = df_target[train_condition].RESCALED_SHAPE.values.item()
+    target_train_pad_values = df_target[train_condition].PAD_VALUES.values.item()
+
+    val_condition = (df.CLASS == cfg.video_class) & (df.NUMBER == cfg.val.video_number_to_use)
+    val_h, val_w = df[val_condition].RESCALED_SHAPE.values.item()
+    val_pad_values = df[val_condition].PAD_VALUES.values.item()
+
+    target_val_h, target_val_w = df_target[val_condition].RESCALED_SHAPE.values.item()
+    target_val_pad_values = df_target[val_condition].PAD_VALUES.values.item()
+
+    # (train_w, train_h), (val_w, val_h) = get_resize_dims(cfg)
+
+    train_transform, val_transform = setup_transforms_for_single_instance(train_h=target_train_h,
+                                                                          train_w=target_train_w,
+                                                                          val_h=target_val_h,
+                                                                          val_w=target_val_w)
+    rgb_train_transform, rgb_val_transform = setup_transforms_for_single_instance(train_h=train_h,
+                                                                                  train_w=train_w,
+                                                                                  val_h=val_h,
+                                                                                  val_w=val_w)
+    rgb_plot_train_transform, _ = setup_transforms_for_single_instance(train_h=rgb_max_shape[0],
+                                                                       train_w=rgb_max_shape[1],
+                                                                       val_h=val_h,
+                                                                       val_w=val_w)
+    common_transform = setup_single_common_transform(use_replay_compose=cfg.using_replay_compose)
 
     train_dataset = setup_single_dataset_instance(cfg, train_transform, video_class=cfg.video_class,
                                                   num_videos=cfg.train.num_videos,
                                                   video_number_to_use=cfg.train.video_number_to_use,
-                                                  multiple_videos=cfg.train.multiple_videos)
+                                                  multiple_videos=cfg.train.multiple_videos,
+                                                  rgb_transform_fn=rgb_train_transform,
+                                                  rgb_new_shape=(train_h, train_w),
+                                                  rgb_pad_value=train_pad_values,
+                                                  target_pad_value=target_train_pad_values,
+                                                  rgb_plot_transform=rgb_plot_train_transform,
+                                                  common_transform=common_transform,
+                                                  using_replay_compose=cfg.using_replay_compose)
     val_dataset = setup_single_dataset_instance(cfg, val_transform, video_class=cfg.video_class,
                                                 num_videos=cfg.val.num_videos,
                                                 video_number_to_use=cfg.val.video_number_to_use,
-                                                multiple_videos=cfg.val.multiple_videos)
-    return train_dataset, val_dataset, [(train_w, train_h), (val_w, val_h)]
+                                                multiple_videos=cfg.val.multiple_videos,
+                                                rgb_transform_fn=rgb_val_transform,
+                                                rgb_new_shape=(val_h, val_w),
+                                                rgb_pad_value=val_pad_values,
+                                                target_pad_value=target_val_pad_values,
+                                                rgb_plot_transform=rgb_plot_train_transform,
+                                                common_transform=common_transform,
+                                                using_replay_compose=cfg.using_replay_compose)
+    return train_dataset, val_dataset
 
 
-def setup_single_dataset_instance(cfg, transform, video_class, num_videos, video_number_to_use, multiple_videos):
+def setup_single_dataset_instance(cfg, transform, video_class, num_videos, video_number_to_use, multiple_videos,
+                                  rgb_transform_fn, rgb_new_shape, rgb_pad_value, target_pad_value,
+                                  rgb_plot_transform, common_transform, using_replay_compose):
     dataset = SDDFrameAndAnnotationDataset(
         root=cfg.root, video_label=getattr(SDDVideoClasses, video_class),
         num_videos=num_videos, transform=transform if cfg.data_augmentation else None,
@@ -82,7 +134,14 @@ def setup_single_dataset_instance(cfg, transform, video_class, num_videos, video
         seg_map_objectness_threshold=cfg.seg_map_objectness_threshold,
         meta_label=getattr(SDDVideoDatasets, video_class),
         heatmap_region_limit_threshold=cfg.heatmap_region_limit_threshold,
-        downscale_only_target_maps=cfg.downscale_only_target_maps
+        downscale_only_target_maps=cfg.downscale_only_target_maps,
+        rgb_transform=rgb_transform_fn,
+        rgb_new_shape=rgb_new_shape,
+        rgb_pad_value=rgb_pad_value,
+        target_pad_value=target_pad_value,
+        rgb_plot_transform=rgb_plot_transform,
+        common_transform=common_transform,
+        using_replay_compose=using_replay_compose
     )
     return dataset
 
@@ -95,14 +154,37 @@ def setup_transforms_for_single_instance(train_h, train_w, val_h, val_w):
 
 def setup_single_transform(height, width):
     transform = A.Compose(
-        [A.Resize(height=height, width=width),
-         A.RandomBrightnessContrast(p=0.3),
-         # A.RandomRotate90(p=0.3),  # possible on square images
-         A.VerticalFlip(p=0.3),
-         A.HorizontalFlip(p=0.3)],
+        [A.Resize(height=height, width=width)],
+        # A.RandomBrightnessContrast(p=0.3),
+        # A.RandomRotate90(p=0.3),  # possible on square images
+        # A.VerticalFlip(p=0.3),
+        # A.HorizontalFlip(p=0.3)],
         bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']),
         keypoint_params=A.KeypointParams(format='xy')
     )
+    return transform
+
+
+def setup_single_common_transform(use_replay_compose=False):
+    if use_replay_compose:
+        transform = A.ReplayCompose(
+            [A.RandomBrightnessContrast(p=0.3),
+             A.VerticalFlip(p=0.3),
+             A.HorizontalFlip(p=0.3)],
+            bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']),
+            keypoint_params=A.KeypointParams(format='xy')
+        )
+    else:
+        transform = A.Compose(
+            [A.RandomBrightnessContrast(p=0.3),
+             A.VerticalFlip(p=0.3),
+             A.HorizontalFlip(p=0.3)],
+            bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']),
+            keypoint_params=A.KeypointParams(format='xy'),
+            additional_targets={'image0': 'image',
+                                'keypoints0': 'keypoints',
+                                'bboxes0': 'bboxes'}
+        )
     return transform
 
 
@@ -177,7 +259,7 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
 def train(cfg):
     logger.info(f'Setting up DataLoader and Model...')
 
-    train_dataset, val_dataset, ((train_w, train_h), (val_w, val_h)) = setup_dataset(cfg)
+    train_dataset, val_dataset = setup_dataset(cfg)
 
     network_type = getattr(model_zoo, cfg.postion_map_network_type)
 
@@ -202,7 +284,7 @@ def train(cfg):
 def overfit(cfg):
     logger.info(f'Overfit - Setting up DataLoader and Model...')
 
-    train_dataset, val_dataset, ((train_w, train_h), (val_w, val_h)) = setup_dataset(cfg)
+    train_dataset, val_dataset = setup_dataset(cfg)
 
     network_type = getattr(model_zoo, cfg.overfit.postion_map_network_type)
     if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation',

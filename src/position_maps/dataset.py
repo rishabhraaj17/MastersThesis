@@ -1,11 +1,15 @@
 import os
-from typing import Optional, Callable, Tuple
+from typing import Optional, Callable, Tuple, Sequence
 
+import albumentations as A
 import numpy as np
 import pandas as pd
 import torch
 import torchvision
+from albumentations import normalize_bboxes, denormalize_bboxes
+from albumentations.augmentations.functional import bbox_hflip, keypoint_hflip, bbox_vflip, keypoint_vflip
 from omegaconf import ListConfig
+from torch.nn.functional import pad
 from torch.utils.data import Dataset
 from torchvision.datasets.folder import make_dataset
 from torchvision.datasets.utils import list_dir
@@ -13,7 +17,7 @@ from torchvision.datasets.video_utils import VideoClips
 
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from average_image.utils import SDDMeta
-from utils import generate_position_map, plot_samples
+from utils import generate_position_map, plot_samples, scale_annotations
 from unsupervised_tp_0.dataset import sort_list
 
 
@@ -27,7 +31,11 @@ class SDDFrameAndAnnotationDataset(Dataset):
             use_generated: bool = False, sigma: int = 10, plot: bool = False,
             desired_size: Tuple[int, int] = None, heatmap_shape: Tuple[int, int] = None,
             return_combined_heatmaps: bool = True, seg_map_objectness_threshold: float = 0.5,
-            heatmap_region_limit_threshold: float = 0.4, downscale_only_target_maps: bool = True):
+            heatmap_region_limit_threshold: float = 0.4, downscale_only_target_maps: bool = True,
+            rgb_transform: Optional[Callable] = None, rgb_new_shape: Tuple[int, int] = None,
+            rgb_pad_value: Sequence[int] = None, target_pad_value: Sequence[int] = None,
+            rgb_plot_transform: Optional[Callable] = None, common_transform: Optional[Callable] = None,
+            using_replay_compose: bool = False):
         super(SDDFrameAndAnnotationDataset, self).__init__()
 
         _mid_path = video_label.value
@@ -124,6 +132,12 @@ class SDDFrameAndAnnotationDataset(Dataset):
         self.video_clips_metadata = video_clips.metadata
         self.video_clips = video_clips
         self.transform = transform
+        self.rgb_transform = rgb_transform
+        self.rgb_new_shape = rgb_new_shape
+        self.rgb_pad_value = rgb_pad_value
+        self.target_pad_value = target_pad_value
+        self.common_transform = common_transform
+        self.rgb_plot_transform = rgb_plot_transform
 
         meta_file = 'H_SDD.txt'
         self.sdd_meta = SDDMeta(root + meta_file)
@@ -141,6 +155,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
         self.meta_label = meta_label
         self.heatmap_region_limit_threshold = heatmap_region_limit_threshold
         self.downscale_only_target_maps = downscale_only_target_maps
+        self.using_replay_compose = using_replay_compose
 
     @property
     def metadata(self):
@@ -188,27 +203,23 @@ class SDDFrameAndAnnotationDataset(Dataset):
             out = self.transform(image=video.squeeze(0).permute(1, 2, 0).numpy(), keypoints=bbox_centers,
                                  bboxes=boxes, class_labels=class_labels)
             img = out['image']
-            boxes = np.stack(out['bboxes'])
-            bbox_centers = np.stack(out['keypoints'])
+            target_boxes = np.stack(out['bboxes'])
+            target_bbox_centers = np.stack(out['keypoints'])
 
-            if not self.downscale_only_target_maps:
-                video = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
-                new_shape = (video.shape[-2], video.shape[-1])
+            # if not self.downscale_only_target_maps:
+            #     video = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
+            #     new_shape = (video.shape[-2], video.shape[-1])
 
-            downscale_shape = (img.shape[0], img.shape[1])
+            img = pad(torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0), self.target_pad_value)
+            downscale_shape = (img.shape[-2], img.shape[-1])
 
         heat_mask = torch.from_numpy(
-            generate_position_map(list(downscale_shape), bbox_centers, sigma=self.sigma,
+            generate_position_map(list(downscale_shape), target_bbox_centers, sigma=self.sigma,
                                   heatmap_shape=self.heatmap_shape,
                                   return_combined=self.return_combined_heatmaps, hw_mode=True))
+        # heat_mask = pad(heat_mask.unsqueeze(0).unsqueeze(0), self.target_pad_value).squeeze()
 
-        meta = {'boxes': boxes, 'bbox_centers': bbox_centers,
-                'track_idx': track_idx, 'item': item,
-                'original_shape': original_shape, 'new_shape': new_shape,
-                'downscale_shape': downscale_shape,
-                'video_idx': video_idx}
-
-        key_points = torch.round(torch.from_numpy(bbox_centers)).long()
+        key_points = torch.round(torch.from_numpy(target_bbox_centers)).long()
         position_map = heat_mask.clone().clamp(min=0, max=1).int().float()
 
         class_maps = heat_mask.clone()
@@ -224,9 +235,123 @@ class SDDFrameAndAnnotationDataset(Dataset):
         heat_mask = torch.where(heat_mask > self.heatmap_region_limit_threshold, heat_mask, 0.0)
         heat_mask = heat_mask.float()
 
+        if self.rgb_transform is not None:
+            # video = self.rgb_transform(video, self.rgb_new_shape, self.rgb_pad_value)
+            out = self.rgb_transform(image=video.squeeze(0).permute(1, 2, 0).numpy(), keypoints=bbox_centers,
+                                     bboxes=boxes, class_labels=class_labels)
+            img = out['image']
+            rgb_boxes = np.stack(out['bboxes'])
+            rgb_bbox_centers = np.stack(out['keypoints'])
+
+            video = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
+            # mid_shape = (video.shape[-2], video.shape[-1])
+
+            # rgb_boxes, rgb_bbox_centers = scale_annotations(rgb_boxes, mid_shape, new_shape)
+            if self.plot and self.rgb_plot_transform is not None:
+                out = self.rgb_plot_transform(image=video.squeeze(0).permute(1, 2, 0).numpy(),
+                                              keypoints=rgb_bbox_centers,
+                                              bboxes=rgb_boxes, class_labels=class_labels)
+                rgb_boxes = np.stack(out['bboxes'])
+                rgb_bbox_centers = np.stack(out['keypoints'])
+
+        if self.common_transform is not None:
+            inside_boxes_idx = [b for b, box in enumerate(rgb_boxes)
+                                if (box[0] > 0 and box[2] < video.shape[-1])
+                                and (box[1] > 0 and box[3] < video.shape[-2])]
+            rgb_boxes = rgb_boxes[inside_boxes_idx]
+            rgb_bbox_centers = rgb_bbox_centers[inside_boxes_idx]
+
+            target_boxes = target_boxes[inside_boxes_idx]
+            target_bbox_centers = target_bbox_centers[inside_boxes_idx]
+            class_labels = ['object'] * rgb_boxes.shape[0]
+            if self.using_replay_compose:
+                out = self.common_transform(image=video.squeeze(0).permute(1, 2, 0).numpy(), keypoints=rgb_bbox_centers,
+                                            bboxes=rgb_boxes, class_labels=class_labels)
+                img = out['image']
+                video = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
+                rgb_boxes = np.stack(out['bboxes'])
+                rgb_bbox_centers = np.stack(out['keypoints'])
+
+                out_mask = A.ReplayCompose.replay(out['replay'], image=heat_mask.numpy())
+                img = out_mask['image']
+                heat_mask = torch.from_numpy(img)
+
+                # adapt
+                if out['replay']['applied']:
+                    # in_params = {'cols': heat_mask.shape[1], 'rows': heat_mask.shape[0]}
+                    kp_extra = np.zeros((target_bbox_centers.shape[0], 2))
+                    target_bbox_centers = np.hstack((target_bbox_centers, kp_extra))
+
+                    boxes_adjusted = []
+                    target_boxes = normalize_bboxes(
+                        target_boxes, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
+
+                    all_transforms = {k: v for k, v in out['replay'].items()
+                                      if k not in ["__class_fullname__", "applied", "params"]}
+                    for transform in all_transforms['transforms']:
+                        if transform['applied'] and transform['__class_fullname__'] != 'albumentations.augmentations.' \
+                                                                                       'transforms.' \
+                                                                                       'RandomBrightnessContrast':
+                            class_name = str.split(transform['__class_fullname__'], '.')[-1]
+                            if class_name == 'HorizontalFlip':
+                                # target_boxes = normalize_bboxes(
+                                #     target_boxes, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
+
+                                target_boxes = [bbox_hflip(box, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
+                                                for box in target_boxes]
+                                target_bbox_centers = [keypoint_hflip(
+                                    kp, rows=heat_mask.shape[0], cols=heat_mask.shape[1]) for kp in target_bbox_centers]
+
+                                # boxes_adjusted.append(True)
+                            elif class_name == 'VerticalFlip':
+                                # target_boxes = normalize_bboxes(
+                                #     target_boxes, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
+
+                                target_boxes = [bbox_vflip(box, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
+                                                for box in target_boxes]
+                                target_bbox_centers = [keypoint_vflip(
+                                    kp, rows=heat_mask.shape[0], cols=heat_mask.shape[1]) for kp in target_bbox_centers]
+
+                                # boxes_adjusted.append(True)
+                            else:
+                                raise NotImplementedError
+
+                    # if len(boxes_adjusted) != 0 and any(boxes_adjusted):
+                    target_boxes = denormalize_bboxes(
+                            target_boxes, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
+
+                    target_boxes = np.stack(target_boxes)
+                    target_bbox_centers = np.stack(target_bbox_centers)
+            else:
+                out = self.common_transform(image=video.squeeze(0).permute(1, 2, 0).numpy(),
+                                            image0=heat_mask.numpy(),
+                                            keypoints=rgb_bbox_centers,
+                                            keypoints0=target_bbox_centers,
+                                            bboxes=rgb_boxes,
+                                            bboxes0=target_boxes,
+                                            class_labels=class_labels)
+
+                video = torch.from_numpy(out['image']).permute(2, 0, 1).unsqueeze(0)
+                rgb_boxes = np.stack(out['bboxes'])
+                rgb_bbox_centers = np.stack(out['keypoints'])
+
+                heat_mask = torch.from_numpy(out['image0'])
+                target_boxes = np.stack(out['bboxes0'])
+                target_bbox_centers = np.stack(out['keypoints0'])
+
+        video = pad(video, self.rgb_pad_value)
+        new_shape = (video.shape[-2], video.shape[-1])
+
         if self.plot:
-            plot_samples(video.squeeze().permute(1, 2, 0), heat_mask, boxes, bbox_centers, plot_boxes=True,
-                         additional_text=f'Frame Number: {item} | Video Idx: {video_idx}')
+            plot_samples(img=video.squeeze().permute(1, 2, 0), mask=heat_mask, boxes=target_boxes,
+                         box_centers=target_bbox_centers, rgb_boxes=rgb_boxes, rgb_box_centers=rgb_bbox_centers,
+                         plot_boxes=True, additional_text=f'Frame Number: {item} | Video Idx: {video_idx}')
+
+        meta = {'boxes': target_boxes, 'bbox_centers': target_bbox_centers,
+                'track_idx': track_idx, 'item': item,
+                'original_shape': original_shape, 'new_shape': new_shape,
+                'downscale_shape': downscale_shape,
+                'video_idx': video_idx}
 
         return video, heat_mask, position_map, distribution_map, class_maps, meta
 
