@@ -285,7 +285,7 @@ def copy_filtered_annotations(root_path, other_root_path):
     print("Done!")
 
 
-def get_each_dims(root_path, desired_ratio=0.25):
+def get_each_dims(root_path, desired_ratio=0.25, save_csv=False):
     filtered_generated_path = root_path + '/annotations'
     meta = SDDMeta(root_path + '/H_SDD.txt')
     v_clazzes = [SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.DEATH_CIRCLE,
@@ -322,8 +322,34 @@ def get_each_dims(root_path, desired_ratio=0.25):
                                  'RESCALED_SHAPE': new_shape_list})
     portrait_df = df[df.ORIENTATION == "Portrait"]
     landscape_df = df[df.ORIENTATION == "Landscape"]
-    df.to_csv(f"{root_path}/shapes_summary.csv", index=False)
-    print("Done!")
+    if save_csv:
+        df.to_csv(f"{root_path}/shapes_summary.csv", index=False)
+    return df, (portrait_df, landscape_df)
+
+
+def get_metadata_for_videos(root_path, video_classes, video_numbers, desired_ratio=0.25):
+    df, _ = get_each_dims(root_path=root_path, desired_ratio=desired_ratio, save_csv=False)
+
+    filtered_dfs = []
+    for idx, v_clz in enumerate(video_classes):
+        filtered_dfs.append(df[(df.CLASS == v_clz) & df.NUMBER.isin(video_numbers[idx])])
+
+    return pd.concat(filtered_dfs)
+
+
+def get_scaled_shapes_with_pad_values(root_path, video_classes, video_numbers, desired_ratio=0.25):
+    df = get_metadata_for_videos(root_path=root_path, video_classes=video_classes,
+                                 video_numbers=video_numbers, desired_ratio=desired_ratio)
+
+    max_shape = df.RESCALED_SHAPE.max()
+    pad_params_list = []
+    for idx, row in df.iterrows():
+        pad_params = get_pad_parameters_with_shapes(original_shape=row.RESCALED_SHAPE, desired_shape=max_shape)
+        pad_params_list.append(pad_params)
+
+    # df.insert(loc=-1, column='PAD_VALUES', value=pad_params_list, allow_duplicates=True)
+    df['PAD_VALUES'] = pad_params_list
+    return df
 
 
 def resize_and_pad(root_path, video_class, video_number, desired_shape, plot=False):
@@ -332,12 +358,7 @@ def resize_and_pad(root_path, video_class, video_number, desired_shape, plot=Fal
     img = Image.open(im_path)
     img_tensor = to_tensor(img)
 
-    # Pad img_tensor shape to the desired_shape
-    desired_height, desired_width = desired_shape
-    diff_h = desired_height - img_tensor.shape[-2]
-    diff_w = desired_width - img_tensor.shape[-1]
-
-    out = pad(img_tensor, [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2])
+    out = pad(img_tensor, get_pad_parameters(img_tensor=img_tensor, desired_shape=desired_shape))
 
     if plot:
         fig, axs = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(12, 10))
@@ -361,6 +382,17 @@ def get_pad_parameters(img_tensor, desired_shape):
     diff_w = desired_width - img_tensor.shape[-1]
 
     return [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2]
+
+
+def get_pad_parameters_with_shapes(original_shape, desired_shape):
+    # Pad img_tensor shape to the desired_shape
+    desired_height, desired_width = desired_shape
+    original_height, original_width = original_shape
+    diff_h = desired_height - original_height
+    diff_w = desired_width - original_width
+
+    return [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2]
+
 
 def scale_annotations(bbox, original_shape, new_shape):
     x_min, y_min, x_max, y_max = bbox[:, 0], bbox[:, 1], bbox[:, 2], bbox[:, 3]
@@ -462,9 +494,15 @@ def overlay_images(transformer, background, overlay):
 
 if __name__ == '__main__':
     # get_each_dims('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD', 0.05)
-    resize_and_pad('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD',
-                   video_class=SDDVideoClasses.LITTLE, video_number=2,
-                   desired_shape=(2002, 1445), plot=True)
+    get_scaled_shapes_with_pad_values(
+        '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD',
+        video_classes=[SDDVideoClasses.LITTLE.name, SDDVideoClasses.GATES.name],
+        video_numbers=[[0, 1], [0, 2, 4]],
+        desired_ratio=0.05)
+
+    # resize_and_pad('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD',
+    #                video_class=SDDVideoClasses.LITTLE, video_number=2,
+    #                desired_shape=(2002, 1445), plot=True)
     s = [480, 320]
     b_centers = [[50, 50], [76, 82], [12, 67], [198, 122]]
     out1 = generate_position_map(s, b_centers, sigma=5)
