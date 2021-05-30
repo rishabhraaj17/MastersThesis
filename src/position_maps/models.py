@@ -33,7 +33,7 @@ class UNet(nn.Module):
 
     Args:
         num_classes: Number of output classes required
-        desired_output_scale_ratio: Out shape desired ratio
+        desired_output_shape: Out shape of model
         input_channels: Number of channels in input images (default 3)
         num_layers: Number of layers in each side of U-net (default 5)
         num_additional_double_conv_layers: Number of layers before U-net starts (default 0)
@@ -45,7 +45,7 @@ class UNet(nn.Module):
             self,
             config: DictConfig,
             num_classes: int,
-            desired_output_scale_ratio: float = None,
+            desired_output_shape: Tuple[int, int] = None,
             input_channels: int = 3,
             num_layers: int = 5,
             num_additional_double_conv_layers: int = 0,
@@ -59,7 +59,7 @@ class UNet(nn.Module):
         super().__init__()
         self.num_layers = num_layers
         self.num_additional_double_conv_layers = num_additional_double_conv_layers
-        self.desired_output_scale_ratio = desired_output_scale_ratio  # unused
+        self.desired_output_shape = desired_output_shape  # unused
         self.config = config
         self.sdd_meta = SDDMeta(self.config.root + 'H_SDD.txt')
 
@@ -82,7 +82,7 @@ class UNet(nn.Module):
 
         self.layers = nn.ModuleList(layers)
 
-    def forward(self, x, desired_ratio=None):
+    def forward(self, x):
         xi = [self.layers[0](x)]
         # Extra DownScale
         for layer in self.layers[1:self.num_additional_double_conv_layers + 1]:
@@ -96,13 +96,8 @@ class UNet(nn.Module):
             xi[-1] = layer(xi[-1], xi[-2 - i])
 
         up_scaled = xi[-1]
-        if desired_ratio is not None:
-            w, h = self.sdd_meta.get_new_scale_from_tensor(img=x,
-                                                           dataset=getattr(SDDVideoDatasets,
-                                                                           self.config.video_class),
-                                                           sequence=self.config.train.video_number_to_use,
-                                                           desired_ratio=desired_ratio)
-            up_scaled = F.upsample_bilinear(up_scaled, size=(h, w))
+        if self.desired_output_shape is not None:
+            up_scaled = F.interpolate(up_scaled, size=self.desired_output_shape)
         out = self.layers[-1](up_scaled)
         return out
 
@@ -176,7 +171,7 @@ class Up(nn.Module):
 
 class PositionMapUNetBase(LightningModule):
     def __init__(self, config: 'DictConfig', train_dataset: 'Dataset', val_dataset: 'Dataset',
-                 desired_output_scale_ratio: float = None, loss_function: 'nn.Module' = None,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: 'nn.Module' = None,
                  collate_fn: Optional[Callable] = None):
         super(PositionMapUNetBase, self).__init__()
         self.config = config
@@ -187,7 +182,7 @@ class PositionMapUNetBase(LightningModule):
                           num_additional_double_conv_layers=self.config.unet.num_additional_double_conv_layers,
                           features_start=self.config.unet.features_start,
                           bilinear=self.config.unet.bilinear,
-                          desired_output_scale_ratio=desired_output_scale_ratio,
+                          desired_output_shape=desired_output_shape,
                           config=self.config)
 
         self.train_dataset = train_dataset
@@ -195,14 +190,14 @@ class PositionMapUNetBase(LightningModule):
 
         self.loss_function = loss_function
         self.collate_fn = collate_fn
-        self.desired_output_scale_ratio = desired_output_scale_ratio
+        self.desired_output_shape = desired_output_shape
 
         self.save_hyperparameters(self.config)
 
         self.init_weights()
 
-    def forward(self, x, desired_ratio=None):
-        return self.u_net(x, desired_ratio)
+    def forward(self, x):
+        return self.u_net(x)
 
     def _one_step(self, batch):
         return NotImplementedError
@@ -263,11 +258,11 @@ class PositionMapUNetBase(LightningModule):
 
 class PositionMapUNetHeatmapRegression(PositionMapUNetBase):
     def __init__(self, config: 'DictConfig', train_dataset: 'Dataset', val_dataset: 'Dataset',
-                 desired_output_scale_ratio: float = None, loss_function: 'nn.Module' = MSELoss(),
+                 desired_output_shape: Tuple[int, int] = None, loss_function: 'nn.Module' = MSELoss(),
                  collate_fn: Optional[Callable] = None):
         super(PositionMapUNetHeatmapRegression, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_function,
-            collate_fn=collate_fn, desired_output_scale_ratio=desired_output_scale_ratio)
+            collate_fn=collate_fn, desired_output_shape=desired_output_shape)
 
     def _one_step(self, batch):
         frames, heat_masks, _, _, _, _ = batch
@@ -278,12 +273,12 @@ class PositionMapUNetHeatmapRegression(PositionMapUNetBase):
 
 class PositionMapUNetPositionMapSegmentation(PositionMapUNetBase):
     def __init__(self, config: 'DictConfig', train_dataset: 'Dataset', val_dataset: 'Dataset',
-                 desired_output_scale_ratio: float = None,
+                 desired_output_shape: Tuple[int, int] = None,
                  loss_function: 'nn.Module' = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean'),
                  collate_fn: Optional[Callable] = None):
         super(PositionMapUNetPositionMapSegmentation, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_function,
-            collate_fn=collate_fn, desired_output_scale_ratio=desired_output_scale_ratio)
+            collate_fn=collate_fn, desired_output_shape=desired_output_shape)
 
     def _one_step(self, batch):
         frames, _, position_map, _, _, _ = batch
@@ -294,12 +289,12 @@ class PositionMapUNetPositionMapSegmentation(PositionMapUNetBase):
 
 class PositionMapUNetClassMapSegmentation(PositionMapUNetBase):
     def __init__(self, config: 'DictConfig', train_dataset: 'Dataset', val_dataset: 'Dataset',
-                 desired_output_scale_ratio: float = None,
+                 desired_output_shape: Tuple[int, int] = None,
                  loss_function: 'nn.Module' = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean'),
                  collate_fn: Optional[Callable] = None):
         super(PositionMapUNetClassMapSegmentation, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_function,
-            collate_fn=collate_fn, desired_output_scale_ratio=desired_output_scale_ratio)
+            collate_fn=collate_fn, desired_output_shape=desired_output_shape)
 
     def _one_step(self, batch):
         frames, _, _, _, class_maps, _ = batch
@@ -310,12 +305,12 @@ class PositionMapUNetClassMapSegmentation(PositionMapUNetBase):
 
 class PositionMapUNetHeatmapSegmentation(PositionMapUNetBase):
     def __init__(self, config: 'DictConfig', train_dataset: 'Dataset', val_dataset: 'Dataset',
-                 desired_output_scale_ratio: float = None,
+                 desired_output_shape: Tuple[int, int] = None,
                  loss_function: 'nn.Module' = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean'),
                  collate_fn: Optional[Callable] = None):
         super(PositionMapUNetHeatmapSegmentation, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_function,
-            collate_fn=collate_fn, desired_output_scale_ratio=desired_output_scale_ratio)
+            collate_fn=collate_fn, desired_output_shape=desired_output_shape)
 
     def _one_step(self, batch):
         frames, heat_masks, _, _, _, _ = batch
@@ -326,12 +321,12 @@ class PositionMapUNetHeatmapSegmentation(PositionMapUNetBase):
 
 class PositionMapStackedHourGlass(PositionMapUNetBase):
     def __init__(self, config: 'DictConfig', train_dataset: 'Dataset', val_dataset: 'Dataset',
-                 desired_output_scale_ratio: float = None,
+                 desired_output_shape: Tuple[int, int] = None,
                  loss_function: 'nn.Module' = BinaryFocalLossWithLogits(alpha=0.8, reduction='mean'),
                  collate_fn: Optional[Callable] = None):
         super(PositionMapStackedHourGlass, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_function,
-            collate_fn=collate_fn, desired_output_scale_ratio=desired_output_scale_ratio)
+            collate_fn=collate_fn, desired_output_shape=desired_output_shape)
         self.network = PoseNet(num_stack=self.config.stacked_hourglass.num_stacks,
                                input_channels=self.config.stacked_hourglass.input_channels,
                                num_classes=self.config.stacked_hourglass.num_classes,

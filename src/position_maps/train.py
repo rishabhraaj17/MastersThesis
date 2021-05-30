@@ -56,7 +56,7 @@ def setup_dataset(cfg):
         video_numbers=[[cfg.train.video_number_to_use], [cfg.val.video_number_to_use]],
         desired_ratio=cfg.desired_pixel_to_meter_ratio_rgb)
 
-    df_target, _ = get_scaled_shapes_with_pad_values(
+    df_target, target_max_shape = get_scaled_shapes_with_pad_values(
         root_path=cfg.root, video_classes=[cfg.video_class, cfg.video_class],
         video_numbers=[[cfg.train.video_number_to_use], [cfg.val.video_number_to_use]],
         desired_ratio=cfg.desired_pixel_to_meter_ratio)
@@ -113,7 +113,7 @@ def setup_dataset(cfg):
                                                 rgb_plot_transform=rgb_plot_train_transform,
                                                 common_transform=common_transform,
                                                 using_replay_compose=cfg.using_replay_compose)
-    return train_dataset, val_dataset
+    return train_dataset, val_dataset, target_max_shape
 
 
 def setup_single_dataset_instance(cfg, transform, video_class, num_videos, video_number_to_use, multiple_videos,
@@ -259,7 +259,7 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
 def train(cfg):
     logger.info(f'Setting up DataLoader and Model...')
 
-    train_dataset, val_dataset = setup_dataset(cfg)
+    train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
 
     network_type = getattr(model_zoo, cfg.postion_map_network_type)
 
@@ -270,7 +270,7 @@ def train(cfg):
         loss_fn = MSELoss()
 
     model = network_type(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
-                         loss_function=loss_fn, collate_fn=heat_map_collate_fn)
+                         loss_function=loss_fn, collate_fn=heat_map_collate_fn, desired_output_shape=target_max_shape)
 
     logger.info(f'Setting up Trainer...')
 
@@ -284,7 +284,7 @@ def train(cfg):
 def overfit(cfg):
     logger.info(f'Overfit - Setting up DataLoader and Model...')
 
-    train_dataset, val_dataset = setup_dataset(cfg)
+    train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
 
     network_type = getattr(model_zoo, cfg.overfit.postion_map_network_type)
     if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation',
@@ -296,7 +296,7 @@ def overfit(cfg):
         loss_fn = MSELoss()
 
     model = network_type(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
-                         loss_function=loss_fn, collate_fn=heat_map_collate_fn)
+                         loss_function=loss_fn, collate_fn=heat_map_collate_fn, desired_output_shape=target_max_shape)
     model.to(cfg.device)
 
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay, amsgrad=cfg.amsgrad)
