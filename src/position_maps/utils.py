@@ -11,7 +11,8 @@ import torch
 from PIL import Image
 from matplotlib import pyplot as plt, patches, lines
 from scipy.stats import multivariate_normal
-from torch.nn.functional import interpolate
+from torch.nn.functional import interpolate, pad
+from torchvision.transforms.functional import to_tensor
 from tqdm import tqdm
 
 from average_image.bbox_utils import _process_scale, cal_centers
@@ -325,6 +326,42 @@ def get_each_dims(root_path, desired_ratio=0.25):
     print("Done!")
 
 
+def resize_and_pad(root_path, video_class, video_number, desired_shape, plot=False):
+    annotation_root_path = root_path + '/annotations'
+    im_path = f"{annotation_root_path}/{video_class.value}/video{video_number}/reference.jpg"
+    img = Image.open(im_path)
+    img_tensor = to_tensor(img)
+
+    # Pad img_tensor shape to the desired_shape
+    desired_height, desired_width = desired_shape
+    diff_h = desired_height - img_tensor.shape[-2]
+    diff_w = desired_width - img_tensor.shape[-1]
+
+    out = pad(img_tensor, [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2])
+
+    if plot:
+        fig, axs = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(12, 10))
+        img_axis, padded_img_axis = axs
+
+        img_axis.imshow(img_tensor.permute(1, 2, 0))
+        padded_img_axis.imshow(out.permute(1, 2, 0))
+
+        img_axis.set_title('Image')
+        padded_img_axis.set_title('Padded Image')
+
+        plt.show()
+
+    return out
+
+
+def get_pad_parameters(img_tensor, desired_shape):
+    # Pad img_tensor shape to the desired_shape
+    desired_height, desired_width = desired_shape
+    diff_h = desired_height - img_tensor.shape[-2]
+    diff_w = desired_width - img_tensor.shape[-1]
+
+    return [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2]
+
 def scale_annotations(bbox, original_shape, new_shape):
     x_min, y_min, x_max, y_max = bbox[:, 0], bbox[:, 1], bbox[:, 2], bbox[:, 3]
     x, y, w, h = x_min, y_min, (x_max - x_min), (y_max - y_min)
@@ -424,7 +461,10 @@ def overlay_images(transformer, background, overlay):
 
 
 if __name__ == '__main__':
-    get_each_dims('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD', 0.05)
+    # get_each_dims('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD', 0.05)
+    resize_and_pad('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD',
+                   video_class=SDDVideoClasses.LITTLE, video_number=2,
+                   desired_shape=(2002, 1445), plot=True)
     s = [480, 320]
     b_centers = [[50, 50], [76, 82], [12, 67], [198, 122]]
     out1 = generate_position_map(s, b_centers, sigma=5)
