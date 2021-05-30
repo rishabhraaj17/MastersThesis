@@ -206,10 +206,6 @@ class SDDFrameAndAnnotationDataset(Dataset):
             target_boxes = np.stack(out['bboxes'])
             target_bbox_centers = np.stack(out['keypoints'])
 
-            # if not self.downscale_only_target_maps:
-            #     video = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
-            #     new_shape = (video.shape[-2], video.shape[-1])
-
             img = pad(torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0), self.target_pad_value)
             downscale_shape = (img.shape[-2], img.shape[-1])
 
@@ -217,7 +213,6 @@ class SDDFrameAndAnnotationDataset(Dataset):
             generate_position_map(list(downscale_shape), target_bbox_centers, sigma=self.sigma,
                                   heatmap_shape=self.heatmap_shape,
                                   return_combined=self.return_combined_heatmaps, hw_mode=True))
-        # heat_mask = pad(heat_mask.unsqueeze(0).unsqueeze(0), self.target_pad_value).squeeze()
 
         key_points = torch.round(torch.from_numpy(target_bbox_centers)).long()
         position_map = heat_mask.clone().clamp(min=0, max=1).int().float()
@@ -236,7 +231,6 @@ class SDDFrameAndAnnotationDataset(Dataset):
         heat_mask = heat_mask.float()
 
         if self.rgb_transform is not None:
-            # video = self.rgb_transform(video, self.rgb_new_shape, self.rgb_pad_value)
             out = self.rgb_transform(image=video.squeeze(0).permute(1, 2, 0).numpy(), keypoints=bbox_centers,
                                      bboxes=boxes, class_labels=class_labels)
             img = out['image']
@@ -244,15 +238,6 @@ class SDDFrameAndAnnotationDataset(Dataset):
             rgb_bbox_centers = np.stack(out['keypoints'])
 
             video = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
-            # mid_shape = (video.shape[-2], video.shape[-1])
-
-            # rgb_boxes, rgb_bbox_centers = scale_annotations(rgb_boxes, mid_shape, new_shape)
-            if self.plot and self.rgb_plot_transform is not None:
-                out = self.rgb_plot_transform(image=video.squeeze(0).permute(1, 2, 0).numpy(),
-                                              keypoints=rgb_bbox_centers,
-                                              bboxes=rgb_boxes, class_labels=class_labels)
-                rgb_boxes = np.stack(out['bboxes'])
-                rgb_bbox_centers = np.stack(out['keypoints'])
 
         if self.common_transform is not None:
             inside_boxes_idx = [b for b, box in enumerate(rgb_boxes)
@@ -264,6 +249,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
             target_boxes = target_boxes[inside_boxes_idx]
             target_bbox_centers = target_bbox_centers[inside_boxes_idx]
             class_labels = ['object'] * rgb_boxes.shape[0]
+
             if self.using_replay_compose:
                 out = self.common_transform(image=video.squeeze(0).permute(1, 2, 0).numpy(), keypoints=rgb_bbox_centers,
                                             bboxes=rgb_boxes, class_labels=class_labels)
@@ -276,13 +262,10 @@ class SDDFrameAndAnnotationDataset(Dataset):
                 img = out_mask['image']
                 heat_mask = torch.from_numpy(img)
 
-                # adapt
                 if out['replay']['applied']:
-                    # in_params = {'cols': heat_mask.shape[1], 'rows': heat_mask.shape[0]}
                     kp_extra = np.zeros((target_bbox_centers.shape[0], 2))
                     target_bbox_centers = np.hstack((target_bbox_centers, kp_extra))
 
-                    boxes_adjusted = []
                     target_boxes = normalize_bboxes(
                         target_boxes, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
 
@@ -294,29 +277,18 @@ class SDDFrameAndAnnotationDataset(Dataset):
                                                                                        'RandomBrightnessContrast':
                             class_name = str.split(transform['__class_fullname__'], '.')[-1]
                             if class_name == 'HorizontalFlip':
-                                # target_boxes = normalize_bboxes(
-                                #     target_boxes, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
-
                                 target_boxes = [bbox_hflip(box, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
                                                 for box in target_boxes]
                                 target_bbox_centers = [keypoint_hflip(
                                     kp, rows=heat_mask.shape[0], cols=heat_mask.shape[1]) for kp in target_bbox_centers]
-
-                                # boxes_adjusted.append(True)
                             elif class_name == 'VerticalFlip':
-                                # target_boxes = normalize_bboxes(
-                                #     target_boxes, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
-
                                 target_boxes = [bbox_vflip(box, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
                                                 for box in target_boxes]
                                 target_bbox_centers = [keypoint_vflip(
                                     kp, rows=heat_mask.shape[0], cols=heat_mask.shape[1]) for kp in target_bbox_centers]
-
-                                # boxes_adjusted.append(True)
                             else:
                                 raise NotImplementedError
 
-                    # if len(boxes_adjusted) != 0 and any(boxes_adjusted):
                     target_boxes = denormalize_bboxes(
                             target_boxes, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
 
@@ -339,15 +311,26 @@ class SDDFrameAndAnnotationDataset(Dataset):
                 target_boxes = np.stack(out['bboxes0'])
                 target_bbox_centers = np.stack(out['keypoints0'])
 
-        video = pad(video, self.rgb_pad_value)
-        new_shape = (video.shape[-2], video.shape[-1])
-
-        if self.plot:
+        if self.plot and self.rgb_plot_transform is not None:
+            out = self.rgb_plot_transform(image=video.squeeze(0).permute(1, 2, 0).numpy(),
+                                          keypoints=rgb_bbox_centers,
+                                          bboxes=rgb_boxes, class_labels=class_labels)
+            plot_samples(img=out['image'], mask=heat_mask, boxes=target_boxes,
+                         box_centers=target_bbox_centers, rgb_boxes=np.stack(out['bboxes']),
+                         rgb_box_centers=np.stack(out['keypoints']),
+                         plot_boxes=True, additional_text=f'Frame Number: {item} | Video Idx: {video_idx}')
+        elif self.plot:
             plot_samples(img=video.squeeze().permute(1, 2, 0), mask=heat_mask, boxes=target_boxes,
                          box_centers=target_bbox_centers, rgb_boxes=rgb_boxes, rgb_box_centers=rgb_bbox_centers,
                          plot_boxes=True, additional_text=f'Frame Number: {item} | Video Idx: {video_idx}')
 
+        pre_padded_video = video.clone()
+        video = pad(video, self.rgb_pad_value)
+        new_shape = (video.shape[-2], video.shape[-1])
+
         meta = {'boxes': target_boxes, 'bbox_centers': target_bbox_centers,
+                'rgb_boxes': rgb_boxes, 'rgb_bbox_centers': rgb_bbox_centers,
+                'pre_pad_rgb': pre_padded_video,
                 'track_idx': track_idx, 'item': item,
                 'original_shape': original_shape, 'new_shape': new_shape,
                 'downscale_shape': downscale_shape,
