@@ -29,6 +29,7 @@ logger = get_logger(__name__)
 
 
 def get_supervised_boxes(cfg, current_random_frame, meta, random_idx, test_loader, test_transform, frame):
+    # fixme: return two boxes for rgb shape and target shape
     gt_annotation_path = f'{cfg.root}annotations/{test_loader.dataset.video_label.value}/' \
                          f'video{test_loader.dataset.video_number_to_use}/annotation_augmented.csv'
     gt_annotation_df = pd.read_csv(gt_annotation_path)
