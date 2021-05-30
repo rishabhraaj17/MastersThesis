@@ -20,8 +20,9 @@ from average_image.utils import SDDMeta
 from log import get_logger
 import models as model_zoo
 from dataset import SDDFrameAndAnnotationDataset
-from train import setup_multiple_datasets_core
-from utils import heat_map_collate_fn, plot_predictions, get_blob_count, overlay_images, plot_predictions_with_overlay
+from train import setup_multiple_datasets_core, setup_single_transform, setup_single_common_transform
+from utils import heat_map_collate_fn, plot_predictions, get_blob_count, overlay_images, plot_predictions_with_overlay, \
+    get_scaled_shapes_with_pad_values
 
 seed_everything(42)
 logger = get_logger(__name__)
@@ -67,9 +68,27 @@ def get_resize_dims(cfg):
 
 
 def setup_dataset(cfg):
-    test_w, test_h = get_resize_dims(cfg)
+    df, rgb_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=[cfg.eval.video_class],
+        video_numbers=[[cfg.eval.test.video_number_to_use]],
+        desired_ratio=cfg.eval.desired_pixel_to_meter_ratio_rgb)
 
-    transform = setup_test_transform(cfg, test_h, test_w)
+    df_target, target_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=[cfg.eval.video_class],
+        video_numbers=[[cfg.eval.test.video_number_to_use]],
+        desired_ratio=cfg.eval.desired_pixel_to_meter_ratio)
+
+    condition = (df.CLASS == cfg.eval.video_class) & (df.NUMBER == cfg.eval.test.video_number_to_use)
+    h, w = df[condition].RESCALED_SHAPE.values.item()
+    pad_values = df[condition].PAD_VALUES.values.item()
+
+    target_h, target_w = df_target[condition].RESCALED_SHAPE.values.item()
+    target_pad_values = df_target[condition].PAD_VALUES.values.item()
+
+    transform = setup_single_transform(height=target_h, width=target_w)
+    rgb_transform_fn = setup_single_transform(height=h, width=w)
+    rgb_plot_transform = setup_single_transform(height=rgb_max_shape[0], width=rgb_max_shape[1])
+    common_transform = setup_single_common_transform(use_replay_compose=cfg.using_replay_compose)
 
     test_dataset = SDDFrameAndAnnotationDataset(
         root=cfg.eval.root, video_label=getattr(SDDVideoClasses, cfg.eval.video_class),
@@ -86,9 +105,16 @@ def setup_dataset(cfg):
         seg_map_objectness_threshold=cfg.eval.seg_map_objectness_threshold,
         meta_label=getattr(SDDVideoDatasets, cfg.eval.video_meta_class),
         heatmap_region_limit_threshold=cfg.eval.heatmap_region_limit_threshold,
-        downscale_only_target_maps=cfg.eval.downscale_only_target_maps
+        downscale_only_target_maps=cfg.eval.downscale_only_target_maps,
+        rgb_transform=rgb_transform_fn,
+        rgb_new_shape=(h, w),
+        rgb_pad_value=pad_values,
+        target_pad_value=target_pad_values,
+        rgb_plot_transform=rgb_plot_transform,
+        common_transform=common_transform,
+        using_replay_compose=cfg.eval.using_replay_compose
     )
-    return test_dataset, transform
+    return test_dataset, transform, target_max_shape
 
 
 def setup_test_transform(cfg, test_h, test_w):
@@ -112,17 +138,27 @@ def setup_test_transform(cfg, test_h, test_w):
 
 def setup_multiple_test_datasets(cfg):
     meta = SDDMeta(cfg.root + 'H_SDD.txt')
+    df, rgb_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=cfg.eval.test.video_classes_to_use,
+        video_numbers=cfg.eval.test.video_numbers_to_use,
+        desired_ratio=cfg.eval.desired_pixel_to_meter_ratio_rgb)
+
+    df_target, target_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=cfg.eval.test.video_classes_to_use,
+        video_numbers=cfg.eval.test.video_numbers_to_use,
+        desired_ratio=cfg.eval.desired_pixel_to_meter_ratio)
     # note: downscale_only_target_maps=cfg.downscale_only_target_maps may not point to eval cfg
     datasets = setup_multiple_datasets_core(cfg, meta, video_classes_to_use=cfg.eval.test.video_classes_to_use,
                                             video_numbers_to_use=cfg.eval.test.video_numbers_to_use,
                                             num_videos=cfg.eval.test.num_videos,
-                                            multiple_videos=cfg.eval.test.multiple_videos)
-    return datasets
+                                            multiple_videos=cfg.eval.test.multiple_videos,
+                                            df=df, df_target=df_target, rgb_max_shape=rgb_max_shape)
+    return datasets, target_max_shape
 
 
 def setup_eval(cfg):
     logger.info(f'Setting up DataLoader')
-    test_dataset, test_transform = setup_dataset(cfg)
+    test_dataset, test_transform, target_max_shape = setup_dataset(cfg)
     test_loader = DataLoader(test_dataset, batch_size=cfg.eval.batch_size, shuffle=False,
                              num_workers=cfg.eval.num_workers, collate_fn=heat_map_collate_fn,
                              pin_memory=cfg.eval.pin_memory, drop_last=cfg.eval.drop_last)
@@ -137,7 +173,7 @@ def setup_eval(cfg):
         loss_fn = MSELoss()
 
     model = network_type(config=cfg, train_dataset=None, val_dataset=None,
-                         loss_function=loss_fn, collate_fn=heat_map_collate_fn)
+                         loss_function=loss_fn, collate_fn=heat_map_collate_fn, desired_output_shape=target_max_shape)
 
     logger.info(f'Setting up Model')
     checkpoint_path = f'{cfg.eval.checkpoint.root}{cfg.eval.checkpoint.path}{cfg.eval.checkpoint.version}/checkpoints/'
@@ -224,6 +260,7 @@ def evaluate(cfg):
                                   f"Agent Count : [GT: {num_objects_gt} | Prediction: {num_objects_pred}]"
                 if cfg.eval.plot_with_overlay:
                     unsupervised_boxes = meta[random_idx]['boxes']
+                    unsupervised_rgb_boxes = meta[random_idx]['rgb_boxes']
                     supervised_boxes = get_supervised_boxes(cfg, current_random_frame, meta, random_idx, test_loader,
                                                             test_transform, frames[random_idx].cpu()) \
                         if cfg.eval.resize_transform_only else None
@@ -238,6 +275,7 @@ def evaluate(cfg):
                         save_dir=save_dir + 'overlay/',
                         img_name=save_image_name,
                         supervised_boxes=supervised_boxes,
+                        unsupervised_rgb_boxes=unsupervised_rgb_boxes,
                         unsupervised_boxes=unsupervised_boxes)
                 else:
                     plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),

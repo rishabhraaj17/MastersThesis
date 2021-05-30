@@ -110,7 +110,8 @@ def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=Fals
         plt.close()
 
 
-def plot_predictions_with_overlay(img, mask, pred_mask, overlay_image, supervised_boxes=None, unsupervised_boxes=None,
+def plot_predictions_with_overlay(img, mask, pred_mask, overlay_image, supervised_boxes=None,
+                                  unsupervised_rgb_boxes=None, unsupervised_boxes=None,
                                   additional_text='', all_heatmaps=False, save_dir=None, img_name=''):
     fig, axs = plt.subplots(2, 2, sharex='none', sharey='none', figsize=(16, 16))
     img_axis, mask_axis, overlay_axis, pred_mask_axis = axs[0, 0], axs[0, 1], axs[1, 0], axs[1, 1]
@@ -139,8 +140,10 @@ def plot_predictions_with_overlay(img, mask, pred_mask, overlay_image, supervise
 
         legends_dict.update({'r': 'Supervised Bounding Box'})
 
+    if unsupervised_rgb_boxes is not None:
+        add_box_to_axes(img_axis, unsupervised_rgb_boxes, edge_color='g')
+
     if unsupervised_boxes is not None:
-        add_box_to_axes(img_axis, unsupervised_boxes, edge_color='g')
         add_box_to_axes(overlay_axis, unsupervised_boxes, edge_color='g')
 
         legends_dict.update({'g': 'Unsupervised Bounding Box'})
@@ -490,6 +493,9 @@ def get_blob_count(image, kernel_size=(1, 1), plot=False):
 def overlay_images(transformer, background, overlay):
     background = transformer(background)
     overlay = transformer(overlay)
+
+    if background.height != overlay.height or background.width != overlay.width:
+        background = background.resize((overlay.width, overlay.height), Image.ANTIALIAS)
 
     background = background.convert("RGBA")
     overlay = overlay.convert("RGBA")

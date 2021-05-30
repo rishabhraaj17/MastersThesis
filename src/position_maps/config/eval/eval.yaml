@@ -15,7 +15,9 @@ eval:
   video_class: DEATH_CIRCLE
   video_meta_class: DEATH_CIRCLE
   desired_pixel_to_meter_ratio: 0.25
+  desired_pixel_to_meter_ratio_rgb: 0.15 # 0.05
   downscale_only_target_maps: False
+  using_replay_compose: True
 
   test:
     num_videos: -1

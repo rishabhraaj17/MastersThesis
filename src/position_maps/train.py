@@ -190,29 +190,58 @@ def setup_single_common_transform(use_replay_compose=False):
 
 def setup_multiple_datasets(cfg):
     meta = SDDMeta(cfg.root + 'H_SDD.txt')
+    df, rgb_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=cfg.train.video_classes_to_use,
+        video_numbers=cfg.train.video_numbers_to_use,
+        desired_ratio=cfg.desired_pixel_to_meter_ratio_rgb)
+
+    df_target, target_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=cfg.val.video_classes_to_use,
+        video_numbers=cfg.val.video_numbers_to_use,
+        desired_ratio=cfg.desired_pixel_to_meter_ratio)
+
     train_datasets = setup_multiple_datasets_core(cfg, meta, video_classes_to_use=cfg.train.video_classes_to_use,
                                                   video_numbers_to_use=cfg.train.video_numbers_to_use,
                                                   num_videos=cfg.train.num_videos,
-                                                  multiple_videos=cfg.train.multiple_videos)
+                                                  multiple_videos=cfg.train.multiple_videos,
+                                                  df=df, df_target=df_target, rgb_max_shape=rgb_max_shape)
     val_datasets = setup_multiple_datasets_core(cfg, meta, video_classes_to_use=cfg.val.video_classes_to_use,
                                                 video_numbers_to_use=cfg.val.video_numbers_to_use,
                                                 num_videos=cfg.val.num_videos,
-                                                multiple_videos=cfg.val.multiple_videos)
-    return train_datasets, val_datasets
+                                                multiple_videos=cfg.val.multiple_videos,
+                                                df=df, df_target=df_target, rgb_max_shape=rgb_max_shape)
+    return train_datasets, val_datasets, target_max_shape
 
 
-def setup_multiple_datasets_core(cfg, meta, video_classes_to_use, video_numbers_to_use, num_videos, multiple_videos):
+def setup_multiple_datasets_core(cfg, meta, video_classes_to_use, video_numbers_to_use, num_videos, multiple_videos,
+                                 df, df_target, rgb_max_shape):
     datasets = []
-    for v_clz in video_classes_to_use:
-        for v_num in video_numbers_to_use:
-            w, h = get_resize_shape(cfg=cfg, sdd_meta=meta, video_class=v_clz, video_number=v_num,
-                                    desired_ratio=cfg.desired_pixel_to_meter_ratio)
-            transform = setup_single_transform(height=h, width=w)
+    for idx, v_clz in enumerate(video_classes_to_use):
+        for v_num in video_numbers_to_use[idx]:
+            condition = (df.CLASS == v_clz) & (df.NUMBER == v_num)
+            h, w = df[condition].RESCALED_SHAPE.values.item()
+            pad_values = df[condition].PAD_VALUES.values.item()
+
+            target_h, target_w = df_target[condition].RESCALED_SHAPE.values.item()
+            target_pad_values = df_target[condition].PAD_VALUES.values.item()
+
+            transform = setup_single_transform(height=target_h, width=target_w)
+            rgb_transform_fn = setup_single_transform(height=h, width=w)
+            rgb_plot_transform = setup_single_transform(height=rgb_max_shape[0], width=rgb_max_shape[1])
+            common_transform = setup_single_common_transform(use_replay_compose=cfg.using_replay_compose)
+
             datasets.append(setup_single_dataset_instance(cfg=cfg, transform=transform,
                                                           video_class=v_clz,
                                                           num_videos=num_videos,
                                                           video_number_to_use=v_num,
-                                                          multiple_videos=multiple_videos))
+                                                          multiple_videos=multiple_videos,
+                                                          rgb_transform_fn=rgb_transform_fn,
+                                                          rgb_new_shape=(h, w),
+                                                          rgb_pad_value=pad_values,
+                                                          target_pad_value=target_pad_values,
+                                                          rgb_plot_transform=rgb_plot_transform,
+                                                          common_transform=common_transform,
+                                                          using_replay_compose=cfg.using_replay_compose))
     return ConcatDataset(datasets)
 
 
