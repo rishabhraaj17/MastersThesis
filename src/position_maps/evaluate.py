@@ -177,14 +177,24 @@ def setup_eval(cfg):
                          loss_function=loss_fn, collate_fn=heat_map_collate_fn, desired_output_shape=target_max_shape)
 
     logger.info(f'Setting up Model')
+
     checkpoint_path = f'{cfg.eval.checkpoint.root}{cfg.eval.checkpoint.path}{cfg.eval.checkpoint.version}/checkpoints/'
     checkpoint_file = checkpoint_path + os.listdir(checkpoint_path)[0]
 
-    logger.info(f'Loading weights from: {checkpoint_file}')
-    load_dict = torch.load(checkpoint_file)
+    if cfg.eval.use_lightning_loader:
+        hparams_file = f'{cfg.eval.checkpoint.root}{cfg.eval.checkpoint.path}{cfg.eval.checkpoint.version}/hparams.yaml'
+        model = network_type.load_from_checkpoint(
+            checkpoint_file,
+            hparams_file=hparams_file,
+            map_location=cfg.eval.device,
+            train_dataset=None, val_dataset=None,
+            loss_function=loss_fn, collate_fn=heat_map_collate_fn, desired_output_shape=target_max_shape)
+    else:
+        logger.info(f'Loading weights from: {checkpoint_file}')
+        load_dict = torch.load(checkpoint_file, map_location=cfg.eval.device)
 
-    model.load_state_dict(load_dict['state_dict'])
-    model.to(cfg.eval.device)
+        model.load_state_dict(load_dict['state_dict'])
+        model.to(cfg.eval.device)
     model.eval()
 
     return loss_fn, model, network_type, test_loader, checkpoint_file, test_transform
@@ -203,14 +213,14 @@ def evaluate(cfg):
         frames, heat_masks, position_map, distribution_map, class_maps, meta = data
 
         if network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
-            frames, class_maps = frames.to(cfg.device), class_maps.to(cfg.device)
+            frames, class_maps = frames.to(cfg.eval.device), class_maps.to(cfg.eval.device)
         elif network_type.__name__ == 'PositionMapUNetPositionMapSegmentation':
-            frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
+            frames, position_map = frames.to(cfg.eval.device), position_map.to(cfg.eval.device)
         elif network_type.__name__ in ['PositionMapUNetHeatmapSegmentation',
                                        'PositionMapStackedHourGlass']:
-            frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+            frames, heat_masks = frames.to(cfg.eval.device), heat_masks.to(cfg.eval.device)
         else:
-            frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+            frames, heat_masks = frames.to(cfg.eval.device), heat_masks.to(cfg.eval.device)
 
         with torch.no_grad():
             out = model(frames)

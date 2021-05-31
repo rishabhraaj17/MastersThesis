@@ -6,7 +6,9 @@ eval:
   pin_memory: True
   drop_last: False
 
-  device: 'cuda:0'
+  device: 'cpu'  # 'cuda:0', 'cpu'
+  use_lightning_loader: False
+
   data_augmentation: True
   resize_transform_only: False  # set true to plot both supervised and unsupervised boxes
 
@@ -15,7 +17,7 @@ eval:
   video_class: DEATH_CIRCLE
   video_meta_class: DEATH_CIRCLE
   desired_pixel_to_meter_ratio: 0.25
-  desired_pixel_to_meter_ratio_rgb: 0.15 # 0.05
+  desired_pixel_to_meter_ratio_rgb: 0.07 # 0.05
   downscale_only_target_maps: False
   using_replay_compose: True
 
@@ -64,4 +66,4 @@ eval:
   checkpoint:
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
     path: "lightning_logs/version_"
-    version: 424798
+    version: 432100
