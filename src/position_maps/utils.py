@@ -222,7 +222,7 @@ def gaussian_v3(empty_map, x, y, stride, sigma):
 def generate_position_map(image_shape, object_locations, sigma: float, heatmap_shape=None, return_combined=False,
                           hw_mode=True):
     heatmap_shape = copy.copy(image_shape) if heatmap_shape is None else heatmap_shape
-    if hw_mode:
+    if hw_mode:  # height-width format
         image_shape[0], image_shape[1] = image_shape[1], image_shape[0]
         heatmap_shape[0], heatmap_shape[1] = heatmap_shape[1], heatmap_shape[0]
     heatmap_shape, image_shape = np.array(heatmap_shape), np.array(image_shape)

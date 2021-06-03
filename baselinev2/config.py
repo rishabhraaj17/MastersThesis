@@ -8,7 +8,8 @@ from baselinev2.constants import STEP, SDDVideoClassAndNumbers
 
 SEVER_MODE = False
 
-LOCAL_PATH = "../"
+# LOCAL_PATH = "../"
+LOCAL_PATH = "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/"
 SERVER_PATH = "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/"
 
 if SEVER_MODE:
