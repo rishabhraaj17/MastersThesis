@@ -4,11 +4,12 @@ import pandas as pd
 import torch
 from matplotlib import pyplot as plt
 from skimage.feature import blob_log
+import torch.distributions as D
 from torchvision.transforms import ToPILImage
 
-from average_image.constants import SDDVideoClasses, SDDVideoDatasets
-from baselinev2.constants import NetworkMode
-from baselinev2.nn.dataset import get_dataset
+from average_image.constants import SDDVideoClasses
+from baselinev2.utils import get_generated_frame_annotations
+from gmm import GaussianMixture
 from utils import generate_position_map, overlay_images
 
 
@@ -51,6 +52,7 @@ def extract_agents_locations(blob_threshold, mask, objectness_threshold):
 
 
 def create_mixture_of_gaussians(masks, meta_list, rgb_img,
+                                video_class: SDDVideoClasses, video_number: int,
                                 objectness_threshold: float = 0.5, blob_threshold: float = 0.45,
                                 blob_overlap: float = 0.5, get_generated: bool = True):
     blobs_per_image, masks = extract_agents_locations(blob_threshold, masks, objectness_threshold)
@@ -63,6 +65,8 @@ def create_mixture_of_gaussians(masks, meta_list, rgb_img,
         out = transform(image=mask.squeeze(0).numpy(), keypoints=blobs)
         adjusted_locations.append(out['keypoints'])
         scaled_images.append(out['image'])
+
+    adjusted_locations = np.stack(adjusted_locations)
 
     # verify
     detected_maps, scaled_detected_maps = [], []
@@ -79,19 +83,28 @@ def create_mixture_of_gaussians(masks, meta_list, rgb_img,
                                                           return_combined=True, hw_mode=True))
     # verify ends
 
-    split_name: str = 'splits_v3' if get_generated else 'splits_v1'
-    dataset = get_dataset(SDDVideoClasses.DEATH_CIRCLE, video_number=2, mode=NetworkMode.TRAIN,
-                          meta_label=SDDVideoDatasets.DEATH_CIRCLE, get_generated=get_generated,
-                          split_name=split_name)
-    tracks = dataset.tracks.reshape((-1, 8))
-    tracks = np.stack((tracks[..., 0], tracks[..., 5], tracks[..., -2], tracks[..., -1])).T
-    tracks_df = pd.DataFrame(tracks, columns=['track_id', 'frame_number', 'x', 'y'])
-    current_agents = tracks_df[(tracks_df.track_id.isin([i for i in range(21)])) & (tracks_df.frame_number == 0)].values
-    trajectory_locations = current_agents[:, 2:]
-
     original_shape = meta_list[0]['original_shape']
+    h, w = original_shape
+
+    annotation_root = '../../Datasets/SDD/filtered_generated_annotations/'
+    annotation_path = f'{annotation_root}{video_class.value}/video{video_number}/generated_annotations.csv'
+    dataset = pd.read_csv(annotation_path)
+
+    frame_annotation = get_generated_frame_annotations(df=dataset, frame_number=0)
+
+    boxes = frame_annotation[:, 1:5].astype(np.int)
+    track_idx = frame_annotation[:, 0].astype(np.int)
+    bbox_centers = frame_annotation[:, 7:9].astype(np.int)
+
+    inside_boxes_idx = [b for b, box in enumerate(boxes)
+                        if (box[0] > 0 and box[2] < w) and (box[1] > 0 and box[3] < h)]
+
+    boxes = boxes[inside_boxes_idx]
+    track_idx = track_idx[inside_boxes_idx]
+    bbox_centers = bbox_centers[inside_boxes_idx]
+
     trajectory_map = generate_position_map([original_shape[-2], original_shape[-1]],
-                                           trajectory_locations,
+                                           bbox_centers,
                                            sigma=1.5 * 4,
                                            heatmap_shape=None,
                                            return_combined=True, hw_mode=True)
@@ -100,6 +113,20 @@ def create_mixture_of_gaussians(masks, meta_list, rgb_img,
                                         overlay=torch.from_numpy(trajectory_map).unsqueeze(0))
     superimposed_image_flip = overlay_images(transformer=ToPILImage(), background=rgb_img[0],
                                              overlay=torch.from_numpy(scaled_detected_maps[0]).unsqueeze(0))
+
+    # we dont need to learn the mixture u and sigma?? We just need gradients from each position
+    # mix = D.Categorical(torch.ones(adjusted_locations[0].shape[0]))
+    # comp = D.Independent(D.Normal(
+    #     torch.from_numpy(adjusted_locations[0]), torch.ones(adjusted_locations[0].shape) * 1.5), 1)
+    # gmm = D.MixtureSameFamily(mix, comp)
+    # way2
+    gmm = GaussianMixture(n_components=adjusted_locations[0].shape[0],
+                          n_features=2,
+                          mu_init=torch.from_numpy(adjusted_locations[0]).unsqueeze(0),
+                          var_init=(torch.ones(adjusted_locations[0].shape) * 1.5).unsqueeze(0))
+
+    loss = - gmm.score_samples(torch.from_numpy(bbox_centers))
+
     print()
 
 
@@ -110,4 +137,5 @@ if __name__ == '__main__':
     sample = torch.load(sample_path)
     rgb_im, heat_mask, pred_mask, m = sample['rgb'], sample['mask'], sample['out'], sample['meta']
     create_mixture_of_gaussians(masks=pred_mask, blob_overlap=0.2, blob_threshold=0.2,
-                                get_generated=False, meta_list=m, rgb_img=rgb_im)  # these params look good
+                                get_generated=False, meta_list=m, rgb_img=rgb_im,
+                                video_class=SDDVideoClasses.DEATH_CIRCLE, video_number=2)  # these params look good
