@@ -89,7 +89,10 @@ def setup_dataset(cfg):
     transform = setup_single_transform(height=target_h, width=target_w)
     rgb_transform_fn = setup_single_transform(height=h, width=w)
     rgb_plot_transform = setup_single_transform(height=rgb_max_shape[0], width=rgb_max_shape[1])
-    common_transform = setup_single_common_transform(use_replay_compose=cfg.using_replay_compose)
+    if cfg.eval.resize_transform_only:
+        common_transform = None
+    else:
+        common_transform = setup_single_common_transform(use_replay_compose=cfg.using_replay_compose)
 
     test_dataset = SDDFrameAndAnnotationDataset(
         root=cfg.eval.root, video_label=getattr(SDDVideoClasses, cfg.eval.video_class),

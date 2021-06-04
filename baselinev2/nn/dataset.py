@@ -211,9 +211,11 @@ class SyntheticDataset(Dataset):
 
 
 def get_dataset(video_clazz: SDDVideoClasses, video_number: int, mode: NetworkMode, meta_label: SDDVideoDatasets,
-                get_generated: bool = False):
-    return BaselineGeneratedDataset(video_clazz, video_number, mode, meta_label=meta_label) if get_generated else \
-        BaselineDataset(video_clazz, video_number, mode, meta_label=meta_label)
+                get_generated: bool = False, split_name: str = 'splits_v1'):
+    return BaselineGeneratedDataset(
+        video_clazz, video_number, mode, meta_label=meta_label, split_name=split_name) \
+        if get_generated \
+        else BaselineDataset(video_clazz, video_number, mode, meta_label=meta_label, split_name=split_name)
 
 
 def get_all_dataset(get_generated: bool = False, root: str = SAVE_BASE_PATH, split_name: str = 'splits_v1'):
