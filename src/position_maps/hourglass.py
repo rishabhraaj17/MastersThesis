@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import torch
 from torch import nn
 from torch.nn import MSELoss
@@ -121,12 +123,13 @@ class Merge(nn.Module):
 
 
 class PoseNet(nn.Module):
-    def __init__(self, num_stack, input_channels, num_classes, loss_fn, bn=False, increase=0, **kwargs):
+    def __init__(self, num_stack, input_channels, num_classes, loss_fn, bn=False, increase=0,
+                 desired_output_shape: Tuple[int, int] = None, **kwargs):
         super(PoseNet, self).__init__()
 
         self.num_stack = num_stack
         self.pre = nn.Sequential(
-            Conv(3, 64, 3, 1, bn=True, relu=True),  # originally 3, 64, 7, 2
+            Conv(input_channels, 64, 3, 1, bn=True, relu=True),  # originally 3, 64, 7, 2
             Residual(64, 128),
             # Pool(2, 2),
             Residual(128, 128),
@@ -147,17 +150,40 @@ class PoseNet(nn.Module):
         self.outs = nn.ModuleList([Conv(input_channels, num_classes, 1, relu=False, bn=False) for i in range(num_stack)])
         self.merge_features = nn.ModuleList([Merge(input_channels, input_channels) for i in range(num_stack - 1)])
         self.merge_preds = nn.ModuleList([Merge(num_classes, input_channels) for i in range(num_stack - 1)])
+        self.post_preds = nn.Sequential(
+            Conv(num_classes, num_classes, 3, 1, bn=False, relu=False)
+        )
+        self.post_feature = nn.Sequential(
+            Conv(input_channels, input_channels, 3, 1, bn=False, relu=False)
+        )
+        self.post_input = nn.Sequential(
+            Conv(input_channels, input_channels, 3, 1, bn=False, relu=False)
+        )
+
         self.num_stack = num_stack
+        self.desired_output_shape = desired_output_shape
+
         self.loss_fn = loss_fn
 
     def forward(self, imgs):
         x = self.pre(imgs)
+        if self.desired_output_shape is not None:
+            x = interpolate(x, size=self.desired_output_shape)
+            x = self.post_feature(x)
 
         combined_hm_preds = []
         for i in range(self.num_stack):
             hg = self.hgs[i](x)
             feature = self.features[i](hg)
             preds = self.outs[i](feature)
+
+            if self.desired_output_shape is not None:
+                feature = interpolate(feature, size=self.desired_output_shape)
+                feature = self.post_feature(feature)
+
+                preds = interpolate(preds, size=self.desired_output_shape)
+                preds = self.post_preds(preds)
+
             combined_hm_preds.append(preds)
 
             if i < self.num_stack - 1:
@@ -177,8 +203,9 @@ class PoseNet(nn.Module):
 
 if __name__ == '__main__':
     inp = torch.randn((2, 3, 490, 320))
-    target = torch.randn((2, 1, 490, 320))
-    net = PoseNet(num_stack=3, input_channels=3, num_classes=1, loss_fn=MSELoss())
+    # target = torch.randn((2, 1, 490, 320))
+    target = torch.randn((2, 1, 190, 160))
+    net = PoseNet(num_stack=3, input_channels=3, num_classes=1, loss_fn=MSELoss(), desired_output_shape=(190, 160))
     o = net(inp)
     loss = net.calc_loss(o, target)
     print()
