@@ -11,7 +11,6 @@ from torch.nn import MSELoss
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 
-from average_image.constants import SDDVideoDatasets
 from average_image.utils import SDDMeta
 from log import get_logger
 from hourglass import PoseNet

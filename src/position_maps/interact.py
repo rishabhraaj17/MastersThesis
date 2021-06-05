@@ -115,11 +115,6 @@ def create_mixture_of_gaussians(masks, meta_list, rgb_img,
                                              overlay=torch.from_numpy(scaled_detected_maps[0]).unsqueeze(0))
 
     # we dont need to learn the mixture u and sigma?? We just need gradients from each position
-    # mix = D.Categorical(torch.ones(adjusted_locations[0].shape[0]))
-    # comp = D.Independent(D.Normal(
-    #     torch.from_numpy(adjusted_locations[0]), torch.ones(adjusted_locations[0].shape) * 1.5), 1)
-    # gmm = D.MixtureSameFamily(mix, comp)
-    # way2
     gmm = GaussianMixture(n_components=adjusted_locations[0].shape[0],
                           n_features=2,
                           mu_init=torch.from_numpy(adjusted_locations[0]).unsqueeze(0),
