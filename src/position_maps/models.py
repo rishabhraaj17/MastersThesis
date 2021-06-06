@@ -7,11 +7,12 @@ from omegaconf import DictConfig
 from pytorch_lightning import LightningModule
 from torch import nn
 import torch.nn.functional as F
-from torch.nn import MSELoss
+from torch.nn import MSELoss, Module
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 
 from average_image.utils import SDDMeta
+from baselinev2.stochastic.model_modules import BaselineGenerator
 from log import get_logger
 from hourglass import PoseNet
 
@@ -339,3 +340,54 @@ class PositionMapStackedHourGlass(PositionMapUNetBase):
         out = self(frames)
         loss = self.network.calc_loss(combined_hm_preds=out, heatmaps=heat_masks)
         return loss.mean()
+
+
+class TrajectoryModel(LightningModule):
+    def __init__(self, config: 'DictConfig'):
+        super(TrajectoryModel, self).__init__()
+        self.config = config
+
+        net_params = self.config.trajectory_baseline.generator
+        self.net = BaselineGenerator(embedding_dim_scalars=net_params.embedding_dim_scalars,
+                                     encoder_h_g_scalar=net_params.encoder_h_g_scalar,
+                                     decoder_h_g_scalar=net_params.decoder_h_g_scalar,
+                                     pred_len=net_params.pred_len,
+                                     noise_scalar=net_params.noise_scalar,
+                                     mlp_vec=net_params.mlp_vec,
+                                     mlp_scalar=net_params.mlp_scalar,
+                                     POV=net_params.POV,
+                                     noise_type=net_params.noise_type,
+                                     social_attention=net_params.social_attention,
+                                     social_dim_scalar=net_params.social_dim_scalar)
+
+    def forward(self, x):
+        # input batch["in_dxdy", "in_xy"]
+        return self.net(x)  # {"out_xy": out_xy, "out_dxdy": out_dxdy}
+
+
+class PositionMapWithTrajectories(PositionMapUNetBase):
+    def __init__(self, config: 'DictConfig', position_map_model: 'Module', trajectory_model: 'Module',
+                 train_dataset: 'Dataset', val_dataset: 'Dataset',
+                 desired_output_shape: Tuple[int, int] = None, loss_function: 'nn.Module' = None,
+                 collate_fn: Optional[Callable] = None):
+        super(PositionMapWithTrajectories, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_function,
+            collate_fn=collate_fn, desired_output_shape=desired_output_shape)
+
+        self.position_map_model = position_map_model
+        self.trajectory_model = trajectory_model
+
+        self.config = config
+        self.train_dataset = train_dataset
+        self.val_dataset = val_dataset
+        self.desired_output_shape = desired_output_shape
+        self.loss_function = loss_function
+        self.collate_fn = collate_fn
+
+        self.first_iter = True
+
+    def _one_step(self, batch):
+        frames, heat_masks, position_map, distribution_map, class_maps, meta = batch
+        out = self(frames)
+        loss = self.loss_function(out, heat_masks)
+        return NotImplementedError  # loss

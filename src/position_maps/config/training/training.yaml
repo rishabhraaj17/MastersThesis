@@ -112,6 +112,30 @@ overfit:
 
   plot_checkpoint: 99
 
+interact:
+  device: 'cuda:0'
+
+  num_epochs: 6000
+  batch_size: 1
+  num_workers: 0
+  pin_memory: True
+  drop_last: False
+
+  num_videos: -1
+  video_classes_to_use: [ DEATH_CIRCLE ]
+  video_numbers_to_use: [ [ 2 ] ]
+  multiple_videos: False
+
+  desired_pixel_to_meter_ratio: 0.25
+  desired_pixel_to_meter_ratio_rgb: 0.25 # 0.05
+
+  postion_map_network_type: 'PositionMapUNetHeatmapSegmentation'
+  focal_loss_alpha: 0.9
+
+  subset_indices: [0, 12, 24, 36, 48, 60]
+
+  plot_checkpoint: 9
+
 
 
 

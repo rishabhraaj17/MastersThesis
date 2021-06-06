@@ -190,14 +190,24 @@ def setup_single_common_transform(use_replay_compose=False):
 
 def setup_multiple_datasets(cfg):
     meta = SDDMeta(cfg.root + 'H_SDD.txt')
+    video_classes = cfg.train.video_classes_to_use
+    video_numbers = cfg.train.video_numbers_to_use
+    for val_clz, val_v_num in zip(cfg.val.video_classes_to_use, cfg.val.video_numbers_to_use):
+        if val_clz in video_classes:
+            idx = video_classes.index(val_clz)
+            video_numbers[idx] = (list(set(video_numbers[idx] + val_v_num)))
+        else:
+            video_classes.append(val_clz)
+            video_numbers.append(val_v_num)
+
     df, rgb_max_shape = get_scaled_shapes_with_pad_values(
-        root_path=cfg.root, video_classes=cfg.train.video_classes_to_use,
-        video_numbers=cfg.train.video_numbers_to_use,
+        root_path=cfg.root, video_classes=video_classes,
+        video_numbers=video_numbers,
         desired_ratio=cfg.desired_pixel_to_meter_ratio_rgb)
 
     df_target, target_max_shape = get_scaled_shapes_with_pad_values(
-        root_path=cfg.root, video_classes=cfg.val.video_classes_to_use,
-        video_numbers=cfg.val.video_numbers_to_use,
+        root_path=cfg.root, video_classes=video_classes,
+        video_numbers=video_numbers,
         desired_ratio=cfg.desired_pixel_to_meter_ratio)
 
     train_datasets = setup_multiple_datasets_core(cfg, meta, video_classes_to_use=cfg.train.video_classes_to_use,
