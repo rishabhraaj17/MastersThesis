@@ -76,7 +76,8 @@ def plot_samples(img, mask, rgb_boxes, rgb_box_centers, boxes, box_centers, plot
     plt.show()
 
 
-def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=False, save_dir=None, img_name=''):
+def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=False, save_dir=None, img_name='',
+                     tight_layout=True):
     fig, axs = plt.subplots(1, 3, sharex='none', sharey='none', figsize=(16, 8))
     img_axis, mask_axis, pred_mask_axis = axs
     if img is not None:
@@ -101,6 +102,8 @@ def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=Fals
         pred_mask_axis.set_title('Predicted Mask')
 
     fig.suptitle(additional_text)
+    if tight_layout:
+        plt.tight_layout()
 
     if save_dir is None:
         plt.show()
