@@ -391,3 +391,15 @@ class PositionMapWithTrajectories(PositionMapUNetBase):
         out = self(frames)
         loss = self.loss_function(out, heat_masks)
         return NotImplementedError  # loss
+
+    def freeze_position_map_model(self):
+        self.position_map_model.freeze()
+
+    def unfreeze_position_map_model(self):
+        self.position_map_model.unfreeze()
+
+    def freeze_trajectory_model(self):
+        self.trajectory_model.freeze()
+
+    def unfreeze_trajectory_model(self):
+        self.trajectory_model.unfreeze()

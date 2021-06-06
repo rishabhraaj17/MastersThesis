@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from kornia.losses import FocalLoss, BinaryFocalLossWithLogits
 from pytorch_lightning import seed_everything, Trainer
+from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 
@@ -256,6 +257,12 @@ def setup_multiple_datasets_core(cfg, meta, video_classes_to_use, video_numbers_
 
 
 def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
+    checkpoint_callback = ModelCheckpoint(
+        monitor=cfg.monitor,
+        save_top_k=cfg.trainer.num_checkpoints_to_save,
+        mode=cfg.mode,
+        verbose=cfg.verbose
+    )
     if cfg.warm_restart.enable:
         checkpoint_root_path = f'{cfg.warm_restart.checkpoint.root}{cfg.warm_restart.checkpoint.path}' \
                                f'{cfg.warm_restart.checkpoint.version}/checkpoints/'
@@ -280,17 +287,18 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                 loss_function=loss_fn, collate_fn=heat_map_collate_fn)
 
         trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
-                          fast_dev_run=cfg.trainer.fast_dev_run)
+                          fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback])
     else:
         if cfg.resume_mode:
             checkpoint_path = f'{cfg.resume.checkpoint.path}{cfg.resume.checkpoint.version}/checkpoints/'
             checkpoint_file = checkpoint_path + os.listdir(checkpoint_path)[0]
 
             trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
-                              fast_dev_run=cfg.trainer.fast_dev_run, resume_from_checkpoint=checkpoint_file)
+                              fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
+                              resume_from_checkpoint=checkpoint_file)
         else:
             trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
-                              fast_dev_run=cfg.trainer.fast_dev_run)
+                              fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback])
     return model, trainer
 
 

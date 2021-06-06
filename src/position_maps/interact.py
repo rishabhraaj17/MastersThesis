@@ -200,6 +200,8 @@ def interact_demo(cfg):
     train_loader = DataLoader(train_subset, batch_size=cfg.interact.batch_size, shuffle=False,
                               num_workers=cfg.interact.num_workers, collate_fn=heat_map_collate_fn,
                               pin_memory=cfg.interact.pin_memory, drop_last=cfg.interact.drop_last)
+
+    last_iter_output = None
     for epoch in range(cfg.interact.num_epochs):
         model.train()
 
