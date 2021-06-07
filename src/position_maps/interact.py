@@ -1,15 +1,16 @@
+import os
 import warnings
 
 import albumentations as A
 import hydra
 import numpy as np
 import pandas as pd
+import scipy
 import torch
 from kornia.losses import BinaryFocalLossWithLogits
 from matplotlib import pyplot as plt
 from pytorch_lightning import seed_everything
 from skimage.feature import blob_log
-import torch.distributions as D
 from torch.nn import MSELoss
 from torch.utils.data import Subset, DataLoader
 from torchvision.transforms import ToPILImage
@@ -28,11 +29,26 @@ seed_everything(42)
 logger = get_logger(__name__)
 
 
-def plot_to_debug(im):
+class PositionBasedTrack(object):
+    def __init__(self, idx: int, frames: np.ndarray, locations: np.ndarray):
+        super(PositionBasedTrack, self).__init__()
+        self.idx = idx
+        self.frames = frames
+        self.locations = locations
+
+    def __eq__(self, other):
+        return self.idx == other.idx
+
+    def __repr__(self):
+        return f"Track ID: {self.idx}\nFrames: {self.frames}\nTrack Positions: {self.locations}"
+
+
+def plot_to_debug(im, txt=''):
     fig, axs = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(8, 10))
     axs.imshow(im)
 
-    plt.tight_layout()
+    plt.tight_layout(pad=1.58)
+    plt.title(txt)
     plt.show()
 
 
@@ -156,7 +172,8 @@ def setup_interact_dataset(cfg):
                                                      video_numbers_to_use=cfg.interact.video_numbers_to_use,
                                                      num_videos=cfg.interact.num_videos,
                                                      multiple_videos=cfg.interact.multiple_videos,
-                                                     df=df, df_target=df_target, rgb_max_shape=rgb_max_shape)
+                                                     df=df, df_target=df_target, rgb_max_shape=rgb_max_shape,
+                                                     use_common_transforms=False)
     # val_datasets = setup_multiple_datasets_core(cfg, meta, video_classes_to_use=cfg.val.video_classes_to_use,
     #                                             video_numbers_to_use=cfg.val.video_numbers_to_use,
     #                                             num_videos=cfg.val.num_videos,
@@ -183,6 +200,13 @@ def interact_demo(cfg):
     position_map_model = position_map_network_type(config=cfg, train_dataset=None, val_dataset=None,
                                                    loss_function=loss_fn, collate_fn=heat_map_collate_fn,
                                                    desired_output_shape=target_max_shape)
+    checkpoint_path = f'{cfg.interact.checkpoint.root}{cfg.interact.checkpoint.path}{cfg.interact.checkpoint.version}/' \
+                      f'checkpoints/'
+    checkpoint_file = checkpoint_path + os.listdir(checkpoint_path)[0]
+    logger.info(f'Loading Position Map Model weights from: {checkpoint_file}')
+    load_dict = torch.load(checkpoint_file, map_location=cfg.interact.device)
+
+    position_map_model.load_state_dict(load_dict['state_dict'])
 
     trajectory_model = model_zoo.TrajectoryModel(cfg)
 
@@ -191,6 +215,7 @@ def interact_demo(cfg):
                                                   val_dataset=None, desired_output_shape=target_max_shape,
                                                   loss_function=loss_fn, collate_fn=heat_map_collate_fn)
 
+    model.freeze_position_map_model()
     model.to(cfg.interact.device)
 
     opt = torch.optim.Adam(position_map_model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay,
@@ -201,13 +226,14 @@ def interact_demo(cfg):
                               num_workers=cfg.interact.num_workers, collate_fn=heat_map_collate_fn,
                               pin_memory=cfg.interact.pin_memory, drop_last=cfg.interact.drop_last)
 
-    last_iter_output = None
+    last_iter_output, last_iter_blobs, last_frame_number = None, None, None
+    running_tracks, track_ids_used = [], []
     for epoch in range(cfg.interact.num_epochs):
         model.train()
 
         train_loss = []
-        for data in train_loader:
-            opt.zero_grad()
+        for t_idx, data in enumerate(train_loader):
+            # opt.zero_grad()
 
             frames, heat_masks, position_map, distribution_map, class_maps, meta = data
 
@@ -223,27 +249,86 @@ def interact_demo(cfg):
 
             out = model.position_map_model(frames)
 
+            plot_to_debug(frames.cpu().squeeze().permute(1, 2, 0), txt=f'RGB @ T = {t_idx}')
+            plot_to_debug(out.cpu().detach().squeeze().sigmoid().round(), txt=f'Pred Mask @ T = {t_idx}')
+
+            agents_count_gt = meta[0]['bbox_centers'].shape[0]
+            blobs_per_image, masks = extract_agents_locations(blob_threshold=cfg.interact.blob_threshold,
+                                                              mask=out.clone().detach().cpu(),
+                                                              objectness_threshold=cfg.interact.objectness_threshold)
+            detected_maps = []
+            for blob in blobs_per_image:
+                locations = correct_locations(blob)
+                detected_maps.append(generate_position_map([masks.shape[-2], masks.shape[-1]], locations, sigma=1.5,
+                                                           heatmap_shape=None,
+                                                           return_combined=True, hw_mode=True))
+
+            plot_to_debug(detected_maps[0], txt=f'Blobs->Mask @ T = {t_idx}')
+            blobs = correct_locations(blobs_per_image[0])  # for batch_size=1
+
+            if t_idx > 0:
+                current_frame_number = meta[0]['item']
+                blob_distance_matrix = np.zeros((last_iter_blobs.shape[0], blobs.shape[0]))
+                for p_idx, prev_blob in enumerate(last_iter_blobs):
+                    for b_idx, blob in enumerate(blobs):
+                        blob_distance_matrix[p_idx, b_idx] = np.linalg.norm((prev_blob - blob), ord=2)
+
+                # Hungarian
+                match_rows, match_cols = scipy.optimize.linear_sum_assignment(blob_distance_matrix)
+
+                last_track_id_used = track_ids_used[-1] if len(track_ids_used) != 0 else 0
+                for r, c in zip(match_rows, match_cols):
+                    is_part_of_live_track = [(i.locations[-1] == last_iter_blobs[r]).all() for i in running_tracks]
+
+                    if np.array(is_part_of_live_track).any():
+                        track_idx = np.where(is_part_of_live_track)[0]
+                        if track_idx.shape[0] > 1:
+                            for t in track_idx:
+                                is_part_of_live_track[t] = False if running_tracks[t].frames.shape[0] > t_idx \
+                                    else is_part_of_live_track[t]
+
+                        track_idx = np.where(is_part_of_live_track)[0].item()
+
+                        running_tracks[track_idx].frames = np.append(running_tracks[track_idx].frames,
+                                                                     [current_frame_number])
+                        running_tracks[track_idx].locations = np.append(running_tracks[track_idx].locations,
+                                                                        [blobs[c]], axis=0)
+                    else:
+                        running_tracks.append(PositionBasedTrack(
+                            idx=last_track_id_used,
+                            frames=np.array([last_frame_number, current_frame_number]),
+                            locations=np.array([last_iter_blobs[r], blobs[c]])))
+
+                        track_ids_used.append(last_track_id_used)
+                        last_track_id_used += 1
+
+                plot_to_debug(last_iter_output.cpu().squeeze().sigmoid().round(), txt=f'Pred Mask @ T = {t_idx - 1}')
+
+            last_iter_output = out.clone().detach()
+            last_iter_blobs = np.copy(blobs)
+            last_frame_number = meta[0]['item']
+
             if position_map_network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
                 loss = loss_fn(out, class_maps.long().squeeze(dim=1))
             elif position_map_network_type.__name__ == 'PositionMapUNetPositionMapSegmentation':
                 loss = loss_fn(out, position_map.long().squeeze(dim=1))
             elif position_map_network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
-                loss = loss_fn(out, heat_masks)
+                loss = torch.tensor([0.])  # loss_fn(out, heat_masks)
             elif position_map_network_type.__name__ == 'PositionMapStackedHourGlass':
-                loss = position_map_model.network.calc_loss(combined_hm_preds=out, heatmaps=heat_masks)
+                loss = model.network.calc_loss(combined_hm_preds=out, heatmaps=heat_masks)
                 loss = loss.mean()
             else:
                 loss = loss_fn(out, heat_masks)
 
             train_loss.append(loss.item())
 
-            loss.backward()
-            opt.step()
+            # loss.backward()
+            # opt.step()
 
         logger.info(f"Epoch: {epoch} | Train Loss: {np.array(train_loss).mean()}")
 
         if epoch % cfg.interact.plot_checkpoint == 0:
-            position_map_model.eval()
+            model.eval()
             val_loss = []
 
             for data in train_loader:
@@ -260,7 +345,7 @@ def interact_demo(cfg):
                     frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
                 with torch.no_grad():
-                    out = position_map_model(frames)
+                    out = model(frames)
 
                 if position_map_network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
                     loss = loss_fn(out, class_maps.long().squeeze(dim=1))
@@ -269,7 +354,7 @@ def interact_demo(cfg):
                 elif position_map_network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
                     loss = loss_fn(out, heat_masks)
                 elif position_map_network_type.__name__ == 'PositionMapStackedHourGlass':
-                    loss = position_map_model.network.calc_loss(combined_hm_preds=out, heatmaps=heat_masks)
+                    loss = model.network.calc_loss(combined_hm_preds=out, heatmaps=heat_masks)
                     loss = loss.mean()
                 else:
                     loss = loss_fn(out, heat_masks)

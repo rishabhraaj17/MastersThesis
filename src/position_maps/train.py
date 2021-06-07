@@ -225,7 +225,7 @@ def setup_multiple_datasets(cfg):
 
 
 def setup_multiple_datasets_core(cfg, meta, video_classes_to_use, video_numbers_to_use, num_videos, multiple_videos,
-                                 df, df_target, rgb_max_shape):
+                                 df, df_target, rgb_max_shape, use_common_transforms=True):
     datasets = []
     for idx, v_clz in enumerate(video_classes_to_use):
         for v_num in video_numbers_to_use[idx]:
@@ -239,7 +239,10 @@ def setup_multiple_datasets_core(cfg, meta, video_classes_to_use, video_numbers_
             transform = setup_single_transform(height=target_h, width=target_w)
             rgb_transform_fn = setup_single_transform(height=h, width=w)
             rgb_plot_transform = setup_single_transform(height=rgb_max_shape[0], width=rgb_max_shape[1])
-            common_transform = setup_single_common_transform(use_replay_compose=cfg.using_replay_compose)
+            if use_common_transforms:
+                common_transform = setup_single_common_transform(use_replay_compose=cfg.using_replay_compose)
+            else:
+                common_transform = None
 
             datasets.append(setup_single_dataset_instance(cfg=cfg, transform=transform,
                                                           video_class=v_clz,
