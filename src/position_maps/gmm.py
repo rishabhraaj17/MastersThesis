@@ -72,7 +72,7 @@ class GaussianMixture(torch.nn.Module):
 
         # (1, k, 1)
         self.pi = torch.nn.Parameter(torch.Tensor(1, self.n_components, 1), requires_grad=False).fill_(
-            1. / self.n_components)
+            1. / self.n_components).to(self.mu)
 
         self.params_fitted = False
 

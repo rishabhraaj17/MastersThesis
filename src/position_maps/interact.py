@@ -228,6 +228,7 @@ def interact_demo(cfg):
 
     last_iter_output, last_iter_blobs, last_frame_number = None, None, None
     running_tracks, track_ids_used = [], []
+    in_xy, in_dxdy, out_xy = [], [], []
     for epoch in range(cfg.interact.num_epochs):
         model.train()
 
@@ -278,6 +279,9 @@ def interact_demo(cfg):
 
                 last_track_id_used = track_ids_used[-1] if len(track_ids_used) != 0 else 0
                 for r, c in zip(match_rows, match_cols):
+                    in_xy.append(last_iter_blobs[r])
+                    out_xy.append(blobs[c])
+                    in_dxdy.append(blobs[c] - last_iter_blobs[r])
                     is_part_of_live_track = [(i.locations[-1] == last_iter_blobs[r]).all() for i in running_tracks]
 
                     if np.array(is_part_of_live_track).any():
@@ -304,9 +308,36 @@ def interact_demo(cfg):
 
                 plot_to_debug(last_iter_output.cpu().squeeze().sigmoid().round(), txt=f'Pred Mask @ T = {t_idx - 1}')
 
+                in_xy, in_dxdy, out_xy = np.stack(in_xy), np.stack(in_dxdy), np.stack(out_xy)
+                in_xy, in_dxdy, out_xy = torch.from_numpy(in_xy), torch.from_numpy(in_dxdy), torch.from_numpy(out_xy)
+                in_xy, in_dxdy, out_xy = \
+                    in_xy.float().unsqueeze(0).to(cfg.interact.device), \
+                    in_dxdy.float().unsqueeze(0).to(cfg.interact.device), \
+                    out_xy.float().unsqueeze(0).to(cfg.interact.device)
+                batch = {'in_xy': in_xy, 'in_dxdy': in_dxdy, 'out_xy': out_xy}
+
+                traj_out = model.trajectory_model(batch)
+                traj_out_xy = traj_out['out_xy']
+
+                trajectory_map = generate_position_map([heat_masks.shape[-2], heat_masks.shape[-1]],
+                                                       traj_out_xy.squeeze().detach().clone().cpu().numpy(),
+                                                       sigma=1.5,
+                                                       heatmap_shape=None,
+                                                       return_combined=True, hw_mode=True)
+                plot_to_debug(trajectory_map, txt=f'Predicted locations @ T = {t_idx}')
+
+                gmm = GaussianMixture(n_components=in_xy.shape[1],
+                                      n_features=in_xy.shape[-1],
+                                      mu_init=in_xy,
+                                      var_init=torch.ones_like(in_xy) * 1.5)
+
+                loss = - gmm.score_samples(traj_out_xy.squeeze(0))
+                # l2_loss = torch.linalg.norm((out_xy - traj_out_xy))
+
             last_iter_output = out.clone().detach()
             last_iter_blobs = np.copy(blobs)
             last_frame_number = meta[0]['item']
+            in_xy, in_dxdy, out_xy = [], [], []
 
             if position_map_network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
                 loss = loss_fn(out, class_maps.long().squeeze(dim=1))
