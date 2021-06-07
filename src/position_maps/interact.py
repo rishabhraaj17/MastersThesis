@@ -218,8 +218,9 @@ def interact_demo(cfg):
     model.freeze_position_map_model()
     model.to(cfg.interact.device)
 
-    opt = torch.optim.Adam(position_map_model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay,
-                           amsgrad=cfg.amsgrad)
+    opt = torch.optim.Adam(model.parameters(), lr=cfg.interact.lr,
+                           weight_decay=cfg.interact.weight_decay,
+                           amsgrad=cfg.interact.amsgrad)
 
     train_subset = Subset(dataset=train_dataset, indices=list(cfg.interact.subset_indices))
     train_loader = DataLoader(train_subset, batch_size=cfg.interact.batch_size, shuffle=False,
@@ -250,8 +251,8 @@ def interact_demo(cfg):
 
             out = model.position_map_model(frames)
 
-            plot_to_debug(frames.cpu().squeeze().permute(1, 2, 0), txt=f'RGB @ T = {t_idx}')
-            plot_to_debug(out.cpu().detach().squeeze().sigmoid().round(), txt=f'Pred Mask @ T = {t_idx}')
+            # plot_to_debug(frames.cpu().squeeze().permute(1, 2, 0), txt=f'RGB @ T = {t_idx}')
+            # plot_to_debug(out.cpu().detach().squeeze().sigmoid().round(), txt=f'Pred Mask @ T = {t_idx}')
 
             agents_count_gt = meta[0]['bbox_centers'].shape[0]
             blobs_per_image, masks = extract_agents_locations(blob_threshold=cfg.interact.blob_threshold,
@@ -264,7 +265,7 @@ def interact_demo(cfg):
                                                            heatmap_shape=None,
                                                            return_combined=True, hw_mode=True))
 
-            plot_to_debug(detected_maps[0], txt=f'Blobs->Mask @ T = {t_idx}')
+            # plot_to_debug(detected_maps[0], txt=f'Blobs->Mask @ T = {t_idx}')
             blobs = correct_locations(blobs_per_image[0])  # for batch_size=1
 
             if t_idx > 0:
@@ -306,7 +307,7 @@ def interact_demo(cfg):
                         track_ids_used.append(last_track_id_used)
                         last_track_id_used += 1
 
-                plot_to_debug(last_iter_output.cpu().squeeze().sigmoid().round(), txt=f'Pred Mask @ T = {t_idx - 1}')
+                # plot_to_debug(last_iter_output.cpu().squeeze().sigmoid().round(), txt=f'Pred Mask @ T = {t_idx - 1}')
 
                 in_xy, in_dxdy, out_xy = np.stack(in_xy), np.stack(in_dxdy), np.stack(out_xy)
                 in_xy, in_dxdy, out_xy = torch.from_numpy(in_xy), torch.from_numpy(in_dxdy), torch.from_numpy(out_xy)
@@ -316,8 +317,33 @@ def interact_demo(cfg):
                     out_xy.float().unsqueeze(0).to(cfg.interact.device)
                 batch = {'in_xy': in_xy, 'in_dxdy': in_dxdy, 'out_xy': out_xy}
 
-                traj_out = model.trajectory_model(batch)
-                traj_out_xy = traj_out['out_xy']
+                in_map = generate_position_map([heat_masks.shape[-2], heat_masks.shape[-1]],
+                                               in_xy.squeeze().detach().clone().cpu().numpy(),
+                                               sigma=1.5,
+                                               heatmap_shape=None,
+                                               return_combined=True, hw_mode=True)
+                plot_to_debug(in_map, txt=f'Input locations @ T = {t_idx}')
+                true_out_map = generate_position_map([heat_masks.shape[-2], heat_masks.shape[-1]],
+                                                     out_xy.squeeze().detach().clone().cpu().numpy(),
+                                                     sigma=1.5,
+                                                     heatmap_shape=None,
+                                                     return_combined=True, hw_mode=True)
+                plot_to_debug(true_out_map, txt=f'True locations @ T = {t_idx}')
+
+                gmm = GaussianMixture(n_components=out_xy.shape[1],
+                                      n_features=out_xy.shape[-1],
+                                      mu_init=out_xy,
+                                      var_init=torch.ones_like(out_xy) * 1.5)
+                for t_i in range(9000):
+                    opt.zero_grad()
+                    traj_out = model.trajectory_model(batch)
+                    traj_out_xy = traj_out['out_xy']
+
+                    # loss = - gmm.score_samples(traj_out_xy.squeeze(0)).sum()
+                    loss = torch.linalg.norm((out_xy - traj_out_xy))
+                    logger.info(f'Loss @ {t_i}: {loss.item()}')
+                    loss.backward()
+                    opt.step()
 
                 trajectory_map = generate_position_map([heat_masks.shape[-2], heat_masks.shape[-1]],
                                                        traj_out_xy.squeeze().detach().clone().cpu().numpy(),
@@ -325,14 +351,6 @@ def interact_demo(cfg):
                                                        heatmap_shape=None,
                                                        return_combined=True, hw_mode=True)
                 plot_to_debug(trajectory_map, txt=f'Predicted locations @ T = {t_idx}')
-
-                gmm = GaussianMixture(n_components=in_xy.shape[1],
-                                      n_features=in_xy.shape[-1],
-                                      mu_init=in_xy,
-                                      var_init=torch.ones_like(in_xy) * 1.5)
-
-                loss = - gmm.score_samples(traj_out_xy.squeeze(0))
-                # l2_loss = torch.linalg.norm((out_xy - traj_out_xy))
 
             last_iter_output = out.clone().detach()
             last_iter_blobs = np.copy(blobs)

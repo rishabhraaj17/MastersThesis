@@ -7,7 +7,7 @@ unet:
   num_classes: 1
   input_channels: 3
   num_layers: 5
-  num_additional_double_conv_layers: 1  # default: 0
+  num_additional_double_conv_layers: 0 # 1 # 0  # default: 0
   features_start: 64
   bilinear: False
 
@@ -24,7 +24,7 @@ trajectory_baseline:
     encoder_h_g_scalar: 8
     decoder_h_g_scalar: 16
 
-    pred_len: 12
+    pred_len: 1
     noise_scalar: 4
     mlp_vec: 64
     mlp_scalar: 32
