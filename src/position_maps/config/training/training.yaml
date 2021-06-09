@@ -138,12 +138,16 @@ interact:
   postion_map_network_type: 'PositionMapUNetHeatmapSegmentation'
   focal_loss_alpha: 0.9
 
-  subset_indices: [0, 5, 10, 15, 20, 25, 30]  # [0, 12, 24, 36, 48, 60]
+  max_trajectory_length: 18
 
-  plot_checkpoint: 9
+  subset_indices: [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85]  # [0, 12, 24, 36, 48, 60]
+
+  plot_checkpoint: 99
 
   blob_threshold: 0.2
   objectness_threshold: 0.2
+
+  do_validation: False
 
   checkpoint:
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
