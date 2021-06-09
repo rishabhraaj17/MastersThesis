@@ -264,8 +264,8 @@ def interact_demo(cfg):
             # plot_to_debug(frames.cpu().squeeze().permute(1, 2, 0), txt=f'RGB @ T = {t_idx}')
             # plot_to_debug(out.cpu().detach().squeeze().sigmoid().round(), txt=f'Pred Mask @ T = {t_idx}')
 
-            # agents_count_gt = meta[0]['bbox_centers'].shape[0]  # for batch_size=1
-            agents_count_gt = [m['bbox_centers'].shape[0] for m in meta]
+            agents_count_gt = meta[0]['bbox_centers'].shape[0]  # for batch_size=1
+            # agents_count_gt = [m['bbox_centers'].shape[0] for m in meta]
             blobs_per_image, masks = extract_agents_locations(blob_threshold=cfg.interact.blob_threshold,
                                                               mask=out.clone().detach().cpu(),
                                                               objectness_threshold=cfg.interact.objectness_threshold)
@@ -278,8 +278,8 @@ def interact_demo(cfg):
 
             # plot_to_debug(detected_maps[0], txt=f'Blobs->Mask @ T = {t_idx}')
 
-            # blobs = correct_locations(blobs_per_image[0])  # for batch_size=1
-            blobs = [correct_locations(b) for b in blobs_per_image]
+            blobs = correct_locations(blobs_per_image[0])  # for batch_size=1
+            # blobs = [correct_locations(b) for b in blobs_per_image]
 
             traj_loss = torch.tensor(0, dtype=torch.float32, device=cfg.interact.device)
             if t_idx > 0:
@@ -359,8 +359,8 @@ def interact_demo(cfg):
 
             last_iter_output = out.clone().detach()
             last_iter_blobs = np.copy(blobs)
-            # last_frame_number = meta[0]['item']  # for batch_size=1
-            last_frame_number = [m['item'] for m in meta]
+            last_frame_number = meta[0]['item']  # for batch_size=1
+            # last_frame_number = [m['item'] for m in meta]
             in_xy, in_dxdy, out_xy = [], [], []
 
             if position_map_network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
