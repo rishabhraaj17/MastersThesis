@@ -498,6 +498,7 @@ def multiple_items_per_batch(cfg, in_dxdy, in_xy, killed_tracks, last_frame_numb
                              opt, opt_traj, out_xy, position_map_network_type, running_tracks, step_counter,
                              total_traj_loss, track_ids_used, train_loader):
     first_iteration = True
+    out_dxdy = []
     for epoch in range(cfg.interact.num_epochs):
         opt_traj.zero_grad()
         model.train()
@@ -540,37 +541,105 @@ def multiple_items_per_batch(cfg, in_dxdy, in_xy, killed_tracks, last_frame_numb
 
             traj_loss = torch.tensor(0, dtype=torch.float32, device=cfg.interact.device)
             if first_iteration:
-                current_frame_number = meta[0]['item']
-                blob_distance_matrix = np.zeros((last_iter_blobs.shape[0], blobs.shape[0]))
-                for p_idx, prev_blob in enumerate(last_iter_blobs):
-                    for b_idx, blob in enumerate(blobs):
-                        blob_distance_matrix[p_idx, b_idx] = np.linalg.norm((prev_blob - blob), ord=2)
+                for b_idx in range(1, len(blobs) - 1):
+                    previous_frame_number = meta[b_idx - 1]['item']
+                    current_frame_number = meta[b_idx]['item']
+                    next_frame_number = meta[b_idx + 1]['item']
 
-                # Hungarian
-                match_rows, match_cols = scipy.optimize.linear_sum_assignment(blob_distance_matrix)
+                    previous_blobs = blobs[b_idx - 1]
+                    current_blobs = blobs[b_idx]
+                    next_blobs = blobs[b_idx + 1]
 
-                last_track_id_used = track_ids_used[-1] if len(track_ids_used) != 0 else 0
-                for r, c in zip(match_rows, match_cols):
-                    in_xy.append(last_iter_blobs[r])
-                    out_xy.append(blobs[c])
-                    in_dxdy.append(blobs[c] - last_iter_blobs[r])
-                    is_part_of_live_track = [(i.locations[-1] == last_iter_blobs[r]).all()
-                                             and (i.frames.shape[0] == step_counter) for i in running_tracks]
+                    previous_current_blob_distance_matrix = get_distance_matrix(previous_blobs, current_blobs)
 
-                    if np.array(is_part_of_live_track).any():
-                        track_idx = np.where(is_part_of_live_track)[0].item()
-                        running_tracks[track_idx].frames = np.append(running_tracks[track_idx].frames,
-                                                                     [current_frame_number])
-                        running_tracks[track_idx].locations = np.append(running_tracks[track_idx].locations,
-                                                                        [blobs[c]], axis=0)
-                    else:
-                        running_tracks.append(PositionBasedTrack(
-                            idx=last_track_id_used,
-                            frames=np.array([last_frame_number, current_frame_number]),
-                            locations=np.array([last_iter_blobs[r], blobs[c]])))
+                    current_next_blob_distance_matrix = get_distance_matrix(current_blobs, next_blobs)
 
-                        track_ids_used.append(last_track_id_used)
-                        last_track_id_used += 1
+                    # Hungarian
+                    previous_current_match_rows, previous_current_match_cols = scipy.optimize.linear_sum_assignment(
+                        previous_current_blob_distance_matrix)
+                    current_next_match_rows, current_next_match_cols = scipy.optimize.linear_sum_assignment(
+                        current_next_blob_distance_matrix)
+
+                    last_track_id_used = track_ids_used[-1] if len(track_ids_used) != 0 else 0
+
+                    # past-current
+                    for r, c in zip(previous_current_match_rows, previous_current_match_cols):
+                        in_xy.append(previous_blobs[r])
+                        # out_xy.append(blobs[c])
+                        in_dxdy.append(current_blobs[c] - previous_blobs[r])
+                        is_part_of_live_track = [(i.locations[-1] == previous_blobs[r]).all()
+                                                 and (i.frames.shape[0] == step_counter) for i in running_tracks]
+
+                        if np.array(is_part_of_live_track).any():
+                            track_idx = np.where(is_part_of_live_track)[0].item()
+                            running_tracks[track_idx].frames = np.append(running_tracks[track_idx].frames,
+                                                                         [current_frame_number])
+                            running_tracks[track_idx].locations = np.append(running_tracks[track_idx].locations,
+                                                                            [current_blobs[c]], axis=0)
+                        else:
+                            running_tracks.append(PositionBasedTrack(
+                                idx=last_track_id_used,
+                                frames=np.array([previous_frame_number, current_frame_number]),
+                                locations=np.array([previous_blobs[r], current_blobs[c]])))
+
+                            track_ids_used.append(last_track_id_used)
+                            last_track_id_used += 1
+
+                    # current-future
+                    for r, c in zip(current_next_match_rows, current_next_match_cols):
+                        out_xy.append(next_blobs[c])
+                        out_dxdy.append(next_blobs[c] - current_blobs[r])
+                        is_part_of_live_track = [
+                            (i.locations[-1] == current_blobs[r]).all()
+                            and (i.frames.shape[0] == (step_counter + 2) if first_iteration else (step_counter + 1)) for
+                            i in running_tracks]
+
+                        if np.array(is_part_of_live_track).any():
+                            track_idx = np.where(is_part_of_live_track)[0].item()
+                            running_tracks[track_idx].frames = np.append(running_tracks[track_idx].frames,
+                                                                         [next_frame_number])
+                            running_tracks[track_idx].locations = np.append(running_tracks[track_idx].locations,
+                                                                            [next_blobs[c]], axis=0)
+                        else:
+                            running_tracks.append(PositionBasedTrack(
+                                idx=last_track_id_used,
+                                frames=np.array([current_frame_number, next_frame_number]),
+                                locations=np.array([current_blobs[r], next_blobs[c]])))
+
+                            track_ids_used.append(last_track_id_used)
+                            last_track_id_used += 1
+
+                # current_frame_number = meta[0]['item']
+                # blob_distance_matrix = np.zeros((last_iter_blobs.shape[0], blobs.shape[0]))
+                # for p_idx, prev_blob in enumerate(last_iter_blobs):
+                #     for b_idx, blob in enumerate(blobs):
+                #         blob_distance_matrix[p_idx, b_idx] = np.linalg.norm((prev_blob - blob), ord=2)
+
+                # # Hungarian
+                # match_rows, match_cols = scipy.optimize.linear_sum_assignment(blob_distance_matrix)
+
+                # last_track_id_used = track_ids_used[-1] if len(track_ids_used) != 0 else 0
+                # for r, c in zip(match_rows, match_cols):
+                #     in_xy.append(last_iter_blobs[r])
+                #     out_xy.append(blobs[c])
+                #     in_dxdy.append(blobs[c] - last_iter_blobs[r])
+                #     is_part_of_live_track = [(i.locations[-1] == last_iter_blobs[r]).all()
+                #                              and (i.frames.shape[0] == step_counter) for i in running_tracks]
+                #
+                #     if np.array(is_part_of_live_track).any():
+                #         track_idx = np.where(is_part_of_live_track)[0].item()
+                #         running_tracks[track_idx].frames = np.append(running_tracks[track_idx].frames,
+                #                                                      [current_frame_number])
+                #         running_tracks[track_idx].locations = np.append(running_tracks[track_idx].locations,
+                #                                                         [blobs[c]], axis=0)
+                #     else:
+                #         running_tracks.append(PositionBasedTrack(
+                #             idx=last_track_id_used,
+                #             frames=np.array([last_frame_number, current_frame_number]),
+                #             locations=np.array([last_iter_blobs[r], blobs[c]])))
+                #
+                #         track_ids_used.append(last_track_id_used)
+                #         last_track_id_used += 1
 
                 # plot_to_debug(last_iter_output.cpu().squeeze().sigmoid().round(), txt=f'Pred Mask @ T = {t_idx - 1}')
 
@@ -733,6 +802,14 @@ def multiple_items_per_batch(cfg, in_dxdy, in_xy, killed_tracks, last_frame_numb
                                                      f"| Epoch: {epoch}")
 
             logger.info(f"Epoch: {epoch} | Validation Loss: {np.array(val_loss).mean()}")
+
+
+def get_distance_matrix(blobs0, blobs1, norm_type=2):
+    distance_matrix = np.zeros((blobs0.shape[0], blobs1.shape[0]))
+    for b0_idx, b0_blob in enumerate(blobs0):
+        for b1_idx, b1_blob in enumerate(blobs1):
+            distance_matrix[b0_idx, b1_idx] = np.linalg.norm((b0_blob - b1_blob), ord=norm_type)
+    return distance_matrix
 
 
 if __name__ == '__main__':
