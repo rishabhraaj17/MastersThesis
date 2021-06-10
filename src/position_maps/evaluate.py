@@ -1,3 +1,4 @@
+import copy
 import os
 import warnings
 
@@ -5,6 +6,7 @@ import albumentations as A
 import hydra
 import numpy as np
 import pandas as pd
+import scipy
 import torch
 from kornia.losses import BinaryFocalLossWithLogits
 from pytorch_lightning import seed_everything
@@ -14,15 +16,16 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import ToPILImage
 from tqdm import tqdm
 
+import models as model_zoo
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost, scale_annotations
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from average_image.utils import SDDMeta
-from log import get_logger
-import models as model_zoo
 from dataset import SDDFrameAndAnnotationDataset
+from interact import extract_agents_locations, correct_locations, get_position_correction_transform
+from log import get_logger
 from train import setup_multiple_datasets_core, setup_single_transform, setup_single_common_transform
 from utils import heat_map_collate_fn, plot_predictions, get_blob_count, overlay_images, plot_predictions_with_overlay, \
-    get_scaled_shapes_with_pad_values
+    get_scaled_shapes_with_pad_values, plot_image_with_features
 
 seed_everything(42)
 logger = get_logger(__name__)
@@ -30,16 +33,8 @@ logger = get_logger(__name__)
 
 def get_supervised_boxes(cfg, current_random_frame, meta, random_idx, test_loader, test_transform, frame):
     # fixme: return two boxes for rgb shape and target shape
-    gt_annotation_path = f'{cfg.root}annotations/{test_loader.dataset.video_label.value}/' \
-                         f'video{test_loader.dataset.video_number_to_use}/annotation_augmented.csv'
-    gt_annotation_df = pd.read_csv(gt_annotation_path)
-    gt_annotation_df = gt_annotation_df.drop(gt_annotation_df.columns[[0]], axis=1)
-    frame_annotation = get_frame_annotations_and_skip_lost(gt_annotation_df, current_random_frame)
-    gt_annotations, gt_bbox_centers = scale_annotations(frame_annotation,
-                                                        original_scale=meta[random_idx]['original_shape'],
-                                                        new_scale=meta[random_idx]['original_shape'],
-                                                        return_track_id=False,
-                                                        tracks_with_annotations=True)
+    gt_annotations, gt_bbox_centers = get_supervised_annotation_per_frame(cfg, current_random_frame, meta, random_idx,
+                                                                          test_loader)
     supervised_boxes = gt_annotations[:, :-1]
     inside_boxes_idx = [b for b, box in enumerate(supervised_boxes)
                         if (box[0] > 0 and box[2] < meta[random_idx]['original_shape'][1])
@@ -54,6 +49,25 @@ def get_supervised_boxes(cfg, current_random_frame, meta, random_idx, test_loade
                          keypoints=gt_bbox_centers,
                          class_labels=class_labels)
     return out['bboxes']
+
+
+def get_supervised_annotation_per_frame(cfg, current_random_frame, meta, random_idx, test_loader):
+    gt_annotation_df = get_supervised_df(cfg, test_loader)
+    frame_annotation = get_frame_annotations_and_skip_lost(gt_annotation_df, current_random_frame)
+    gt_annotations, gt_bbox_centers = scale_annotations(frame_annotation,
+                                                        original_scale=meta[random_idx]['original_shape'],
+                                                        new_scale=meta[random_idx]['original_shape'],
+                                                        return_track_id=False,
+                                                        tracks_with_annotations=True)
+    return gt_annotations, gt_bbox_centers
+
+
+def get_supervised_df(cfg, test_loader):
+    gt_annotation_path = f'{cfg.root}annotations/{test_loader.dataset.video_label.value}/' \
+                         f'video{test_loader.dataset.video_number_to_use}/annotation_augmented.csv'
+    gt_annotation_df = pd.read_csv(gt_annotation_path)
+    gt_annotation_df = gt_annotation_df.drop(gt_annotation_df.columns[[0]], axis=1)
+    return gt_annotation_df
 
 
 def get_resize_dims(cfg):
@@ -205,9 +219,13 @@ def setup_eval(cfg):
 
 @hydra.main(config_path="config", config_name="config")
 def evaluate(cfg):
+    sdd_meta = SDDMeta(cfg.eval.root + 'H_SDD.txt')
     to_pil = ToPILImage()
 
     loss_fn, model, network_type, test_loader, checkpoint_file, test_transform = setup_eval(cfg)
+
+    ratio = float(sdd_meta.get_meta(getattr(SDDVideoDatasets, cfg.eval.video_meta_class)
+                                    , cfg.eval.test.video_number_to_use)[0]['Ratio'].to_numpy()[0])
 
     logger.info(f'Starting evaluation...')
 
@@ -241,6 +259,82 @@ def evaluate(cfg):
             loss = loss_fn(out, heat_masks)
 
         total_loss.append(loss.item())
+
+        if cfg.eval.evaluate_precision_recall:
+            blobs_per_image, masks = extract_agents_locations(blob_threshold=cfg.eval.blob_threshold,
+                                                              mask=out.clone().detach().cpu(),
+                                                              objectness_threshold=cfg.eval.objectness_threshold)
+            blobs_per_image = [correct_locations(b) for b in blobs_per_image]
+
+            adjusted_locations, scaled_images = [], []
+            for blobs, m, mask in zip(blobs_per_image, meta, masks):
+                original_shape = m['original_shape']
+                transform = get_position_correction_transform(original_shape)
+                out = transform(image=mask.squeeze(0).numpy(), keypoints=blobs)
+                adjusted_locations.append(out['keypoints'])
+                scaled_images.append(out['image'])
+
+            blobs_per_image = copy.deepcopy(adjusted_locations)
+            masks = np.stack(scaled_images)
+
+            for f in range(len(meta)):
+                frame_number = meta[f]['item']
+                rgb_frame = frames[f].cpu()
+
+                gt_annotation_df = get_supervised_df(cfg, test_loader)
+                frame_annotation = get_frame_annotations_and_skip_lost(gt_annotation_df, frame_number)
+                gt_annotations, gt_bbox_centers = scale_annotations(frame_annotation,
+                                                                    original_scale=meta[f]['original_shape'],
+                                                                    new_scale=meta[f]['original_shape'],
+                                                                    return_track_id=False,
+                                                                    tracks_with_annotations=True)
+                supervised_boxes = gt_annotations[:, :-1]
+                inside_boxes_idx = [b for b, box in enumerate(supervised_boxes)
+                                    if (box[0] > 0 and box[2] < meta[f]['original_shape'][1])
+                                    and (box[1] > 0 and box[3] < meta[f]['original_shape'][0])]
+                supervised_boxes = supervised_boxes[inside_boxes_idx]
+                gt_bbox_centers = gt_bbox_centers[inside_boxes_idx]
+                class_labels = ['object'] * supervised_boxes.shape[0]
+
+                rgb_frame = interpolate(rgb_frame.unsqueeze(0), size=meta[f]['original_shape'])
+
+                # transform = get_position_correction_transform(meta[f]['original_shape'])
+                # out = transform(image=rgb_frame.squeeze(dim=0).permute(1, 2, 0).numpy(),
+                #                 keypoints=gt_bbox_centers)
+                # gt_bbox_centers = out['keypoints']
+                # gt_bbox_centers = np.stack(gt_bbox_centers)
+
+                pred_centers = blobs_per_image[f]
+
+                distance_matrix = np.zeros(shape=(len(gt_bbox_centers), len(pred_centers)))
+                for gt_i, gt_loc in enumerate(gt_bbox_centers):
+                    for pred_i, pred_loc in enumerate(pred_centers):
+                        dist = np.linalg.norm((gt_loc - pred_loc), 2) * ratio
+                        distance_matrix[gt_i, pred_i] = dist
+
+                distance_matrix = cfg.eval.gt_pred_loc_distance_threshold - distance_matrix
+                distance_matrix[distance_matrix < 0] = 1000
+                # Hungarian
+                match_rows, match_cols = scipy.optimize.linear_sum_assignment(distance_matrix)
+                actually_matched_mask = distance_matrix[match_rows, match_cols] < 1000
+                match_rows = match_rows[actually_matched_mask]
+                match_cols = match_cols[actually_matched_mask]
+
+                tp = len(match_rows)
+                fp = len(pred_centers) - len(match_rows)
+                fn = len(gt_bbox_centers) - len(match_rows)
+
+                precision = tp / (tp + fp)
+                recall = tp / (tp + fn)
+
+                plot_image_with_features(rgb_frame.squeeze(dim=0).permute(1, 2, 0).numpy(), gt_bbox_centers,
+                                         np.stack(pred_centers), boxes=supervised_boxes,
+                                         txt=f'Frame Number: {frame_number}\n'
+                                             f'Agent Count: GT-{len(gt_bbox_centers)} | Pred-{len(pred_centers)}'
+                                             f'\nPrecision: {precision} | Recall: {recall}',
+                                         footnote_txt=f'L2 Matching Threshold: '
+                                                      f'{cfg.eval.gt_pred_loc_distance_threshold}m')
+                print()
 
         if cfg.eval.show_plots and idx % cfg.eval.plot_checkpoint == 0:
             random_idx = np.random.choice(cfg.eval.batch_size, 1, replace=False).item()

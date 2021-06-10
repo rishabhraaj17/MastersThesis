@@ -55,6 +55,11 @@ eval:
   plot_save_dir: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/proposed_method/v0/position_maps/'
   plot_with_overlay: True
 
+  evaluate_precision_recall: True
+  blob_threshold: 0.2
+  objectness_threshold: 0.2
+  gt_pred_loc_distance_threshold: 1 # meters
+
   max_pool:
     kernel_size: 2
     stride: 1
