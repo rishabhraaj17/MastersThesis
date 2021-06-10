@@ -242,9 +242,8 @@ def evaluate(cfg):
 
         total_loss.append(loss.item())
 
-        random_idx = np.random.choice(cfg.eval.batch_size, 1, replace=False).item()
-
-        if idx % cfg.eval.plot_checkpoint == 0:
+        if cfg.eval.show_plots and idx % cfg.eval.plot_checkpoint == 0:
+            random_idx = np.random.choice(cfg.eval.batch_size, 1, replace=False).item()
             current_random_frame = meta[random_idx]['item']
 
             save_dir = f'{cfg.eval.plot_save_dir}{network_type.__name__}_{loss_fn._get_name()}/' \
