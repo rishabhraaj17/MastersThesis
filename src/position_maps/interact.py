@@ -562,6 +562,7 @@ def multiple_items_per_batch(cfg, in_dxdy, in_xy, killed_tracks, last_frame_numb
 
                     last_track_id_used = track_ids_used[-1] if len(track_ids_used) != 0 else 0
 
+                    #  change it to collect all.. make trajectory--do prediction
                     # past-current
                     for r, c in zip(previous_current_match_rows, previous_current_match_cols):
                         in_xy.append(previous_blobs[r])
