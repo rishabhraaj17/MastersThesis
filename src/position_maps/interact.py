@@ -610,85 +610,55 @@ def multiple_items_per_batch(cfg, in_dxdy, in_xy, killed_tracks, last_frame_numb
                             track_ids_used.append(last_track_id_used)
                             last_track_id_used += 1
 
-                # current_frame_number = meta[0]['item']
-                # blob_distance_matrix = np.zeros((last_iter_blobs.shape[0], blobs.shape[0]))
-                # for p_idx, prev_blob in enumerate(last_iter_blobs):
-                #     for b_idx, blob in enumerate(blobs):
-                #         blob_distance_matrix[p_idx, b_idx] = np.linalg.norm((prev_blob - blob), ord=2)
+                    # plot_to_debug(last_iter_output.cpu().squeeze().sigmoid().round(),
+                    #               txt=f'Pred Mask @ T = {t_idx - 1}')
 
-                # # Hungarian
-                # match_rows, match_cols = scipy.optimize.linear_sum_assignment(blob_distance_matrix)
+                    in_xy, in_dxdy, out_xy, out_dxdy = \
+                        np.stack(in_xy), np.stack(in_dxdy), np.stack(out_xy), np.stack(out_dxdy)
+                    in_xy, in_dxdy, out_xy, out_dxdy = \
+                        torch.from_numpy(in_xy), torch.from_numpy(in_dxdy), \
+                        torch.from_numpy(out_xy), torch.from_numpy(out_dxdy)
+                    in_xy, in_dxdy, out_xy, out_dxdy = \
+                        in_xy.float().unsqueeze(0).to(cfg.interact.device), \
+                        in_dxdy.float().unsqueeze(0).to(cfg.interact.device), \
+                        out_xy.float().unsqueeze(0).to(cfg.interact.device), \
+                        out_dxdy.float().unsqueeze(0).to(cfg.interact.device)
+                    batch = {'in_xy': in_xy, 'in_dxdy': in_dxdy, 'out_xy': out_xy, 'out_dxdy': out_dxdy}
 
-                # last_track_id_used = track_ids_used[-1] if len(track_ids_used) != 0 else 0
-                # for r, c in zip(match_rows, match_cols):
-                #     in_xy.append(last_iter_blobs[r])
-                #     out_xy.append(blobs[c])
-                #     in_dxdy.append(blobs[c] - last_iter_blobs[r])
-                #     is_part_of_live_track = [(i.locations[-1] == last_iter_blobs[r]).all()
-                #                              and (i.frames.shape[0] == step_counter) for i in running_tracks]
-                #
-                #     if np.array(is_part_of_live_track).any():
-                #         track_idx = np.where(is_part_of_live_track)[0].item()
-                #         running_tracks[track_idx].frames = np.append(running_tracks[track_idx].frames,
-                #                                                      [current_frame_number])
-                #         running_tracks[track_idx].locations = np.append(running_tracks[track_idx].locations,
-                #                                                         [blobs[c]], axis=0)
-                #     else:
-                #         running_tracks.append(PositionBasedTrack(
-                #             idx=last_track_id_used,
-                #             frames=np.array([last_frame_number, current_frame_number]),
-                #             locations=np.array([last_iter_blobs[r], blobs[c]])))
-                #
-                #         track_ids_used.append(last_track_id_used)
-                #         last_track_id_used += 1
+                    in_map = generate_position_map([heat_masks.shape[-2], heat_masks.shape[-1]],
+                                                   in_xy.squeeze().detach().clone().cpu().numpy(),
+                                                   sigma=1.5,
+                                                   heatmap_shape=None,
+                                                   return_combined=True, hw_mode=True)
+                    true_out_map = generate_position_map([heat_masks.shape[-2], heat_masks.shape[-1]],
+                                                         out_xy.squeeze().detach().clone().cpu().numpy(),
+                                                         sigma=1.5,
+                                                         heatmap_shape=None,
+                                                         return_combined=True, hw_mode=True)
 
-                # plot_to_debug(last_iter_output.cpu().squeeze().sigmoid().round(), txt=f'Pred Mask @ T = {t_idx - 1}')
+                    gmm = GaussianMixture(n_components=out_xy.shape[1],
+                                          n_features=out_xy.shape[-1],
+                                          mu_init=out_xy,
+                                          var_init=torch.ones_like(out_xy) * 1.5)
 
-                in_xy, in_dxdy, out_xy = np.stack(in_xy), np.stack(in_dxdy), np.stack(out_xy)
-                in_xy, in_dxdy, out_xy = torch.from_numpy(in_xy), torch.from_numpy(in_dxdy), torch.from_numpy(out_xy)
-                in_xy, in_dxdy, out_xy = \
-                    in_xy.float().unsqueeze(0).to(cfg.interact.device), \
-                    in_dxdy.float().unsqueeze(0).to(cfg.interact.device), \
-                    out_xy.float().unsqueeze(0).to(cfg.interact.device)
-                batch = {'in_xy': in_xy, 'in_dxdy': in_dxdy, 'out_xy': out_xy}
+                    traj_out = model.trajectory_model(batch)
+                    traj_out_xy = traj_out['out_xy']
 
-                in_map = generate_position_map([heat_masks.shape[-2], heat_masks.shape[-1]],
-                                               in_xy.squeeze().detach().clone().cpu().numpy(),
-                                               sigma=1.5,
-                                               heatmap_shape=None,
-                                               return_combined=True, hw_mode=True)
-                true_out_map = generate_position_map([heat_masks.shape[-2], heat_masks.shape[-1]],
-                                                     out_xy.squeeze().detach().clone().cpu().numpy(),
-                                                     sigma=1.5,
-                                                     heatmap_shape=None,
-                                                     return_combined=True, hw_mode=True)
+                    traj_loss = - gmm.score_samples(traj_out_xy.squeeze(0)).sum()
 
-                gmm = GaussianMixture(n_components=out_xy.shape[1],
-                                      n_features=out_xy.shape[-1],
-                                      mu_init=out_xy,
-                                      var_init=torch.ones_like(out_xy) * 1.5)
+                    trajectory_map = generate_position_map([heat_masks.shape[-2], heat_masks.shape[-1]],
+                                                           traj_out_xy.squeeze().detach().clone().cpu().numpy(),
+                                                           sigma=1.5,
+                                                           heatmap_shape=None,
+                                                           return_combined=True, hw_mode=True)
 
-                traj_out = model.trajectory_model(batch)
-                traj_out_xy = traj_out['out_xy']
+                    if epoch % cfg.interact.plot_checkpoint == 0 and epoch != 0:
+                        plot_to_debug(in_map, txt=f'Input locations @ T = {t_idx}')
+                        plot_to_debug(true_out_map, txt=f'True locations @ T = {t_idx}')
+                        plot_to_debug(trajectory_map, txt=f'Predicted locations @ T = {t_idx}')
 
-                traj_loss = - gmm.score_samples(traj_out_xy.squeeze(0)).sum()
-
-                trajectory_map = generate_position_map([heat_masks.shape[-2], heat_masks.shape[-1]],
-                                                       traj_out_xy.squeeze().detach().clone().cpu().numpy(),
-                                                       sigma=1.5,
-                                                       heatmap_shape=None,
-                                                       return_combined=True, hw_mode=True)
-
-                if epoch % cfg.interact.plot_checkpoint == 0 and epoch != 0:
-                    plot_to_debug(in_map, txt=f'Input locations @ T = {t_idx}')
-                    plot_to_debug(true_out_map, txt=f'True locations @ T = {t_idx}')
-                    plot_to_debug(trajectory_map, txt=f'Predicted locations @ T = {t_idx}')
-
-            last_iter_output = out.clone().detach()
-            last_iter_blobs = np.copy(blobs)
-            last_frame_number = meta[0]['item']  # for batch_size=1
-            # last_frame_number = [m['item'] for m in meta]
-            in_xy, in_dxdy, out_xy = [], [], []
+                    in_xy, in_dxdy, out_xy, out_dxdy = [], [], [], []
+                    step_counter += 3
 
             if position_map_network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
                 loss = loss_fn(out, class_maps.long().squeeze(dim=1))
@@ -717,7 +687,7 @@ def multiple_items_per_batch(cfg, in_dxdy, in_xy, killed_tracks, last_frame_numb
 
             loss.backward()
             opt.step()
-            step_counter += 1
+            # step_counter += 1
 
             still_running_tracks = []
             for r_track in running_tracks:
