@@ -60,6 +60,9 @@ eval:
   objectness_threshold: 0.2
   gt_pred_loc_distance_threshold: 2 # meters
 
+  make_video: True
+  video_fps: 2
+
   max_pool:
     kernel_size: 2
     stride: 1

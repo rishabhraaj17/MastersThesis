@@ -1,14 +1,18 @@
 import copy
 import os
 import warnings
+from pathlib import Path
 
 import albumentations as A
 import hydra
 import numpy as np
 import pandas as pd
 import scipy
+import skimage
 import torch
+import torchvision
 from kornia.losses import BinaryFocalLossWithLogits
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from pytorch_lightning import seed_everything
 from torch.nn import MSELoss
 from torch.nn.functional import interpolate
@@ -25,7 +29,7 @@ from interact import extract_agents_locations, correct_locations, get_position_c
 from log import get_logger
 from train import setup_multiple_datasets_core, setup_single_transform, setup_single_common_transform
 from utils import heat_map_collate_fn, plot_predictions, get_blob_count, overlay_images, plot_predictions_with_overlay, \
-    get_scaled_shapes_with_pad_values, plot_image_with_features
+    get_scaled_shapes_with_pad_values, plot_image_with_features, ImagePadder
 
 seed_everything(42)
 logger = get_logger(__name__)
@@ -143,6 +147,21 @@ def get_precision_recall_for_metrics(cfg, gt_bbox_centers, pred_centers, ratio):
     recall = tp / (tp + fn + 1e-9)
 
     return fn, fp, precision, recall, tp
+
+
+def get_image_array_from_figure(fig):
+    canvas = FigureCanvas(fig)
+    canvas.draw()
+    buf = canvas.buffer_rgba()
+    video_frame = np.asarray(buf, dtype=np.uint8)[:, :, :-1]
+    return video_frame
+
+
+def process_numpy_video_frame_to_tensor(video_frame):
+    video_frame = torch.from_numpy(video_frame).permute(2, 0, 1)
+    image_padder = ImagePadder(video_frame.shape)
+    video_frame = image_padder.pad(video_frame.unsqueeze(0).float())[0].to(dtype=torch.uint8)
+    return video_frame
 
 
 def get_resize_dims(cfg):
@@ -306,6 +325,8 @@ def evaluate(cfg):
 
     total_loss = []
     tp_list, fp_list, fn_list = [], [], []
+
+    video_frames = []
     for idx, data in enumerate(tqdm(test_loader)):
         frames, heat_masks, position_map, distribution_map, class_maps, meta = data
 
@@ -349,8 +370,8 @@ def evaluate(cfg):
                 fn, fp, precision, recall, tp = get_precision_recall_for_metrics(cfg, gt_bbox_centers, pred_centers,
                                                                                  ratio)
 
-                if cfg.eval.show_plots:
-                    plot_image_with_features(
+                if cfg.eval.show_plots or cfg.eval.make_video:
+                    fig = plot_image_with_features(
                         rgb_frame.squeeze(dim=0).permute(1, 2, 0).numpy(), gt_bbox_centers,
                         np.stack(pred_centers), boxes=supervised_boxes,
                         txt=f'Frame Number: {frame_number}\n'
@@ -359,7 +380,20 @@ def evaluate(cfg):
                         footnote_txt=f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
                                      f'Video Number: {cfg.eval.test.video_number_to_use}'
                                      f'\n\nL2 Matching Threshold: '
-                                     f'{cfg.eval.gt_pred_loc_distance_threshold}m')
+                                     f'{cfg.eval.gt_pred_loc_distance_threshold}m',
+                        video_mode=cfg.eval.make_video)
+
+                    if cfg.eval.make_video:
+                        video_frame = get_image_array_from_figure(fig)
+
+                        if video_frame.shape[0] != meta[f]['original_shape'][1] \
+                                or video_frame.shape[1] != meta[f]['original_shape'][0]:
+                            video_frame = skimage.transform.resize(
+                                video_frame, (meta[f]['original_shape'][1], meta[f]['original_shape'][0]))
+                            video_frame = (video_frame * 255).astype(np.uint8)
+
+                            video_frame = process_numpy_video_frame_to_tensor(video_frame)
+                            video_frames.append(video_frame)
 
                 tp_list.append(tp)
                 fp_list.append(fp)
@@ -448,6 +482,15 @@ def evaluate(cfg):
     logger.info(f"Threshold: {cfg.eval.gt_pred_loc_distance_threshold}m")
     logger.info(f"Test Loss: {np.array(total_loss).mean()}")
     logger.info(f"Precision: {final_precision} | Recall: {final_recall}")
+
+    if cfg.eval.make_video:
+        logger.info(f"\nWriting Video")
+        Path(os.path.join(os.getcwd(), 'videos')).mkdir(parents=True, exist_ok=True)
+        torchvision.io.write_video(
+            f'videos/{getattr(SDDVideoClasses, cfg.eval.video_meta_class).name}_'
+            f'{cfg.eval.test.video_number_to_use}.avi',
+            torch.cat(video_frames).permute(0, 2, 3, 1),
+            cfg.eval.video_fps)
 
 
 if __name__ == '__main__':

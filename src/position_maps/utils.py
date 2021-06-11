@@ -21,6 +21,27 @@ from average_image.utils import SDDMeta
 from baselinev2.plot_utils import add_box_to_axes, add_features_to_axis
 
 
+class ImagePadder:
+    """ Pads images such that dimensions are divisible by 8 """
+
+    def __init__(self, dims, mode='sintel'):
+        self.ht, self.wd = dims[-2:]
+        pad_ht = (((self.ht // 8) + 1) * 8 - self.ht) % 8
+        pad_wd = (((self.wd // 8) + 1) * 8 - self.wd) % 8
+        if mode == 'sintel':
+            self._pad = [pad_wd // 2, pad_wd - pad_wd // 2, pad_ht // 2, pad_ht - pad_ht // 2]
+        else:
+            self._pad = [pad_wd // 2, pad_wd - pad_wd // 2, 0, pad_ht]
+
+    def pad(self, *inputs):
+        return [pad(x, self._pad, mode='replicate') for x in inputs]
+
+    def unpad(self, x):
+        ht, wd = x.shape[-2:]
+        c = [self._pad[2], ht - self._pad[3], self._pad[0], wd - self._pad[1]]
+        return x[..., c[0]:c[1], c[2]:c[3]]
+
+
 def gaussian_v0(x: int, y: int, height: int, width: int, sigma: int = 5) -> 'np.ndarray':
     channel = [np.exp(-((c - x) ** 2 + (r - y) ** 2) / (2 * sigma ** 2)) for r in range(height) for c in range(width)]
     channel = np.array(channel, dtype=np.float32).reshape((height, width))
@@ -77,7 +98,7 @@ def plot_samples(img, mask, rgb_boxes, rgb_box_centers, boxes, box_centers, plot
 
 
 def plot_image_with_features(im, feat1=None, feat2=None, boxes=None, txt='', marker_size=5, add_on_both_axes=True,
-                             footnote_txt=''):
+                             footnote_txt='', video_mode=False):
     fig, axs = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(12, 10))
     rgb_ax, feat_ax = axs
 
@@ -109,7 +130,13 @@ def plot_image_with_features(im, feat1=None, feat2=None, boxes=None, txt='', mar
 
     plt.suptitle(txt)
     plt.figtext(0.99, 0.01, footnote_txt, horizontalalignment='right')
-    plt.show()
+
+    if video_mode:
+        plt.close()
+    else:
+        plt.show()
+
+    return fig
 
 
 def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=False, save_dir=None, img_name='',
