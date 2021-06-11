@@ -484,7 +484,7 @@ def evaluate(cfg):
     logger.info(f"Precision: {final_precision} | Recall: {final_recall}")
 
     if cfg.eval.make_video:
-        logger.info(f"\nWriting Video")
+        logger.info(f"Writing Video")
         Path(os.path.join(os.getcwd(), 'videos')).mkdir(parents=True, exist_ok=True)
         torchvision.io.write_video(
             f'videos/{getattr(SDDVideoClasses, cfg.eval.video_meta_class).name}_'
