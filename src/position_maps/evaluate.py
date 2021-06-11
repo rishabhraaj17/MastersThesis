@@ -363,6 +363,8 @@ def evaluate(cfg):
             for f in range(len(meta)):
                 frame_number = meta[f]['item']
                 rgb_frame = frames[f].cpu()
+                gt_heatmap = heat_masks[f].cpu()
+                pred_heatmap = out.sigmoid().round()[f].cpu()
 
                 gt_bbox_centers, pred_centers, rgb_frame, supervised_boxes = get_gt_annotations_for_metrics(
                     blobs_per_image, cfg, f, frame_number, meta, rgb_frame, test_loader)
@@ -381,7 +383,10 @@ def evaluate(cfg):
                                      f'Video Number: {cfg.eval.test.video_number_to_use}'
                                      f'\n\nL2 Matching Threshold: '
                                      f'{cfg.eval.gt_pred_loc_distance_threshold}m',
-                        video_mode=cfg.eval.make_video)
+                        video_mode=cfg.eval.make_video,
+                        plot_heatmaps=True,
+                        gt_heatmap=gt_heatmap.squeeze(dim=0).numpy(),
+                        pred_heatmap=pred_heatmap.squeeze(dim=0).numpy())
 
                     if cfg.eval.make_video:
                         video_frame = get_image_array_from_figure(fig)

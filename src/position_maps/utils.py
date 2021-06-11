@@ -98,9 +98,20 @@ def plot_samples(img, mask, rgb_boxes, rgb_box_centers, boxes, box_centers, plot
 
 
 def plot_image_with_features(im, feat1=None, feat2=None, boxes=None, txt='', marker_size=5, add_on_both_axes=True,
-                             footnote_txt='', video_mode=False):
-    fig, axs = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(12, 10))
-    rgb_ax, feat_ax = axs
+                             footnote_txt='', video_mode=False, plot_heatmaps=True, gt_heatmap=None, pred_heatmap=None,
+                             h_factor=0, w_factor=0):
+    if plot_heatmaps:
+        fig, axs = plt.subplots(2, 2, sharex='none', sharey='none', figsize=(22 + h_factor, 16 + w_factor))
+        rgb_ax, feat_ax, gt_heatmap_ax, pred_heatmap_ax = axs[0, 0], axs[0, 1], axs[1, 0], axs[1, 1]
+        if gt_heatmap is not None:
+            gt_heatmap_ax.imshow(gt_heatmap, cmap='hot')
+        if pred_heatmap is not None:
+            pred_heatmap_ax.imshow(pred_heatmap, cmap='hot')
+        gt_heatmap_ax.set_title('GT Heatmap')
+        pred_heatmap_ax.set_title('Pred Heatmap')
+    else:
+        fig, axs = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(12, 10))
+        rgb_ax, feat_ax = axs
 
     rgb_ax.imshow(im)
     feat_ax.imshow(im)
@@ -123,6 +134,7 @@ def plot_image_with_features(im, feat1=None, feat2=None, boxes=None, txt='', mar
     rgb_ax.set_title('RGB')
     feat_ax.set_title('RGB + Locations')
 
+    fig.subplots_adjust(wspace=0.1, hspace=0.1)
     plt.tight_layout(pad=1.58)
 
     legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
