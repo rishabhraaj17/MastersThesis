@@ -1,8 +1,8 @@
 # @package _global_
 
 eval:
-  batch_size : 2
-  num_workers: 0
+  batch_size : 4
+  num_workers: 12
   pin_memory: True
   drop_last: False
 
@@ -28,7 +28,7 @@ eval:
     video_numbers_to_use: [ [ 2, 4 ], [ 0, 3 ] ]
     multiple_videos: False
 
-  dataset_workers: 8
+  dataset_workers: 12
   # keep one of them null at one time
   scale_factor: null # 0.25
   desired_size: [ 490, 360 ]
@@ -58,7 +58,7 @@ eval:
   evaluate_precision_recall: True
   blob_threshold: 0.2
   objectness_threshold: 0.2
-  gt_pred_loc_distance_threshold: 1 # meters
+  gt_pred_loc_distance_threshold: 2 # meters
 
   max_pool:
     kernel_size: 2
