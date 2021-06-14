@@ -294,7 +294,13 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
     else:
         if cfg.resume_mode:
             checkpoint_path = f'{cfg.resume.checkpoint.path}{cfg.resume.checkpoint.version}/checkpoints/'
-            checkpoint_file = checkpoint_path + os.listdir(checkpoint_path)[0]
+            checkpoint_files = os.listdir(checkpoint_path)
+
+            epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
+            epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
+            checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
+
+            checkpoint_file = checkpoint_path + checkpoint_files[-cfg.resume.checkpoint.top_k]
 
             trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                               fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],

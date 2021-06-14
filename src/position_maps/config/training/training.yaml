@@ -90,7 +90,8 @@ resume_mode: False
 resume:
   checkpoint:
     path: "lightning_logs/version_"
-    version: 10
+    version: 472698
+    top_k: 1
 
 class_map_segmentation: False
 position_map_segmentation: False
