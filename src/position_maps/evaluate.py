@@ -290,7 +290,13 @@ def setup_eval(cfg):
     logger.info(f'Setting up Model')
 
     checkpoint_path = f'{cfg.eval.checkpoint.root}{cfg.eval.checkpoint.path}{cfg.eval.checkpoint.version}/checkpoints/'
-    checkpoint_file = checkpoint_path + os.listdir(checkpoint_path)[0]
+    checkpoint_files = os.listdir(checkpoint_path)
+
+    epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
+    epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
+    checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
+
+    checkpoint_file = checkpoint_path + checkpoint_files[-cfg.eval.checkpoint.top_k]
 
     if cfg.eval.use_lightning_loader:
         hparams_file = f'{cfg.eval.checkpoint.root}{cfg.eval.checkpoint.path}{cfg.eval.checkpoint.version}/hparams.yaml'

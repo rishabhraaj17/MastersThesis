@@ -60,7 +60,7 @@ eval:
   objectness_threshold: 0.2
   gt_pred_loc_distance_threshold: 2 # meters
 
-  make_video: True
+  make_video: False
   video_fps: 2
 
   max_pool:
@@ -75,4 +75,5 @@ eval:
   checkpoint:
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
     path: "lightning_logs/version_"
-    version: 424798 # 437363  # 424798
+    version: 476322 #424798 # 437363  # 424798
+    top_k: 1
