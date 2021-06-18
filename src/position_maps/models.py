@@ -600,10 +600,16 @@ class HourGlassPositionMapNetwork(LightningModule):
         offset = self.conv_offset(x)
         return self.last_conv(x, offset)
 
+    def calc_loss(self, predictions, heatmaps):
+        combined_loss = [self.loss_fn(pred, heatmaps) for pred in predictions]
+        combined_loss = torch.stack(combined_loss, dim=0)
+        return combined_loss
+
     def _one_step(self, batch):
         frames, heat_masks, _, _, _, meta = batch
         out = self(frames)
-        return NotImplementedError
+        loss = self.calc_loss(out, heat_masks)
+        return loss
 
     def training_step(self, batch, batch_idx):
         loss = self._one_step(batch)

@@ -35,7 +35,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
             rgb_transform: Optional[Callable] = None, rgb_new_shape: Tuple[int, int] = None,
             rgb_pad_value: Sequence[int] = None, target_pad_value: Sequence[int] = None,
             rgb_plot_transform: Optional[Callable] = None, common_transform: Optional[Callable] = None,
-            using_replay_compose: bool = False):
+            using_replay_compose: bool = False, manual_annotation_processing: bool = False):
         super(SDDFrameAndAnnotationDataset, self).__init__()
 
         _mid_path = video_label.value
@@ -156,6 +156,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
         self.heatmap_region_limit_threshold = heatmap_region_limit_threshold
         self.downscale_only_target_maps = downscale_only_target_maps
         self.using_replay_compose = using_replay_compose
+        self.manual_annotation_processing = manual_annotation_processing
 
     @property
     def metadata(self):
@@ -258,42 +259,50 @@ class SDDFrameAndAnnotationDataset(Dataset):
                 rgb_boxes = np.stack(out['bboxes'])
                 rgb_bbox_centers = np.stack(out['keypoints'])
 
-                out_mask = A.ReplayCompose.replay(out['replay'], image=heat_mask.numpy())
+                out_mask = A.ReplayCompose.replay(out['replay'], image=heat_mask.numpy(), keypoints=target_bbox_centers,
+                                                  bboxes=target_boxes, class_labels=class_labels)
                 img = out_mask['image']
                 heat_mask = torch.from_numpy(img)
 
-                if out['replay']['applied']:
-                    kp_extra = np.zeros((target_bbox_centers.shape[0], 2))
-                    target_bbox_centers = np.hstack((target_bbox_centers, kp_extra))
+                if not self.manual_annotation_processing:
+                    target_boxes = np.stack(out_mask['bboxes'])
+                    target_bbox_centers = np.stack(out_mask['keypoints'])
+                else:
+                    if out['replay']['applied']:
+                        kp_extra = np.zeros((target_bbox_centers.shape[0], 2))
+                        target_bbox_centers = np.hstack((target_bbox_centers, kp_extra))
 
-                    target_boxes = normalize_bboxes(
-                        target_boxes, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
-
-                    all_transforms = {k: v for k, v in out['replay'].items()
-                                      if k not in ["__class_fullname__", "applied", "params"]}
-                    for transform in all_transforms['transforms']:
-                        if transform['applied'] and transform['__class_fullname__'] != 'albumentations.augmentations.' \
-                                                                                       'transforms.' \
-                                                                                       'RandomBrightnessContrast':
-                            class_name = str.split(transform['__class_fullname__'], '.')[-1]
-                            if class_name == 'HorizontalFlip':
-                                target_boxes = [bbox_hflip(box, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
-                                                for box in target_boxes]
-                                target_bbox_centers = [keypoint_hflip(
-                                    kp, rows=heat_mask.shape[0], cols=heat_mask.shape[1]) for kp in target_bbox_centers]
-                            elif class_name == 'VerticalFlip':
-                                target_boxes = [bbox_vflip(box, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
-                                                for box in target_boxes]
-                                target_bbox_centers = [keypoint_vflip(
-                                    kp, rows=heat_mask.shape[0], cols=heat_mask.shape[1]) for kp in target_bbox_centers]
-                            else:
-                                raise NotImplementedError
-
-                    target_boxes = denormalize_bboxes(
+                        target_boxes = normalize_bboxes(
                             target_boxes, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
 
-                    target_boxes = np.stack(target_boxes)
-                    target_bbox_centers = np.stack(target_bbox_centers)
+                        all_transforms = {k: v for k, v in out['replay'].items()
+                                          if k not in ["__class_fullname__", "applied", "params"]}
+                        for transform in all_transforms['transforms']:
+                            if transform['applied'] \
+                                    and transform['__class_fullname__'] != 'albumentations.augmentations.' \
+                                                                           'transforms.' \
+                                                                           'RandomBrightnessContrast':
+                                class_name = str.split(transform['__class_fullname__'], '.')[-1]
+                                if class_name == 'HorizontalFlip':
+                                    target_boxes = [bbox_hflip(box, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
+                                                    for box in target_boxes]
+                                    target_bbox_centers = [keypoint_hflip(
+                                        kp, rows=heat_mask.shape[0], cols=heat_mask.shape[1]) for kp in
+                                        target_bbox_centers]
+                                elif class_name == 'VerticalFlip':
+                                    target_boxes = [bbox_vflip(box, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
+                                                    for box in target_boxes]
+                                    target_bbox_centers = [keypoint_vflip(
+                                        kp, rows=heat_mask.shape[0], cols=heat_mask.shape[1]) for kp in
+                                        target_bbox_centers]
+                                else:
+                                    continue  # raise NotImplementedError
+
+                        target_boxes = denormalize_bboxes(
+                            target_boxes, rows=heat_mask.shape[0], cols=heat_mask.shape[1])
+
+                        target_boxes = np.stack(target_boxes)
+                        target_bbox_centers = np.stack(target_bbox_centers)
             else:
                 out = self.common_transform(image=video.squeeze(0).permute(1, 2, 0).numpy(),
                                             image0=heat_mask.numpy(),

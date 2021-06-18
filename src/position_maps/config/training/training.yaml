@@ -45,6 +45,7 @@ desired_pixel_to_meter_ratio: 0.25
 desired_pixel_to_meter_ratio_rgb: 0.12 # 0.05
 downscale_only_target_maps: False
 using_replay_compose: True
+manual_annotation_processing: False
 
 train:
   num_videos: -1
@@ -97,8 +98,9 @@ class_map_segmentation: False
 position_map_segmentation: False
 
 # one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation',
-# 'PositionMapUNetClassMapSegmentation', 'PositionMapUNetHeatmapSegmentation', 'PositionMapStackedHourGlass'
-postion_map_network_type: 'PositionMapUNetHeatmapSegmentation'
+# 'PositionMapUNetClassMapSegmentation', 'PositionMapUNetHeatmapSegmentation', 'PositionMapStackedHourGlass',
+# 'HourGlassPositionMapNetwork'
+postion_map_network_type: 'HourGlassPositionMapNetwork'
 
 overfit:
   num_epochs: 6000

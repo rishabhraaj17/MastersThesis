@@ -224,7 +224,8 @@ def setup_dataset(cfg):
         target_pad_value=target_pad_values,
         rgb_plot_transform=rgb_plot_transform,
         common_transform=common_transform,
-        using_replay_compose=cfg.eval.using_replay_compose
+        using_replay_compose=cfg.eval.using_replay_compose,
+        manual_annotation_processing=cfg.eval.manual_annotation_processing
     )
     return test_dataset, transform, target_max_shape
 
