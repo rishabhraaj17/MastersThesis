@@ -347,13 +347,20 @@ def overfit(cfg):
     if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation',
                                  'PositionMapUNetClassMapSegmentation',
                                  'PositionMapUNetHeatmapSegmentation',
-                                 'PositionMapStackedHourGlass']:
+                                 'PositionMapStackedHourGlass',
+                                 'HourGlassPositionMapNetwork']:
         loss_fn = BinaryFocalLossWithLogits(alpha=cfg.overfit.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
     else:
         loss_fn = MSELoss()
 
-    model = network_type(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
-                         loss_function=loss_fn, collate_fn=heat_map_collate_fn, desired_output_shape=target_max_shape)
+    if network_type.__name__ == 'HourGlassPositionMapNetwork':
+        model = network_type.from_config(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+                                         loss_function=loss_fn, collate_fn=heat_map_collate_fn,
+                                         desired_output_shape=target_max_shape)
+    else:
+        model = network_type(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+                             loss_function=loss_fn, collate_fn=heat_map_collate_fn,
+                             desired_output_shape=target_max_shape)
     model.to(cfg.device)
 
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay, amsgrad=cfg.amsgrad)
@@ -376,7 +383,8 @@ def overfit(cfg):
             elif network_type.__name__ == 'PositionMapUNetPositionMapSegmentation':
                 frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
             elif network_type.__name__ in ['PositionMapUNetHeatmapSegmentation',
-                                           'PositionMapStackedHourGlass']:
+                                           'PositionMapStackedHourGlass',
+                                           'HourGlassPositionMapNetwork']:
                 frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
             else:
                 frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
@@ -392,6 +400,9 @@ def overfit(cfg):
             elif network_type.__name__ == 'PositionMapStackedHourGlass':
                 loss = model.network.calc_loss(combined_hm_preds=out, heatmaps=heat_masks)
                 loss = loss.mean()
+            elif network_type.__name__ == 'HourGlassPositionMapNetwork':
+                out = model_zoo.post_process_multi_apply(out)
+                loss = model.calc_loss(out, heat_masks).mean()
             else:
                 loss = loss_fn(out, heat_masks)
 
@@ -414,7 +425,8 @@ def overfit(cfg):
                 elif network_type.__name__ == 'PositionMapUNetPositionMapSegmentation':
                     frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
                 elif network_type.__name__ in ['PositionMapUNetHeatmapSegmentation',
-                                               'PositionMapStackedHourGlass']:
+                                               'PositionMapStackedHourGlass',
+                                               'HourGlassPositionMapNetwork']:
                     frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
                 else:
                     frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
@@ -431,6 +443,9 @@ def overfit(cfg):
                 elif network_type.__name__ == 'PositionMapStackedHourGlass':
                     loss = model.network.calc_loss(combined_hm_preds=out, heatmaps=heat_masks)
                     loss = loss.mean()
+                elif network_type.__name__ == 'HourGlassPositionMapNetwork':
+                    out = model_zoo.post_process_multi_apply(out)
+                    loss = model.calc_loss(out, heat_masks).mean()
                 else:
                     loss = loss_fn(out, heat_masks)
 
@@ -463,6 +478,18 @@ def overfit(cfg):
                                      additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
                                                      f"| Epoch: {epoch}")
                     plot_predictions(pred_mask[-3][random_idx].int().squeeze(dim=0) * 255,
+                                     pred_mask[-2][random_idx].int().squeeze(dim=0) * 255,
+                                     pred_mask[-1][random_idx].int().squeeze(dim=0) * 255,
+                                     additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
+                                                     f"| Epoch: {epoch}\nLast 3 HeatMaps", all_heatmaps=True)
+                elif network_type.__name__ == 'HourGlassPositionMapNetwork':
+                    pred_mask = [torch.round(torch.sigmoid(o)).squeeze(dim=1).cpu() for o in out]
+                    plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                     heat_masks[random_idx].squeeze().cpu(),
+                                     pred_mask[-1][random_idx].int().squeeze(dim=0) * 255,
+                                     additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
+                                                     f"| Epoch: {epoch}")
+                    plot_predictions(heat_masks[random_idx].squeeze().cpu(),
                                      pred_mask[-2][random_idx].int().squeeze(dim=0) * 255,
                                      pred_mask[-1][random_idx].int().squeeze(dim=0) * 255,
                                      additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "

@@ -1,6 +1,7 @@
 # @package _global_
 dropout: 0.0
 batch_norm: False
+use_torch_deform_conv: True
 
 # model
 unet:

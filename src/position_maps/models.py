@@ -3,7 +3,13 @@ from typing import Union, List, Callable, Optional, Tuple
 import hydra
 import torch
 from kornia.losses import BinaryFocalLossWithLogits
-from mmcv.ops import DeformConv2d
+import yaml
+with open('config/model/model.yaml', 'r') as f:
+    model_config = yaml.safe_load(f)
+if model_config['use_torch_deform_conv']:
+    from torchvision.ops import DeformConv2d
+else:
+    from mmcv.ops import DeformConv2d
 from mmdet.core import multi_apply
 from mmdet.models import HourglassNet
 from omegaconf import DictConfig
@@ -431,8 +437,12 @@ class DoubleDeformableConv(nn.Module):
         self.post_first_layer = nn.Sequential(
             nn.BatchNorm2d(out_ch), nn.ReLU(inplace=True),
         )
-        self.net = DeformConv2d(out_ch, out_ch, kernel_size=self.config.hourglass.deform.kernel,
-                                padding=self.config.hourglass.deform.padding, deform_groups=deform_groups)
+        if self.config.use_torch_deform_conv:
+            self.net = DeformConv2d(out_ch, out_ch, kernel_size=self.config.hourglass.deform.kernel,
+                                    padding=self.config.hourglass.deform.padding, groups=deform_groups)
+        else:
+            self.net = DeformConv2d(out_ch, out_ch, kernel_size=self.config.hourglass.deform.kernel,
+                                    padding=self.config.hourglass.deform.padding, deform_groups=deform_groups)
         self.post_net = nn.Sequential() if last_layer else nn.Sequential(nn.BatchNorm2d(out_ch), nn.ReLU(inplace=True))
 
         self.use_conv_deform_conv = use_conv_deform_conv
@@ -601,13 +611,14 @@ class HourGlassPositionMapNetwork(LightningModule):
         return self.last_conv(x, offset)
 
     def calc_loss(self, predictions, heatmaps):
-        combined_loss = [self.loss_fn(pred, heatmaps) for pred in predictions]
+        combined_loss = [self.loss_function(pred, heatmaps) for pred in predictions]
         combined_loss = torch.stack(combined_loss, dim=0)
         return combined_loss
 
     def _one_step(self, batch):
         frames, heat_masks, _, _, _, meta = batch
         out = self(frames)
+        out = post_process_multi_apply(out)
         loss = self.calc_loss(out, heat_masks)
         return loss
 
