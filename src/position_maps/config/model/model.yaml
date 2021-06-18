@@ -11,12 +11,57 @@ unet:
   features_start: 64
   bilinear: False
 
+# old version
 stacked_hourglass:
   num_stacks: 3
   num_classes: 1
   input_channels: 3
   batch_norm: False
   increase: 0
+
+hourglass:
+  downsample_times: 5
+  num_stacks: 2
+  stage_channels: [256, 256, 384, 384, 384, 512]
+  stage_blocks: [2, 2, 2, 2, 2, 4]
+  feat_channel: 256
+  norm_cfg_type: 'BN'
+  norm_cfg_requires_grad: True
+  pretrained: null
+  init_cfg: null
+
+  head:
+    num_layers: 2
+    bilinear: False
+    enable_last_layer_activation: False
+    use_conv_deform_conv: True
+
+  last_conv:
+    out_channels: 1
+    kernel: 3
+    stride: 1
+    padding: 1
+
+    offset_kernel: 3
+    offset_stride: 1
+    offset_padding: 1
+
+  upsample_params:
+    factor: 2
+    mode: bilinear
+    align_corners: True
+    kernel_bilinear: 1
+    kernel: 2
+    stride: 2
+
+    offset_kernel: 2
+    offset_stride: 2
+    offset_padding: 0
+
+  deform:
+    groups: 1
+    kernel: 3
+    padding: 1
 
 trajectory_baseline:
   generator:

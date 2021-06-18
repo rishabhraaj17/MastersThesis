@@ -1,7 +1,11 @@
 from typing import Union, List, Callable, Optional, Tuple
 
+import hydra
 import torch
 from kornia.losses import BinaryFocalLossWithLogits
+from mmcv.ops import DeformConv2d
+from mmdet.core import multi_apply
+from mmdet.models import HourglassNet
 from omegaconf import DictConfig
 # from pl_bolts.models.vision import UNet  # has some matplotlib issue
 from pytorch_lightning import LightningModule
@@ -17,6 +21,11 @@ from log import get_logger
 from hourglass import PoseNet
 
 logger = get_logger(__name__)
+
+
+def post_process_multi_apply(x):
+    out = [torch.stack(multi_apply_feats) for multi_apply_feats in zip(*x)]
+    return out
 
 
 class UNet(nn.Module):
@@ -403,3 +412,248 @@ class PositionMapWithTrajectories(PositionMapUNetBase):
 
     def unfreeze_trajectory_model(self):
         self.trajectory_model.unfreeze()
+
+
+class DoubleDeformableConv(nn.Module):
+    """
+    [ Conv2d => BatchNorm (optional) => ReLU ] x 2
+    """
+
+    def __init__(self, config: DictConfig, in_ch: int, out_ch: int, last_layer: bool = False,
+                 use_conv_deform_conv=False,
+                 deform_groups: int = 1):
+        super().__init__()
+        self.config = config
+        self.first_layer = nn.Conv2d(in_ch, out_ch, kernel_size=self.config.hourglass.deform.kernel,
+                                     padding=self.config.hourglass.deform.padding) \
+            if use_conv_deform_conv else DeformConv2d(in_ch, out_ch, kernel_size=self.config.hourglass.deform.kernel,
+                                                      padding=self.config.hourglass.deform.padding)
+        self.post_first_layer = nn.Sequential(
+            nn.BatchNorm2d(out_ch), nn.ReLU(inplace=True),
+        )
+        self.net = DeformConv2d(out_ch, out_ch, kernel_size=self.config.hourglass.deform.kernel,
+                                padding=self.config.hourglass.deform.padding, deform_groups=deform_groups)
+        self.post_net = nn.Sequential() if last_layer else nn.Sequential(nn.BatchNorm2d(out_ch), nn.ReLU(inplace=True))
+
+        self.use_conv_deform_conv = use_conv_deform_conv
+
+    def forward(self, x, offsets):
+        out = self.first_layer(x) if self.use_conv_deform_conv else self.first_layer(x, offsets)
+        out = self.post_first_layer(out)
+        out = self.net(out, offsets)
+        return self.post_net(out)
+
+
+class DeformableConvUp(nn.Module):
+    """
+    Upsampling (by either bilinear interpolation or transpose convolutions)
+    followed by concatenation of feature map from contracting path, followed by DoubleConv.
+    """
+
+    def __init__(self, config: DictConfig, in_ch: int, out_ch: int, bilinear: bool = False, last_layer: bool = False,
+                 use_conv_deform_conv=False):
+        super().__init__()
+        self.config = config
+        self.upsample = None
+        kernel_size = self.config.hourglass.upsample_params.kernel_bilinear \
+            if bilinear else self.config.hourglass.upsample_params.kernel
+        if bilinear:
+            self.upsample = nn.Sequential(
+                nn.Upsample(scale_factor=self.config.hourglass.upsample_params.factor,
+                            mode=self.config.hourglass.upsample_params.mode,
+                            align_corners=self.config.hourglass.upsample_params.align_corners),
+                nn.Conv2d(in_ch, in_ch // 2, kernel_size=kernel_size),
+            )
+        else:
+            self.upsample = nn.ConvTranspose2d(in_ch, in_ch // 2,
+                                               kernel_size=kernel_size,
+                                               stride=self.config.hourglass.upsample_params.stride)
+
+        self.conv = DoubleDeformableConv(config, in_ch // 2, out_ch, last_layer=last_layer,
+                                         use_conv_deform_conv=use_conv_deform_conv,
+                                         deform_groups=self.config.hourglass.deform.groups)
+        offset_out_channel = self.config.hourglass.deform.groups * 2 \
+                             * self.config.hourglass.deform.kernel \
+                             * self.config.hourglass.deform.kernel
+        self.conv_offset = nn.ConvTranspose2d(in_ch, offset_out_channel,
+                                              kernel_size=self.config.hourglass.upsample_params.offset_kernel,
+                                              stride=self.config.hourglass.upsample_params.offset_stride,
+                                              padding=self.config.hourglass.upsample_params.offset_padding,
+                                              bias=False)
+
+    def forward(self, x_in):
+        x = self.upsample(x_in)
+        offsets = self.conv_offset(x_in)
+        return self.conv(x, offsets)
+
+
+class HourGlassNetwork(LightningModule):
+    def __init__(self, config: DictConfig):
+        super(HourGlassNetwork, self).__init__()
+        self.config = config
+        self.hour_glass = HourglassNet(downsample_times=self.config.hourglass.downsample_times,
+                                       num_stacks=self.config.hourglass.num_stacks,
+                                       stage_channels=self.config.hourglass.stage_channels,
+                                       stage_blocks=self.config.hourglass.stage_blocks,
+                                       feat_channel=self.config.hourglass.feat_channel,
+                                       norm_cfg=dict(type=self.config.hourglass.norm_cfg_type,
+                                                     requires_grad=self.config.hourglass.norm_cfg_requires_grad),
+                                       pretrained=self.config.hourglass.pretrained,
+                                       init_cfg=self.config.hourglass.init_cfg)
+        self.hour_glass.init_weights()
+
+    def forward(self, x):
+        return self.hour_glass(x)
+
+
+class PositionMapHead(LightningModule):
+    def __init__(self, config: DictConfig):
+        super(PositionMapHead, self).__init__()
+        self.config = config
+
+        layers = []
+        feats = self.config.hourglass.feat_channel
+        for idx in range(self.config.hourglass.head.num_layers):
+            if idx == self.config.hourglass.head.num_layers - 1:
+                layers.append(DeformableConvUp(self.config, feats, feats // 2, self.config.hourglass.head.bilinear,
+                                               self.config.hourglass.head.enable_last_layer_activation,
+                                               use_conv_deform_conv=self.config.hourglass.head.use_conv_deform_conv))
+            else:
+                layers.append(DeformableConvUp(self.config, feats, feats // 2, self.config.hourglass.head.bilinear,
+                                               use_conv_deform_conv=self.config.hourglass.head.use_conv_deform_conv))
+            feats //= 2
+
+        self.module = nn.Sequential(*layers)
+        # self.module.init_weights()
+
+    def forward(self, x):
+        return multi_apply(self.forward_single, x)
+
+    def forward_single(self, x):
+        return self.module(x)
+
+
+class HourGlassPositionMapNetwork(LightningModule):
+    def __init__(self, config: 'DictConfig', backbone: 'nn.Module', head: 'nn.Module',
+                 train_dataset: 'Dataset', val_dataset: 'Dataset',
+                 desired_output_shape: Tuple[int, int] = None, loss_function: 'nn.Module' = None,
+                 collate_fn: Optional[Callable] = None):
+        super(HourGlassPositionMapNetwork, self).__init__()
+        self.config = config
+        self.backbone = backbone
+        self.head = head
+        self.last_conv = DeformConv2d(
+            in_channels=self.config.hourglass.feat_channel // (2 ** self.config.hourglass.head.num_layers),
+            out_channels=self.config.hourglass.last_conv.out_channels,
+            kernel_size=self.config.hourglass.last_conv.kernel,
+            stride=self.config.hourglass.last_conv.stride,
+            padding=self.config.hourglass.last_conv.padding)
+
+        offset_out_channel = self.config.hourglass.deform.groups * 2 \
+                             * self.config.hourglass.last_conv.kernel \
+                             * self.config.hourglass.last_conv.kernel
+        self.conv_offset = nn.Conv2d(
+            self.config.hourglass.feat_channel // (2 ** self.config.hourglass.head.num_layers),
+            offset_out_channel,
+            kernel_size=self.config.hourglass.last_conv.offset_kernel,
+            stride=self.config.hourglass.last_conv.offset_stride,
+            padding=self.config.hourglass.last_conv.offset_padding,
+            bias=False)
+
+        self.train_dataset = train_dataset
+        self.val_dataset = val_dataset
+
+        self.loss_function = loss_function
+        self.collate_fn = collate_fn
+        self.desired_output_shape = desired_output_shape
+
+        self.save_hyperparameters(self.config)
+
+    @classmethod
+    def from_config(cls, config: DictConfig, train_dataset: Dataset = None, val_dataset: Dataset = None,
+                    desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                    collate_fn: Optional[Callable] = None):
+        return HourGlassPositionMapNetwork(
+            config=config,
+            backbone=HourGlassNetwork(config=config),
+            head=PositionMapHead(config=config),
+            train_dataset=train_dataset,
+            val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape,
+            loss_function=loss_function,
+            collate_fn=collate_fn)
+
+    def forward(self, x):
+        out = self.backbone(x)
+        out = self.head(out)
+
+        out = post_process_multi_apply(out)
+        if self.desired_output_shape is not None:
+            out = [F.interpolate(o, size=self.desired_output_shape) for o in out]
+
+        return self.forward_last(out)
+
+    def forward_last(self, x):
+        return multi_apply(self.forward_last_single, x)
+
+    def forward_last_single(self, x):
+        offset = self.conv_offset(x)
+        return self.last_conv(x, offset)
+
+    def _one_step(self, batch):
+        frames, heat_masks, _, _, _, meta = batch
+        out = self(frames)
+        return NotImplementedError
+
+    def training_step(self, batch, batch_idx):
+        loss = self._one_step(batch)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss = self._one_step(batch)
+        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return loss
+
+    def configure_optimizers(self):
+        opt = torch.optim.Adam(self.parameters(), lr=self.config.lr, weight_decay=self.config.weight_decay,
+                               amsgrad=self.config.amsgrad)
+        schedulers = [
+            {
+                'scheduler': ReduceLROnPlateau(opt,
+                                               patience=self.config.patience,
+                                               verbose=self.config.verbose,
+                                               factor=self.config.factor,
+                                               min_lr=self.config.min_lr),
+                'monitor': self.config.monitor,
+                'interval': self.config.interval,
+                'frequency': self.config.frequency
+            }]
+        return [opt], schedulers
+
+    def train_dataloader(self) -> DataLoader:
+        return DataLoader(
+            dataset=self.train_dataset, batch_size=self.config.batch_size,
+            shuffle=False, num_workers=self.config.num_workers,
+            collate_fn=self.collate_fn, pin_memory=self.config.pin_memory,
+            drop_last=self.config.drop_last)
+
+    def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
+        return DataLoader(
+            dataset=self.val_dataset, batch_size=self.config.batch_size * self.config.val_batch_size_factor,
+            shuffle=False, num_workers=self.config.num_workers,
+            collate_fn=self.collate_fn, pin_memory=self.config.pin_memory,
+            drop_last=self.config.drop_last)
+
+
+@hydra.main(config_path="config", config_name="config")
+def verify_nets(cfg):
+    model = HourGlassPositionMapNetwork.from_config(config=cfg, desired_output_shape=(720 // 3, 360 // 3)).cuda()
+    inp = torch.randn((2, 3, 720 // 2, 360 // 2)).cuda()
+    o = model(inp)
+    o = post_process_multi_apply(o)
+    print()
+
+
+if __name__ == '__main__':
+    verify_nets()
