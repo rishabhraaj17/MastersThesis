@@ -6,6 +6,7 @@ import hydra
 import numpy as np
 import torch
 from kornia.losses import FocalLoss, BinaryFocalLossWithLogits
+from mmdet.models import GaussianFocalLoss
 from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.nn import CrossEntropyLoss, MSELoss
@@ -349,7 +350,8 @@ def overfit(cfg):
                                  'PositionMapUNetHeatmapSegmentation',
                                  'PositionMapStackedHourGlass',
                                  'HourGlassPositionMapNetwork']:
-        loss_fn = BinaryFocalLossWithLogits(alpha=cfg.overfit.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
+        # loss_fn = BinaryFocalLossWithLogits(alpha=cfg.overfit.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
+        loss_fn = GaussianFocalLoss(alpha=cfg.overfit.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
     else:
         loss_fn = MSELoss()
 
@@ -484,6 +486,7 @@ def overfit(cfg):
                                                      f"| Epoch: {epoch}\nLast 3 HeatMaps", all_heatmaps=True)
                 elif network_type.__name__ == 'HourGlassPositionMapNetwork':
                     pred_mask = [torch.round(torch.sigmoid(o)).squeeze(dim=1).cpu() for o in out]
+                    # pred_mask = [o.squeeze(dim=1).cpu() for o in out]
                     plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                      heat_masks[random_idx].squeeze().cpu(),
                                      pred_mask[-1][random_idx].int().squeeze(dim=0) * 255,
