@@ -667,8 +667,8 @@ class HourGlassPositionMapNetwork(LightningModule):
 
 @hydra.main(config_path="config", config_name="config")
 def verify_nets(cfg):
-    model = HourGlassPositionMapNetwork.from_config(config=cfg, desired_output_shape=(720 // 3, 360 // 3)).cuda()
-    inp = torch.randn((2, 3, 720 // 2, 360 // 2)).cuda()
+    model = HourGlassPositionMapNetwork.from_config(config=cfg, desired_output_shape=(720 // 3, 360 // 3))
+    inp = torch.randn((2, 3, 720 // 2, 360 // 2))
     o = model(inp)
     o = post_process_multi_apply(o)
     print()
