@@ -19,6 +19,8 @@ from dataset import SDDFrameAndAnnotationDataset
 import models as model_zoo
 from utils import heat_map_collate_fn, plot_predictions, get_scaled_shapes_with_pad_values, rgb_transform
 
+warnings.filterwarnings("ignore")
+
 seed_everything(42)
 logger = get_logger(__name__)
 
@@ -293,7 +295,7 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
 
         trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                           fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
-                          accelerator=cfg.trainer.accelerator, deterministic=cfg.trainer.deterministic, 
+                          accelerator=cfg.trainer.accelerator, deterministic=cfg.trainer.deterministic,
                           replace_sampler_ddp=cfg.trainer.replace_sampler_ddp)
     else:
         if cfg.resume_mode:
@@ -308,13 +310,13 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
 
             trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                               fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
-                              resume_from_checkpoint=checkpoint_file, accelerator=cfg.trainer.accelerator, 
-                              deterministic=cfg.trainer.deterministic, 
+                              resume_from_checkpoint=checkpoint_file, accelerator=cfg.trainer.accelerator,
+                              deterministic=cfg.trainer.deterministic,
                               replace_sampler_ddp=cfg.trainer.replace_sampler_ddp)
         else:
             trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                               fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
-                              accelerator=cfg.trainer.accelerator, deterministic=cfg.trainer.deterministic, 
+                              accelerator=cfg.trainer.accelerator, deterministic=cfg.trainer.deterministic,
                               replace_sampler_ddp=cfg.trainer.replace_sampler_ddp)
     return model, trainer
 
