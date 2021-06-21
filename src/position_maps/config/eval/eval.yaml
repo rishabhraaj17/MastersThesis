@@ -17,7 +17,7 @@ eval:
   video_class: DEATH_CIRCLE
   video_meta_class: DEATH_CIRCLE
   desired_pixel_to_meter_ratio: 0.25
-  desired_pixel_to_meter_ratio_rgb: 0.25 # 0.07 # 0.25 # 0.05
+  desired_pixel_to_meter_ratio_rgb: 0.10 # 0.07 # 0.25 # 0.05
   downscale_only_target_maps: False
   using_replay_compose: True
   manual_annotation_processing: False
@@ -46,10 +46,13 @@ eval:
   seg_map_objectness_threshold: 0.5
   heatmap_region_limit_threshold: 0.0
   focal_loss_alpha: 0.8
+  gaussuan_focal_loss_alpha: 2.0
+  pick_heatmap_from_stack_number: -2
 
   # one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation',
-  # 'PositionMapUNetClassMapSegmentation', 'PositionMapUNetHeatmapSegmentation', 'PositionMapStackedHourGlass'
-  postion_map_network_type: 'PositionMapUNetHeatmapSegmentation'
+  # 'PositionMapUNetClassMapSegmentation', 'PositionMapUNetHeatmapSegmentation', 'PositionMapStackedHourGlass',
+  # 'HourGlassPositionMapNetwork'
+  postion_map_network_type: 'HourGlassPositionMapNetwork'
 
   show_plots: True
   plot_checkpoint: 20
@@ -76,5 +79,5 @@ eval:
   checkpoint:
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
     path: "lightning_logs/version_"
-    version: 476322 #424798 # 437363  # 424798
+    version: 492265 #424798 # 437363  # 424798
     top_k: 1

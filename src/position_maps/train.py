@@ -359,7 +359,7 @@ def overfit(cfg):
                                  'PositionMapStackedHourGlass',
                                  'HourGlassPositionMapNetwork']:
         # loss_fn = BinaryFocalLossWithLogits(alpha=cfg.overfit.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
-        loss_fn = GaussianFocalLoss(alpha=cfg.overfit.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
+        loss_fn = GaussianFocalLoss(alpha=cfg.overfit.gaussuan_focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
     else:
         loss_fn = MSELoss()
 

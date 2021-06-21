@@ -13,6 +13,7 @@ import torch
 import torchvision
 from kornia.losses import BinaryFocalLossWithLogits
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from mmdet.models import GaussianFocalLoss
 from pytorch_lightning import seed_everything
 from torch.nn import MSELoss
 from torch.nn.functional import interpolate
@@ -282,11 +283,19 @@ def setup_eval(cfg):
                                  'PositionMapUNetHeatmapSegmentation',
                                  'PositionMapStackedHourGlass']:
         loss_fn = BinaryFocalLossWithLogits(alpha=cfg.eval.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
+    elif network_type.__name__ == 'HourGlassPositionMapNetwork':
+        loss_fn = GaussianFocalLoss(alpha=cfg.eval.gaussuan_focal_loss_alpha, reduction='mean')
     else:
         loss_fn = MSELoss()
 
-    model = network_type(config=cfg, train_dataset=None, val_dataset=None,
-                         loss_function=loss_fn, collate_fn=heat_map_collate_fn, desired_output_shape=target_max_shape)
+    if network_type.__name__ == 'HourGlassPositionMapNetwork':
+        model = network_type.from_config(config=cfg, train_dataset=None, val_dataset=None,
+                                         loss_function=loss_fn, collate_fn=heat_map_collate_fn,
+                                         desired_output_shape=target_max_shape)
+    else:
+        model = network_type(config=cfg, train_dataset=None, val_dataset=None,
+                             loss_function=loss_fn, collate_fn=heat_map_collate_fn, 
+                             desired_output_shape=target_max_shape)
 
     logger.info(f'Setting up Model')
 
@@ -359,6 +368,9 @@ def evaluate(cfg):
         elif network_type.__name__ == 'PositionMapStackedHourGlass':
             loss = model.network.calc_loss(combined_hm_preds=out, heatmaps=heat_masks)
             loss = loss.mean()
+        elif network_type.__name__ == 'HourGlassPositionMapNetwork':
+            out = model_zoo.post_process_multi_apply(out)
+            loss = model.calc_loss(out, heat_masks).mean()
         else:
             loss = loss_fn(out, heat_masks)
 
@@ -428,10 +440,16 @@ def evaluate(cfg):
                                  pred_mask[random_idx].int() * 255,
                                  additional_text=f"{network_type.__name__} | {loss_fn._get_name()} | "
                                                  f"Frame: {current_random_frame}")
-            elif network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
+            elif network_type.__name__ in ['PositionMapUNetHeatmapSegmentation', 'HourGlassPositionMapNetwork']:
                 num_objects_gt = meta[random_idx]['bbox_centers'].shape[0]
 
-                pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
+                if network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
+                    pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
+                elif network_type.__name__ == 'HourGlassPositionMapNetwork':
+                    pred_mask = [torch.round(torch.sigmoid(o)).squeeze(dim=1).cpu() for o in out]
+                    pred_mask = pred_mask[cfg.eval.pick_heatmap_from_stack_number]
+                else:
+                    return NotImplementedError
 
                 num_objects_pred = get_blob_count(
                     pred_mask[random_idx].numpy().astype(np.uint8) * 255,
