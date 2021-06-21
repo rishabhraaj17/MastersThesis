@@ -292,7 +292,9 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                 loss_function=loss_fn, collate_fn=heat_map_collate_fn)
 
         trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
-                          fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback])
+                          fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
+                          accelerator=cfg.trainer.accelerator, deterministic=cfg.trainer.deterministic, 
+                          replace_sampler_ddp=cfg.trainer.replace_sampler_ddp)
     else:
         if cfg.resume_mode:
             checkpoint_path = f'{cfg.resume.checkpoint.path}{cfg.resume.checkpoint.version}/checkpoints/'
@@ -306,10 +308,14 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
 
             trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                               fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
-                              resume_from_checkpoint=checkpoint_file)
+                              resume_from_checkpoint=checkpoint_file, accelerator=cfg.trainer.accelerator, 
+                              deterministic=cfg.trainer.deterministic, 
+                              replace_sampler_ddp=cfg.trainer.replace_sampler_ddp)
         else:
             trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
-                              fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback])
+                              fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
+                              accelerator=cfg.trainer.accelerator, deterministic=cfg.trainer.deterministic, 
+                              replace_sampler_ddp=cfg.trainer.replace_sampler_ddp)
     return model, trainer
 
 
@@ -324,12 +330,12 @@ def train(cfg):
     if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation',
                                  'PositionMapUNetHeatmapSegmentation']:
         loss_fn = BinaryFocalLossWithLogits(alpha=cfg.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
-    elif network_type.__name__ == 'HourGlassPositionMapNetwork':
+    elif network_type.__name__ in ['HourGlassPositionMapNetwork', 'HourGlassPositionMapNetworkDDP']:
         loss_fn = GaussianFocalLoss(alpha=cfg.gaussuan_focal_loss_alpha, reduction='mean')
     else:
         loss_fn = MSELoss()
 
-    if network_type.__name__ == 'HourGlassPositionMapNetwork':
+    if network_type.__name__ in ['HourGlassPositionMapNetwork', 'HourGlassPositionMapNetworkDDP']:
         model = network_type.from_config(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
                                          loss_function=loss_fn, collate_fn=heat_map_collate_fn,
                                          desired_output_shape=target_max_shape)

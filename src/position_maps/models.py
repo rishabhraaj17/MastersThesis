@@ -5,7 +5,9 @@ import torch
 from kornia.losses import BinaryFocalLossWithLogits
 import yaml
 
-with open('config/model/model.yaml', 'r') as f:
+with open(os.path.join(
+        '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/',
+        'config/model/model.yaml'), 'r') as f:
     model_config = yaml.safe_load(f)
 if model_config['use_torch_deform_conv']:
     from torchvision.ops import DeformConv2d
@@ -733,6 +735,43 @@ class HourGlassPositionMapNetwork(LightningModule):
             shuffle=False, num_workers=self.config.num_workers,
             collate_fn=self.collate_fn, pin_memory=self.config.pin_memory,
             drop_last=self.config.drop_last)
+
+
+class HourGlassPositionMapNetworkDDP(HourGlassPositionMapNetwork):
+    def __init__(self, config: 'DictConfig', backbone: 'nn.Module', head: 'nn.Module',
+                 train_dataset: 'Dataset', val_dataset: 'Dataset',
+                 desired_output_shape: Tuple[int, int] = None, loss_function: 'nn.Module' = None,
+                 collate_fn: Optional[Callable] = None):
+        super(HourGlassPositionMapNetworkDDP, self).__init__(
+            config=config, backbone=backbone, head=head, train_dataset=train_dataset, val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
+        )
+
+    def training_step(self, batch, batch_idx):
+        loss = self._one_step(batch)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss = self._one_step(batch)
+        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        return loss
+
+    def train_dataloader(self) -> DataLoader:
+        return DataLoader(
+            dataset=self.train_dataset, batch_size=self.config.batch_size,
+            shuffle=False, num_workers=self.config.num_workers,
+            collate_fn=self.collate_fn, pin_memory=self.config.pin_memory,
+            drop_last=self.config.drop_last,
+            sampler=torch.utils.data.distributed.DistributedSampler(self.train_dataset))
+
+    def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
+        return DataLoader(
+            dataset=self.val_dataset, batch_size=self.config.batch_size * self.config.val_batch_size_factor,
+            shuffle=False, num_workers=self.config.num_workers,
+            collate_fn=self.collate_fn, pin_memory=self.config.pin_memory,
+            drop_last=self.config.drop_last,
+            sampler=torch.utils.data.distributed.DistributedSampler(self.val_dataset))
 
 
 @hydra.main(config_path="config", config_name="config")

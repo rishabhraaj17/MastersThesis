@@ -35,6 +35,9 @@ trainer:
   gpus : 1
   fast_dev_run: False
   num_checkpoints_to_save: 4
+  deterministic: False
+  accelerator: 'ddp_cpu' # null  # 'ddp', 'ddp_cpu'
+  replace_sampler_ddp: False
 
 
 # dataset
@@ -100,8 +103,8 @@ position_map_segmentation: False
 
 # one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation',
 # 'PositionMapUNetClassMapSegmentation', 'PositionMapUNetHeatmapSegmentation', 'PositionMapStackedHourGlass',
-# 'HourGlassPositionMapNetwork'
-postion_map_network_type: 'HourGlassPositionMapNetwork'
+# 'HourGlassPositionMapNetwork', 'HourGlassPositionMapNetworkDDP'
+postion_map_network_type: 'HourGlassPositionMapNetworkDDP'
 
 overfit:
   num_epochs: 6000

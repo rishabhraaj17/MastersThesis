@@ -352,9 +352,14 @@ class SDDFrameAndAnnotationDataset(Dataset):
         df = self.annotations_df[video_idx]
         frame_annotation = self.get_generated_frame_annotations(df, item)
 
-        boxes = frame_annotation[:, 1:5].astype(np.int)
-        track_idx = frame_annotation[:, 0].astype(np.int)
-        bbox_centers = frame_annotation[:, 7:9].astype(np.int)
+        # boxes = frame_annotation[:, 1:5].astype(np.int)
+        # track_idx = frame_annotation[:, 0].astype(np.int)
+        # bbox_centers = frame_annotation[:, 7:9].astype(np.int)
+
+        # silence dep warning
+        boxes = frame_annotation[:, 1:5].astype(int)
+        track_idx = frame_annotation[:, 0].astype(int)
+        bbox_centers = frame_annotation[:, 7:9].astype(int)
 
         inside_boxes_idx = [b for b, box in enumerate(boxes)
                             if (box[0] > 0 and box[2] < w) and (box[1] > 0 and box[3] < h)]
