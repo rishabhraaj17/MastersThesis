@@ -21,10 +21,13 @@ stacked_hourglass:
   increase: 0
 
 hourglass:
-  downsample_times: 5
+#  downsample_times: 5
+  downsample_times: 3
   num_stacks: 2
-  stage_channels: [256, 256, 384, 384, 384, 512]
-  stage_blocks: [2, 2, 2, 2, 2, 4]
+#  stage_channels: [256, 256, 384, 384, 384, 512]
+  stage_channels: [256, 256, 384, 512]
+#  stage_blocks: [2, 2, 2, 2, 2, 4]
+  stage_blocks: [2, 2, 2, 4]
   feat_channel: 256
   norm_cfg_type: 'BN'
   norm_cfg_requires_grad: True

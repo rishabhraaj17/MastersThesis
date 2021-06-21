@@ -73,11 +73,12 @@ plot_samples: False
 # gaussian
 heatmap_shape: null
 return_combined_heatmaps: True
-sigma: 1.5
+sigma: 0.7
 
 seg_map_objectness_threshold: 0.5
-heatmap_region_limit_threshold: 0.5
+heatmap_region_limit_threshold: 0.0
 focal_loss_alpha: 0.8
+gaussuan_focal_loss_alpha: 2.0
 
 warm_restart:
   enable: False
@@ -111,6 +112,7 @@ overfit:
 
   postion_map_network_type: 'HourGlassPositionMapNetwork'
   focal_loss_alpha: 0.9
+  gaussuan_focal_loss_alpha: 2.0
 
   subset_indices: [0, 85, 32, 5, 125, 200]
 #  subset_indices: [0]

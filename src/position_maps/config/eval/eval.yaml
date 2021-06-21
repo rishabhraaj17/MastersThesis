@@ -41,22 +41,22 @@ eval:
   # gaussian
   heatmap_shape: null
   return_combined_heatmaps: True
-  sigma: 1.5
+  sigma: 0.7
 
   seg_map_objectness_threshold: 0.5
-  heatmap_region_limit_threshold: 0.5
+  heatmap_region_limit_threshold: 0.0
   focal_loss_alpha: 0.8
 
   # one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation',
   # 'PositionMapUNetClassMapSegmentation', 'PositionMapUNetHeatmapSegmentation', 'PositionMapStackedHourGlass'
   postion_map_network_type: 'PositionMapUNetHeatmapSegmentation'
 
-  show_plots: False
+  show_plots: True
   plot_checkpoint: 20
   plot_save_dir: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/proposed_method/v0/position_maps/'
   plot_with_overlay: True
 
-  evaluate_precision_recall: True
+  evaluate_precision_recall: False
   blob_threshold: 0.2
   objectness_threshold: 0.2
   gt_pred_loc_distance_threshold: 2 # meters

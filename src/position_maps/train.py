@@ -324,11 +324,19 @@ def train(cfg):
     if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation', 'PositionMapUNetClassMapSegmentation',
                                  'PositionMapUNetHeatmapSegmentation']:
         loss_fn = BinaryFocalLossWithLogits(alpha=cfg.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
+    elif network_type.__name__ == 'HourGlassPositionMapNetwork':
+        loss_fn = GaussianFocalLoss(alpha=cfg.gaussuan_focal_loss_alpha, reduction='mean')
     else:
         loss_fn = MSELoss()
 
-    model = network_type(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
-                         loss_function=loss_fn, collate_fn=heat_map_collate_fn, desired_output_shape=target_max_shape)
+    if network_type.__name__ == 'HourGlassPositionMapNetwork':
+        model = network_type.from_config(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+                                         loss_function=loss_fn, collate_fn=heat_map_collate_fn,
+                                         desired_output_shape=target_max_shape)
+    else:
+        model = network_type(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+                             loss_function=loss_fn, collate_fn=heat_map_collate_fn,
+                             desired_output_shape=target_max_shape)
 
     logger.info(f'Setting up Trainer...')
 
