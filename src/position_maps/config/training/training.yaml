@@ -90,7 +90,7 @@ warm_restart:
   checkpoint:
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
     path: "lightning_logs/version_"
-    version: 0
+    version: 492265
 
 resume_mode: False
 resume:
@@ -124,7 +124,7 @@ overfit:
   plot_checkpoint: 99
 
   use_pretrained:
-    enabled: True
+    enabled: False
     checkpoint:
       root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
       path: "lightning_logs/version_"

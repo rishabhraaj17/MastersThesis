@@ -276,11 +276,19 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                                f'{cfg.warm_restart.checkpoint.version}/checkpoints/'
         hparams_path = f'{cfg.warm_restart.checkpoint.root}{cfg.warm_restart.checkpoint.path}' \
                        f'{cfg.warm_restart.checkpoint.version}/hparams.yaml'
-        model_path = checkpoint_root_path + os.listdir(checkpoint_root_path)[0]
+
+        checkpoint_files = os.listdir(checkpoint_root_path)
+
+        epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
+        epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
+        checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
+
+        model_path = checkpoint_root_path + checkpoint_files[-cfg.overfit.use_pretrained.checkpoint.top_k]
+        # model_path = checkpoint_root_path + os.listdir(checkpoint_root_path)[0]
         logger.info(f'Resuming from : {model_path}')
         if cfg.warm_restart.custom_load:
             logger.info(f'Loading weights manually as custom load is {cfg.warm_restart.custom_load}')
-            load_dict = torch.load(model_path)
+            load_dict = torch.load(model_path, map_location=cfg.device)
 
             model.load_state_dict(load_dict['state_dict'])
             model.to(cfg.device)

@@ -79,5 +79,5 @@ eval:
   checkpoint:
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
     path: "lightning_logs/version_"
-    version: 492265 #424798 # 437363  # 424798
+    version: 492265 # 497829 # 492265 #424798 # 437363  # 424798
     top_k: 1
