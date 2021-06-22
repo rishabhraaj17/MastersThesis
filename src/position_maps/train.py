@@ -17,6 +17,7 @@ from average_image.utils import SDDMeta
 from log import get_logger
 from dataset import SDDFrameAndAnnotationDataset
 import models as model_zoo
+from losses import CenterNetFocalLoss
 from utils import heat_map_collate_fn, plot_predictions, get_scaled_shapes_with_pad_values, rgb_transform
 
 warnings.filterwarnings("ignore")
@@ -333,7 +334,8 @@ def train(cfg):
                                  'PositionMapUNetHeatmapSegmentation']:
         loss_fn = BinaryFocalLossWithLogits(alpha=cfg.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
     elif network_type.__name__ in ['HourGlassPositionMapNetwork', 'HourGlassPositionMapNetworkDDP']:
-        loss_fn = GaussianFocalLoss(alpha=cfg.gaussuan_focal_loss_alpha, reduction='mean')
+        loss_fn = CenterNetFocalLoss() if cfg.use_center_net_gaussian_focal_loss \
+            else GaussianFocalLoss(alpha=cfg.gaussuan_focal_loss_alpha, reduction='mean')
     else:
         loss_fn = MSELoss()
 
@@ -367,7 +369,8 @@ def overfit(cfg):
                                  'PositionMapStackedHourGlass',
                                  'HourGlassPositionMapNetwork']:
         # loss_fn = BinaryFocalLossWithLogits(alpha=cfg.overfit.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
-        loss_fn = GaussianFocalLoss(alpha=cfg.overfit.gaussuan_focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
+        # loss_fn = GaussianFocalLoss(alpha=cfg.overfit.gaussuan_focal_loss_alpha, reduction='mean')
+        loss_fn = CenterNetFocalLoss()
     else:
         loss_fn = MSELoss()
 
@@ -379,6 +382,23 @@ def overfit(cfg):
         model = network_type(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
                              loss_function=loss_fn, collate_fn=heat_map_collate_fn,
                              desired_output_shape=target_max_shape)
+    if cfg.overfit.use_pretrained.enabled:
+        checkpoint_path = f'{cfg.overfit.use_pretrained.checkpoint.root}' \
+                          f'{cfg.overfit.use_pretrained.checkpoint.path}' \
+                          f'{cfg.overfit.use_pretrained.checkpoint.version}/checkpoints/'
+        checkpoint_files = os.listdir(checkpoint_path)
+
+        epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
+        epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
+        checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
+
+        checkpoint_file = checkpoint_path + checkpoint_files[-cfg.overfit.use_pretrained.checkpoint.top_k]
+
+        logger.info(f'Loading weights from: {checkpoint_file}')
+        load_dict = torch.load(checkpoint_file, map_location=cfg.device)
+
+        model.load_state_dict(load_dict['state_dict'])
+
     model.to(cfg.device)
 
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay, amsgrad=cfg.amsgrad)

@@ -82,6 +82,7 @@ seg_map_objectness_threshold: 0.5
 heatmap_region_limit_threshold: 0.0
 focal_loss_alpha: 0.8
 gaussuan_focal_loss_alpha: 2.0
+use_center_net_gaussian_focal_loss: True
 
 warm_restart:
   enable: False
@@ -121,6 +122,14 @@ overfit:
 #  subset_indices: [0]
 
   plot_checkpoint: 99
+
+  use_pretrained:
+    enabled: True
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+      path: "lightning_logs/version_"
+      version: 492265 # 497829 # 492265 #424798 # 437363  # 424798
+      top_k: 1
 
 interact:
   device: 'cuda:0'

@@ -684,7 +684,7 @@ class HourGlassPositionMapNetwork(LightningModule):
             return self.last_conv(x)
 
     def calc_loss(self, predictions, heatmaps):
-        if self.loss_function._get_name() == 'GaussianFocalLoss':
+        if self.loss_function._get_name() in ['GaussianFocalLoss', 'CenterNetFocalLoss']:
             predictions = [p.sigmoid() for p in predictions]
         combined_loss = [self.loss_function(pred, heatmaps) for pred in predictions]
         combined_loss = torch.stack(combined_loss, dim=0)
