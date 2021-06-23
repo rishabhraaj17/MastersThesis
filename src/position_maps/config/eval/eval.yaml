@@ -25,8 +25,8 @@ eval:
   test:
     num_videos: -1
     video_number_to_use: 2
-    video_classes_to_use: [ DEATH_CIRCLE, LITTLE ]
-    video_numbers_to_use: [ [ 2, 4 ], [ 0, 3 ] ]
+    video_classes_to_use: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
+    video_numbers_to_use: [ [ 6 ], [ 3 ], [ 3 ], [ 7 ], [ 9, 14 ], [ 0 ], [ 6 ], [ 0 ] ]
     multiple_videos: False
 
   dataset_workers: 12
@@ -73,7 +73,7 @@ eval:
     padding: 1
 
   blob_counter:
-    kernel: [1, 1]
+    kernel: [ 1, 1 ]
     plot: False
 
   checkpoint:

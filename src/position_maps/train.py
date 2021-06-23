@@ -234,6 +234,7 @@ def setup_multiple_datasets_core(cfg, meta, video_classes_to_use, video_numbers_
     datasets = []
     for idx, v_clz in enumerate(video_classes_to_use):
         for v_num in video_numbers_to_use[idx]:
+            logger.info(f"Setting up {v_clz} - {v_num}")
             condition = (df.CLASS == v_clz) & (df.NUMBER == v_num)
             h, w = df[condition].RESCALED_SHAPE.values.item()
             pad_values = df[condition].PAD_VALUES.values.item()
@@ -334,7 +335,8 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
 def train(cfg):
     logger.info(f'Setting up DataLoader and Model...')
 
-    train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
+    # train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
+    train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
 
     network_type = getattr(model_zoo, cfg.postion_map_network_type)
 
@@ -368,7 +370,8 @@ def train(cfg):
 def overfit(cfg):
     logger.info(f'Overfit - Setting up DataLoader and Model...')
 
-    train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
+    # train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
+    train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
 
     network_type = getattr(model_zoo, cfg.overfit.postion_map_network_type)
     if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation',

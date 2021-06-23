@@ -31,8 +31,8 @@ val_batch_size_factor: 2
 
 # trainer
 trainer:
-  max_epochs : 400
-  gpus : 1
+  max_epochs: 400
+  gpus: 1
   fast_dev_run: False
   num_checkpoints_to_save: 4
   deterministic: False
@@ -53,21 +53,23 @@ manual_annotation_processing: False
 train:
   num_videos: -1
   video_number_to_use: 4
-  video_classes_to_use: [DEATH_CIRCLE, LITTLE]
-  video_numbers_to_use: [[2, 4], [0, 3]]
+  video_classes_to_use: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
+  video_numbers_to_use: [ [ 1, 2, 3, 4, 5 ], [ 0, 1, 2 ], [ 0, 1, 2, 4 ], [ 0, 1, 2, 3, 5, 6, 8 ],
+                          [ 0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13 ], [ 1, 2, 3 ],
+                          [ 0, 1, 2, 7, 8, 9, 10, 11 ], [ 1, 2, 3 ] ] # nexus 3, 4 are bad
   multiple_videos: False
 
 val:
   num_videos: -1
   video_number_to_use: 2
-  video_classes_to_use: [ DEATH_CIRCLE, LITTLE ]
-  video_numbers_to_use: [ [ 2, 4 ], [ 0, 3 ] ]
+  video_classes_to_use: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
+  video_numbers_to_use: [ [ 0 ], [ 3 ], [ 3 ], [ 4 ], [ 7 ], [ 0 ], [ 6 ], [ 0 ] ]
   multiple_videos: False
 
 dataset_workers: 8
 # keep one of them null at one time
 scale_factor: null # 0.25
-desired_size: [490, 360]
+desired_size: [ 490, 360 ]
 
 use_generated_dataset: True
 
@@ -118,8 +120,8 @@ overfit:
   focal_loss_alpha: 0.9
   gaussuan_focal_loss_alpha: 2.0
 
-  subset_indices: [0, 85, 32, 5, 125, 200]
-#  subset_indices: [0]
+  subset_indices: [ 0, 85, 32, 5, 125, 200 ]
+  #  subset_indices: [0]
 
   plot_checkpoint: 99
 
@@ -128,7 +130,7 @@ overfit:
     checkpoint:
       root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
       path: "lightning_logs/version_"
-      version: 492265 # 497829 # 492265 #424798 # 437363  # 424798
+      version: 502496 # 492265 # 497829 # 492265 #424798 # 437363  # 424798
       top_k: 1
 
 interact:
@@ -157,7 +159,7 @@ interact:
 
   max_trajectory_length: 18
 
-  subset_indices: [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85]  # [0, 12, 24, 36, 48, 60]
+  subset_indices: [ 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85 ]  # [0, 12, 24, 36, 48, 60]
 
   plot_checkpoint: 99
 

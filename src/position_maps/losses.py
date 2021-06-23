@@ -34,6 +34,8 @@ def _neg_loss(pred, gt):
         pred (batch x c x h x w)
         gt (batch x c x h x w)
     """
+    eps = 1e-12
+    pred += eps
     pos_inds = gt.eq(1).float()
     neg_inds = gt.lt(1).float()
 
