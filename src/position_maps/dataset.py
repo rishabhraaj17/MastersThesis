@@ -222,9 +222,10 @@ class SDDFrameAndAnnotationDataset(Dataset):
         class_maps = torch.where(class_maps > self.seg_map_objectness_threshold, 1.0, 0.0)
 
         distribution_map = torch.zeros(size=(heat_mask.shape[-2], heat_mask.shape[-1], 3))
-        variance_list = torch.tensor([self.sigma] * key_points.shape[0])
-        distribution_map[key_points[:, 1], key_points[:, 0]] = torch.stack(
-            (key_points[:, 1], key_points[:, 0], variance_list)).t().float()
+        # not in use - remove later
+        # variance_list = torch.tensor([self.sigma] * key_points.shape[0])
+        # distribution_map[key_points[:, 1], key_points[:, 0]] = torch.stack(
+        #     (key_points[:, 1], key_points[:, 0], variance_list)).t().float()
         distribution_map = distribution_map.permute(2, 0, 1)
 
         heat_mask = heat_mask.to(dtype=torch.float64)
@@ -241,9 +242,13 @@ class SDDFrameAndAnnotationDataset(Dataset):
             video = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
 
         if self.common_transform is not None:
-            inside_boxes_idx = [b for b, box in enumerate(rgb_boxes)
-                                if (box[0] > 0 and box[2] < video.shape[-1])
-                                and (box[1] > 0 and box[3] < video.shape[-2])]
+            # inside_boxes_idx = [b for b, box in enumerate(rgb_boxes)
+            #                     if (box[0] > 0 and box[2] < video.shape[-1])
+            #                     and (box[1] > 0 and box[3] < video.shape[-2])]
+            # filter using smaller image - correct later
+            inside_boxes_idx = [b for b, box in enumerate(target_boxes)
+                                if (box[0] > 0 and box[2] < heat_mask.shape[-1])
+                                and (box[1] > 0 and box[3] < heat_mask.shape[-2])]
             rgb_boxes = rgb_boxes[inside_boxes_idx]
             rgb_bbox_centers = rgb_bbox_centers[inside_boxes_idx]
 

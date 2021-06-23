@@ -1,3 +1,4 @@
+import copy
 import os
 import warnings
 
@@ -196,8 +197,8 @@ def setup_single_common_transform(use_replay_compose=False):
 
 def setup_multiple_datasets(cfg):
     meta = SDDMeta(cfg.root + 'H_SDD.txt')
-    video_classes = cfg.train.video_classes_to_use
-    video_numbers = cfg.train.video_numbers_to_use
+    video_classes = copy.deepcopy(cfg.train.video_classes_to_use)
+    video_numbers = copy.deepcopy(cfg.train.video_numbers_to_use)
     for val_clz, val_v_num in zip(cfg.val.video_classes_to_use, cfg.val.video_numbers_to_use):
         if val_clz in video_classes:
             idx = video_classes.index(val_clz)
@@ -494,7 +495,7 @@ def overfit(cfg):
                     loss = loss.mean()
                 elif network_type.__name__ == 'HourGlassPositionMapNetwork':
                     out = model_zoo.post_process_multi_apply(out)
-                    loss = model.calc_loss(out, heat_masks).mean()
+                    loss = model.calc_loss(out, heat_masks).sum()
                 else:
                     loss = loss_fn(out, heat_masks)
 

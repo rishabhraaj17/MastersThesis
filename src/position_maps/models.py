@@ -695,7 +695,7 @@ class HourGlassPositionMapNetwork(LightningModule):
         out = self(frames)
         out = post_process_multi_apply(out)
         loss = self.calc_loss(out, heat_masks)
-        return loss.mean()
+        return loss.sum()
 
     def training_step(self, batch, batch_idx):
         loss = self._one_step(batch)

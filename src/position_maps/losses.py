@@ -35,7 +35,6 @@ def _neg_loss(pred, gt):
         gt (batch x c x h x w)
     """
     eps = 1e-12
-    pred += eps
     pos_inds = gt.eq(1).float()
     neg_inds = gt.lt(1).float()
 
@@ -43,8 +42,8 @@ def _neg_loss(pred, gt):
 
     loss = 0
 
-    pos_loss = torch.log(pred) * torch.pow(1 - pred, 2) * pos_inds
-    neg_loss = torch.log(1 - pred) * torch.pow(pred, 2) * neg_weights * neg_inds
+    pos_loss = torch.log(pred + eps) * torch.pow(1 - (pred + eps), 2) * pos_inds
+    neg_loss = torch.log(1 - (pred + eps)) * torch.pow(pred + eps, 2) * neg_weights * neg_inds
 
     num_pos = pos_inds.float().sum()
     pos_loss = pos_loss.sum()
