@@ -4,7 +4,7 @@ from torch.nn import functional as F
 
 # https://github.com/sinAshish/Multi-Scale-Attention/blob/master/src/models/attention.py
 
-__all__ = ['PAM_Module', 'CAM_Module', 'SemanticModule']
+__all__ = ['PAM_Module', 'CAM_Module', 'SemanticModule', 'PAM_CAM_Layer']
 
 
 class _EncoderBlock(nn.Module):

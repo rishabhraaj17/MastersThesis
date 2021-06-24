@@ -52,8 +52,8 @@ class ResNeXt101(nn.Module):
         return layer4
 
 
-def _resnext_core(model):
-    model.conv1 = nn.Conv2d(1, 64, (7, 7), (2, 2), (3, 3), 1, 1, bias=False)
+def _resnext_core(model, in_channels=3):
+    model.conv1 = nn.Conv2d(in_channels, 64, (7, 7), (2, 2), (3, 3), 1, 1, bias=False)
     model.avgpool = nn.AvgPool2d((7, 7), (1, 1))
     model.fc = nn.Sequential(
         Lambda(lambda x: x.view(x.size(0), -1)),
