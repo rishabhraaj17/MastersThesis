@@ -4,14 +4,18 @@ import torch
 import torch.nn.functional as F
 from omegaconf import DictConfig
 from torch import nn
+from torch.nn import MSELoss
 from torch.utils.data import Dataset
 
-from base import Base
-from resnext import ResNeXt101
-from attention.multi_scale_attention import PAM_CAM_Layer, SemanticModule, MultiConv
+from src.models_hub.attention.multi_scale_attention import PAM_CAM_Layer, SemanticModule, MultiConv
+from src.models_hub.base import Base
+from src.models_hub.resnext import ResNeXt101
+from src.position_maps.losses import CenterNetFocalLoss
 
 
 # https://github.com/sinAshish/Multi-Scale-Attention/blob/96d76f2794ee1b16e847f38a16d397d137c774f6/src/models/my_stacked_danet.py#L19
+
+
 class MSANet(Base):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
                  desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
@@ -114,6 +118,9 @@ class MSANet(Base):
         self.predict3_2 = nn.Conv2d(64, 1, kernel_size=1)
         self.predict2_2 = nn.Conv2d(64, 1, kernel_size=1)
         self.predict1_2 = nn.Conv2d(64, 1, kernel_size=1)
+
+        self.gaussian_loss = CenterNetFocalLoss()
+        self.mse_loss = MSELoss()
 
     def forward(self, x):
         layer0 = self.resnext.layer0(x)
@@ -230,6 +237,42 @@ class MSANet(Base):
                    predict4_2
         else:
             return (predict1_2 + predict2_2 + predict3_2 + predict4_2) / 4
+
+    def calculate_loss(self, pred, target):
+        semVector_1_1, semVector_2_1, semVector_1_2, semVector_2_2, semVector_1_3, semVector_2_3, \
+        semVector_1_4, semVector_2_4, inp_enc0, inp_enc1, inp_enc2, inp_enc3, inp_enc4, inp_enc5, \
+        inp_enc6, inp_enc7, out_enc0, out_enc1, out_enc2, out_enc3, out_enc4, out_enc5, out_enc6, \
+        out_enc7, outputs0, outputs1, outputs2, outputs3, outputs0_2, outputs1_2, outputs2_2, \
+        outputs3_2 = pred
+
+        # Cross-entropy loss
+        loss0 = self.gaussian_loss(outputs0.sigmoid(), target)
+        loss1 = self.gaussian_loss(outputs1.sigmoid(), target)
+        loss2 = self.gaussian_loss(outputs2.sigmoid(), target)
+        loss3 = self.gaussian_loss(outputs3.sigmoid(), target)
+        loss0_2 = self.gaussian_loss(outputs0_2.sigmoid(), target)
+        loss1_2 = self.gaussian_loss(outputs1_2.sigmoid(), target)
+        loss2_2 = self.gaussian_loss(outputs2_2.sigmoid(), target)
+        loss3_2 = self.gaussian_loss(outputs3_2.sigmoid(), target)
+
+        lossSemantic1 = self.mse_loss(semVector_1_1, semVector_2_1)
+        lossSemantic2 = self.mse_loss(semVector_1_2, semVector_2_2)
+        lossSemantic3 = self.mse_loss(semVector_1_3, semVector_2_3)
+        lossSemantic4 = self.mse_loss(semVector_1_4, semVector_2_4)
+
+        lossRec0 = self.mse_loss(inp_enc0, out_enc0)
+        lossRec1 = self.mse_loss(inp_enc1, out_enc1)
+        lossRec2 = self.mse_loss(inp_enc2, out_enc2)
+        lossRec3 = self.mse_loss(inp_enc3, out_enc3)
+        lossRec4 = self.mse_loss(inp_enc4, out_enc4)
+        lossRec5 = self.mse_loss(inp_enc5, out_enc5)
+        lossRec6 = self.mse_loss(inp_enc6, out_enc6)
+        lossRec7 = self.mse_loss(inp_enc7, out_enc7)
+
+        loss = (loss0 + loss1 + loss2 + loss3 + loss0_2 + loss1_2 + loss2_2 + loss3_2) \
+                + 0.25 * (lossSemantic1 + lossSemantic2 + lossSemantic3 + lossSemantic4) \
+                + 0.1 * (lossRec0 + lossRec1 + lossRec2 + lossRec3 + lossRec4 + lossRec5 + lossRec6 + lossRec7)
+        return loss
 
 
 if __name__ == '__main__':
