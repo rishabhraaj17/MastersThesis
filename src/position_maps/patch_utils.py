@@ -2,6 +2,10 @@ import matplotlib.pyplot as plt
 import torch
 import torchvision.io
 from torch import nn
+from torch.nn.functional import interpolate
+
+from src.models_hub.trans_unet import get_r50_b16_config, VisionTransformer
+from src.position_maps.utils import generate_position_map
 
 
 def extract_patches_2d(img, patch_shape, step=[1.0, 1.0], batch_first=False):
@@ -109,13 +113,39 @@ if __name__ == '__main__':
     im_path = "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/annotations/" \
               "deathCircle/video1/reference.jpg"
     patch_size = (256, 256)
+    batch_size = 2
+    num_locs = 40
 
     img = torchvision.io.read_image(im_path).unsqueeze(0)
+    img = interpolate(img, scale_factor=0.5)
+
     patches = extract_patches_2d(img, patch_size, batch_first=True)
     stitched_img = reconstruct_from_patches_2d(patches, img.shape[-2:], batch_first=True).to(dtype=torch.uint8)
 
     p = torchvision.utils.make_grid(patches.squeeze(0), nrow=img.shape[2] // patch_size[0])
-    quick_viz(p)
 
+    quick_viz(p)
     quick_viz(img, stitched_img)
+
+    loc_x = torch.randint(0, img.shape[-2], (num_locs,))
+    loc_y = torch.randint(0, img.shape[-1], (num_locs,))
+    locs = torch.stack((loc_x, loc_y)).t()
+    p_img = torch.from_numpy(
+        generate_position_map(list(img.shape[-2:]), locs, sigma=2, return_combined=True))[(None,) * 2]
+
+    patches_target = extract_patches_2d(p_img, patch_size, batch_first=True)
+    stitched_img_target = reconstruct_from_patches_2d(patches_target, p_img.shape[-2:], batch_first=True)
+
+    p_target = torchvision.utils.make_grid(patches_target.squeeze(0), nrow=p_img.shape[2] // patch_size[0])
+
+    # quick_viz(p_target)
+    # quick_viz(p_img, stitched_img_target)
+
+    conf = get_r50_b16_config()
+    conf.n_classes = 1
+    m = VisionTransformer(conf, img_size=patch_size, num_classes=1)
+
+    inp = (patches.view(-1, *patches.shape[2:]).float() / 255.0).repeat(batch_size, 1, 1, 1)
+    o = m(inp)
+    o = o.view(batch_size, -1, *patches.shape[3:])
     print()
