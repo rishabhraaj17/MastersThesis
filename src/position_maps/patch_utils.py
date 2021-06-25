@@ -103,7 +103,7 @@ def quick_viz(im1, im2=None, img_idx=0):
 
 
 def preprocess_image(im, img_idx):
-    im = im.cpu() if isinstance(im, torch.Tensor) else im
+    im = im.detach().cpu() if isinstance(im, torch.Tensor) else im
     im = im[img_idx] if im.ndim == 4 else im
     im = im.permute(1, 2, 0) if im.shape[0] in [1, 2, 3] else im
     return im
@@ -112,31 +112,33 @@ def preprocess_image(im, img_idx):
 if __name__ == '__main__':
     im_path = "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/annotations/" \
               "deathCircle/video1/reference.jpg"
+    random_idx = 0
     patch_size = (256, 256)
     batch_size = 2
     num_locs = 40
 
     img = torchvision.io.read_image(im_path).unsqueeze(0)
-    img = interpolate(img, scale_factor=0.5)
+    img = interpolate(img, scale_factor=0.5).repeat(batch_size, 1, 1, 1)
 
     patches = extract_patches_2d(img, patch_size, batch_first=True)
     stitched_img = reconstruct_from_patches_2d(patches, img.shape[-2:], batch_first=True).to(dtype=torch.uint8)
 
-    p = torchvision.utils.make_grid(patches.squeeze(0), nrow=img.shape[2] // patch_size[0])
+    p = torchvision.utils.make_grid(patches[random_idx].squeeze(0), nrow=img.shape[2] // patch_size[0])
 
-    quick_viz(p)
-    quick_viz(img, stitched_img)
+    # quick_viz(p)
+    # quick_viz(img, stitched_img)
 
     loc_x = torch.randint(0, img.shape[-2], (num_locs,))
     loc_y = torch.randint(0, img.shape[-1], (num_locs,))
     locs = torch.stack((loc_x, loc_y)).t()
     p_img = torch.from_numpy(
-        generate_position_map(list(img.shape[-2:]), locs, sigma=2, return_combined=True))[(None,) * 2]
+        generate_position_map(
+            list(img.shape[-2:]), locs, sigma=2, return_combined=True))[(None,) * 2].repeat(batch_size, 1, 1, 1)
 
     patches_target = extract_patches_2d(p_img, patch_size, batch_first=True)
     stitched_img_target = reconstruct_from_patches_2d(patches_target, p_img.shape[-2:], batch_first=True)
 
-    p_target = torchvision.utils.make_grid(patches_target.squeeze(0), nrow=p_img.shape[2] // patch_size[0])
+    p_target = torchvision.utils.make_grid(patches_target[random_idx].squeeze(0), nrow=p_img.shape[2] // patch_size[0])
 
     # quick_viz(p_target)
     # quick_viz(p_img, stitched_img_target)
@@ -145,7 +147,11 @@ if __name__ == '__main__':
     conf.n_classes = 1
     m = VisionTransformer(conf, img_size=patch_size, num_classes=1)
 
-    inp = (patches.view(-1, *patches.shape[2:]).float() / 255.0).repeat(batch_size, 1, 1, 1)
+    inp = (patches.contiguous().view(-1, *patches.shape[2:]).float() / 255.0)
     o = m(inp)
-    o = o.view(batch_size, -1, *patches.shape[3:])
+    o = o.view(batch_size, -1, 1, *patches.shape[3:])
+
+    stitched_output = reconstruct_from_patches_2d(o, img.shape[-2:], batch_first=True)
+    quick_viz(img, stitched_output)
+
     print()
