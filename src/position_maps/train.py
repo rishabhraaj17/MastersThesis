@@ -19,7 +19,8 @@ from log import get_logger
 from dataset import SDDFrameAndAnnotationDataset
 import models as model_zoo
 from losses import CenterNetFocalLoss
-from utils import heat_map_collate_fn, plot_predictions, get_scaled_shapes_with_pad_values, rgb_transform
+from src.models_hub.msanet import MSANet
+from utils import heat_map_collate_fn, plot_predictions, get_scaled_shapes_with_pad_values, rgb_transform, ImagePadder
 
 warnings.filterwarnings("ignore")
 
@@ -386,14 +387,21 @@ def overfit(cfg):
     else:
         loss_fn = MSELoss()
 
-    if network_type.__name__ == 'HourGlassPositionMapNetwork':
-        model = network_type.from_config(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
-                                         loss_function=loss_fn, collate_fn=heat_map_collate_fn,
-                                         desired_output_shape=target_max_shape)
+    if cfg.from_model_hub:
+        if cfg.model_hub.model == 'MSANet':
+            model = MSANet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+                           loss_function=loss_fn, collate_fn=heat_map_collate_fn,
+                           desired_output_shape=target_max_shape)
     else:
-        model = network_type(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
-                             loss_function=loss_fn, collate_fn=heat_map_collate_fn,
-                             desired_output_shape=target_max_shape)
+        if network_type.__name__ == 'HourGlassPositionMapNetwork':
+            model = network_type.from_config(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+                                             loss_function=loss_fn, collate_fn=heat_map_collate_fn,
+                                             desired_output_shape=target_max_shape)
+        else:
+            model = network_type(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+                                 loss_function=loss_fn, collate_fn=heat_map_collate_fn,
+                                 desired_output_shape=target_max_shape)
+
     if cfg.overfit.use_pretrained.enabled:
         checkpoint_path = f'{cfg.overfit.use_pretrained.checkpoint.root}' \
                           f'{cfg.overfit.use_pretrained.checkpoint.path}' \
@@ -428,33 +436,41 @@ def overfit(cfg):
 
             frames, heat_masks, position_map, distribution_map, class_maps, meta = data
 
-            if network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
-                frames, class_maps = frames.to(cfg.device), class_maps.to(cfg.device)
-            elif network_type.__name__ == 'PositionMapUNetPositionMapSegmentation':
-                frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
-            elif network_type.__name__ in ['PositionMapUNetHeatmapSegmentation',
-                                           'PositionMapStackedHourGlass',
-                                           'HourGlassPositionMapNetwork']:
+            if cfg.from_model_hub:
+                padder = ImagePadder(frames.shape[-2:])
+                frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
                 frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
             else:
-                frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+                if network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
+                    frames, class_maps = frames.to(cfg.device), class_maps.to(cfg.device)
+                elif network_type.__name__ == 'PositionMapUNetPositionMapSegmentation':
+                    frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
+                elif network_type.__name__ in ['PositionMapUNetHeatmapSegmentation',
+                                               'PositionMapStackedHourGlass',
+                                               'HourGlassPositionMapNetwork']:
+                    frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+                else:
+                    frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
             out = model(frames)
 
-            if network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
-                loss = loss_fn(out, class_maps.long().squeeze(dim=1))
-            elif network_type.__name__ == 'PositionMapUNetPositionMapSegmentation':
-                loss = loss_fn(out, position_map.long().squeeze(dim=1))
-            elif network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
-                loss = loss_fn(out, heat_masks)
-            elif network_type.__name__ == 'PositionMapStackedHourGlass':
-                loss = model.network.calc_loss(combined_hm_preds=out, heatmaps=heat_masks)
-                loss = loss.mean()
-            elif network_type.__name__ == 'HourGlassPositionMapNetwork':
-                out = model_zoo.post_process_multi_apply(out)
-                loss = model.calc_loss(out, heat_masks).mean()
+            if cfg.from_model_hub:
+                loss = model.calculate_loss(out, heat_masks)
             else:
-                loss = loss_fn(out, heat_masks)
+                if network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
+                    loss = loss_fn(out, class_maps.long().squeeze(dim=1))
+                elif network_type.__name__ == 'PositionMapUNetPositionMapSegmentation':
+                    loss = loss_fn(out, position_map.long().squeeze(dim=1))
+                elif network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
+                    loss = loss_fn(out, heat_masks)
+                elif network_type.__name__ == 'PositionMapStackedHourGlass':
+                    loss = model.network.calc_loss(combined_hm_preds=out, heatmaps=heat_masks)
+                    loss = loss.mean()
+                elif network_type.__name__ == 'HourGlassPositionMapNetwork':
+                    out = model_zoo.post_process_multi_apply(out)
+                    loss = model.calc_loss(out, heat_masks).mean()
+                else:
+                    loss = loss_fn(out, heat_masks)
 
             train_loss.append(loss.item())
 
@@ -470,87 +486,103 @@ def overfit(cfg):
             for data in train_loader:
                 frames, heat_masks, position_map, distribution_map, class_maps, meta = data
 
-                if network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
-                    frames, class_maps = frames.to(cfg.device), class_maps.to(cfg.device)
-                elif network_type.__name__ == 'PositionMapUNetPositionMapSegmentation':
-                    frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
-                elif network_type.__name__ in ['PositionMapUNetHeatmapSegmentation',
-                                               'PositionMapStackedHourGlass',
-                                               'HourGlassPositionMapNetwork']:
+                if cfg.from_model_hub:
+                    padder = ImagePadder(frames.shape[-2:])
+                    frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
                     frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
                 else:
-                    frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+                    if network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
+                        frames, class_maps = frames.to(cfg.device), class_maps.to(cfg.device)
+                    elif network_type.__name__ == 'PositionMapUNetPositionMapSegmentation':
+                        frames, position_map = frames.to(cfg.device), position_map.to(cfg.device)
+                    elif network_type.__name__ in ['PositionMapUNetHeatmapSegmentation',
+                                                   'PositionMapStackedHourGlass',
+                                                   'HourGlassPositionMapNetwork']:
+                        frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+                    else:
+                        frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
                 with torch.no_grad():
                     out = model(frames)
 
-                if network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
-                    loss = loss_fn(out, class_maps.long().squeeze(dim=1))
-                elif network_type.__name__ == 'PositionMapUNetPositionMapSegmentation':
-                    loss = loss_fn(out, position_map.long().squeeze(dim=1))
-                elif network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
-                    loss = loss_fn(out, heat_masks)
-                elif network_type.__name__ == 'PositionMapStackedHourGlass':
-                    loss = model.network.calc_loss(combined_hm_preds=out, heatmaps=heat_masks)
-                    loss = loss.mean()
-                elif network_type.__name__ == 'HourGlassPositionMapNetwork':
-                    out = model_zoo.post_process_multi_apply(out)
-                    loss = model.calc_loss(out, heat_masks).sum()
+                if cfg.from_model_hub:
+                    loss = torch.tensor([0])  # model.calculate_loss(out, heat_masks)
                 else:
-                    loss = loss_fn(out, heat_masks)
+                    if network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
+                        loss = loss_fn(out, class_maps.long().squeeze(dim=1))
+                    elif network_type.__name__ == 'PositionMapUNetPositionMapSegmentation':
+                        loss = loss_fn(out, position_map.long().squeeze(dim=1))
+                    elif network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
+                        loss = loss_fn(out, heat_masks)
+                    elif network_type.__name__ == 'PositionMapStackedHourGlass':
+                        loss = model.network.calc_loss(combined_hm_preds=out, heatmaps=heat_masks)
+                        loss = loss.mean()
+                    elif network_type.__name__ == 'HourGlassPositionMapNetwork':
+                        out = model_zoo.post_process_multi_apply(out)
+                        loss = model.calc_loss(out, heat_masks).sum()
+                    else:
+                        loss = loss_fn(out, heat_masks)
 
                 val_loss.append(loss.item())
 
                 random_idx = np.random.choice(cfg.overfit.batch_size, 1, replace=False).item()
 
-                if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation',
-                                             'PositionMapUNetClassMapSegmentation']:
-                    pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
-                    plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                     class_maps[random_idx].squeeze().cpu()
-                                     if cfg.class_map_segmentation else position_map[random_idx].squeeze().cpu(),
-                                     pred_mask[random_idx].int() * 255,
-                                     additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
-                                                     f"| Epoch: {epoch}")
-                elif network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
+                if cfg.from_model_hub:
                     pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
                     plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                      heat_masks[random_idx].squeeze().cpu(),
                                      pred_mask[random_idx].int() * 255,
-                                     additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
+                                     additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
                                                      f"| Epoch: {epoch}")
-                elif network_type.__name__ == 'PositionMapStackedHourGlass':
-                    pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
-                    plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                     class_maps[random_idx].squeeze().cpu()
-                                     if cfg.class_map_segmentation else position_map[random_idx].squeeze().cpu(),
-                                     pred_mask[-1][random_idx].int().squeeze(dim=0) * 255,
-                                     additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
-                                                     f"| Epoch: {epoch}")
-                    plot_predictions(pred_mask[-3][random_idx].int().squeeze(dim=0) * 255,
-                                     pred_mask[-2][random_idx].int().squeeze(dim=0) * 255,
-                                     pred_mask[-1][random_idx].int().squeeze(dim=0) * 255,
-                                     additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
-                                                     f"| Epoch: {epoch}\nLast 3 HeatMaps", all_heatmaps=True)
-                elif network_type.__name__ == 'HourGlassPositionMapNetwork':
-                    pred_mask = [torch.round(torch.sigmoid(o)).squeeze(dim=1).cpu() for o in out]
-                    # pred_mask = [o.squeeze(dim=1).cpu() for o in out]
-                    plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                     heat_masks[random_idx].squeeze().cpu(),
-                                     pred_mask[-1][random_idx].int().squeeze(dim=0) * 255,
-                                     additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
-                                                     f"| Epoch: {epoch}")
-                    plot_predictions(heat_masks[random_idx].squeeze().cpu(),
-                                     pred_mask[-2][random_idx].int().squeeze(dim=0) * 255,
-                                     pred_mask[-1][random_idx].int().squeeze(dim=0) * 255,
-                                     additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
-                                                     f"| Epoch: {epoch}\nLast 3 HeatMaps", all_heatmaps=True)
                 else:
-                    plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                     heat_masks[random_idx].squeeze().cpu(),
-                                     out[random_idx].squeeze().cpu(),
-                                     additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
-                                                     f"| Epoch: {epoch}")
+                    if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation',
+                                                 'PositionMapUNetClassMapSegmentation']:
+                        pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
+                        plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                         class_maps[random_idx].squeeze().cpu()
+                                         if cfg.class_map_segmentation else position_map[random_idx].squeeze().cpu(),
+                                         pred_mask[random_idx].int() * 255,
+                                         additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
+                                                         f"| Epoch: {epoch}")
+                    elif network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
+                        pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
+                        plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                         heat_masks[random_idx].squeeze().cpu(),
+                                         pred_mask[random_idx].int() * 255,
+                                         additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
+                                                         f"| Epoch: {epoch}")
+                    elif network_type.__name__ == 'PositionMapStackedHourGlass':
+                        pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
+                        plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                         class_maps[random_idx].squeeze().cpu()
+                                         if cfg.class_map_segmentation else position_map[random_idx].squeeze().cpu(),
+                                         pred_mask[-1][random_idx].int().squeeze(dim=0) * 255,
+                                         additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
+                                                         f"| Epoch: {epoch}")
+                        plot_predictions(pred_mask[-3][random_idx].int().squeeze(dim=0) * 255,
+                                         pred_mask[-2][random_idx].int().squeeze(dim=0) * 255,
+                                         pred_mask[-1][random_idx].int().squeeze(dim=0) * 255,
+                                         additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
+                                                         f"| Epoch: {epoch}\nLast 3 HeatMaps", all_heatmaps=True)
+                    elif network_type.__name__ == 'HourGlassPositionMapNetwork':
+                        pred_mask = [torch.round(torch.sigmoid(o)).squeeze(dim=1).cpu() for o in out]
+                        # pred_mask = [o.squeeze(dim=1).cpu() for o in out]
+                        plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                         heat_masks[random_idx].squeeze().cpu(),
+                                         pred_mask[-1][random_idx].int().squeeze(dim=0) * 255,
+                                         additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
+                                                         f"| Epoch: {epoch}")
+                        plot_predictions(heat_masks[random_idx].squeeze().cpu(),
+                                         pred_mask[-2][random_idx].int().squeeze(dim=0) * 255,
+                                         pred_mask[-1][random_idx].int().squeeze(dim=0) * 255,
+                                         additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
+                                                         f"| Epoch: {epoch}\nLast 3 HeatMaps", all_heatmaps=True)
+                    else:
+                        plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                         heat_masks[random_idx].squeeze().cpu(),
+                                         out[random_idx].squeeze().cpu(),
+                                         additional_text=f"{network_type.__name__} | {loss_fn._get_name()} "
+                                                         f"| Epoch: {epoch}")
 
             logger.info(f"Epoch: {epoch} | Validation Loss: {np.array(val_loss).mean()}")
 

@@ -740,6 +740,6 @@ if __name__ == '__main__':
     inp = torch.randn((1, 3, 480, 360))
     conf = get_r50_b16_config()
     conf.n_classes = 1
-    m = VisionTransformer(conf, img_size=360, num_classes=1)
+    m = VisionTransformer(conf, img_size=(480, 360), num_classes=1)
     o = m(inp)
     print(m)

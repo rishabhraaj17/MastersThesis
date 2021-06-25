@@ -58,6 +58,11 @@ train:
   #  video_numbers_to_use: [ [ 1, 2, 3, 4, 5 ], [ 0, 1, 2 ], [ 0, 1, 2, 4 ], [ 0, 1, 2, 3, 5, 6, 8 ],
   #                          [ 0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13 ], [ 1, 2, 3 ],
   #                          [ 0, 1, 2, 7, 8, 9, 10, 11 ], [ 1, 2, 3 ] ] # nexus 3, 4 are bad
+  #  # Portraits -> H > W
+  #  video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS ]
+  #  video_numbers_to_use: [ [ 0, 1, 2, 4 ], [ 0, 1, 2, 3, 5, 6, 8 ],
+  #                          [ 0, 1, 4, 5, 8 ], [ 1, 2, 3 ],
+  #                          [ 0, 1, 2, 7, 8, 9, 10, 11 ] ] # nexus 3, 4 are bad
   # Portraits -> H > W
   video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS ]
   video_numbers_to_use: [ [ 0, 1, 2, 4 ], [ 0, 1, 2, 3, 5, 6, 8 ],
@@ -72,6 +77,9 @@ val:
   #  video_classes_to_use: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
   #  video_numbers_to_use: [ [ 0 ], [ 3 ], [ 3 ], [ 4 ], [ 7 ], [ 0 ], [ 6 ], [ 0 ] ]
   # Portraits -> H > W
+  # Portraits -> H > W
+  #  video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS ]
+  #  video_numbers_to_use: [ [ 3 ], [ 4 ], [ 7 ], [ 0 ], [ 6 ] ]
   video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS ]
   video_numbers_to_use: [ [ 3 ], [ 4 ], [ 7 ], [ 0 ], [ 6 ] ]
   multiple_videos: False
@@ -118,6 +126,10 @@ position_map_segmentation: False
 # 'PositionMapUNetClassMapSegmentation', 'PositionMapUNetHeatmapSegmentation', 'PositionMapStackedHourGlass',
 # 'HourGlassPositionMapNetwork', 'HourGlassPositionMapNetworkDDP'
 postion_map_network_type: 'HourGlassPositionMapNetworkDDP'
+
+from_model_hub: True
+model_hub:
+  model: 'MSANet'
 
 overfit:
   num_epochs: 6000
