@@ -6,6 +6,7 @@ import albumentations as A
 import hydra
 import numpy as np
 import torch
+import torchvision
 from kornia.losses import FocalLoss, BinaryFocalLossWithLogits
 from mmdet.models import GaussianFocalLoss
 from pytorch_lightning import seed_everything, Trainer
@@ -20,6 +21,9 @@ from dataset import SDDFrameAndAnnotationDataset
 import models as model_zoo
 from losses import CenterNetFocalLoss
 from src.models_hub.msanet import MSANet
+from src.models_hub.trans_unet import TransUNet
+from src.models_hub.vis_trans import VisionTransformerSegmentation
+from src.position_maps.patch_utils import extract_patches_2d, reconstruct_from_patches_2d, quick_viz
 from utils import heat_map_collate_fn, plot_predictions, get_scaled_shapes_with_pad_values, rgb_transform, ImagePadder
 
 warnings.filterwarnings("ignore")
@@ -596,26 +600,32 @@ def patch_based_overfit(cfg):
 
     loss_fn = CenterNetFocalLoss()
 
-    if cfg.model_hub.model == 'MSANet':
+    if cfg.patch_mode.model == 'MSANet':
         model = MSANet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
                        loss_function=loss_fn, collate_fn=heat_map_collate_fn,
                        desired_output_shape=target_max_shape)
-    elif cfg.model_hub.model == 'TransUNet':
-        model = None
-    elif cfg.model_hub.model == 'ViT':
-        model = None
+    elif cfg.patch_mode.model == 'TransUNet':
+        model = TransUNet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+                          loss_function=loss_fn, collate_fn=heat_map_collate_fn,
+                          desired_output_shape=target_max_shape)
+    elif cfg.patch_mode.model == 'ViT':
+        model = VisionTransformerSegmentation(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+                                              loss_function=loss_fn, collate_fn=heat_map_collate_fn,
+                                              desired_output_shape=target_max_shape)
+    else:
+        raise NotImplementedError
 
-    if cfg.overfit.use_pretrained.enabled:
-        checkpoint_path = f'{cfg.overfit.use_pretrained.checkpoint.root}' \
-                          f'{cfg.overfit.use_pretrained.checkpoint.path}' \
-                          f'{cfg.overfit.use_pretrained.checkpoint.version}/checkpoints/'
+    if cfg.patch_mode.use_pretrained.enabled:
+        checkpoint_path = f'{cfg.patch_mode.use_pretrained.checkpoint.root}' \
+                          f'{cfg.patch_mode.use_pretrained.checkpoint.path}' \
+                          f'{cfg.patch_mode.use_pretrained.checkpoint.version}/checkpoints/'
         checkpoint_files = os.listdir(checkpoint_path)
 
         epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
         epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
         checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
 
-        checkpoint_file = checkpoint_path + checkpoint_files[-cfg.overfit.use_pretrained.checkpoint.top_k]
+        checkpoint_file = checkpoint_path + checkpoint_files[-cfg.patch_mode.use_pretrained.checkpoint.top_k]
 
         logger.info(f'Loading weights from: {checkpoint_file}')
         load_dict = torch.load(checkpoint_file, map_location=cfg.device)
@@ -626,11 +636,11 @@ def patch_based_overfit(cfg):
 
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay, amsgrad=cfg.amsgrad)
 
-    train_subset = Subset(dataset=train_dataset, indices=list(cfg.overfit.subset_indices))
-    train_loader = DataLoader(train_subset, batch_size=cfg.overfit.batch_size, shuffle=False,
-                              num_workers=cfg.overfit.num_workers, collate_fn=heat_map_collate_fn,
-                              pin_memory=cfg.overfit.pin_memory, drop_last=cfg.overfit.drop_last)
-    for epoch in range(cfg.overfit.num_epochs):
+    train_subset = Subset(dataset=train_dataset, indices=list(cfg.patch_mode.subset_indices))
+    train_loader = DataLoader(train_subset, batch_size=cfg.patch_mode.batch_size, shuffle=False,
+                              num_workers=cfg.patch_mode.num_workers, collate_fn=heat_map_collate_fn,
+                              pin_memory=cfg.patch_mode.pin_memory, drop_last=cfg.patch_mode.drop_last)
+    for epoch in range(cfg.patch_mode.num_epochs):
         model.train()
 
         train_loss = []
@@ -641,20 +651,57 @@ def patch_based_overfit(cfg):
 
             padder = ImagePadder(frames.shape[-2:])
             frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
+
+            # frames_whole, heat_masks_whole = frames.clone(), heat_masks.clone()
+            
+            frames = extract_patches_2d(frames, cfg.patch_mode.patch_size, batch_first=True)
+            heat_masks = extract_patches_2d(heat_masks, cfg.patch_mode.patch_size, batch_first=True)
+            # viz
+            # random_idx = np.random.choice(cfg.patch_mode.batch_size, 1, replace=False).item()
+
+            # stitched_frames = reconstruct_from_patches_2d(
+            #     frames, frames_whole.shape[-2:], batch_first=True)
+            # stitched_masks = reconstruct_from_patches_2d(
+            #     heat_masks, heat_masks_whole.shape[-2:], batch_first=True)
+            # 
+            # p_frames = torchvision.utils.make_grid(
+            #     frames[random_idx].squeeze(0), nrow=frames_whole.shape[2] // cfg.patch_mode.patch_size[0])
+            # p_masks = torchvision.utils.make_grid(
+            #     heat_masks[random_idx].squeeze(0), nrow=heat_masks_whole.shape[2] // cfg.patch_mode.patch_size[0])
+
+            # quick_viz(p_frames)
+            # quick_viz(frames_whole, stitched_frames)
+            #
+            # quick_viz(p_masks)
+            # quick_viz(heat_masks_whole, stitched_masks)
+
+            # reshape for input and loss
+            frames = (frames.contiguous().view(-1, *frames.shape[2:]).float() / 255.0)
+            heat_masks = (heat_masks.contiguous().view(-1, *heat_masks.shape[2:]).float() / 255.0)
+
             frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
-            out = model(frames)
+            # out = model(frames)
+            #
+            # loss = model.calculate_loss(out, heat_masks)
+            #
+            # train_loss.append(loss.item())
+            for f_idx in range(0, frames.shape[0] - cfg.patch_mode.mini_batch_size + 1, cfg.patch_mode.mini_batch_size):
+                out = model(frames[f_idx: f_idx + cfg.patch_mode.mini_batch_size])
 
-            loss = model.calculate_loss(out, heat_masks)
+                loss = model.calculate_loss(out.sigmoid(), heat_masks[f_idx: f_idx + cfg.patch_mode.mini_batch_size])
 
-            train_loss.append(loss.item())
+                train_loss.append(loss.item())
 
-            loss.backward()
+                loss.backward()
             opt.step()
+
+            # loss.backward()
+            # opt.step()
 
         logger.info(f"Epoch: {epoch} | Train Loss: {np.array(train_loss).mean()}")
 
-        if epoch % cfg.overfit.plot_checkpoint == 0:
+        if epoch % cfg.patch_mode.plot_checkpoint == 0:
             model.eval()
             val_loss = []
 
@@ -663,21 +710,60 @@ def patch_based_overfit(cfg):
 
                 padder = ImagePadder(frames.shape[-2:])
                 frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
+
+                frames_whole, heat_masks_whole = frames.clone(), heat_masks.clone()
+
+                frames = extract_patches_2d(frames, cfg.patch_mode.patch_size, batch_first=True)
+                heat_masks = extract_patches_2d(heat_masks, cfg.patch_mode.patch_size, batch_first=True)
+                # viz
+                random_idx = np.random.choice(cfg.patch_mode.batch_size, 1, replace=False).item()
+
+                # stitched_frames = reconstruct_from_patches_2d(
+                #     frames, frames_whole.shape[-2:], batch_first=True)
+                # stitched_masks = reconstruct_from_patches_2d(
+                #     heat_masks, heat_masks_whole.shape[-2:], batch_first=True)
+                # 
+                # p_frames = torchvision.utils.make_grid(
+                #     frames[random_idx].squeeze(0), nrow=frames_whole.shape[2] // cfg.patch_mode.patch_size[0])
+                # p_masks = torchvision.utils.make_grid(
+                #     heat_masks[random_idx].squeeze(0), nrow=heat_masks_whole.shape[2] // cfg.patch_mode.patch_size[0])
+
+                # quick_viz(p_frames)
+                # quick_viz(frames_whole, stitched_frames)
+                #
+                # quick_viz(p_masks)
+                # quick_viz(heat_masks_whole, stitched_masks)
+
+                # reshape for input and loss
+                frames = (frames.contiguous().view(-1, *frames.shape[2:]).float() / 255.0)
+                heat_masks = (heat_masks.contiguous().view(-1, *heat_masks.shape[2:]).float() / 255.0)
+
                 frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
+                # with torch.no_grad():
+                #     out = model(frames)
+                
+                outs = []
                 with torch.no_grad():
-                    out = model(frames)
+                    for f_idx in range(
+                            0, frames.shape[0] - cfg.patch_mode.mini_batch_size + 1, cfg.patch_mode.mini_batch_size):
+                        out = model(frames[f_idx: f_idx + cfg.patch_mode.mini_batch_size])
+                        outs.append(out.view(cfg.patch_mode.mini_batch_size, -1, 1, *frames.shape[2:]).cpu())
 
-                loss = torch.tensor([0])  # model.calculate_loss(out, heat_masks)
+                        loss = model.calculate_loss(out.sigmoid(),
+                                                    heat_masks[f_idx: f_idx + cfg.patch_mode.mini_batch_size])
 
-                val_loss.append(loss.item())
+                        val_loss.append(loss.item())
 
-                random_idx = np.random.choice(cfg.overfit.batch_size, 1, replace=False).item()
+                # val_loss.append(loss.item())
 
-                pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
+                pred_mask = torch.round(torch.sigmoid(torch.cat(outs))).cpu().transpose(0, 1)
+                stitched_pred_masks = reconstruct_from_patches_2d(
+                    pred_mask, heat_masks_whole.shape[-2:], batch_first=True).squeeze(dim=1)
+
                 plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                  heat_masks[random_idx].squeeze().cpu(),
-                                 pred_mask[random_idx].int() * 255,
+                                 stitched_pred_masks[random_idx].int() * 255,
                                  additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
                                                  f"| Epoch: {epoch}")
 

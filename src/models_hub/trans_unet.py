@@ -83,7 +83,26 @@ def get_r50_b16_config():
     config.pretrained_path = '../model/vit_checkpoint/imagenet21k/R50+ViT-B_16.npz'
     config.decoder_channels = (256, 128, 64, 16)
     config.skip_channels = [512, 256, 64, 16]
-    config.n_classes = 2
+    config.n_classes = 1
+    config.n_skip = 3
+    config.activation = 'softmax'
+
+    return config
+
+
+def get_r50_b16_small_config():
+    """Returns the Resnet50 + ViT-B/16 configuration."""
+    config = get_b16_config()
+    config.patches.grid = (16, 16)
+    config.resnet = ml_collections.ConfigDict()
+    config.resnet.num_layers = (2, 3, 5)
+    config.resnet.width_factor = 1
+
+    config.classifier = 'seg'
+    config.pretrained_path = '../model/vit_checkpoint/imagenet21k/R50+ViT-B_16.npz'
+    config.decoder_channels = (256, 128, 64, 16)
+    config.skip_channels = [512, 256, 64, 16]
+    config.n_classes = 1
     config.n_skip = 3
     config.activation = 'softmax'
 
@@ -116,7 +135,7 @@ def get_l16_config():
     config.resnet_pretrained_path = None
     config.pretrained_path = '../model/vit_checkpoint/imagenet21k/ViT-L_16.npz'
     config.decoder_channels = (256, 128, 64, 16)
-    config.n_classes = 2
+    config.n_classes = 1
     config.activation = 'softmax'
     return config
 
@@ -133,7 +152,7 @@ def get_r50_l16_config():
     config.resnet_pretrained_path = '../model/vit_checkpoint/imagenet21k/R50+ViT-B_16.npz'
     config.decoder_channels = (256, 128, 64, 16)
     config.skip_channels = [512, 256, 64, 16]
-    config.n_classes = 2
+    config.n_classes = 1
     config.activation = 'softmax'
     return config
 
@@ -169,6 +188,7 @@ CONFIGS = {
     'ViT-L_32': get_l32_config(),
     'ViT-H_14': get_h14_config(),
     'R50-ViT-B_16': get_r50_b16_config(),
+    'R50-ViT-B_16_small': get_r50_b16_config(),
     'R50-ViT-L_16': get_r50_l16_config(),
     'testing': get_testing(),
 }

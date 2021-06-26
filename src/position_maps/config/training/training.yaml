@@ -195,6 +195,32 @@ interact:
     path: "lightning_logs/version_"
     version: 424798 # 437363  # 424798
 
+patch_mode:
+  use_pretrained:
+    enabled: False
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+      path: "lightning_logs/version_"
+      version: 502496 # 492265 # 497829 # 492265 #424798 # 437363  # 424798
+      top_k: 1
+
+  patch_size: [256, 256]
+  num_epochs: 6000
+  batch_size: 1
+  mini_batch_size: 2
+  num_workers: 0
+  pin_memory: True
+  drop_last: False
+
+  model: 'TransUNet'
+  focal_loss_alpha: 0.9
+  gaussuan_focal_loss_alpha: 2.0
+
+  subset_indices: [ 0, 85, 32, 5, 125, 200 ]
+  #  subset_indices: [0]
+
+  plot_checkpoint: 99
+
 
 
 

@@ -71,14 +71,14 @@ hourglass:
 
 trans_unet:
   config: 'R50-ViT-B_16'
-  img_size: [128, 128]
+  img_size: [256, 256]
   num_classes: 1
   zero_head: False
   vis: False
   use_attn_decoder: True
 
 vit:
-  img_size: [128, 128]
+  img_size: [256, 256]
   patch_size: 16
   in_channels: 3
   embed_dim: 768
