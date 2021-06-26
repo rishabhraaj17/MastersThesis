@@ -85,12 +85,12 @@ vit:
   depth: 12
   num_heads: 12
   mlp_ratio: 4
-  out_indices: -1
+  out_indices: 11
   qkv_bias: True
   qk_scale: null
-  drop_rate: 0.
-  attn_drop_rate: 0.
-  drop_path_rate: 0.
+  drop_rate: 0
+  attn_drop_rate: 0
+  drop_path_rate: 0
   norm_cfg:
     type: 'LN'
     eps: 1e-6
@@ -99,10 +99,18 @@ vit:
     type: 'GELU'
   norm_eval: False
   final_norm: False
-  out_reshape: 'NCHW'
+  out_shape: 'NCHW'
   interpolate_mode: 'bicubic'
-  with_cls_token: True
+  with_cls_token: False
   with_cp: False
+
+  seg_head:
+    in_channels: 3
+    out_channels: 1
+    kernel_size: 1
+    padding: 0
+    stride: 1
+    use_bn: True
 
 trajectory_baseline:
   generator:
