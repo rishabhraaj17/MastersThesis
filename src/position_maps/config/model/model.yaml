@@ -69,6 +69,41 @@ hourglass:
 
   use_deformable_conv: False
 
+trans_unet:
+  config: 'R50-ViT-B_16'
+  img_size: [128, 128]
+  num_classes: 1
+  zero_head: False
+  vis: False
+  use_attn_decoder: True
+
+vit:
+  img_size: [128, 128]
+  patch_size: 16
+  in_channels: 3
+  embed_dim: 768
+  depth: 12
+  num_heads: 12
+  mlp_ratio: 4
+  out_indices: -1
+  qkv_bias: True
+  qk_scale: null
+  drop_rate: 0.
+  attn_drop_rate: 0.
+  drop_path_rate: 0.
+  norm_cfg:
+    type: 'LN'
+    eps: 1e-6
+    requires_grad: True
+  act_cfg:
+    type: 'GELU'
+  norm_eval: False
+  final_norm: False
+  out_reshape: 'NCHW'
+  interpolate_mode: 'bicubic'
+  with_cls_token: True
+  with_cp: False
+
 trajectory_baseline:
   generator:
     embedding_dim_scalars: 8

@@ -2,17 +2,21 @@ import copy
 import math
 from collections import OrderedDict
 from os.path import join as pjoin
+from typing import Tuple, Optional, Callable
 
 import ml_collections
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from omegaconf import DictConfig
 from scipy import ndimage
 from torch.nn import Dropout, Softmax, Linear, Conv2d, LayerNorm
 from torch.nn.modules.utils import _pair
+from torch.utils.data import Dataset
 
 from log import get_logger
+from src.models_hub.base import Base
 from src.models_hub.unets import Attention_block
 
 logger = get_logger(__name__)
@@ -776,6 +780,28 @@ class VisionTransformer(nn.Module):
                 for bname, block in self.transformer.embeddings.hybrid_model.body.named_children():
                     for uname, unit in block.named_children():
                         unit.load_from(res_weight, n_block=bname, n_unit=uname)
+
+
+class TransUNet(Base):
+    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                 collate_fn: Optional[Callable] = None):
+        super(TransUNet, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
+        )
+        self.net = VisionTransformer(config=CONFIGS[self.config.trans_unet.config],
+                                     img_size=self.config.trans_unet.img_size,
+                                     num_classes=self.config.trans_unet.num_classes,
+                                     zero_head=self.config.trans_unet.zero_head,
+                                     vis=self.config.trans_unet.vis,
+                                     use_attn_decoder=self.config.trans_unet.use_attn_decoder)
+
+    def forward(self, x):
+        return self.net(x)
+
+    def calculate_loss(self, pred, target):
+        return self.loss_function(pred, target)
 
 
 if __name__ == '__main__':

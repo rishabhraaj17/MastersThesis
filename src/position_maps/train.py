@@ -587,9 +587,107 @@ def overfit(cfg):
             logger.info(f"Epoch: {epoch} | Validation Loss: {np.array(val_loss).mean()}")
 
 
+@hydra.main(config_path="config", config_name="config")
+def patch_based_overfit(cfg):
+    logger.info(f'Patch Based Overfit - Setting up DataLoader and Model...')
+
+    train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
+    # train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
+
+    loss_fn = CenterNetFocalLoss()
+
+    if cfg.model_hub.model == 'MSANet':
+        model = MSANet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+                       loss_function=loss_fn, collate_fn=heat_map_collate_fn,
+                       desired_output_shape=target_max_shape)
+    elif cfg.model_hub.model == 'TransUNet':
+        model = None
+    elif cfg.model_hub.model == 'ViT':
+        model = None
+
+    if cfg.overfit.use_pretrained.enabled:
+        checkpoint_path = f'{cfg.overfit.use_pretrained.checkpoint.root}' \
+                          f'{cfg.overfit.use_pretrained.checkpoint.path}' \
+                          f'{cfg.overfit.use_pretrained.checkpoint.version}/checkpoints/'
+        checkpoint_files = os.listdir(checkpoint_path)
+
+        epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
+        epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
+        checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
+
+        checkpoint_file = checkpoint_path + checkpoint_files[-cfg.overfit.use_pretrained.checkpoint.top_k]
+
+        logger.info(f'Loading weights from: {checkpoint_file}')
+        load_dict = torch.load(checkpoint_file, map_location=cfg.device)
+
+        model.load_state_dict(load_dict['state_dict'])
+
+    model.to(cfg.device)
+
+    opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay, amsgrad=cfg.amsgrad)
+
+    train_subset = Subset(dataset=train_dataset, indices=list(cfg.overfit.subset_indices))
+    train_loader = DataLoader(train_subset, batch_size=cfg.overfit.batch_size, shuffle=False,
+                              num_workers=cfg.overfit.num_workers, collate_fn=heat_map_collate_fn,
+                              pin_memory=cfg.overfit.pin_memory, drop_last=cfg.overfit.drop_last)
+    for epoch in range(cfg.overfit.num_epochs):
+        model.train()
+
+        train_loss = []
+        for data in train_loader:
+            opt.zero_grad()
+
+            frames, heat_masks, position_map, distribution_map, class_maps, meta = data
+
+            padder = ImagePadder(frames.shape[-2:])
+            frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
+            frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+
+            out = model(frames)
+
+            loss = model.calculate_loss(out, heat_masks)
+
+            train_loss.append(loss.item())
+
+            loss.backward()
+            opt.step()
+
+        logger.info(f"Epoch: {epoch} | Train Loss: {np.array(train_loss).mean()}")
+
+        if epoch % cfg.overfit.plot_checkpoint == 0:
+            model.eval()
+            val_loss = []
+
+            for data in train_loader:
+                frames, heat_masks, position_map, distribution_map, class_maps, meta = data
+
+                padder = ImagePadder(frames.shape[-2:])
+                frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
+                frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+
+                with torch.no_grad():
+                    out = model(frames)
+
+                loss = torch.tensor([0])  # model.calculate_loss(out, heat_masks)
+
+                val_loss.append(loss.item())
+
+                random_idx = np.random.choice(cfg.overfit.batch_size, 1, replace=False).item()
+
+                pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
+                plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                 heat_masks[random_idx].squeeze().cpu(),
+                                 pred_mask[random_idx].int() * 255,
+                                 additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                 f"| Epoch: {epoch}")
+
+            logger.info(f"Epoch: {epoch} | Validation Loss: {np.array(val_loss).mean()}")
+
+
 if __name__ == '__main__':
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
-        overfit()
+        patch_based_overfit()
+        # overfit()
         # train()

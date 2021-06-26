@@ -37,6 +37,9 @@ class Base(LightningModule):
     def _one_step(self, batch):
         return NotImplementedError
 
+    def calculate_loss(self, pred, target):
+        return NotImplementedError
+
     def training_step(self, batch, batch_idx):
         loss = self._one_step(batch)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
