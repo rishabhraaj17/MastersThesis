@@ -1,10 +1,11 @@
 import matplotlib.pyplot as plt
 import torch
 import torchvision.io
+from mmseg.models import VisionTransformer
 from torch import nn
 from torch.nn.functional import interpolate
 
-from src.models_hub.trans_unet import get_r50_b16_config, VisionTransformer
+from src.models_hub.trans_unet import get_r50_b16_config, VisionTransformer as ViT
 from src.position_maps.utils import generate_position_map
 
 
@@ -145,7 +146,10 @@ if __name__ == '__main__':
 
     conf = get_r50_b16_config()
     conf.n_classes = 1
-    m = VisionTransformer(conf, img_size=patch_size, num_classes=1)
+    # # from mm-seg -> reshape to input shape -> put Seg head to get desired classes
+    # m = VisionTransformer(img_size=patch_size)
+
+    m = ViT(conf, img_size=patch_size, num_classes=1, use_attn_decoder=True)
 
     inp = (patches.contiguous().view(-1, *patches.shape[2:]).float() / 255.0)
     o = m(inp)

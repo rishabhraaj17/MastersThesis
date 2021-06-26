@@ -13,6 +13,7 @@ from torch.nn import Dropout, Softmax, Linear, Conv2d, LayerNorm
 from torch.nn.modules.utils import _pair
 
 from log import get_logger
+from src.models_hub.unets import Attention_block
 
 logger = get_logger(__name__)
 
@@ -610,6 +611,43 @@ class DecoderBlock(nn.Module):
         return x
 
 
+class DecoderAttnBlock(nn.Module):
+    def __init__(
+            self,
+            in_channels,
+            out_channels,
+            skip_channels=0,
+            use_batchnorm=True,
+    ):
+        super().__init__()
+        self.conv1 = Conv2dReLU(
+            in_channels + skip_channels,
+            out_channels,
+            kernel_size=3,
+            padding=1,
+            use_batchnorm=use_batchnorm,
+        )
+        self.conv2 = Conv2dReLU(
+            out_channels,
+            out_channels,
+            kernel_size=3,
+            padding=1,
+            use_batchnorm=use_batchnorm,
+        )
+        if skip_channels != 0:
+            self.attn = Attention_block(F_g=in_channels, F_l=skip_channels, F_int=skip_channels)
+        self.up = nn.UpsamplingBilinear2d(scale_factor=2)
+
+    def forward(self, x, skip=None):
+        x = self.up(x)
+        if skip is not None:
+            skip = self.attn(x, skip)
+            x = torch.cat([x, skip], dim=1)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        return x
+
+
 class SegmentationHead(nn.Sequential):
 
     def __init__(self, in_channels, out_channels, kernel_size=3, upsampling=1):
@@ -619,9 +657,11 @@ class SegmentationHead(nn.Sequential):
 
 
 class DecoderCup(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, use_attn_decoder=False):
         super().__init__()
         self.config = config
+        self.use_attn_decoder = use_attn_decoder
+
         head_channels = 512
         self.conv_more = Conv2dReLU(
             config.hidden_size,
@@ -642,8 +682,10 @@ class DecoderCup(nn.Module):
         else:
             skip_channels = [0, 0, 0, 0]
 
+        decoder_block = DecoderAttnBlock if use_attn_decoder else DecoderBlock
         blocks = [
-            DecoderBlock(in_ch, out_ch, sk_ch) for in_ch, out_ch, sk_ch in zip(in_channels, out_channels, skip_channels)
+            decoder_block(in_ch, out_ch, sk_ch) for in_ch, out_ch, sk_ch
+            in zip(in_channels, out_channels, skip_channels)
         ]
         self.blocks = nn.ModuleList(blocks)
 
@@ -663,13 +705,13 @@ class DecoderCup(nn.Module):
 
 
 class VisionTransformer(nn.Module):
-    def __init__(self, config, img_size=224, num_classes=21843, zero_head=False, vis=False):
+    def __init__(self, config, img_size=224, num_classes=21843, zero_head=False, vis=False, use_attn_decoder=False):
         super(VisionTransformer, self).__init__()
         self.num_classes = num_classes
         self.zero_head = zero_head
         self.classifier = config.classifier
         self.transformer = Transformer(config, img_size, vis)
-        self.decoder = DecoderCup(config)
+        self.decoder = DecoderCup(config, use_attn_decoder=use_attn_decoder)
         self.segmentation_head = SegmentationHead(
             in_channels=config['decoder_channels'][-1],
             out_channels=config['n_classes'],

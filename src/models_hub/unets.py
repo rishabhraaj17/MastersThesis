@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn import init
 
+
 # https://github.com/LeeJunHyun/Image_Segmentation/blob/master/network.py
 
 
@@ -422,3 +423,10 @@ class R2AttU_Net(nn.Module):
         d1 = self.Conv_1x1(d2)
 
         return d1
+
+
+if __name__ == '__main__':
+    inp = torch.randn((2, 3, 480, 480))
+    attn = AttU_Net()
+    o = attn(inp)
+    print()
