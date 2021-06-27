@@ -11,6 +11,7 @@ from kornia.losses import FocalLoss, BinaryFocalLossWithLogits
 from mmdet.models import GaussianFocalLoss
 from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.plugins import DDPPlugin
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 
@@ -278,6 +279,11 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
         mode=cfg.mode,
         verbose=cfg.verbose
     )
+
+    plugins = None
+    if cfg.trainer.accelerator in ['ddp', 'ddp_cpu']:
+        plugins = DDPPlugin(find_unused_parameters=cfg.trainer.find_unused_parameters)
+
     if cfg.warm_restart.enable:
         checkpoint_root_path = f'{cfg.warm_restart.checkpoint.root}{cfg.warm_restart.checkpoint.path}' \
                                f'{cfg.warm_restart.checkpoint.version}/checkpoints/'
@@ -312,7 +318,8 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
         trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                           fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
                           accelerator=cfg.trainer.accelerator, deterministic=cfg.trainer.deterministic,
-                          replace_sampler_ddp=cfg.trainer.replace_sampler_ddp)
+                          replace_sampler_ddp=cfg.trainer.replace_sampler_ddp,
+                          num_nodes=cfg.trainer.num_nodes, plugins=plugins)
     else:
         if cfg.resume_mode:
             checkpoint_path = f'{cfg.resume.checkpoint.path}{cfg.resume.checkpoint.version}/checkpoints/'
@@ -328,18 +335,25 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                               fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
                               resume_from_checkpoint=checkpoint_file, accelerator=cfg.trainer.accelerator,
                               deterministic=cfg.trainer.deterministic,
-                              replace_sampler_ddp=cfg.trainer.replace_sampler_ddp)
+                              replace_sampler_ddp=cfg.trainer.replace_sampler_ddp,
+                              num_nodes=cfg.trainer.num_nodes, plugins=plugins)
         else:
             trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                               fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
                               accelerator=cfg.trainer.accelerator, deterministic=cfg.trainer.deterministic,
-                              replace_sampler_ddp=cfg.trainer.replace_sampler_ddp)
+                              replace_sampler_ddp=cfg.trainer.replace_sampler_ddp,
+                              num_nodes=cfg.trainer.num_nodes, plugins=plugins)
     return model, trainer
 
 
 @hydra.main(config_path="config", config_name="config")
 def train(cfg):
     logger.info(f'Setting up DataLoader and Model...')
+
+    # runtime config adjustments
+    if cfg.trainer.accelerator in ['ddp', 'ddp_cpu']:
+        cfg.num_workers = 0
+        cfg.dataset_workers = 0
 
     # train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
     train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
@@ -774,6 +788,6 @@ if __name__ == '__main__':
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
-        patch_based_overfit()
+        # patch_based_overfit()
         # overfit()
-        # train()
+        train()

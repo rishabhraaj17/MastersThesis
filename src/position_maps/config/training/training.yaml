@@ -1,11 +1,11 @@
 # @package _global_
 
-device: 'cuda:0'
+device: 'cuda:0'  # 'cuda:0'
 data_augmentation: True
 
 # optimizer
 # Adam
-lr: 5e-3
+lr: 1e-4
 weight_decay: 0
 amsgrad: False
 
@@ -24,7 +24,7 @@ mode: 'min'
 # loaders
 batch_size: 1
 shuffle: False  # keep it always False
-num_workers: 0
+num_workers: 12
 pin_memory: True
 drop_last: False
 val_batch_size_factor: 2
@@ -36,23 +36,25 @@ trainer:
   fast_dev_run: False
   num_checkpoints_to_save: 4
   deterministic: False
-  accelerator: 'ddp_cpu' # null  # 'ddp', 'ddp_cpu'
+  accelerator: 'ddp' #'ddp_cpu' # null  # 'ddp', 'ddp_cpu'
   replace_sampler_ddp: False
+  num_nodes: 1
+  find_unused_parameters: True
 
 
 # dataset
 root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
 video_class: DEATH_CIRCLE
 video_meta_class: DEATH_CIRCLE
-desired_pixel_to_meter_ratio: 0.25
-desired_pixel_to_meter_ratio_rgb: 0.12 # 0.05
+desired_pixel_to_meter_ratio: 0.35 # 0.35
+desired_pixel_to_meter_ratio_rgb: 0.25 # 0.25 # 0.05
 downscale_only_target_maps: False
 using_replay_compose: True
 manual_annotation_processing: False
 
 train:
   num_videos: -1
-  video_number_to_use: 4
+  video_number_to_use: 3
   # all videos
   #  video_classes_to_use: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
   #  video_numbers_to_use: [ [ 1, 2, 3, 4, 5 ], [ 0, 1, 2 ], [ 0, 1, 2, 4 ], [ 0, 1, 2, 3, 5, 6, 8 ],
@@ -64,10 +66,8 @@ train:
   #                          [ 0, 1, 4, 5, 8 ], [ 1, 2, 3 ],
   #                          [ 0, 1, 2, 7, 8, 9, 10, 11 ] ] # nexus 3, 4 are bad
   # Portraits -> H > W
-  video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS ]
-  video_numbers_to_use: [ [ 0, 1, 2, 4 ], [ 0, 1, 2, 3, 5, 6, 8 ],
-                          [ 0, 1, 4, 5, 8 ], [ 1, 2, 3 ],
-                          [ 0, 1, 2, 7, 8, 9, 10, 11 ] ] # nexus 3, 4 are bad
+  video_classes_to_use: [ DEATH_CIRCLE ]
+  video_numbers_to_use: [ [ 3 ]] # nexus 3, 4 are bad
   multiple_videos: False
 
 val:
@@ -80,11 +80,11 @@ val:
   # Portraits -> H > W
   #  video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS ]
   #  video_numbers_to_use: [ [ 3 ], [ 4 ], [ 7 ], [ 0 ], [ 6 ] ]
-  video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS ]
-  video_numbers_to_use: [ [ 3 ], [ 4 ], [ 7 ], [ 0 ], [ 6 ] ]
+  video_classes_to_use: [ DEATH_CIRCLE ]
+  video_numbers_to_use: [ [ 2 ] ]
   multiple_videos: False
 
-dataset_workers: 8
+dataset_workers: 12
 # keep one of them null at one time
 scale_factor: null # 0.25
 desired_size: [ 490, 360 ]
@@ -96,7 +96,7 @@ plot_samples: False
 # gaussian
 heatmap_shape: null
 return_combined_heatmaps: True
-sigma: 0.7
+sigma: 1.0 # 0.7
 
 seg_map_objectness_threshold: 0.5
 heatmap_region_limit_threshold: 0.0
