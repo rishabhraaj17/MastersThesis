@@ -106,7 +106,7 @@ class BaseDDP(Base):
             shuffle=False, num_workers=self.config.num_workers,
             collate_fn=self.collate_fn, pin_memory=self.config.pin_memory,
             drop_last=self.config.drop_last,
-            sampler=torch.utils.data.distributed.DistributedSampler(self.train_dataset))
+            sampler=torch.utils.data.distributed.DistributedSampler(self.train_dataset, shuffle=False))
 
     def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
         return DataLoader(
@@ -114,4 +114,4 @@ class BaseDDP(Base):
             shuffle=False, num_workers=self.config.num_workers,
             collate_fn=self.collate_fn, pin_memory=self.config.pin_memory,
             drop_last=self.config.drop_last,
-            sampler=torch.utils.data.distributed.DistributedSampler(self.val_dataset))
+            sampler=torch.utils.data.distributed.DistributedSampler(self.val_dataset, shuffle=False))

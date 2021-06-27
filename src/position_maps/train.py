@@ -676,8 +676,8 @@ def patch_based_overfit(cfg):
             # quick_viz(heat_masks_whole, stitched_masks)
 
             # reshape for input and loss
-            frames = (frames.contiguous().view(-1, *frames.shape[2:]).float() / 255.0)
-            heat_masks = (heat_masks.contiguous().view(-1, *heat_masks.shape[2:]).float() / 255.0)
+            frames = frames.contiguous().view(-1, *frames.shape[2:]).float()
+            heat_masks = heat_masks.contiguous().view(-1, *heat_masks.shape[2:]).float()
 
             frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
@@ -735,8 +735,8 @@ def patch_based_overfit(cfg):
                 # quick_viz(heat_masks_whole, stitched_masks)
 
                 # reshape for input and loss
-                frames = (frames.contiguous().view(-1, *frames.shape[2:]).float() / 255.0)
-                heat_masks = (heat_masks.contiguous().view(-1, *heat_masks.shape[2:]).float() / 255.0)
+                frames = frames.contiguous().view(-1, *frames.shape[2:]).float()
+                heat_masks = heat_masks.contiguous().view(-1, *heat_masks.shape[2:]).float()
 
                 frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
