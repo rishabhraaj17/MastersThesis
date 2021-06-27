@@ -7,8 +7,8 @@ from omegaconf import DictConfig
 from torch import nn
 from torch.utils.data import Dataset
 
-from src.models_hub.base import Base
-from src.models_hub.trans_unet import Conv2dReLU
+from src_lib.models_hub.base import Base
+from src_lib.models_hub.trans_unet import Conv2dReLU
 
 
 class VITSegmentationHead(nn.Module):
@@ -80,7 +80,7 @@ class VisionTransformerSegmentation(Base):
         return torch.stack([self.loss_function(p, target) for p in pred]).sum()
 
 
-@hydra.main(config_path="../position_maps/config", config_name="config")
+@hydra.main(config_path="../../src/position_maps/config", config_name="config")
 def verify_vit(cfg):
     inp = torch.randn((2, 3, 128, 128))
     m = VisionTransformerSegmentation.from_config(cfg)

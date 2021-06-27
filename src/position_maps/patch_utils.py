@@ -5,7 +5,7 @@ from mmseg.models import VisionTransformer
 from torch import nn
 from torch.nn.functional import interpolate
 
-from src.models_hub.trans_unet import get_r50_b16_config, VisionTransformer as ViT
+from src_lib.models_hub.trans_unet import get_r50_b16_config, VisionTransformer as ViT
 from src.position_maps.utils import generate_position_map
 
 

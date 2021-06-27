@@ -7,9 +7,9 @@ from torch import nn
 from torch.nn import MSELoss
 from torch.utils.data import Dataset
 
-from src.models_hub.attention.multi_scale_attention import PAM_CAM_Layer, SemanticModule, MultiConv
-from src.models_hub.base import Base
-from src.models_hub.resnext import ResNeXt101
+from src_lib.models_hub.attention.multi_scale_attention import PAM_CAM_Layer, SemanticModule, MultiConv
+from src_lib.models_hub.base import Base
+from src_lib.models_hub.resnext import ResNeXt101
 from src.position_maps.losses import CenterNetFocalLoss
 
 

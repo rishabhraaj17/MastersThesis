@@ -16,8 +16,8 @@ from torch.nn.modules.utils import _pair
 from torch.utils.data import Dataset
 
 from log import get_logger
-from src.models_hub.base import Base
-from src.models_hub.unets import Attention_block
+from src_lib.models_hub.base import Base
+from src_lib.models_hub.unets import Attention_block
 
 logger = get_logger(__name__)
 
