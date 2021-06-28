@@ -101,7 +101,7 @@ vit:
   final_norm: False
   out_shape: 'NCHW'
   interpolate_mode: 'bicubic'
-  with_cls_token: False
+  with_cls_token: True
   with_cp: False
 
   seg_head:

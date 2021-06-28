@@ -152,7 +152,7 @@ def plot_image_with_features(im, feat1=None, feat2=None, boxes=None, txt='', mar
 
 
 def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=False, save_dir=None, img_name='',
-                     tight_layout=True):
+                     tight_layout=True, do_nothing=False):
     fig, axs = plt.subplots(1, 3, sharex='none', sharey='none', figsize=(16, 8))
     img_axis, mask_axis, pred_mask_axis = axs
     if img is not None:
@@ -180,6 +180,10 @@ def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=Fals
     if tight_layout:
         plt.tight_layout()
 
+    if do_nothing:
+        plt.close()
+        return fig
+
     if save_dir is None:
         plt.show()
     else:
@@ -190,7 +194,8 @@ def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=Fals
 
 def plot_predictions_with_overlay(img, mask, pred_mask, overlay_image, supervised_boxes=None,
                                   unsupervised_rgb_boxes=None, unsupervised_boxes=None,
-                                  additional_text='', all_heatmaps=False, save_dir=None, img_name=''):
+                                  additional_text='', all_heatmaps=False, save_dir=None, img_name='',
+                                  do_nothing=False):
     fig, axs = plt.subplots(2, 2, sharex='none', sharey='none', figsize=(16, 16))
     img_axis, mask_axis, overlay_axis, pred_mask_axis = axs[0, 0], axs[0, 1], axs[1, 0], axs[1, 1]
     if img is not None:
@@ -243,6 +248,10 @@ def plot_predictions_with_overlay(img, mask, pred_mask, overlay_image, supervise
 
     legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
     fig.legend(handles=legend_patches, loc=2)
+
+    if do_nothing:
+        plt.close()
+        return fig
 
     if save_dir is None:
         plt.show()
@@ -580,6 +589,21 @@ def overlay_images(transformer, background, overlay):
 
     new_img = Image.blend(background, overlay, 0.5)
     return np.array(new_img)
+
+
+def get_ensemble(state_dictionaries):
+    base_dict = state_dictionaries[0]
+    out_dict = copy.deepcopy(state_dictionaries[0])
+
+    num_state_dicts = float(len(state_dictionaries))
+
+    # Average all parameters
+    for key in base_dict:
+        temp = 0
+        for state_dict in state_dictionaries:
+            temp += state_dict[key]
+        out_dict[key] = temp / num_state_dicts
+    return out_dict
 
 
 if __name__ == '__main__':

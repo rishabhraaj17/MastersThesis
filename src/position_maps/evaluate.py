@@ -28,9 +28,11 @@ from average_image.utils import SDDMeta
 from dataset import SDDFrameAndAnnotationDataset
 from interact import extract_agents_locations, correct_locations, get_position_correction_transform
 from log import get_logger
+from losses import CenterNetFocalLoss
+from patch_utils import quick_viz
 from train import setup_multiple_datasets_core, setup_single_transform, setup_single_common_transform
 from utils import heat_map_collate_fn, plot_predictions, get_blob_count, overlay_images, plot_predictions_with_overlay, \
-    get_scaled_shapes_with_pad_values, plot_image_with_features, ImagePadder
+    get_scaled_shapes_with_pad_values, plot_image_with_features, ImagePadder, get_ensemble
 
 seed_everything(42)
 logger = get_logger(__name__)
@@ -284,7 +286,8 @@ def setup_eval(cfg):
                                  'PositionMapStackedHourGlass']:
         loss_fn = BinaryFocalLossWithLogits(alpha=cfg.eval.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
     elif network_type.__name__ == 'HourGlassPositionMapNetwork':
-        loss_fn = GaussianFocalLoss(alpha=cfg.eval.gaussuan_focal_loss_alpha, reduction='mean')
+        # loss_fn = GaussianFocalLoss(alpha=cfg.eval.gaussuan_focal_loss_alpha, reduction='mean')
+        loss_fn = CenterNetFocalLoss()
     else:
         loss_fn = MSELoss()
 
@@ -294,7 +297,7 @@ def setup_eval(cfg):
                                          desired_output_shape=target_max_shape)
     else:
         model = network_type(config=cfg, train_dataset=None, val_dataset=None,
-                             loss_function=loss_fn, collate_fn=heat_map_collate_fn, 
+                             loss_function=loss_fn, collate_fn=heat_map_collate_fn,
                              desired_output_shape=target_max_shape)
 
     logger.info(f'Setting up Model')
@@ -318,9 +321,15 @@ def setup_eval(cfg):
             loss_function=loss_fn, collate_fn=heat_map_collate_fn, desired_output_shape=target_max_shape)
     else:
         logger.info(f'Loading weights from: {checkpoint_file}')
-        load_dict = torch.load(checkpoint_file, map_location=cfg.eval.device)
+        if cfg.eval.use_ensemble:
+            ensemble_files = [checkpoint_path + c for c in checkpoint_files]
+            state_dict = [torch.load(e, map_location=cfg.eval.device)['state_dict'] for e in ensemble_files]
+            state_dict = get_ensemble(state_dict)
+            model.load_state_dict(state_dict)
+        else:
+            load_dict = torch.load(checkpoint_file, map_location=cfg.eval.device)
+            model.load_state_dict(load_dict['state_dict'])
 
-        model.load_state_dict(load_dict['state_dict'])
         model.to(cfg.eval.device)
     model.eval()
 
@@ -446,6 +455,7 @@ def evaluate(cfg):
                 if network_type.__name__ == 'PositionMapUNetHeatmapSegmentation':
                     pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
                 elif network_type.__name__ == 'HourGlassPositionMapNetwork':
+                    temp_mask = [torch.sigmoid(o).squeeze(dim=1).cpu() for o in out]
                     pred_mask = [torch.round(torch.sigmoid(o)).squeeze(dim=1).cpu() for o in out]
                     pred_mask = pred_mask[cfg.eval.pick_heatmap_from_stack_number]
                 else:
@@ -476,14 +486,16 @@ def evaluate(cfg):
                         img_name=save_image_name,
                         supervised_boxes=supervised_boxes,
                         unsupervised_rgb_boxes=unsupervised_rgb_boxes,
-                        unsupervised_boxes=unsupervised_boxes)
+                        unsupervised_boxes=unsupervised_boxes,
+                        do_nothing=cfg.eval.plots_do_nothing)
                 else:
                     plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                      heat_masks[random_idx].squeeze().cpu(),
                                      pred_mask[random_idx].int() * 255,
                                      additional_text=additional_text,
                                      save_dir=save_dir + 'simple/',
-                                     img_name=save_image_name)
+                                     img_name=save_image_name,
+                                     do_nothing=cfg.eval.plots_do_nothing)
             elif network_type.__name__ == 'PositionMapStackedHourGlass':
                 pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
                 plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),

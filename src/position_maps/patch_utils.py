@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import torch
 import torchvision.io
 from mmseg.models import VisionTransformer
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from torch import nn
 from torch.nn.functional import interpolate
 
@@ -93,11 +94,19 @@ def quick_viz(im1, im2=None, img_idx=0):
         fig, ax = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(14, 12))
         image_axis, stitched_image_axis = ax
 
-        stitched_image_axis.imshow(im2)
+        s_im = stitched_image_axis.imshow(im2)
         stitched_image_axis.set_title('Stitched')
 
-    image_axis.imshow(im1)
+        divider = make_axes_locatable(stitched_image_axis)
+        cax = divider.append_axes('right', size='5%', pad=0.10)
+        fig.colorbar(s_im, cax=cax, orientation='vertical')
+
+    i_im = image_axis.imshow(im1)
     image_axis.set_title('Original')
+
+    divider = make_axes_locatable(image_axis)
+    cax = divider.append_axes('right', size='5%', pad=0.10)
+    fig.colorbar(i_im, cax=cax, orientation='vertical')
 
     plt.tight_layout()
     plt.show()

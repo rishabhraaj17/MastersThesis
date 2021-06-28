@@ -630,7 +630,7 @@ def patch_based_overfit(cfg):
         model = model_zoo.HourGlassPositionMapNetwork.from_config(
             config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
             loss_function=loss_fn, collate_fn=heat_map_collate_fn,
-            desired_output_shape=target_max_shape)
+            desired_output_shape=None)
     else:
         raise NotImplementedError
 
@@ -708,7 +708,17 @@ def patch_based_overfit(cfg):
             for f_idx in range(0, frames.shape[0] - cfg.patch_mode.mini_batch_size + 1, cfg.patch_mode.mini_batch_size):
                 out = model(frames[f_idx: f_idx + cfg.patch_mode.mini_batch_size])
 
-                loss = model.calculate_loss(out.sigmoid(), heat_masks[f_idx: f_idx + cfg.patch_mode.mini_batch_size])
+                if cfg.patch_mode.model == 'HourGlass':
+                    out = model_zoo.post_process_multi_apply(out)
+
+                if isinstance(out, (tuple, list)):
+                    out = out
+                else:
+                    out = out.sigmoid()
+                loss = model.calculate_loss(out, heat_masks[f_idx: f_idx + cfg.patch_mode.mini_batch_size])
+
+                if cfg.patch_mode.model == 'HourGlass':
+                    loss = loss.sum()
 
                 train_loss.append(loss.item())
 
@@ -767,24 +777,68 @@ def patch_based_overfit(cfg):
                     for f_idx in range(
                             0, frames.shape[0] - cfg.patch_mode.mini_batch_size + 1, cfg.patch_mode.mini_batch_size):
                         out = model(frames[f_idx: f_idx + cfg.patch_mode.mini_batch_size])
-                        outs.append(out.view(cfg.patch_mode.mini_batch_size, -1, 1, *frames.shape[2:]).cpu())
 
-                        loss = model.calculate_loss(out.sigmoid(),
-                                                    heat_masks[f_idx: f_idx + cfg.patch_mode.mini_batch_size])
+                        if cfg.patch_mode.model == 'HourGlass':
+                            out = model_zoo.post_process_multi_apply(out)
+                            outs.append(
+                                [o.view(cfg.patch_mode.mini_batch_size, -1, 1, *frames.shape[2:]).cpu() for o in out])
+                        else:
+                            outs.append(out.view(cfg.patch_mode.mini_batch_size, -1, 1, *frames.shape[2:]).cpu())
+
+                        if isinstance(out, (tuple, list)):
+                            out = out
+                        else:
+                            out = out.sigmoid()
+                        loss = model.calculate_loss(out, heat_masks[f_idx: f_idx + cfg.patch_mode.mini_batch_size])
+
+                        if cfg.patch_mode.model == 'HourGlass':
+                            loss = loss.sum()
 
                         val_loss.append(loss.item())
 
                 # val_loss.append(loss.item())
 
-                pred_mask = torch.round(torch.sigmoid(torch.cat(outs))).cpu().transpose(0, 1)
-                stitched_pred_masks = reconstruct_from_patches_2d(
-                    pred_mask, heat_masks_whole.shape[-2:], batch_first=True).squeeze(dim=1)
+                if cfg.patch_mode.model == 'HourGlass':
+                    out1, out2 = [], []
+                    for o in outs:
+                        out1.append(o[0])
+                        out2.append(o[1])
 
-                plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                 heat_masks[random_idx].squeeze().cpu(),
-                                 stitched_pred_masks[random_idx].int() * 255,
-                                 additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
-                                                 f"| Epoch: {epoch}")
+                    pred_mask1 = torch.sigmoid(torch.cat(out1)).cpu().transpose(0, 1)
+                    stitched_pred_masks1 = reconstruct_from_patches_2d(
+                        pred_mask1, heat_masks_whole.shape[-2:], batch_first=True).squeeze(dim=1)
+
+                    pred_mask2 = torch.sigmoid(torch.cat(out2)).cpu().transpose(0, 1)
+                    stitched_pred_masks2 = reconstruct_from_patches_2d(
+                        pred_mask2, heat_masks_whole.shape[-2:], batch_first=True).squeeze(dim=1)
+
+                    quick_viz(stitched_pred_masks1, stitched_pred_masks2)
+
+                    pred_mask1 = torch.round(torch.sigmoid(torch.cat(out1))).cpu().transpose(0, 1)
+                    stitched_pred_masks1 = reconstruct_from_patches_2d(
+                        pred_mask1, heat_masks_whole.shape[-2:], batch_first=True).squeeze(dim=1)
+
+                    pred_mask2 = torch.round(torch.sigmoid(torch.cat(out2))).cpu().transpose(0, 1)
+                    stitched_pred_masks2 = reconstruct_from_patches_2d(
+                        pred_mask2, heat_masks_whole.shape[-2:], batch_first=True).squeeze(dim=1)
+
+                    quick_viz(stitched_pred_masks1, stitched_pred_masks2)
+
+                    plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                     heat_masks[random_idx].squeeze().cpu(),
+                                     stitched_pred_masks2[random_idx].int() * 255,
+                                     additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                     f"| Epoch: {epoch}")
+                else:
+                    pred_mask = torch.round(torch.sigmoid(torch.cat(outs))).cpu().transpose(0, 1)
+                    stitched_pred_masks = reconstruct_from_patches_2d(
+                        pred_mask, heat_masks_whole.shape[-2:], batch_first=True).squeeze(dim=1)
+
+                    plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                     heat_masks[random_idx].squeeze().cpu(),
+                                     stitched_pred_masks[random_idx].int() * 255,
+                                     additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                     f"| Epoch: {epoch}")
 
             logger.info(f"Epoch: {epoch} | Validation Loss: {np.array(val_loss).mean()}")
 

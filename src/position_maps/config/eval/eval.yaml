@@ -8,6 +8,7 @@ eval:
 
   device: 'cpu'  # 'cuda:0', 'cpu'
   use_lightning_loader: False
+  use_ensemble: False
 
   data_augmentation: True
   resize_transform_only: True  # set true to plot both supervised and unsupervised boxes
@@ -41,7 +42,7 @@ eval:
   # gaussian
   heatmap_shape: null
   return_combined_heatmaps: True
-  sigma: 0.7
+  sigma: 1.0
 
   seg_map_objectness_threshold: 0.5
   heatmap_region_limit_threshold: 0.0
@@ -58,6 +59,7 @@ eval:
   plot_checkpoint: 20
   plot_save_dir: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/proposed_method/v0/position_maps/'
   plot_with_overlay: True
+  plots_do_nothing: True
 
   evaluate_precision_recall: False
   blob_threshold: 0.2
