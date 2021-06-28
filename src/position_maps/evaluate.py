@@ -370,7 +370,7 @@ def evaluate(cfg):
             loss = loss.mean()
         elif network_type.__name__ == 'HourGlassPositionMapNetwork':
             out = model_zoo.post_process_multi_apply(out)
-            loss = model.calc_loss(out, heat_masks).mean()
+            loss = model.calculate_loss(out, heat_masks).mean()
         else:
             loss = loss_fn(out, heat_masks)
 

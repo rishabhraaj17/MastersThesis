@@ -24,7 +24,7 @@ from losses import CenterNetFocalLoss
 from src_lib.models_hub.msanet import MSANet
 from src_lib.models_hub.trans_unet import TransUNet
 from src_lib.models_hub.vis_trans import VisionTransformerSegmentation
-from src.position_maps.patch_utils import extract_patches_2d, reconstruct_from_patches_2d
+from src.position_maps.patch_utils import extract_patches_2d, reconstruct_from_patches_2d, quick_viz
 from utils import heat_map_collate_fn, plot_predictions, get_scaled_shapes_with_pad_values, ImagePadder
 
 warnings.filterwarnings("ignore")
@@ -626,6 +626,11 @@ def patch_based_overfit(cfg):
         model = VisionTransformerSegmentation(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
                                               loss_function=loss_fn, collate_fn=heat_map_collate_fn,
                                               desired_output_shape=target_max_shape)
+    elif cfg.patch_mode.model == 'HourGlass':
+        model = model_zoo.HourGlassPositionMapNetwork.from_config(
+            config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+            loss_function=loss_fn, collate_fn=heat_map_collate_fn,
+            desired_output_shape=target_max_shape)
     else:
         raise NotImplementedError
 
@@ -667,7 +672,7 @@ def patch_based_overfit(cfg):
             frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
 
             # frames_whole, heat_masks_whole = frames.clone(), heat_masks.clone()
-            
+
             frames = extract_patches_2d(frames, cfg.patch_mode.patch_size, batch_first=True)
             heat_masks = extract_patches_2d(heat_masks, cfg.patch_mode.patch_size, batch_first=True)
             # viz
@@ -756,7 +761,7 @@ def patch_based_overfit(cfg):
 
                 # with torch.no_grad():
                 #     out = model(frames)
-                
+
                 outs = []
                 with torch.no_grad():
                     for f_idx in range(
@@ -788,6 +793,6 @@ if __name__ == '__main__':
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
-        # patch_based_overfit()
+        patch_based_overfit()
         # overfit()
-        train()
+        # train()

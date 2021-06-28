@@ -683,7 +683,7 @@ class HourGlassPositionMapNetwork(LightningModule):
         else:
             return self.last_conv(x)
 
-    def calc_loss(self, predictions, heatmaps):
+    def calculate_loss(self, predictions, heatmaps):
         if self.loss_function._get_name() in ['GaussianFocalLoss', 'CenterNetFocalLoss']:
             predictions = [p.sigmoid() for p in predictions]
         combined_loss = [self.loss_function(pred, heatmaps) for pred in predictions]
@@ -694,7 +694,7 @@ class HourGlassPositionMapNetwork(LightningModule):
         frames, heat_masks, _, _, _, meta = batch
         out = self(frames)
         out = post_process_multi_apply(out)
-        loss = self.calc_loss(out, heat_masks)
+        loss = self.calculate_loss(out, heat_masks)
         return loss.sum()
 
     def training_step(self, batch, batch_idx):

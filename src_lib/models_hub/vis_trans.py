@@ -11,6 +11,23 @@ from src_lib.models_hub.base import Base
 from src_lib.models_hub.trans_unet import Conv2dReLU
 
 
+class CustomList(list):
+    def __init__(self):
+        super(CustomList, self).__init__()
+
+    def cpu(self):
+        return [s.cpu() for s in self][0]  # for batch-size 1
+
+    def sigmoid(self):
+        return [s.sigmoid() for s in self]
+
+    def view(self, *args):
+        o = CustomList()
+        for s in self:
+            o.append(s.view(*args))
+        return o
+
+
 class VITSegmentationHead(nn.Module):
     def __init__(self, config: DictConfig):
         super(VITSegmentationHead, self).__init__()
@@ -32,6 +49,7 @@ class VITSegmentationHead(nn.Module):
         return self.net(x)
 
 
+# not working!
 class VisionTransformerSegmentation(Base):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
                  desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
@@ -68,7 +86,7 @@ class VisionTransformerSegmentation(Base):
     def forward(self, x):
         backbone_out = self.backbone(x)
 
-        out = []
+        out = CustomList()  # []
         for o in backbone_out:
             o = o.contiguous().view(*x.shape)
             o = self.head(o)
