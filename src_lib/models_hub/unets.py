@@ -5,7 +5,6 @@ import torch.nn as nn
 from omegaconf import DictConfig
 from torch.nn import init
 
-
 # https://github.com/LeeJunHyun/Image_Segmentation/blob/master/network.py
 from torch.utils.data import Dataset
 
@@ -360,6 +359,80 @@ class AttU_Net(nn.Module):
         d1 = self.Conv_1x1(d2)
 
         return d1
+
+
+class UpBlock(nn.Module):
+    def __init__(self, channels, use_cam_pam):
+        super(UpBlock, self).__init__()
+
+        self.channels = channels
+        self.use_cam_pam = use_cam_pam
+
+        self.up = up_conv(ch_in=self.channels, ch_out=self.channels // 2)
+        self.attn = Attention_block(F_g=self.channels // 2, F_l=self.channels // 2, F_int=self.channels // 4,
+                                    use_cam_pam=use_cam_pam)
+        self.up_conv = conv_block(ch_in=self.channels, ch_out=self.channels // 2)
+
+    def forward(self, previous, skip):
+        up = self.up(previous)
+        skip = self.attn(g=up, x=skip)
+        up = torch.cat((skip, up), dim=1)
+        up = self.up_conv(up)
+        return up
+
+
+class AttU_NetV2(nn.Module):
+    def __init__(self, config: DictConfig):
+        super(AttU_NetV2, self).__init__()
+
+        self.config = config
+        in_channel = self.config.attn_unet.in_channels
+        out_channel = self.config.attn_unet.initial_out_channels
+
+        # down path
+        self.down = nn.ModuleDict()
+        for d_idx in range(self.config.attn_unet.num_layers):
+            if d_idx != self.config.attn_unet.num_layers - 1:
+                self.down[f'conv_block_{d_idx}'] = nn.Sequential(
+                    conv_block(ch_in=in_channel, ch_out=out_channel),
+                    nn.MaxPool2d(kernel_size=self.config.attn_unet.max_pool.kernel,
+                                 stride=self.config.attn_unet.max_pool.stride))
+            else:
+                self.down[f'conv_block_{d_idx}'] = nn.Sequential(
+                    conv_block(ch_in=in_channel, ch_out=out_channel))
+
+            in_channel = out_channel
+            out_channel *= 2
+
+        # up path
+        self.up = nn.ModuleDict()
+        for u_idx, use_cam_pam in zip(range(self.config.attn_unet.num_layers), self.config.attn_unet.use_cam_pam):
+            self.up[f'up_block_{u_idx}'] = UpBlock(channels=out_channel, use_cam_pam=use_cam_pam)
+
+            out_channel = out_channel // 2
+
+        self.out_conv = nn.Conv2d(out_channel,
+                                  self.config.attn_unet.out_channels,
+                                  kernel_size=1, stride=1, padding=0)
+
+    def forward(self, x):
+        out_down = []
+        # encoding path
+        for key, value in self.down.items():
+            x = value(x)
+            out_down.append(x)
+
+        # decoding + concat path
+        skip_idx = 2
+        previous = out_down[-1]
+        for key, value in self.up.items():
+            x = value(previous, out_down[-skip_idx])
+            previous = x
+            skip_idx += 1
+
+        x = self.out_conv(x)
+
+        return x
 
 
 class R2AttU_Net(nn.Module):

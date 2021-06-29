@@ -221,6 +221,11 @@ patch_mode:
 
   plot_checkpoint: 99
 
+  patience: 50
+  verbose: True
+  factor: 0.1
+  min_lr: 1e-10
+
 
 
 
