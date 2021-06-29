@@ -392,7 +392,7 @@ class AttU_NetV2(nn.Module):
         # down path
         self.down = nn.ModuleDict()
         for d_idx in range(self.config.attn_unet.num_layers):
-            if d_idx != self.config.attn_unet.num_layers - 1:
+            if d_idx != 0:
                 self.down[f'conv_block_{d_idx}'] = nn.Sequential(
                     conv_block(ch_in=in_channel, ch_out=out_channel),
                     nn.MaxPool2d(kernel_size=self.config.attn_unet.max_pool.kernel,
@@ -405,8 +405,9 @@ class AttU_NetV2(nn.Module):
             out_channel *= 2
 
         # up path
+        out_channel = out_channel // 2
         self.up = nn.ModuleDict()
-        for u_idx, use_cam_pam in zip(range(self.config.attn_unet.num_layers), self.config.attn_unet.use_cam_pam):
+        for u_idx, use_cam_pam in zip(range(self.config.attn_unet.num_layers - 1), self.config.attn_unet.use_cam_pam):
             self.up[f'up_block_{u_idx}'] = UpBlock(channels=out_channel, use_cam_pam=use_cam_pam)
 
             out_channel = out_channel // 2
@@ -539,8 +540,9 @@ class AttentionUNet(Base):
             config=config, train_dataset=train_dataset, val_dataset=val_dataset,
             desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
         )
-        self.net = AttU_Net(img_ch=self.config.attn_unet.in_channels,
-                            output_ch=self.config.attn_unet.out_channels)
+        # self.net = AttU_Net(img_ch=self.config.attn_unet.in_channels,
+        #                     output_ch=self.config.attn_unet.out_channels)
+        self.net = AttU_NetV2(config=self.config)
 
     def forward(self, x):
         return self.net(x)
