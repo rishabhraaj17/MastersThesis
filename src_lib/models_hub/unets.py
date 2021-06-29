@@ -1,9 +1,15 @@
+from typing import Tuple, Optional, Callable
+
 import torch
 import torch.nn as nn
+from omegaconf import DictConfig
 from torch.nn import init
 
 
 # https://github.com/LeeJunHyun/Image_Segmentation/blob/master/network.py
+from torch.utils.data import Dataset
+
+from src_lib.models_hub.base import Base
 
 
 def init_weights(net, init_type='normal', gain=0.02):
@@ -423,6 +429,43 @@ class R2AttU_Net(nn.Module):
         d1 = self.Conv_1x1(d2)
 
         return d1
+
+
+class R2AttentionUNet(Base):
+    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                 collate_fn: Optional[Callable] = None):
+        super(R2AttentionUNet, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
+        )
+        self.net = R2AttU_Net(img_ch=self.config.r2_attn_unet.in_channels,
+                              output_ch=self.config.r2_attn_unet.out_channels,
+                              t=self.config.r2_attn_unet.t)
+
+    def forward(self, x):
+        return self.net(x)
+
+    def calculate_loss(self, pred, target):
+        return self.loss_function(pred, target)
+
+
+class AttentionUNet(Base):
+    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                 collate_fn: Optional[Callable] = None):
+        super(AttentionUNet, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
+        )
+        self.net = AttU_Net(img_ch=self.config.attn_unet.in_channels,
+                            output_ch=self.config.attn_unet.out_channels)
+
+    def forward(self, x):
+        return self.net(x)
+
+    def calculate_loss(self, pred, target):
+        return self.loss_function(pred, target)
 
 
 if __name__ == '__main__':

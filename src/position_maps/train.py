@@ -24,9 +24,11 @@ import models as model_zoo
 from losses import CenterNetFocalLoss
 from src_lib.models_hub.msanet import MSANet
 from src_lib.models_hub.trans_unet import TransUNet
+from src_lib.models_hub.unets import R2AttentionUNet, AttentionUNet
 from src_lib.models_hub.vis_trans import VisionTransformerSegmentation
 from src.position_maps.patch_utils import extract_patches_2d, reconstruct_from_patches_2d, quick_viz
-from utils import heat_map_collate_fn, plot_predictions, get_scaled_shapes_with_pad_values, ImagePadder
+from utils import heat_map_collate_fn, plot_predictions, get_scaled_shapes_with_pad_values, ImagePadder, \
+    TensorDatasetForTwo, plot_predictions_v2
 
 warnings.filterwarnings("ignore")
 
@@ -627,6 +629,14 @@ def patch_based_overfit(cfg):
         model = VisionTransformerSegmentation(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
                                               loss_function=loss_fn, collate_fn=heat_map_collate_fn,
                                               desired_output_shape=target_max_shape)
+    elif cfg.patch_mode.model == 'r2_attn_u_net':
+        model = R2AttentionUNet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+                                loss_function=loss_fn, collate_fn=heat_map_collate_fn,
+                                desired_output_shape=target_max_shape)
+    elif cfg.patch_mode.model == 'attn_u_net':
+        model = AttentionUNet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+                              loss_function=loss_fn, collate_fn=heat_map_collate_fn,
+                              desired_output_shape=target_max_shape)
     elif cfg.patch_mode.model == 'HourGlass':
         model = model_zoo.HourGlassPositionMapNetwork.from_config(
             config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
@@ -718,9 +728,14 @@ def patch_based_overfit(cfg):
             #
             # train_loss.append(loss.item())
 
-            till = frames.shape[0] - cfg.patch_mode.mini_batch_size + 1 \
-                if frames.shape[0] % 2 == 0 or cfg.patch_mode.mini_batch_size == 1 \
-                else frames.shape[0] - cfg.patch_mode.mini_batch_size + 2
+            # till = frames.shape[0] - cfg.patch_mode.mini_batch_size + 1 \
+            #     if frames.shape[0] % 2 == 0 or cfg.patch_mode.mini_batch_size == 1 \
+            #     else frames.shape[0] - cfg.patch_mode.mini_batch_size + 2
+            till = (frames.shape[0] + cfg.patch_mode.mini_batch_size) - \
+                   (frames.shape[0] % cfg.patch_mode.mini_batch_size) - cfg.patch_mode.mini_batch_size \
+                if frames.shape[0] % cfg.patch_mode.mini_batch_size == 0 \
+                else (frames.shape[0] + cfg.patch_mode.mini_batch_size) - \
+                     (frames.shape[0] % cfg.patch_mode.mini_batch_size)
             for f_idx in range(0, till, cfg.patch_mode.mini_batch_size):
                 out = model(frames[f_idx: f_idx + cfg.patch_mode.mini_batch_size])
 
@@ -795,16 +810,20 @@ def patch_based_overfit(cfg):
                 #     out = model(frames)
 
                 outs = []
-                till = frames.shape[0] - cfg.patch_mode.mini_batch_size + 1 \
-                    if frames.shape[0] % 2 == 0 or cfg.patch_mode.mini_batch_size == 1 \
-                    else frames.shape[0] - cfg.patch_mode.mini_batch_size + 2
+                till = (frames.shape[0] + cfg.patch_mode.mini_batch_size) - \
+                       (frames.shape[0] % cfg.patch_mode.mini_batch_size) - cfg.patch_mode.mini_batch_size \
+                    if frames.shape[0] % cfg.patch_mode.mini_batch_size == 0 \
+                    else (frames.shape[0] + cfg.patch_mode.mini_batch_size) - \
+                         (frames.shape[0] % cfg.patch_mode.mini_batch_size)
                 with torch.no_grad():
                     for f_idx in range(
                             0, till, cfg.patch_mode.mini_batch_size):
                         out = model(frames[f_idx: f_idx + cfg.patch_mode.mini_batch_size])
 
-                        view_dim0 = 1 if frames.shape[0] == till and frames.shape[0] % 2 != 0 \
-                            else cfg.patch_mode.mini_batch_size
+                        # view_dim0 = frames.shape[0] % cfg.patch_mode.mini_batch_size \
+                        #     if frames.shape[0] == till and frames.shape[0] % 2 != 0 \
+                        #     else cfg.patch_mode.mini_batch_size
+                        view_dim0 = out.shape[0]
                         if cfg.patch_mode.model == 'HourGlass':
                             out = model_zoo.post_process_multi_apply(out)
                             outs.append(
@@ -861,8 +880,11 @@ def patch_based_overfit(cfg):
                                      additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
                                                      f"| Epoch: {epoch}")
                 else:
-                    pred_mask0 = torch.sigmoid(torch.cat(outs, dim=1)).cpu()
-                    pred_mask = torch.round(torch.sigmoid(torch.cat(outs, dim=1))).cpu()
+                    # pred_mask0 = torch.sigmoid(torch.cat(outs, dim=1)).cpu()
+                    pred_mask0 = torch.sigmoid(torch.cat(outs, dim=0)).cpu().transpose(0, 1)
+
+                    # pred_mask = torch.round(torch.sigmoid(torch.cat(outs, dim=1))).cpu()
+                    pred_mask = torch.round(torch.sigmoid(torch.cat(outs, dim=0))).cpu().transpose(0, 1)
 
                     stitched_pred_masks0 = reconstruct_from_patches_2d(
                         pred_mask0, heat_masks_whole.shape[-2:], batch_first=True).squeeze(dim=1)
@@ -880,10 +902,149 @@ def patch_based_overfit(cfg):
             logger.info(f"Epoch: {epoch} | Validation Loss: {np.array(val_loss).mean()}")
 
 
+@hydra.main(config_path="config", config_name="config")
+def selected_patch_overfit(cfg):
+    if cfg.patch_mode.model == 'MSANet':
+        patches = torch.load('patch_data_small.pt')
+    else:
+        patches = torch.load('patch_data_0.pt')
+    f_patches, m_patches = patches['frames'], patches['masks']
+
+    # selected_patches = [17]  # [24]
+
+    # filter out null tiles
+    selected_patches = [idx for idx, h in enumerate(m_patches) if h.max() > 0]
+
+    f_patches, m_patches = f_patches[selected_patches].to('cpu'), m_patches[selected_patches].to('cpu')
+    dataset = TensorDatasetForTwo(f_patches, m_patches)
+
+    logger.info(f'Mini Patch Based Overfit - Setting up DataLoader and Model...')
+
+    loss_fn = CenterNetFocalLoss()
+
+    if cfg.patch_mode.model == 'MSANet':
+        model = MSANet(config=cfg, train_dataset=None, val_dataset=None,
+                       loss_function=loss_fn, collate_fn=None,
+                       desired_output_shape=None)
+    elif cfg.patch_mode.model == 'TransUNet':
+        model = TransUNet(config=cfg, train_dataset=None, val_dataset=None,
+                          loss_function=loss_fn, collate_fn=None,
+                          desired_output_shape=None)
+    elif cfg.patch_mode.model == 'ViT':
+        model = VisionTransformerSegmentation(config=cfg, train_dataset=None, val_dataset=None,
+                                              loss_function=loss_fn, collate_fn=None,
+                                              desired_output_shape=None)
+    elif cfg.patch_mode.model == 'r2_attn_u_net':
+        model = R2AttentionUNet(config=cfg, train_dataset=None, val_dataset=None,
+                                loss_function=loss_fn, collate_fn=None,
+                                desired_output_shape=None)
+    elif cfg.patch_mode.model == 'attn_u_net':
+        model = AttentionUNet(config=cfg, train_dataset=None, val_dataset=None,
+                              loss_function=loss_fn, collate_fn=None,
+                              desired_output_shape=None)
+    elif cfg.patch_mode.model == 'HourGlass':
+        model = model_zoo.HourGlassPositionMapNetwork.from_config(
+            config=cfg, train_dataset=None, val_dataset=None,
+            loss_function=loss_fn, collate_fn=None,
+            desired_output_shape=None)
+    else:
+        raise NotImplementedError
+
+    model.to(cfg.device)
+
+    opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay, amsgrad=cfg.amsgrad)
+
+    sch = ReduceLROnPlateau(opt,
+                            patience=cfg.patch_mode.patience,
+                            verbose=cfg.patch_mode.verbose,
+                            factor=cfg.patch_mode.factor,
+                            min_lr=cfg.patch_mode.min_lr)
+
+    train_loader = DataLoader(dataset, batch_size=cfg.patch_mode.batch_size, shuffle=False,
+                              num_workers=cfg.patch_mode.num_workers, collate_fn=None,
+                              pin_memory=cfg.patch_mode.pin_memory, drop_last=cfg.patch_mode.drop_last)
+    for epoch in range(cfg.patch_mode.num_epochs):
+        model.train()
+        train_loss = []
+
+        for data in train_loader:
+            opt.zero_grad()
+
+            frames, mask = data
+            frames, mask = frames.to(cfg.device), mask.to(cfg.device)
+
+            out = model(frames)
+
+            if cfg.patch_mode.model == 'HourGlass':
+                out = model_zoo.post_process_multi_apply(out)
+                loss = model.calculate_loss(out, mask).mean()
+            elif cfg.patch_mode.model == 'MSANet':
+                loss = model.calculate_loss(out, mask)
+            else:
+                loss = model.calculate_loss(out.sigmoid(), mask)
+
+            train_loss.append(loss.item())
+
+            loss.backward()
+            opt.step()
+            sch.step(np.array(train_loss).mean())
+
+        logger.info(f"Epoch: {epoch} | Train Loss: {np.array(train_loss).mean()}")
+
+        if epoch % cfg.patch_mode.plot_checkpoint == 0:
+            model.eval()
+            val_loss = []
+
+            for data in train_loader:
+                frames, mask = data
+                frames, mask = frames.to(cfg.device), mask.to(cfg.device)
+
+                with torch.no_grad():
+                    out = model(frames)
+
+                if cfg.patch_mode.model == 'HourGlass':
+                    out = model_zoo.post_process_multi_apply(out)
+                    loss = model.calculate_loss(out, mask).mean()
+                elif cfg.patch_mode.model == 'MSANet':
+                    loss = torch.tensor([0])
+                else:
+                    loss = model.calculate_loss(out.sigmoid(), mask)
+
+                val_loss.append(loss.item())
+
+                random_idx = np.random.choice(cfg.patch_mode.batch_size, 1, replace=False).item()
+
+                if cfg.patch_mode.model == 'HourGlass':
+                    out = [o.cpu().squeeze(1) for o in out]
+                    plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                        mask[random_idx].squeeze().cpu(),
+                                        out[0][random_idx].sigmoid().round(),
+                                        logits_mask=out[0][random_idx].sigmoid(),
+                                        additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                        f"| Epoch: {epoch}")
+                    plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                        mask[random_idx].squeeze().cpu(),
+                                        out[-1][random_idx].sigmoid().round(),
+                                        logits_mask=out[-1][random_idx].sigmoid(),
+                                        additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                        f"| Epoch: {epoch}")
+                else:
+                    out = out.cpu().squeeze(1)
+                    plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                        mask[random_idx].squeeze().cpu(),
+                                        out[random_idx].sigmoid().round(),
+                                        logits_mask=out[random_idx].sigmoid(),
+                                        additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                        f"| Epoch: {epoch}")
+
+            logger.info(f"Epoch: {epoch} | Validation Loss: {np.array(val_loss).mean()}")
+
+
 if __name__ == '__main__':
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
-        patch_based_overfit()
+        selected_patch_overfit()
+        # patch_based_overfit()
         # overfit()
         # train()

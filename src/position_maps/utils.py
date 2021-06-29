@@ -12,6 +12,7 @@ from PIL import Image
 from matplotlib import pyplot as plt, patches, lines
 from scipy.stats import multivariate_normal
 from torch.nn.functional import interpolate, pad
+from torch.utils.data import Dataset
 from torchvision.transforms.functional import to_tensor
 from tqdm import tqdm
 
@@ -175,6 +176,58 @@ def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=Fals
         img_axis.set_title('RGB')
         mask_axis.set_title('Mask')
         pred_mask_axis.set_title('Predicted Mask')
+
+    fig.suptitle(additional_text)
+    if tight_layout:
+        plt.tight_layout()
+
+    if do_nothing:
+        plt.close()
+        return fig
+
+    if save_dir is None:
+        plt.show()
+    else:
+        Path(save_dir).mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_dir + f'{img_name}.png')
+        plt.close()
+
+
+def plot_predictions_v2(img, mask, pred_mask, logits_mask, additional_text='',
+                        all_heatmaps=False, save_dir=None, img_name='',
+                        tight_layout=True, do_nothing=False):
+    fig, axs = plt.subplots(1, 4, sharex='none', sharey='none', figsize=(20, 8))
+    img_axis, mask_axis, pred_mask_axis, logits_axis = axs
+    if img is not None:
+        if all_heatmaps:
+            img_axis.imshow(img, cmap='hot')
+        else:
+            img_axis.imshow(img)
+
+    if mask is not None:
+        mask_axis.imshow(mask, cmap='hot')
+
+    if pred_mask is not None:
+        pred_mask_axis.imshow(pred_mask, cmap='hot')
+
+    if logits_mask is not None:
+        logits_axis.imshow(logits_mask, cmap='hot')
+
+    if all_heatmaps:
+        logits_axis.set_title('Predicted Mask -4')
+        img_axis.set_title('Predicted Mask -3')
+        mask_axis.set_title('Predicted Mask -2')
+        pred_mask_axis.set_title('Predicted Mask -1')
+    else:
+        img_axis.set_title('RGB')
+        mask_axis.set_title('Mask')
+        pred_mask_axis.set_title('Predicted Mask')
+        logits_axis.set_title('Logits Mask')
+
+    img_axis.grid(False)
+    mask_axis.grid(False)
+    pred_mask_axis.grid(False)
+    logits_axis.grid(False)
 
     fig.suptitle(additional_text)
     if tight_layout:
@@ -604,6 +657,20 @@ def get_ensemble(state_dictionaries):
             temp += state_dict[key]
         out_dict[key] = temp / num_state_dicts
     return out_dict
+
+
+class TensorDatasetForTwo(Dataset):
+    def __init__(self, a, b):
+        super(TensorDatasetForTwo, self).__init__()
+        assert a.shape[0] == b.shape[0]
+        self.a = a
+        self.b = b
+
+    def __getitem__(self, index):
+        return self.a[index], self.b[index]
+
+    def __len__(self):
+        return self.a.shape[0]
 
 
 if __name__ == '__main__':
