@@ -13,6 +13,7 @@ from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.plugins import DDPPlugin
 from torch.nn import CrossEntropyLoss, MSELoss
+from torch.nn.functional import interpolate
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 
@@ -402,17 +403,22 @@ def overfit(cfg):
                                  'PositionMapUNetHeatmapSegmentation',
                                  'PositionMapStackedHourGlass',
                                  'HourGlassPositionMapNetwork']:
-        # loss_fn = BinaryFocalLossWithLogits(alpha=cfg.overfit.focal_loss_alpha, reduction='mean')  # CrossEntropyLoss()
+        # loss_fn = BinaryFocalLossWithLogits(alpha=cfg.overfit.focal_loss_alpha, reduction='mean')
         # loss_fn = GaussianFocalLoss(alpha=cfg.overfit.gaussuan_focal_loss_alpha, reduction='mean')
         loss_fn = CenterNetFocalLoss()
     else:
         loss_fn = MSELoss()
 
+    bfl_fn = BinaryFocalLossWithLogits(alpha=0.9, gamma=4)
     if cfg.from_model_hub:
         if cfg.model_hub.model == 'MSANet':
             model = MSANet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
                            loss_function=loss_fn, collate_fn=heat_map_collate_fn,
                            desired_output_shape=target_max_shape)
+        elif cfg.patch_mode.model == 'attn_u_net':
+            model = AttentionUNet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+                                  loss_function=loss_fn, collate_fn=heat_map_collate_fn,
+                                  desired_output_shape=target_max_shape)
     else:
         if network_type.__name__ == 'HourGlassPositionMapNetwork':
             model = network_type.from_config(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
@@ -443,6 +449,11 @@ def overfit(cfg):
     model.to(cfg.device)
 
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay, amsgrad=cfg.amsgrad)
+    sch = ReduceLROnPlateau(opt,
+                            patience=cfg.patch_mode.patience,
+                            verbose=cfg.patch_mode.verbose,
+                            factor=cfg.patch_mode.factor,
+                            min_lr=cfg.patch_mode.min_lr)
 
     train_subset = Subset(dataset=train_dataset, indices=list(cfg.overfit.subset_indices))
     train_loader = DataLoader(train_subset, batch_size=cfg.overfit.batch_size, shuffle=False,
@@ -616,6 +627,7 @@ def patch_based_overfit(cfg):
     # train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
 
     loss_fn = CenterNetFocalLoss()
+    bfl_fn = BinaryFocalLossWithLogits(alpha=0.9, gamma=4)
 
     if cfg.patch_mode.model == 'MSANet':
         model = MSANet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
@@ -746,7 +758,8 @@ def patch_based_overfit(cfg):
                     out = out
                 else:
                     out = out.sigmoid()
-                loss = model.calculate_loss(out, heat_masks[f_idx: f_idx + cfg.patch_mode.mini_batch_size])
+                loss = model.calculate_loss(out, heat_masks[f_idx: f_idx + cfg.patch_mode.mini_batch_size]) + \
+                       bfl_fn(out, heat_masks[f_idx: f_idx + cfg.patch_mode.mini_batch_size]).abs().sum()
 
                 if cfg.patch_mode.model == 'HourGlass':
                     loss = loss.mean()
@@ -839,7 +852,9 @@ def patch_based_overfit(cfg):
                         if cfg.patch_mode.model == 'MSANet':
                             loss = torch.tensor([0])
                         else:
-                            loss = model.calculate_loss(out, heat_masks[f_idx: f_idx + cfg.patch_mode.mini_batch_size])
+                            loss = model.calculate_loss(
+                                out, heat_masks[f_idx: f_idx + cfg.patch_mode.mini_batch_size]) + \
+                                   bfl_fn(out, heat_masks[f_idx: f_idx + cfg.patch_mode.mini_batch_size]).abs().sum()
 
                         if cfg.patch_mode.model == 'HourGlass':
                             loss = loss.mean()
@@ -920,7 +935,9 @@ def selected_patch_overfit(cfg):
 
     logger.info(f'Mini Patch Based Overfit - Setting up DataLoader and Model...')
 
-    loss_fn = CenterNetFocalLoss()
+    # loss_fn = CenterNetFocalLoss()
+    gauss_loss_fn = CenterNetFocalLoss()
+    loss_fn = BinaryFocalLossWithLogits(alpha=0.9, gamma=4)
 
     if cfg.patch_mode.model == 'MSANet':
         model = MSANet(config=cfg, train_dataset=None, val_dataset=None,
@@ -963,6 +980,7 @@ def selected_patch_overfit(cfg):
     train_loader = DataLoader(dataset, batch_size=cfg.patch_mode.batch_size, shuffle=False,
                               num_workers=cfg.patch_mode.num_workers, collate_fn=None,
                               pin_memory=cfg.patch_mode.pin_memory, drop_last=cfg.patch_mode.drop_last)
+    interpolate_size = (128, 128)  # for cam and pam
     for epoch in range(cfg.patch_mode.num_epochs):
         model.train()
         train_loss = []
@@ -971,6 +989,10 @@ def selected_patch_overfit(cfg):
             opt.zero_grad()
 
             frames, mask = data
+
+            frames = interpolate(frames, size=interpolate_size)
+            mask = interpolate(mask, size=interpolate_size)
+
             frames, mask = frames.to(cfg.device), mask.to(cfg.device)
 
             out = model(frames)
@@ -981,13 +1003,14 @@ def selected_patch_overfit(cfg):
             elif cfg.patch_mode.model == 'MSANet':
                 loss = model.calculate_loss(out, mask)
             else:
-                loss = model.calculate_loss(out.sigmoid(), mask)
+                # loss = model.calculate_loss(out.sigmoid(), mask)
+                loss = model.calculate_loss(out, mask).abs().sum() + gauss_loss_fn(out.sigmoid(), mask)
 
             train_loss.append(loss.item())
 
             loss.backward()
             opt.step()
-            sch.step(np.array(train_loss).mean())
+        sch.step(np.array(train_loss).mean())
 
         logger.info(f"Epoch: {epoch} | Train Loss: {np.array(train_loss).mean()}")
 
@@ -997,6 +1020,10 @@ def selected_patch_overfit(cfg):
 
             for data in train_loader:
                 frames, mask = data
+
+                frames = interpolate(frames, size=interpolate_size)
+                mask = interpolate(mask, size=interpolate_size)
+
                 frames, mask = frames.to(cfg.device), mask.to(cfg.device)
 
                 with torch.no_grad():
@@ -1008,7 +1035,8 @@ def selected_patch_overfit(cfg):
                 elif cfg.patch_mode.model == 'MSANet':
                     loss = torch.tensor([0])
                 else:
-                    loss = model.calculate_loss(out.sigmoid(), mask)
+                    # loss = model.calculate_loss(out.sigmoid(), mask)
+                    loss = model.calculate_loss(out, mask).abs().sum() + gauss_loss_fn(out.sigmoid(), mask)
 
                 val_loss.append(loss.item())
 
@@ -1044,7 +1072,7 @@ if __name__ == '__main__':
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
-        selected_patch_overfit()
-        # patch_based_overfit()
+        # selected_patch_overfit()
+        patch_based_overfit()
         # overfit()
         # train()

@@ -9,6 +9,7 @@ from torch.nn import init
 # https://github.com/LeeJunHyun/Image_Segmentation/blob/master/network.py
 from torch.utils.data import Dataset
 
+from src_lib.models_hub.attention.multi_scale_attention import PAM_CAM
 from src_lib.models_hub.base import Base
 
 
@@ -119,8 +120,9 @@ class single_conv(nn.Module):
 
 
 class Attention_block(nn.Module):
-    def __init__(self, F_g, F_l, F_int):
+    def __init__(self, F_g, F_l, F_int, use_cam_pam=True):
         super(Attention_block, self).__init__()
+        self.use_cam_pam = use_cam_pam
         self.W_g = nn.Sequential(
             nn.Conv2d(F_g, F_int, kernel_size=1, stride=1, padding=0, bias=True),
             nn.BatchNorm2d(F_int)
@@ -136,10 +138,16 @@ class Attention_block(nn.Module):
             nn.BatchNorm2d(1),
             nn.Sigmoid()
         )
+        if self.use_cam_pam:
+            self.pam = PAM_CAM(in_ch=F_l, use_pam=True)
+            self.cam = PAM_CAM(in_ch=F_l, use_pam=False)
 
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, g, x):
+        if self.use_cam_pam:
+            x = x * (self.pam(x) + self.cam(x))
+
         g1 = self.W_g(g)
         x1 = self.W_x(x)
         psi = self.relu(g1 + x1)
@@ -307,7 +315,7 @@ class AttU_Net(nn.Module):
         self.Up_conv3 = conv_block(ch_in=256, ch_out=128)
 
         self.Up2 = up_conv(ch_in=128, ch_out=64)
-        self.Att2 = Attention_block(F_g=64, F_l=64, F_int=32)
+        self.Att2 = Attention_block(F_g=64, F_l=64, F_int=32, use_cam_pam=False)
         self.Up_conv2 = conv_block(ch_in=128, ch_out=64)
 
         self.Conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
@@ -469,7 +477,7 @@ class AttentionUNet(Base):
 
 
 if __name__ == '__main__':
-    inp = torch.randn((2, 3, 480, 480))
+    inp = torch.randn((2, 3, 1560 // 2, 1136 // 2))
     attn = AttU_Net()
     o = attn(inp)
     print()

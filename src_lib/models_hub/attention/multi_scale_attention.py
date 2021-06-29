@@ -182,6 +182,42 @@ class PAM_CAM_Layer(nn.Module):
         return self.attn(x)
 
 
+class PAM_CAM(nn.Module):
+    """
+    Helper Function for PAM and CAM attention
+
+    Parameters:
+    ----------
+    input:
+        in_ch : input channels
+        use_pam : Boolean value whether to use PAM_Module or CAM_Module
+    output:
+        returns the attention map
+    """
+
+    def __init__(self, in_ch, use_pam=True):
+        super(PAM_CAM, self).__init__()
+
+        self.pre_attn = nn.Sequential(
+            nn.Conv2d(in_ch, in_ch, kernel_size=3, padding=1),
+            nn.BatchNorm2d(in_ch),
+            nn.PReLU())
+
+        self.attn = PAM_Module(in_ch) if use_pam else CAM_Module(in_ch)
+
+        self.post_attn = nn.Sequential(
+            nn.Conv2d(in_ch, in_ch, kernel_size=3, padding=1),
+            nn.BatchNorm2d(in_ch),
+            nn.PReLU()
+        )
+
+    def forward(self, x):
+        out = self.pre_attn(x)
+        out = self.attn(out)
+        out = self.post_attn(out)
+        return out
+
+
 class MultiConv(nn.Module):
     """
     Helper function for Multiple Convolutions for refining.
