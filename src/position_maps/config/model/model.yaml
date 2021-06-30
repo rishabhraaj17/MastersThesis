@@ -132,6 +132,7 @@ attn_unet:
   out_channels: 1
 
   use_cam_pam: [True, True, True, False]
+  use_bn: False  # not used yet
 
   max_pool:
     kernel: 2

@@ -10,6 +10,7 @@ import pandas as pd
 import torch
 from PIL import Image
 from matplotlib import pyplot as plt, patches, lines
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.stats import multivariate_normal
 from torch.nn.functional import interpolate, pad
 from torch.utils.data import Dataset
@@ -195,7 +196,7 @@ def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=Fals
 
 def plot_predictions_v2(img, mask, pred_mask, logits_mask, additional_text='',
                         all_heatmaps=False, save_dir=None, img_name='',
-                        tight_layout=True, do_nothing=False):
+                        tight_layout=True, do_nothing=False, show_colorbar=False):
     fig, axs = plt.subplots(1, 4, sharex='none', sharey='none', figsize=(20, 8))
     img_axis, mask_axis, pred_mask_axis, logits_axis = axs
     if img is not None:
@@ -211,7 +212,11 @@ def plot_predictions_v2(img, mask, pred_mask, logits_mask, additional_text='',
         pred_mask_axis.imshow(pred_mask, cmap='hot')
 
     if logits_mask is not None:
-        logits_axis.imshow(logits_mask, cmap='hot')
+        lm = logits_axis.imshow(logits_mask, cmap='hot')
+        if show_colorbar:
+            divider = make_axes_locatable(logits_axis)
+            cax = divider.append_axes('right', size='5%', pad=0.10)
+            fig.colorbar(lm, cax=cax, orientation='vertical')
 
     if all_heatmaps:
         logits_axis.set_title('Predicted Mask -4')
