@@ -6,6 +6,7 @@ from omegaconf import DictConfig
 from torch.nn import init
 
 # https://github.com/LeeJunHyun/Image_Segmentation/blob/master/network.py
+from torch.nn.functional import pad
 from torch.utils.data import Dataset
 
 from src_lib.models_hub.attention.multi_scale_attention import PAM_CAM
@@ -118,6 +119,14 @@ class single_conv(nn.Module):
         return x
 
 
+def pad_to_cat(x1, x2):
+    # Pad x1 to the size of x2
+    diff_h = x2.shape[2] - x1.shape[2]
+    diff_w = x2.shape[3] - x1.shape[3]
+    x1 = pad(x1, [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2])
+    return x1
+
+
 class Attention_block(nn.Module):
     def __init__(self, F_g, F_l, F_int, use_cam_pam=True):
         super(Attention_block, self).__init__()
@@ -149,6 +158,10 @@ class Attention_block(nn.Module):
 
         g1 = self.W_g(g)
         x1 = self.W_x(x)
+
+        # pad for non square inputs
+        g1 = pad_to_cat(g1, x1)
+
         psi = self.relu(g1 + x1)
         psi = self.psi(psi)
 
@@ -338,21 +351,25 @@ class AttU_Net(nn.Module):
         # decoding + concat path
         d5 = self.Up5(x5)
         x4 = self.Att5(g=d5, x=x4)
+        d5 = pad_to_cat(d5, x4)
         d5 = torch.cat((x4, d5), dim=1)
         d5 = self.Up_conv5(d5)
 
         d4 = self.Up4(d5)
         x3 = self.Att4(g=d4, x=x3)
+        d4 = pad_to_cat(d4, x3)
         d4 = torch.cat((x3, d4), dim=1)
         d4 = self.Up_conv4(d4)
 
         d3 = self.Up3(d4)
         x2 = self.Att3(g=d3, x=x2)
+        d3 = pad_to_cat(d3, x2)
         d3 = torch.cat((x2, d3), dim=1)
         d3 = self.Up_conv3(d3)
 
         d2 = self.Up2(d3)
         x1 = self.Att2(g=d2, x=x1)
+        d2 = pad_to_cat(d2, x1)
         d2 = torch.cat((x1, d2), dim=1)
         d2 = self.Up_conv2(d2)
 
@@ -376,6 +393,10 @@ class UpBlock(nn.Module):
     def forward(self, previous, skip):
         up = self.up(previous)
         skip = self.attn(g=up, x=skip)
+
+        # pad for non square inputs
+        up = pad_to_cat(up, skip)
+
         up = torch.cat((skip, up), dim=1)
         up = self.up_conv(up)
         return up
@@ -552,7 +573,7 @@ class AttentionUNet(Base):
 
 
 if __name__ == '__main__':
-    inp = torch.randn((2, 3, 1560 // 2, 1136 // 2))
+    inp = torch.randn((2, 3, 1560 // 2, 1136 // 2)).transpose(2, 3)
     attn = AttU_Net()
     o = attn(inp)
     print()

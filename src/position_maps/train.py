@@ -977,6 +977,8 @@ def selected_patch_overfit(cfg):
                             factor=cfg.patch_mode.factor,
                             min_lr=cfg.patch_mode.min_lr)
 
+    g_weight = 0.5
+
     train_loader = DataLoader(dataset, batch_size=cfg.patch_mode.batch_size, shuffle=False,
                               num_workers=cfg.patch_mode.num_workers, collate_fn=None,
                               pin_memory=cfg.patch_mode.pin_memory, drop_last=cfg.patch_mode.drop_last)
@@ -1004,7 +1006,7 @@ def selected_patch_overfit(cfg):
                 loss = model.calculate_loss(out, mask)
             else:
                 # loss = model.calculate_loss(out.sigmoid(), mask)
-                loss = model.calculate_loss(out, mask).abs().sum() + gauss_loss_fn(out.sigmoid(), mask)
+                loss = model.calculate_loss(out, mask).abs().sum() + (g_weight * gauss_loss_fn(out.sigmoid(), mask))
 
             train_loss.append(loss.item())
 
@@ -1036,11 +1038,11 @@ def selected_patch_overfit(cfg):
                     loss = torch.tensor([0])
                 else:
                     # loss = model.calculate_loss(out.sigmoid(), mask)
-                    loss = model.calculate_loss(out, mask).abs().sum() + gauss_loss_fn(out.sigmoid(), mask)
+                    loss = model.calculate_loss(out, mask).abs().sum() + (g_weight * gauss_loss_fn(out.sigmoid(), mask))
 
                 val_loss.append(loss.item())
 
-                random_idx = np.random.choice(cfg.patch_mode.batch_size, 1, replace=False).item()
+                random_idx = np.random.choice(frames.shape[0], 1, replace=False).item()
 
                 if cfg.patch_mode.model == 'HourGlass':
                     out = [o.cpu().squeeze(1) for o in out]
