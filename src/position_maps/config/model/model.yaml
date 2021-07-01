@@ -150,6 +150,100 @@ deep_lab_v3_plus:
     requires_grad: True
   use_up_module: True
   use_fcrn_up_project: False
+  align_corners: True
+  use_correctors: True
+  with_aux_head: True
+  pretrained: null # or url
+  up:
+    in_ch: 1
+    out_ch: 1
+    use_convt2d: False
+    bilinear: False
+    ch_div_factor: 1
+    skip_double_conv: False
+    use_double_conv: False
+
+ccnet:
+  norm:
+    type: 'BN'
+    requires_grad: True
+  use_up_module: True
+  align_corners: True
+  use_correctors: True
+  with_aux_head: True
+  pretrained: null # or url
+  up:
+    in_ch: 1
+    out_ch: 1
+    use_convt2d: False
+    bilinear: False
+    ch_div_factor: 1
+    skip_double_conv: False
+    use_double_conv: False
+
+danet:
+  norm:
+    type: 'BN'
+    requires_grad: True
+  use_up_module: True
+  align_corners: True
+  use_correctors: True
+  with_aux_head: True
+  pretrained: null # or url
+  up:
+    in_ch: 1
+    out_ch: 1
+    use_convt2d: False
+    bilinear: False
+    ch_div_factor: 1
+    skip_double_conv: False
+    use_double_conv: False
+
+dmnet:
+  norm:
+    type: 'BN'
+    requires_grad: True
+  use_up_module: True
+  align_corners: True
+  use_correctors: True
+  with_aux_head: True
+  pretrained: null # or url
+  up:
+    in_ch: 1
+    out_ch: 1
+    use_convt2d: False
+    bilinear: False
+    ch_div_factor: 1
+    skip_double_conv: False
+    use_double_conv: False
+
+hrnet:
+  norm:
+    type: 'BN'
+    requires_grad: True
+  use_up_module: True
+  align_corners: True
+  use_correctors: True
+  pretrained: null # or url
+  up:
+    in_ch: 1
+    out_ch: 1
+    use_convt2d: False
+    bilinear: False
+    ch_div_factor: 1
+    skip_double_conv: False
+    use_double_conv: False
+
+pspnet:
+  norm:
+    type: 'BN'
+    requires_grad: True
+  use_up_module: True
+  align_corners: True
+  use_correctors: True
+  with_aux_head: True
+  pretrained: null # or url
+  bacbonne: 'resnet'  # 'unet'
   up:
     in_ch: 1
     out_ch: 1

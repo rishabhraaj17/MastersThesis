@@ -9,6 +9,7 @@ import torch
 import torchvision
 from kornia.losses import FocalLoss, BinaryFocalLossWithLogits
 from mmdet.models import GaussianFocalLoss
+from omegaconf import ListConfig
 from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.plugins import DDPPlugin
@@ -468,7 +469,11 @@ def overfit(cfg):
                             factor=cfg.patch_mode.factor,
                             min_lr=cfg.patch_mode.min_lr)
 
-    train_subset = Subset(dataset=train_dataset, indices=list(cfg.overfit.subset_indices))
+    if isinstance(cfg.overfit.subset_indices, (list, ListConfig)):
+        indices = list(cfg.overfit.subset_indices)
+    else:
+        indices = np.random.choice(len(train_dataset), cfg.overfit.subset_indices, replace=False)
+    train_subset = Subset(dataset=train_dataset, indices=indices)
     train_loader = DataLoader(train_subset, batch_size=cfg.overfit.batch_size, shuffle=False,
                               num_workers=cfg.overfit.num_workers, collate_fn=heat_map_collate_fn,
                               pin_memory=cfg.overfit.pin_memory, drop_last=cfg.overfit.drop_last)
@@ -592,24 +597,26 @@ def overfit(cfg):
                 if cfg.from_model_hub:
                     if cfg.model_hub.model in ['DeepLabV3', 'DeepLabV3Plus']:
                         out = [o.cpu().squeeze(1) for o in out]
-                        plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                            heat_masks[random_idx].squeeze().cpu(),
-                                            torch.nn.functional.threshold(out[0][random_idx].sigmoid(),
-                                                                          threshold=cfg.prediction.threshold,
-                                                                          value=cfg.prediction.fill_value,
-                                                                          inplace=True),
-                                            logits_mask=out[0][random_idx].sigmoid(),
-                                            additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
-                                                            f"| Epoch: {epoch}")
-                        plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                            heat_masks[random_idx].squeeze().cpu(),
-                                            torch.nn.functional.threshold(out[-1][random_idx].sigmoid(),
-                                                                          threshold=cfg.prediction.threshold,
-                                                                          value=cfg.prediction.fill_value,
-                                                                          inplace=True),
-                                            logits_mask=out[-1][random_idx].sigmoid(),
-                                            additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
-                                                            f"| Epoch: {epoch}")
+                        show = np.random.choice(2, 1, replace=False, p=[0.65, 0.35]).item()
+                        if show:
+                            plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                                heat_masks[random_idx].squeeze().cpu(),
+                                                torch.nn.functional.threshold(out[0][random_idx].sigmoid(),
+                                                                              threshold=cfg.prediction.threshold,
+                                                                              value=cfg.prediction.fill_value,
+                                                                              inplace=True),
+                                                logits_mask=out[0][random_idx].sigmoid(),
+                                                additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                                f"| Epoch: {epoch}")
+                            plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                                heat_masks[random_idx].squeeze().cpu(),
+                                                torch.nn.functional.threshold(out[-1][random_idx].sigmoid(),
+                                                                              threshold=cfg.prediction.threshold,
+                                                                              value=cfg.prediction.fill_value,
+                                                                              inplace=True),
+                                                logits_mask=out[-1][random_idx].sigmoid(),
+                                                additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                                f"| Epoch: {epoch}")
                     else:
                         pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
                         plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),

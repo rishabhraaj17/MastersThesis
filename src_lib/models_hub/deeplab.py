@@ -53,7 +53,7 @@ class DeepLabV3Plus(Base):
             config=config, train_dataset=train_dataset, val_dataset=val_dataset,
             desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
         )
-        self.align_corners = True  # replace it
+        self.align_corners = self.config.deep_lab_v3_plus.align_corners
 
         norm_cfg = dict(type=self.config.deep_lab_v3_plus.norm.type,
                         requires_grad=self.config.deep_lab_v3_plus.norm.requires_grad)
@@ -141,10 +141,10 @@ class DeepLabV3Plus(Base):
                 nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0)
             )
 
-        self.use_correctors = True
-        self.with_aux_head = True  # replace it
+        self.use_correctors = self.config.deep_lab_v3_plus.use_correctors
+        self.with_aux_head = self.config.deep_lab_v3_plus.with_aux_head
 
-        self.init_weights(pretrained=None)  # fix me
+        self.init_weights(pretrained=self.config.deep_lab_v3_plus.pretrained)
 
     def init_weights(self, pretrained=None):
         self.backbone.init_weights(pretrained=pretrained)
