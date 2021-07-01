@@ -398,6 +398,7 @@ def overfit(cfg):
     train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
     # train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
 
+    reduction = 'sum'
     network_type = getattr(model_zoo, cfg.overfit.postion_map_network_type)
     if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation',
                                  'PositionMapUNetClassMapSegmentation',
@@ -406,7 +407,7 @@ def overfit(cfg):
                                  'HourGlassPositionMapNetwork']:
         # loss_fn = BinaryFocalLossWithLogits(alpha=cfg.overfit.focal_loss_alpha, reduction='mean')
         # loss_fn = GaussianFocalLoss(alpha=cfg.overfit.gaussuan_focal_loss_alpha, reduction='mean')
-        loss_fn = BinaryFocalLossWithLogits(alpha=0.8, gamma=4)
+        loss_fn = BinaryFocalLossWithLogits(alpha=0.8, gamma=4, reduction=reduction)
     else:
         loss_fn = MSELoss()
 
@@ -427,6 +428,10 @@ def overfit(cfg):
             model = DeepLabV3Plus(config=cfg, train_dataset=None, val_dataset=None,
                                   loss_function=loss_fn, collate_fn=None,
                                   desired_output_shape=None)
+        elif cfg.model_hub.model == 'DeepLabV3':
+            model = DeepLabV3(config=cfg, train_dataset=None, val_dataset=None,
+                              loss_function=loss_fn, collate_fn=None,
+                              desired_output_shape=None)
     else:
         if network_type.__name__ == 'HourGlassPositionMapNetwork':
             model = network_type.from_config(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
@@ -496,8 +501,9 @@ def overfit(cfg):
 
             if cfg.from_model_hub:
                 if cfg.model_hub.model in ['DeepLabV3', 'DeepLabV3Plus']:
-                    loss = model.calculate_loss(out, heat_masks).abs().sum() + \
-                           torch.stack([g_weight * gauss_loss_fn(o.sigmoid(), heat_masks) for o in out]).sum()
+                    loss = getattr(torch.Tensor, reduction)(model.calculate_loss(out, heat_masks)) + \
+                           getattr(torch.Tensor, reduction)(
+                               torch.stack([g_weight * gauss_loss_fn(o.sigmoid(), heat_masks) for o in out]))
                 else:
                     loss = model.calculate_loss(out, heat_masks)
             else:
@@ -519,11 +525,13 @@ def overfit(cfg):
             train_loss.append(loss.item())
 
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, norm_type=2)
             # opt.step()
 
         if epoch % 6 == 0 or epoch == cfg.overfit.num_epochs - 1:
             opt.step()
             opt.zero_grad()
+        sch.step(np.array(train_loss).mean())
 
         logger.info(f"Epoch: {epoch} | Train Loss: {np.array(train_loss).mean()}")
 
@@ -555,8 +563,9 @@ def overfit(cfg):
 
                 if cfg.from_model_hub:
                     if cfg.model_hub.model in ['DeepLabV3', 'DeepLabV3Plus']:
-                        loss = model.calculate_loss(out, heat_masks).abs().sum() + \
-                               torch.stack([g_weight * gauss_loss_fn(o.sigmoid(), heat_masks) for o in out]).sum()
+                        loss = getattr(torch.Tensor, reduction)(model.calculate_loss(out, heat_masks)) + \
+                               getattr(torch.Tensor, reduction)(
+                                   torch.stack([g_weight * gauss_loss_fn(o.sigmoid(), heat_masks) for o in out]))
                     else:
                         loss = model.calculate_loss(out, heat_masks)
                         # loss = torch.tensor([0])  # model.calculate_loss(out, heat_masks)
@@ -585,13 +594,19 @@ def overfit(cfg):
                         out = [o.cpu().squeeze(1) for o in out]
                         plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                             heat_masks[random_idx].squeeze().cpu(),
-                                            out[0][random_idx].sigmoid().round(),
+                                            torch.nn.functional.threshold(out[0][random_idx].sigmoid(),
+                                                                          threshold=cfg.prediction.threshold,
+                                                                          value=cfg.prediction.fill_value,
+                                                                          inplace=True),
                                             logits_mask=out[0][random_idx].sigmoid(),
                                             additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
                                                             f"| Epoch: {epoch}")
                         plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                             heat_masks[random_idx].squeeze().cpu(),
-                                            out[-1][random_idx].sigmoid().round(),
+                                            torch.nn.functional.threshold(out[-1][random_idx].sigmoid(),
+                                                                          threshold=cfg.prediction.threshold,
+                                                                          value=cfg.prediction.fill_value,
+                                                                          inplace=True),
                                             logits_mask=out[-1][random_idx].sigmoid(),
                                             additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
                                                             f"| Epoch: {epoch}")
@@ -1132,6 +1147,6 @@ if __name__ == '__main__':
         warnings.simplefilter("ignore")
 
         # selected_patch_overfit()
-        patch_based_overfit()
-        # overfit()
+        # patch_based_overfit()
+        overfit()
         # train()

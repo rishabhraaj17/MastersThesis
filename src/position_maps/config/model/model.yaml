@@ -138,6 +138,27 @@ attn_unet:
     kernel: 2
     stride: 2
 
+deep_lab_v3:
+  backbone: 'r50'  # 'r50', 'r101', 'mnv3_large'
+  pretrained: False
+  aux_loss: True
+  num_classes: 1
+
+deep_lab_v3_plus:
+  norm:
+    type: 'BN'
+    requires_grad: True
+  use_up_module: True
+  use_fcrn_up_project: False
+  up:
+    in_ch: 1
+    out_ch: 1
+    use_convt2d: False
+    bilinear: False
+    ch_div_factor: 1
+    skip_double_conv: False
+    use_double_conv: False
+
 trajectory_baseline:
   generator:
     embedding_dim_scalars: 8

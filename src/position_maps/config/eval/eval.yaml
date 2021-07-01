@@ -56,7 +56,7 @@ eval:
   postion_map_network_type: 'HourGlassPositionMapNetwork'
 
   show_plots: True
-  plot_checkpoint: 20
+  plot_checkpoint: 5
   plot_save_dir: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/proposed_method/v0/position_maps/'
   plot_with_overlay: True
   plots_do_nothing: True

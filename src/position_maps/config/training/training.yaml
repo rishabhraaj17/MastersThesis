@@ -35,7 +35,7 @@ trainer:
   gpus: 1
   fast_dev_run: False
   num_checkpoints_to_save: 4
-  deterministic: False
+  deterministic: True
   accelerator: 'ddp' #'ddp_cpu' # null  # 'ddp', 'ddp_cpu'
   replace_sampler_ddp: False
   num_nodes: 1
@@ -54,7 +54,7 @@ manual_annotation_processing: False
 
 train:
   num_videos: -1
-  video_number_to_use: 3
+  video_number_to_use: 4
   # all videos
   #  video_classes_to_use: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
   #  video_numbers_to_use: [ [ 1, 2, 3, 4, 5 ], [ 0, 1, 2 ], [ 0, 1, 2, 4 ], [ 0, 1, 2, 3, 5, 6, 8 ],
@@ -103,6 +103,10 @@ heatmap_region_limit_threshold: 0.0
 focal_loss_alpha: 0.8
 gaussuan_focal_loss_alpha: 2.0
 use_center_net_gaussian_focal_loss: True
+
+prediction:
+  threshold: 0.3
+  fill_value: 0.0
 
 warm_restart:
   enable: False

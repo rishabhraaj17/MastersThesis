@@ -60,9 +60,10 @@ class Up(nn.Module):
     """
 
     def __init__(self, in_ch: int, out_ch: int, use_conv_trans2d=True, bilinear: bool = False, channels_div_factor=1,
-                 as_last_layer=False, use_double_conv=True):
+                 as_last_layer=False, use_double_conv=True, skip_double_conv=False):
         super().__init__()
         self.up = None
+        self.skip_double_conv = skip_double_conv
         if use_conv_trans2d:
             self.up = nn.ConvTranspose2d(in_ch, in_ch // channels_div_factor, kernel_size=2, stride=2)
         else:
@@ -77,15 +78,18 @@ class Up(nn.Module):
                     nn.Conv2d(in_ch, in_ch // channels_div_factor, kernel_size=1),
                 )
 
-        self.conv = DoubleConv(in_ch, out_ch, as_last_layer=as_last_layer) \
-            if use_double_conv else SingleConv(in_ch, out_ch, as_last_layer=as_last_layer)
+        if not skip_double_conv:
+            self.conv = DoubleConv(in_ch, out_ch, as_last_layer=as_last_layer) \
+                if use_double_conv else SingleConv(in_ch, out_ch, as_last_layer=as_last_layer)
 
     def forward(self, x):
         x = self.up(x)
+        if self.skip_double_conv:
+            return x
         return self.conv(x)
 
 
-class UpProject(nn.Module):
+class UpProject(nn.Module):  # loss goes to nan
 
     def __init__(self, in_ch: int, out_ch: int, use_conv_trans2d=True, bilinear: bool = False, channels_div_factor=1,
                  as_last_layer=False, use_double_conv=True):
