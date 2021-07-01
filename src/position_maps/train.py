@@ -23,6 +23,7 @@ from log import get_logger
 from dataset import SDDFrameAndAnnotationDataset
 import models as model_zoo
 from losses import CenterNetFocalLoss
+from src_lib.models_hub.deeplab import DeepLabV3, DeepLabV3Plus
 from src_lib.models_hub.msanet import MSANet
 from src_lib.models_hub.trans_unet import TransUNet
 from src_lib.models_hub.unets import R2AttentionUNet, AttentionUNet
@@ -405,20 +406,27 @@ def overfit(cfg):
                                  'HourGlassPositionMapNetwork']:
         # loss_fn = BinaryFocalLossWithLogits(alpha=cfg.overfit.focal_loss_alpha, reduction='mean')
         # loss_fn = GaussianFocalLoss(alpha=cfg.overfit.gaussuan_focal_loss_alpha, reduction='mean')
-        loss_fn = CenterNetFocalLoss()
+        loss_fn = BinaryFocalLossWithLogits(alpha=0.8, gamma=4)
     else:
         loss_fn = MSELoss()
 
-    bfl_fn = BinaryFocalLossWithLogits(alpha=0.9, gamma=4)
+    # bfl_fn = BinaryFocalLossWithLogits(alpha=0.9, gamma=4)
+    gauss_loss_fn = CenterNetFocalLoss()
+    g_weight = 0.5
+
     if cfg.from_model_hub:
         if cfg.model_hub.model == 'MSANet':
             model = MSANet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
                            loss_function=loss_fn, collate_fn=heat_map_collate_fn,
                            desired_output_shape=target_max_shape)
-        elif cfg.patch_mode.model == 'attn_u_net':
+        elif cfg.model_hub.model == 'attn_u_net':
             model = AttentionUNet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
                                   loss_function=loss_fn, collate_fn=heat_map_collate_fn,
                                   desired_output_shape=target_max_shape)
+        elif cfg.model_hub.model == 'DeepLabV3Plus':
+            model = DeepLabV3Plus(config=cfg, train_dataset=None, val_dataset=None,
+                                  loss_function=loss_fn, collate_fn=None,
+                                  desired_output_shape=None)
     else:
         if network_type.__name__ == 'HourGlassPositionMapNetwork':
             model = network_type.from_config(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
@@ -487,7 +495,11 @@ def overfit(cfg):
             out = model(frames)
 
             if cfg.from_model_hub:
-                loss = model.calculate_loss(out, heat_masks)
+                if cfg.model_hub.model in ['DeepLabV3', 'DeepLabV3Plus']:
+                    loss = model.calculate_loss(out, heat_masks).abs().sum() + \
+                           torch.stack([g_weight * gauss_loss_fn(o.sigmoid(), heat_masks) for o in out]).sum()
+                else:
+                    loss = model.calculate_loss(out, heat_masks)
             else:
                 if network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
                     loss = loss_fn(out, class_maps.long().squeeze(dim=1))
@@ -507,7 +519,11 @@ def overfit(cfg):
             train_loss.append(loss.item())
 
             loss.backward()
+            # opt.step()
+
+        if epoch % 6 == 0 or epoch == cfg.overfit.num_epochs - 1:
             opt.step()
+            opt.zero_grad()
 
         logger.info(f"Epoch: {epoch} | Train Loss: {np.array(train_loss).mean()}")
 
@@ -538,7 +554,12 @@ def overfit(cfg):
                     out = model(frames)
 
                 if cfg.from_model_hub:
-                    loss = torch.tensor([0])  # model.calculate_loss(out, heat_masks)
+                    if cfg.model_hub.model in ['DeepLabV3', 'DeepLabV3Plus']:
+                        loss = model.calculate_loss(out, heat_masks).abs().sum() + \
+                               torch.stack([g_weight * gauss_loss_fn(o.sigmoid(), heat_masks) for o in out]).sum()
+                    else:
+                        loss = model.calculate_loss(out, heat_masks)
+                        # loss = torch.tensor([0])  # model.calculate_loss(out, heat_masks)
                 else:
                     if network_type.__name__ == 'PositionMapUNetClassMapSegmentation':
                         loss = loss_fn(out, class_maps.long().squeeze(dim=1))
@@ -560,12 +581,27 @@ def overfit(cfg):
                 random_idx = np.random.choice(cfg.overfit.batch_size, 1, replace=False).item()
 
                 if cfg.from_model_hub:
-                    pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
-                    plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                     heat_masks[random_idx].squeeze().cpu(),
-                                     pred_mask[random_idx].int() * 255,
-                                     additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
-                                                     f"| Epoch: {epoch}")
+                    if cfg.model_hub.model in ['DeepLabV3', 'DeepLabV3Plus']:
+                        out = [o.cpu().squeeze(1) for o in out]
+                        plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                            heat_masks[random_idx].squeeze().cpu(),
+                                            out[0][random_idx].sigmoid().round(),
+                                            logits_mask=out[0][random_idx].sigmoid(),
+                                            additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                            f"| Epoch: {epoch}")
+                        plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                            heat_masks[random_idx].squeeze().cpu(),
+                                            out[-1][random_idx].sigmoid().round(),
+                                            logits_mask=out[-1][random_idx].sigmoid(),
+                                            additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                            f"| Epoch: {epoch}")
+                    else:
+                        pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
+                        plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                         heat_masks[random_idx].squeeze().cpu(),
+                                         pred_mask[random_idx].int() * 255,
+                                         additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                         f"| Epoch: {epoch}")
                 else:
                     if network_type.__name__ in ['PositionMapUNetPositionMapSegmentation',
                                                  'PositionMapUNetClassMapSegmentation']:
@@ -919,16 +955,24 @@ def patch_based_overfit(cfg):
 
 @hydra.main(config_path="config", config_name="config")
 def selected_patch_overfit(cfg):
-    if cfg.patch_mode.model == 'MSANet':
-        patches = torch.load('patch_data_small.pt')
-    else:
-        patches = torch.load('patch_data_0.pt')
+    patches = torch.load('patch_data_256_8_imgs.pt')
+
+    # patches = {'frames': [], 'masks': []}
+    # for stuff in os.listdir(os.getcwd()):
+    #     if stuff.startswith('patch'):
+    #         item = torch.load(stuff)
+    #         patches['frames'].append(item['frames'])
+    #         patches['masks'].append(item['masks'])
+    #
+    # patches['frames'] = torch.cat(patches['frames'], dim=0)
+    # patches['masks'] = torch.cat(patches['masks'], dim=0)
+
     f_patches, m_patches = patches['frames'], patches['masks']
 
     # selected_patches = [17]  # [24]
 
     # filter out null tiles
-    selected_patches = [idx for idx, h in enumerate(m_patches) if h.max() > 0]
+    selected_patches = [idx for idx, h in enumerate(m_patches) if h.max() > 0.5]
 
     f_patches, m_patches = f_patches[selected_patches].to('cpu'), m_patches[selected_patches].to('cpu')
     dataset = TensorDatasetForTwo(f_patches, m_patches)
@@ -937,7 +981,7 @@ def selected_patch_overfit(cfg):
 
     # loss_fn = CenterNetFocalLoss()
     gauss_loss_fn = CenterNetFocalLoss()
-    loss_fn = BinaryFocalLossWithLogits(alpha=0.9, gamma=4)
+    loss_fn = BinaryFocalLossWithLogits(alpha=0.8, gamma=4)
 
     if cfg.patch_mode.model == 'MSANet':
         model = MSANet(config=cfg, train_dataset=None, val_dataset=None,
@@ -957,6 +1001,10 @@ def selected_patch_overfit(cfg):
                                 desired_output_shape=None)
     elif cfg.patch_mode.model == 'attn_u_net':
         model = AttentionUNet(config=cfg, train_dataset=None, val_dataset=None,
+                              loss_function=loss_fn, collate_fn=None,
+                              desired_output_shape=None)
+    elif cfg.patch_mode.model == 'DeepLabV3Plus':
+        model = DeepLabV3Plus(config=cfg, train_dataset=None, val_dataset=None,
                               loss_function=loss_fn, collate_fn=None,
                               desired_output_shape=None)
     elif cfg.patch_mode.model == 'HourGlass':
@@ -987,8 +1035,8 @@ def selected_patch_overfit(cfg):
         model.train()
         train_loss = []
 
-        for data in train_loader:
-            opt.zero_grad()
+        for t_idx, data in enumerate(train_loader):
+            # opt.zero_grad()
 
             frames, mask = data
 
@@ -1001,9 +1049,12 @@ def selected_patch_overfit(cfg):
 
             if cfg.patch_mode.model == 'HourGlass':
                 out = model_zoo.post_process_multi_apply(out)
-                loss = model.calculate_loss(out, mask).mean()
+                loss = model.calculate_loss(out, mask).abs().sum()  # .mean()
             elif cfg.patch_mode.model == 'MSANet':
                 loss = model.calculate_loss(out, mask)
+            elif cfg.patch_mode.model in ['DeepLabV3', 'DeepLabV3Plus']:
+                loss = model.calculate_loss(out, mask).abs().sum() + \
+                       torch.stack([g_weight * gauss_loss_fn(o.sigmoid(), mask) for o in out]).sum()
             else:
                 # loss = model.calculate_loss(out.sigmoid(), mask)
                 loss = model.calculate_loss(out, mask).abs().sum() + (g_weight * gauss_loss_fn(out.sigmoid(), mask))
@@ -1011,7 +1062,10 @@ def selected_patch_overfit(cfg):
             train_loss.append(loss.item())
 
             loss.backward()
-            opt.step()
+            if t_idx % 6 == 0 or t_idx == len(train_loader) - 1:
+                opt.step()
+                opt.zero_grad()
+
         sch.step(np.array(train_loss).mean())
 
         logger.info(f"Epoch: {epoch} | Train Loss: {np.array(train_loss).mean()}")
@@ -1033,9 +1087,12 @@ def selected_patch_overfit(cfg):
 
                 if cfg.patch_mode.model == 'HourGlass':
                     out = model_zoo.post_process_multi_apply(out)
-                    loss = model.calculate_loss(out, mask).mean()
+                    loss = model.calculate_loss(out, mask).abs().sum()  # .mean()
                 elif cfg.patch_mode.model == 'MSANet':
                     loss = torch.tensor([0])
+                elif cfg.patch_mode.model in ['DeepLabV3', 'DeepLabV3Plus']:
+                    loss = model.calculate_loss(out, mask).abs().sum() + \
+                           torch.stack([g_weight * gauss_loss_fn(o.sigmoid(), mask) for o in out]).sum()
                 else:
                     # loss = model.calculate_loss(out.sigmoid(), mask)
                     loss = model.calculate_loss(out, mask).abs().sum() + (g_weight * gauss_loss_fn(out.sigmoid(), mask))
@@ -1044,28 +1101,28 @@ def selected_patch_overfit(cfg):
 
                 random_idx = np.random.choice(frames.shape[0], 1, replace=False).item()
 
-                if cfg.patch_mode.model == 'HourGlass':
+                if cfg.patch_mode.model in ['HourGlass', 'DeepLabV3', 'DeepLabV3Plus']:
                     out = [o.cpu().squeeze(1) for o in out]
-                    plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                        mask[random_idx].squeeze().cpu(),
-                                        out[0][random_idx].sigmoid().round(),
-                                        logits_mask=out[0][random_idx].sigmoid(),
-                                        additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
-                                                        f"| Epoch: {epoch}")
-                    plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                        mask[random_idx].squeeze().cpu(),
-                                        out[-1][random_idx].sigmoid().round(),
-                                        logits_mask=out[-1][random_idx].sigmoid(),
-                                        additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
-                                                        f"| Epoch: {epoch}")
+                    # plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                    #                     mask[random_idx].squeeze().cpu(),
+                    #                     out[0][random_idx].sigmoid().round(),
+                    #                     logits_mask=out[0][random_idx].sigmoid(),
+                    #                     additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                    #                                     f"| Epoch: {epoch}")
+                    # plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                    #                     mask[random_idx].squeeze().cpu(),
+                    #                     out[-1][random_idx].sigmoid().round(),
+                    #                     logits_mask=out[-1][random_idx].sigmoid(),
+                    #                     additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                    #                                     f"| Epoch: {epoch}")
                 else:
                     out = out.cpu().squeeze(1)
-                    plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                        mask[random_idx].squeeze().cpu(),
-                                        out[random_idx].sigmoid().round(),
-                                        logits_mask=out[random_idx].sigmoid(),
-                                        additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
-                                                        f"| Epoch: {epoch}")
+                    # plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                    #                     mask[random_idx].squeeze().cpu(),
+                    #                     out[random_idx].sigmoid().round(),
+                    #                     logits_mask=out[random_idx].sigmoid(),
+                    #                     additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                    #                                     f"| Epoch: {epoch}")
 
             logger.info(f"Epoch: {epoch} | Validation Loss: {np.array(val_loss).mean()}")
 

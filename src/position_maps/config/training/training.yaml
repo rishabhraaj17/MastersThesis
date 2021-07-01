@@ -216,7 +216,7 @@ patch_mode:
   focal_loss_alpha: 0.9
   gaussuan_focal_loss_alpha: 2.0
 
-  subset_indices: [ 0, 85, 32, 5, 125, 200 ]
+  subset_indices: [ 0, 85, 32, 5, 125, 200, 220, 240, 1024, 1600, 2600, 4000 ]
   #  subset_indices: [0]
 
   plot_checkpoint: 99
