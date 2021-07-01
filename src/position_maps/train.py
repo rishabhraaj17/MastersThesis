@@ -472,7 +472,7 @@ def overfit(cfg):
 
         train_loss = []
         for data in train_loader:
-            opt.zero_grad()
+            # opt.zero_grad()
 
             frames, heat_masks, position_map, distribution_map, class_maps, meta = data
 
