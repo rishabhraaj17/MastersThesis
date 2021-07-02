@@ -823,6 +823,11 @@ class TransUNet(Base):
     def calculate_loss(self, pred, target):
         return self.loss_function(pred, target)
 
+    @staticmethod
+    def calculate_additional_loss(loss_function, pred, target, apply_sigmoid=True, weight_factor=1.0):
+        pred = pred.sigmoid() if apply_sigmoid else pred
+        return weight_factor * loss_function(pred.sigmoid(), target)
+
 
 if __name__ == '__main__':
     inp = torch.randn((1, 3, 480, 360))

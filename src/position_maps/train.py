@@ -24,8 +24,13 @@ from log import get_logger
 from dataset import SDDFrameAndAnnotationDataset
 import models as model_zoo
 from losses import CenterNetFocalLoss
+from src_lib.models_hub.ccnet import CCNet
+from src_lib.models_hub.danet import DANet
 from src_lib.models_hub.deeplab import DeepLabV3, DeepLabV3Plus
+from src_lib.models_hub.dmnet import DMNet
+from src_lib.models_hub.hrnet import HRNetwork
 from src_lib.models_hub.msanet import MSANet
+from src_lib.models_hub.pspnet import PSPUNet, PSPNet
 from src_lib.models_hub.trans_unet import TransUNet
 from src_lib.models_hub.unets import R2AttentionUNet, AttentionUNet
 from src_lib.models_hub.vis_trans import VisionTransformerSegmentation
@@ -415,7 +420,9 @@ def overfit(cfg):
     # bfl_fn = BinaryFocalLossWithLogits(alpha=0.9, gamma=4)
     gauss_loss_fn = CenterNetFocalLoss()
     g_weight = 0.5
+    image_pad_factor = 16 if cfg.model_hub.model == 'PSPUNet' else 8
 
+    model_hub_models = ['DeepLabV3', 'DeepLabV3Plus', 'PSPUNet', 'DANet', 'DMNet', 'PSPNet', 'CCNet', 'HRNet']
     if cfg.from_model_hub:
         if cfg.model_hub.model == 'MSANet':
             model = MSANet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
@@ -431,6 +438,30 @@ def overfit(cfg):
                                   desired_output_shape=None)
         elif cfg.model_hub.model == 'DeepLabV3':
             model = DeepLabV3(config=cfg, train_dataset=None, val_dataset=None,
+                              loss_function=loss_fn, collate_fn=None,
+                              desired_output_shape=None)
+        elif cfg.model_hub.model == 'PSPUNet':
+            model = PSPUNet(config=cfg, train_dataset=None, val_dataset=None,
+                            loss_function=loss_fn, collate_fn=None,
+                            desired_output_shape=None)
+        elif cfg.model_hub.model == 'PSPNet':
+            model = PSPNet(config=cfg, train_dataset=None, val_dataset=None,
+                           loss_function=loss_fn, collate_fn=None,
+                           desired_output_shape=None)
+        elif cfg.model_hub.model == 'DANet':
+            model = DANet(config=cfg, train_dataset=None, val_dataset=None,
+                          loss_function=loss_fn, collate_fn=None,
+                          desired_output_shape=None)
+        elif cfg.model_hub.model == 'DMNet':
+            model = DMNet(config=cfg, train_dataset=None, val_dataset=None,
+                          loss_function=loss_fn, collate_fn=None,
+                          desired_output_shape=None)
+        elif cfg.model_hub.model == 'CCNet':
+            model = CCNet(config=cfg, train_dataset=None, val_dataset=None,
+                          loss_function=loss_fn, collate_fn=None,
+                          desired_output_shape=None)
+        elif cfg.model_hub.model == 'HRNet':
+            model = HRNetwork(config=cfg, train_dataset=None, val_dataset=None,
                               loss_function=loss_fn, collate_fn=None,
                               desired_output_shape=None)
     else:
@@ -487,7 +518,7 @@ def overfit(cfg):
             frames, heat_masks, position_map, distribution_map, class_maps, meta = data
 
             if cfg.from_model_hub:
-                padder = ImagePadder(frames.shape[-2:])
+                padder = ImagePadder(frames.shape[-2:], factor=image_pad_factor)
                 frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
                 frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
             else:
@@ -505,10 +536,10 @@ def overfit(cfg):
             out = model(frames)
 
             if cfg.from_model_hub:
-                if cfg.model_hub.model in ['DeepLabV3', 'DeepLabV3Plus']:
+                if cfg.model_hub.model in model_hub_models:
                     loss = getattr(torch.Tensor, reduction)(model.calculate_loss(out, heat_masks)) + \
-                           getattr(torch.Tensor, reduction)(
-                               torch.stack([g_weight * gauss_loss_fn(o.sigmoid(), heat_masks) for o in out]))
+                           getattr(torch.Tensor, reduction)(model.calculate_additional_loss(
+                               gauss_loss_fn, out, heat_masks, apply_sigmoid=True, weight_factor=g_weight))
                 else:
                     loss = model.calculate_loss(out, heat_masks)
             else:
@@ -548,7 +579,7 @@ def overfit(cfg):
                 frames, heat_masks, position_map, distribution_map, class_maps, meta = data
 
                 if cfg.from_model_hub:
-                    padder = ImagePadder(frames.shape[-2:])
+                    padder = ImagePadder(frames.shape[-2:], factor=image_pad_factor)
                     frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
                     frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
                 else:
@@ -567,10 +598,10 @@ def overfit(cfg):
                     out = model(frames)
 
                 if cfg.from_model_hub:
-                    if cfg.model_hub.model in ['DeepLabV3', 'DeepLabV3Plus']:
+                    if cfg.model_hub.model in model_hub_models:
                         loss = getattr(torch.Tensor, reduction)(model.calculate_loss(out, heat_masks)) + \
-                               getattr(torch.Tensor, reduction)(
-                                   torch.stack([g_weight * gauss_loss_fn(o.sigmoid(), heat_masks) for o in out]))
+                               getattr(torch.Tensor, reduction)(model.calculate_additional_loss(
+                               gauss_loss_fn, out, heat_masks, apply_sigmoid=True, weight_factor=g_weight))
                     else:
                         loss = model.calculate_loss(out, heat_masks)
                         # loss = torch.tensor([0])  # model.calculate_loss(out, heat_masks)
@@ -595,28 +626,50 @@ def overfit(cfg):
                 random_idx = np.random.choice(cfg.overfit.batch_size, 1, replace=False).item()
 
                 if cfg.from_model_hub:
-                    if cfg.model_hub.model in ['DeepLabV3', 'DeepLabV3Plus']:
-                        out = [o.cpu().squeeze(1) for o in out]
-                        show = np.random.choice(2, 1, replace=False, p=[0.65, 0.35]).item()
-                        if show:
-                            plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                                heat_masks[random_idx].squeeze().cpu(),
-                                                torch.nn.functional.threshold(out[0][random_idx].sigmoid(),
-                                                                              threshold=cfg.prediction.threshold,
-                                                                              value=cfg.prediction.fill_value,
-                                                                              inplace=True),
-                                                logits_mask=out[0][random_idx].sigmoid(),
-                                                additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
-                                                                f"| Epoch: {epoch}")
-                            plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                                heat_masks[random_idx].squeeze().cpu(),
-                                                torch.nn.functional.threshold(out[-1][random_idx].sigmoid(),
-                                                                              threshold=cfg.prediction.threshold,
-                                                                              value=cfg.prediction.fill_value,
-                                                                              inplace=True),
-                                                logits_mask=out[-1][random_idx].sigmoid(),
-                                                additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
-                                                                f"| Epoch: {epoch}")
+                    show = np.random.choice(2, 1, replace=False, p=[0.65, 0.35]).item()
+
+                    if cfg.model_hub.model in model_hub_models:
+                        if isinstance(out, (list, tuple)):
+                            if cfg.model_hub.model == 'DANet':
+                                out0, out1 = out
+                                out = [out0[0], out1]
+
+                            out = [o.cpu().squeeze(1) for o in out]
+                            if show:
+                                plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                                    heat_masks[random_idx].squeeze().cpu(),
+                                                    torch.nn.functional.threshold(out[0][random_idx].sigmoid(),
+                                                                                  threshold=cfg.prediction.threshold,
+                                                                                  value=cfg.prediction.fill_value,
+                                                                                  inplace=True),
+                                                    logits_mask=out[0][random_idx].sigmoid(),
+                                                    additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                                    f"| Epoch: {epoch} "
+                                                                    f"| Threshold: {cfg.prediction.threshold}")
+                                plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                                    heat_masks[random_idx].squeeze().cpu(),
+                                                    torch.nn.functional.threshold(out[-1][random_idx].sigmoid(),
+                                                                                  threshold=cfg.prediction.threshold,
+                                                                                  value=cfg.prediction.fill_value,
+                                                                                  inplace=True),
+                                                    logits_mask=out[-1][random_idx].sigmoid(),
+                                                    additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                                    f"| Epoch: {epoch} "
+                                                                    f"| Threshold: {cfg.prediction.threshold}")
+                        else:
+                            out = out.cpu().squeeze(1)
+                            if show:
+                                plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                                    heat_masks[random_idx].squeeze().cpu(),
+                                                    torch.nn.functional.threshold(out[random_idx].sigmoid(),
+                                                                                  threshold=cfg.prediction.threshold,
+                                                                                  value=cfg.prediction.fill_value,
+                                                                                  inplace=True),
+                                                    logits_mask=out[random_idx].sigmoid(),
+                                                    additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                                    f"| Epoch: {epoch} "
+                                                                    f"| Threshold: {cfg.prediction.threshold}")
+
                     else:
                         pred_mask = torch.round(torch.sigmoid(out)).squeeze(dim=1).cpu()
                         plot_predictions(frames[random_idx].squeeze().cpu().permute(1, 2, 0),

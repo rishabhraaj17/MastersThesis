@@ -26,17 +26,18 @@ from baselinev2.plot_utils import add_box_to_axes, add_features_to_axis
 class ImagePadder:
     """ Pads images such that dimensions are divisible by 8 """
 
-    def __init__(self, dims, mode='sintel'):
+    def __init__(self, dims, mode='sintel', factor=8):
+        self.factor = factor
         self.ht, self.wd = dims[-2:]
-        pad_ht = (((self.ht // 8) + 1) * 8 - self.ht) % 8
-        pad_wd = (((self.wd // 8) + 1) * 8 - self.wd) % 8
+        pad_ht = (((self.ht // factor) + 1) * factor - self.ht) % factor
+        pad_wd = (((self.wd // factor) + 1) * factor - self.wd) % factor
         if mode == 'sintel':
             self._pad = [pad_wd // 2, pad_wd - pad_wd // 2, pad_ht // 2, pad_ht - pad_ht // 2]
         else:
             self._pad = [pad_wd // 2, pad_wd - pad_wd // 2, 0, pad_ht]
 
-    def pad(self, *inputs):
-        return [pad(x, self._pad, mode='replicate') for x in inputs]
+    def pad(self, *inputs, mode='replicate'):
+        return [pad(x, self._pad, mode=mode) for x in inputs]
 
     def unpad(self, x):
         ht, wd = x.shape[-2:]

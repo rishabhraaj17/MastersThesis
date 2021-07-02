@@ -552,6 +552,11 @@ class R2AttentionUNet(Base):
     def calculate_loss(self, pred, target):
         return self.loss_function(pred, target)
 
+    @staticmethod
+    def calculate_additional_loss(loss_function, pred, target, apply_sigmoid=True, weight_factor=1.0):
+        pred = pred.sigmoid() if apply_sigmoid else pred
+        return weight_factor * loss_function(pred.sigmoid(), target)
+
 
 class AttentionUNet(Base):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
@@ -570,6 +575,11 @@ class AttentionUNet(Base):
 
     def calculate_loss(self, pred, target):
         return self.loss_function(pred, target)
+
+    @staticmethod
+    def calculate_additional_loss(loss_function, pred, target, apply_sigmoid=True, weight_factor=1.0):
+        pred = pred.sigmoid() if apply_sigmoid else pred
+        return weight_factor * loss_function(pred.sigmoid(), target)
 
 
 if __name__ == '__main__':

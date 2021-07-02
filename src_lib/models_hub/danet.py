@@ -64,20 +64,23 @@ class DANet(Base):
                        use_conv_trans2d=self.config.danet.up.use_convt2d,
                        bilinear=self.config.danet.up.bilinear,
                        channels_div_factor=self.config.danet.up.ch_div_factor,
-                       use_double_conv=self.config.danet.up.use_double_conv),
+                       use_double_conv=self.config.danet.up.use_double_conv,
+                       skip_double_conv=self.config.danet.up.skip_double_conv),
                     Up(in_ch=self.config.danet.up.in_ch,
                        out_ch=self.config.danet.up.out_ch,
                        use_conv_trans2d=self.config.danet.up.use_convt2d,
                        bilinear=self.config.danet.up.bilinear,
                        channels_div_factor=self.config.danet.up.ch_div_factor,
-                       use_double_conv=self.config.danet.up.use_double_conv),
+                       use_double_conv=self.config.danet.up.use_double_conv,
+                       skip_double_conv=self.config.danet.up.skip_double_conv),
                     Up(in_ch=self.config.danet.up.in_ch,
                        out_ch=self.config.danet.up.out_ch,
                        use_conv_trans2d=self.config.danet.up.use_convt2d,
                        bilinear=self.config.danet.up.bilinear,
                        channels_div_factor=self.config.danet.up.ch_div_factor,
                        as_last_layer=True,
-                       use_double_conv=self.config.danet.up.use_double_conv)
+                       use_double_conv=self.config.danet.up.use_double_conv,
+                       skip_double_conv=self.config.danet.up.skip_double_conv)
                 ),
                 nn.Sequential(
                     Up(in_ch=self.config.danet.up.in_ch,
@@ -85,20 +88,23 @@ class DANet(Base):
                        use_conv_trans2d=self.config.danet.up.use_convt2d,
                        bilinear=self.config.danet.up.bilinear,
                        channels_div_factor=self.config.danet.up.ch_div_factor,
-                       use_double_conv=self.config.danet.up.use_double_conv),
+                       use_double_conv=self.config.danet.up.use_double_conv,
+                       skip_double_conv=self.config.danet.up.skip_double_conv),
                     Up(in_ch=self.config.danet.up.in_ch,
                        out_ch=self.config.danet.up.out_ch,
                        use_conv_trans2d=self.config.danet.up.use_convt2d,
                        bilinear=self.config.danet.up.bilinear,
                        channels_div_factor=self.config.danet.up.ch_div_factor,
-                       use_double_conv=self.config.danet.up.use_double_conv),
+                       use_double_conv=self.config.danet.up.use_double_conv,
+                       skip_double_conv=self.config.danet.up.skip_double_conv),
                     Up(in_ch=self.config.danet.up.in_ch,
                        out_ch=self.config.danet.up.out_ch,
                        use_conv_trans2d=self.config.danet.up.use_convt2d,
                        bilinear=self.config.danet.up.bilinear,
                        channels_div_factor=self.config.danet.up.ch_div_factor,
                        as_last_layer=True,
-                       use_double_conv=self.config.danet.up.use_double_conv)
+                       use_double_conv=self.config.danet.up.use_double_conv,
+                       skip_double_conv=self.config.danet.up.skip_double_conv)
                 ),
                 nn.Sequential(
                     Up(in_ch=self.config.danet.up.in_ch,
@@ -106,20 +112,23 @@ class DANet(Base):
                        use_conv_trans2d=self.config.danet.up.use_convt2d,
                        bilinear=self.config.danet.up.bilinear,
                        channels_div_factor=self.config.danet.up.ch_div_factor,
-                       use_double_conv=self.config.danet.up.use_double_conv),
+                       use_double_conv=self.config.danet.up.use_double_conv,
+                       skip_double_conv=self.config.danet.up.skip_double_conv),
                     Up(in_ch=self.config.danet.up.in_ch,
                        out_ch=self.config.danet.up.out_ch,
                        use_conv_trans2d=self.config.danet.up.use_convt2d,
                        bilinear=self.config.danet.up.bilinear,
                        channels_div_factor=self.config.danet.up.ch_div_factor,
-                       use_double_conv=self.config.danet.up.use_double_conv),
+                       use_double_conv=self.config.danet.up.use_double_conv,
+                       skip_double_conv=self.config.danet.up.skip_double_conv),
                     Up(in_ch=self.config.danet.up.in_ch,
                        out_ch=self.config.danet.up.out_ch,
                        use_conv_trans2d=self.config.danet.up.use_convt2d,
                        bilinear=self.config.danet.up.bilinear,
                        channels_div_factor=self.config.danet.up.ch_div_factor,
                        as_last_layer=True,
-                       use_double_conv=self.config.danet.up.use_double_conv)
+                       use_double_conv=self.config.danet.up.use_double_conv,
+                       skip_double_conv=self.config.danet.up.skip_double_conv)
                 )
             ])
             self.aux_head_corrector = nn.Sequential(
@@ -128,20 +137,23 @@ class DANet(Base):
                    use_conv_trans2d=self.config.danet.up.use_convt2d,
                    bilinear=self.config.danet.up.bilinear,
                    channels_div_factor=self.config.danet.up.ch_div_factor,
-                   use_double_conv=self.config.danet.up.use_double_conv),
+                   use_double_conv=self.config.danet.up.use_double_conv,
+                   skip_double_conv=self.config.danet.up.skip_double_conv),
                 Up(in_ch=self.config.danet.up.in_ch,
                    out_ch=self.config.danet.up.out_ch,
                    use_conv_trans2d=self.config.danet.up.use_convt2d,
                    bilinear=self.config.danet.up.bilinear,
                    channels_div_factor=self.config.danet.up.ch_div_factor,
-                   use_double_conv=self.config.danet.up.use_double_conv),
+                   use_double_conv=self.config.danet.up.use_double_conv,
+                   skip_double_conv=self.config.danet.up.skip_double_conv),
                 Up(in_ch=self.config.danet.up.in_ch,
                    out_ch=self.config.danet.up.out_ch,
                    use_conv_trans2d=self.config.danet.up.use_convt2d,
                    bilinear=self.config.danet.up.bilinear,
                    channels_div_factor=self.config.danet.up.ch_div_factor,
                    as_last_layer=True,
-                   use_double_conv=self.config.danet.up.use_double_conv)
+                   use_double_conv=self.config.danet.up.use_double_conv,
+                   skip_double_conv=self.config.danet.up.skip_double_conv)
             )
         else:
             self.head_corrector = nn.Sequential(
@@ -191,7 +203,19 @@ class DANet(Base):
         return out1, out2
 
     def calculate_loss(self, pred, target):
-        return torch.stack([self.loss_function(p, target) for p in pred])
+        pred1, pred2 = pred
+        loss1 = torch.stack([self.loss_function(p, target) for p in pred1])
+        loss2 = self.loss_function(pred2, target)
+        return torch.stack((loss1.sum(), loss2))
+
+    @staticmethod
+    def calculate_additional_loss(loss_function, pred, target, apply_sigmoid=True, weight_factor=1.0):
+        pred1, pred2 = pred
+        pred1 = [p.sigmoid() if apply_sigmoid else p for p in pred1]
+        pred2 = pred2.sigmoid() if apply_sigmoid else pred2
+        loss1 = torch.stack([weight_factor * loss_function(p, target) for p in pred1])
+        loss2 = weight_factor * loss_function(pred2, target)
+        return torch.stack((loss1.sum(), loss2))
 
 
 if __name__ == '__main__':

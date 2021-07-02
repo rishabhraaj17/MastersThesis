@@ -2,6 +2,7 @@ from typing import Tuple, Optional, Callable
 
 import torch
 import torch.nn.functional as F
+from kornia.losses import BinaryFocalLossWithLogits
 from omegaconf import DictConfig
 from torch import nn
 from torch.nn import MSELoss
@@ -119,6 +120,8 @@ class MSANet(Base):
         self.predict2_2 = nn.Conv2d(64, 1, kernel_size=1)
         self.predict1_2 = nn.Conv2d(64, 1, kernel_size=1)
 
+        self.gaussian_weight = 0.5
+        self.binary_focal_loss = BinaryFocalLossWithLogits(alpha=0.8, gamma=4.0, reduction='sum')
         self.gaussian_loss = CenterNetFocalLoss()
         self.mse_loss = MSELoss()
 
@@ -246,14 +249,22 @@ class MSANet(Base):
         outputs3_2 = pred
 
         # Cross-entropy loss
-        loss0 = self.gaussian_loss(outputs0.sigmoid(), target)
-        loss1 = self.gaussian_loss(outputs1.sigmoid(), target)
-        loss2 = self.gaussian_loss(outputs2.sigmoid(), target)
-        loss3 = self.gaussian_loss(outputs3.sigmoid(), target)
-        loss0_2 = self.gaussian_loss(outputs0_2.sigmoid(), target)
-        loss1_2 = self.gaussian_loss(outputs1_2.sigmoid(), target)
-        loss2_2 = self.gaussian_loss(outputs2_2.sigmoid(), target)
-        loss3_2 = self.gaussian_loss(outputs3_2.sigmoid(), target)
+        loss0 = self.binary_focal_loss(outputs0, target) + (
+                self.gaussian_weight * self.gaussian_loss(outputs0.sigmoid(), target))
+        loss1 = self.binary_focal_loss(outputs1, target) + (
+                    self.gaussian_weight * self.gaussian_loss(outputs1.sigmoid(), target))
+        loss2 = self.binary_focal_loss(outputs2, target) + (
+                    self.gaussian_weight * self.gaussian_loss(outputs2.sigmoid(), target))
+        loss3 = self.binary_focal_loss(outputs3, target) + (
+                    self.gaussian_weight * self.gaussian_loss(outputs3.sigmoid(), target))
+        loss0_2 = self.binary_focal_loss(outputs0_2, target) + (
+                self.gaussian_weight * self.gaussian_loss(outputs0_2.sigmoid(), target))
+        loss1_2 = self.binary_focal_loss(outputs1_2, target) + (
+                self.gaussian_weight * self.gaussian_loss(outputs1_2.sigmoid(), target))
+        loss2_2 = self.binary_focal_loss(outputs2_2, target) + (
+                self.gaussian_weight * self.gaussian_loss(outputs2_2.sigmoid(), target))
+        loss3_2 = self.binary_focal_loss(outputs3_2, target) + (
+                self.gaussian_weight * self.gaussian_loss(outputs3_2.sigmoid(), target))
 
         lossSemantic1 = self.mse_loss(semVector_1_1, semVector_2_1)
         lossSemantic2 = self.mse_loss(semVector_1_2, semVector_2_2)
@@ -270,8 +281,8 @@ class MSANet(Base):
         lossRec7 = self.mse_loss(inp_enc7, out_enc7)
 
         loss = (loss0 + loss1 + loss2 + loss3 + loss0_2 + loss1_2 + loss2_2 + loss3_2) \
-                + 0.25 * (lossSemantic1 + lossSemantic2 + lossSemantic3 + lossSemantic4) \
-                + 0.1 * (lossRec0 + lossRec1 + lossRec2 + lossRec3 + lossRec4 + lossRec5 + lossRec6 + lossRec7)
+               + 0.25 * (lossSemantic1 + lossSemantic2 + lossSemantic3 + lossSemantic4) \
+               + 0.1 * (lossRec0 + lossRec1 + lossRec2 + lossRec3 + lossRec4 + lossRec5 + lossRec6 + lossRec7)
         return loss
 
 

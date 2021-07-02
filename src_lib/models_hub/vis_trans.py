@@ -95,7 +95,12 @@ class VisionTransformerSegmentation(Base):
         return out
 
     def calculate_loss(self, pred, target):
-        return torch.stack([self.loss_function(p, target) for p in pred]).sum()
+        return torch.stack([self.loss_function(p, target) for p in pred])
+
+    @staticmethod
+    def calculate_additional_loss(loss_function, pred, target, apply_sigmoid=True, weight_factor=1.0):
+        pred = [p.sigmoid() if apply_sigmoid else p for p in pred]
+        return torch.stack([weight_factor * loss_function(p, target) for p in pred])
 
 
 @hydra.main(config_path="../../src/position_maps/config", config_name="config")

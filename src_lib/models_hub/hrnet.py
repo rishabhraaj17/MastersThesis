@@ -73,14 +73,16 @@ class HRNetwork(Base):
                    use_conv_trans2d=self.config.hrnet.up.use_convt2d,
                    bilinear=self.config.hrnet.up.bilinear,
                    channels_div_factor=self.config.hrnet.up.ch_div_factor,
-                   use_double_conv=self.config.hrnet.up.use_double_conv),
+                   use_double_conv=self.config.hrnet.up.use_double_conv,
+                   skip_double_conv=self.config.hrnet.up.skip_double_conv),
                 Up(in_ch=self.config.hrnet.up.in_ch,
                    out_ch=self.config.hrnet.up.out_ch,
                    use_conv_trans2d=self.config.hrnet.up.use_convt2d,
                    bilinear=self.config.hrnet.up.bilinear,
                    channels_div_factor=self.config.hrnet.up.ch_div_factor,
                    as_last_layer=True,
-                   use_double_conv=self.config.hrnet.up.use_double_conv)
+                   use_double_conv=self.config.hrnet.up.use_double_conv,
+                   skip_double_conv=self.config.hrnet.up.skip_double_conv)
             )
         else:
             self.head_corrector = nn.Sequential(
@@ -111,7 +113,12 @@ class HRNetwork(Base):
         return out
 
     def calculate_loss(self, pred, target):
-        return torch.stack([self.loss_function(p, target) for p in pred])
+        return self.loss_function(pred, target)
+
+    @staticmethod
+    def calculate_additional_loss(loss_function, pred, target, apply_sigmoid=True, weight_factor=1.0):
+        pred = pred.sigmoid() if apply_sigmoid else pred
+        return weight_factor * loss_function(pred.sigmoid(), target)
 
 
 if __name__ == '__main__':

@@ -44,6 +44,11 @@ class DeepLabV3(Base):
     def calculate_loss(self, pred, target):
         return torch.stack([self.loss_function(p, target) for p in pred])
 
+    @staticmethod
+    def calculate_additional_loss(loss_function, pred, target, apply_sigmoid=True, weight_factor=1.0):
+        pred = [p.sigmoid() if apply_sigmoid else p for p in pred]
+        return torch.stack([weight_factor * loss_function(p, target) for p in pred])
+
 
 class DeepLabV3Plus(Base):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
@@ -101,14 +106,16 @@ class DeepLabV3Plus(Base):
                          use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
                          bilinear=self.config.deep_lab_v3_plus.up.bilinear,
                          channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
-                         use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv),
+                         use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
+                         skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv),
                 up_block(in_ch=self.config.deep_lab_v3_plus.up.in_ch,
                          out_ch=self.config.deep_lab_v3_plus.up.out_ch,
                          use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
                          bilinear=self.config.deep_lab_v3_plus.up.bilinear,
                          channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
                          as_last_layer=True,
-                         use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv)
+                         use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
+                         skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv)
             )
             self.aux_head_corrector = nn.Sequential(
                 up_block(in_ch=self.config.deep_lab_v3_plus.up.in_ch,
@@ -116,20 +123,23 @@ class DeepLabV3Plus(Base):
                          use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
                          bilinear=self.config.deep_lab_v3_plus.up.bilinear,
                          channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
-                         use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv),
+                         use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
+                         skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv),
                 up_block(in_ch=self.config.deep_lab_v3_plus.up.in_ch,
                          out_ch=self.config.deep_lab_v3_plus.up.out_ch,
                          use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
                          bilinear=self.config.deep_lab_v3_plus.up.bilinear,
                          channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
-                         use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv),
+                         use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
+                         skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv),
                 up_block(in_ch=self.config.deep_lab_v3_plus.up.in_ch,
                          out_ch=self.config.deep_lab_v3_plus.up.out_ch,
                          use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
                          bilinear=self.config.deep_lab_v3_plus.up.bilinear,
                          channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
                          as_last_layer=True,
-                         use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv)
+                         use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
+                         skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv)
             )
         else:
             self.head_corrector = nn.Sequential(
@@ -180,6 +190,11 @@ class DeepLabV3Plus(Base):
 
     def calculate_loss(self, pred, target):
         return torch.stack([self.loss_function(p, target) for p in pred])
+
+    @staticmethod
+    def calculate_additional_loss(loss_function, pred, target, apply_sigmoid=True, weight_factor=1.0):
+        pred = [p.sigmoid() if apply_sigmoid else p for p in pred]
+        return torch.stack([weight_factor * loss_function(p, target) for p in pred])
 
 
 if __name__ == '__main__':
