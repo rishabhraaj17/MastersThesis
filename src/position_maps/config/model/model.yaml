@@ -157,10 +157,10 @@ deep_lab_v3_plus:
   up:
     in_ch: 1
     out_ch: 1
-    use_convt2d: True
+    use_convt2d: False
     bilinear: False
     ch_div_factor: 1
-    skip_double_conv: False
+    skip_double_conv: True
     use_double_conv: True
 
   head:
@@ -204,7 +204,7 @@ danet:
   norm:
     type: 'BN'
     requires_grad: True
-  use_up_module: True
+  use_up_module: False
   align_corners: True
   use_correctors: True
   with_aux_head: True
@@ -222,7 +222,7 @@ dmnet:
   norm:
     type: 'BN'
     requires_grad: True
-  use_up_module: True
+  use_up_module: False
   align_corners: True
   use_correctors: True
   with_aux_head: True
@@ -244,6 +244,26 @@ hrnet:
   align_corners: True
   use_correctors: True
   pretrained: null # or url
+  up:
+    in_ch: 1
+    out_ch: 1
+    use_convt2d: False
+    bilinear: False
+    ch_div_factor: 1
+    skip_double_conv: False
+    use_double_conv: False
+
+ocrnet:
+  norm:
+    type: 'BN'
+    requires_grad: True
+  use_up_module: False
+  align_corners: True
+  use_correctors: False
+  pretrained: null # or url
+  num_stages: 2
+  resnet_depth: 50
+  model: 'hr18_small'
   up:
     in_ch: 1
     out_ch: 1

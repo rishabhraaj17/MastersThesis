@@ -30,6 +30,7 @@ from src_lib.models_hub.deeplab import DeepLabV3, DeepLabV3Plus
 from src_lib.models_hub.dmnet import DMNet
 from src_lib.models_hub.hrnet import HRNetwork
 from src_lib.models_hub.msanet import MSANet
+from src_lib.models_hub.ocrnet import OCRNet, OCRResNet
 from src_lib.models_hub.pspnet import PSPUNet, PSPNet
 from src_lib.models_hub.trans_unet import TransUNet
 from src_lib.models_hub.unets import R2AttentionUNet, AttentionUNet
@@ -422,7 +423,8 @@ def overfit(cfg):
     g_weight = 0.5
     image_pad_factor = 16 if cfg.model_hub.model == 'PSPUNet' else 8
 
-    model_hub_models = ['DeepLabV3', 'DeepLabV3Plus', 'PSPUNet', 'DANet', 'DMNet', 'PSPNet', 'CCNet', 'HRNet']
+    model_hub_models = ['DeepLabV3', 'DeepLabV3Plus', 'PSPUNet', 'DANet', 'DMNet', 'PSPNet', 'CCNet', 'HRNet', 'OCRNet',
+                        'OCRResNet']
     if cfg.from_model_hub:
         if cfg.model_hub.model == 'MSANet':
             model = MSANet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
@@ -462,6 +464,14 @@ def overfit(cfg):
                           desired_output_shape=None)
         elif cfg.model_hub.model == 'HRNet':
             model = HRNetwork(config=cfg, train_dataset=None, val_dataset=None,
+                              loss_function=loss_fn, collate_fn=None,
+                              desired_output_shape=None)
+        elif cfg.model_hub.model == 'OCRNet':
+            model = OCRNet(config=cfg, train_dataset=None, val_dataset=None,
+                           loss_function=loss_fn, collate_fn=None,
+                           desired_output_shape=None)
+        elif cfg.model_hub.model == 'OCRResNet':
+            model = OCRResNet(config=cfg, train_dataset=None, val_dataset=None,
                               loss_function=loss_fn, collate_fn=None,
                               desired_output_shape=None)
     else:
@@ -601,7 +611,7 @@ def overfit(cfg):
                     if cfg.model_hub.model in model_hub_models:
                         loss = getattr(torch.Tensor, reduction)(model.calculate_loss(out, heat_masks)) + \
                                getattr(torch.Tensor, reduction)(model.calculate_additional_loss(
-                               gauss_loss_fn, out, heat_masks, apply_sigmoid=True, weight_factor=g_weight))
+                                   gauss_loss_fn, out, heat_masks, apply_sigmoid=True, weight_factor=g_weight))
                     else:
                         loss = model.calculate_loss(out, heat_masks)
                         # loss = torch.tensor([0])  # model.calculate_loss(out, heat_masks)

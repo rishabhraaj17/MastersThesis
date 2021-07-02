@@ -60,6 +60,7 @@ class DeepLabV3Plus(Base):
         )
         self.align_corners = self.config.deep_lab_v3_plus.align_corners
         self.with_aux_head = self.config.deep_lab_v3_plus.with_aux_head
+        self.use_correctors = self.config.deep_lab_v3_plus.use_correctors
 
         norm_cfg = dict(type=self.config.deep_lab_v3_plus.norm.type,
                         requires_grad=self.config.deep_lab_v3_plus.norm.requires_grad)
@@ -144,7 +145,7 @@ class DeepLabV3Plus(Base):
                              use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
                              skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv)
                 )
-        else:
+        elif self.use_correctors:
             self.head_corrector = nn.Sequential(
                 nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0),
                 nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0)
@@ -154,8 +155,10 @@ class DeepLabV3Plus(Base):
                     nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0),
                     nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0)
                 )
-
-        self.use_correctors = self.config.deep_lab_v3_plus.use_correctors
+        else:
+            self.head_corrector = nn.Identity()
+            if self.with_aux_head:
+                self.aux_head_corrector = nn.Identity()
 
         self.init_weights(pretrained=self.config.deep_lab_v3_plus.pretrained)
 
@@ -172,7 +175,8 @@ class DeepLabV3Plus(Base):
     def forward(self, x):
         feats = self.backbone(x)
         out1 = self.head(feats)
-        out2 = self.aux_head(feats)
+        if self.with_aux_head:
+            out2 = self.aux_head(feats)
 
         if not self.config.deep_lab_v3_plus.use_up_module:
             out1 = resize(
