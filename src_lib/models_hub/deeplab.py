@@ -59,6 +59,7 @@ class DeepLabV3Plus(Base):
             desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
         )
         self.align_corners = self.config.deep_lab_v3_plus.align_corners
+        self.with_aux_head = self.config.deep_lab_v3_plus.with_aux_head
 
         norm_cfg = dict(type=self.config.deep_lab_v3_plus.norm.type,
                         requires_grad=self.config.deep_lab_v3_plus.norm.requires_grad)
@@ -85,17 +86,18 @@ class DeepLabV3Plus(Base):
             norm_cfg=norm_cfg,
             align_corners=self.align_corners
         )
-        self.aux_head = FCNHead(
-            in_channels=1024,
-            in_index=2,
-            channels=256,
-            num_convs=1,
-            concat_input=False,
-            dropout_ratio=0.1,
-            num_classes=self.config.deep_lab_v3_plus.aux_head.out_ch,
-            norm_cfg=norm_cfg,
-            align_corners=self.align_corners
-        )
+        if self.with_aux_head:
+            self.aux_head = FCNHead(
+                in_channels=1024,
+                in_index=2,
+                channels=256,
+                num_convs=1,
+                concat_input=False,
+                dropout_ratio=0.1,
+                num_classes=self.config.deep_lab_v3_plus.aux_head.out_ch,
+                norm_cfg=norm_cfg,
+                align_corners=self.align_corners
+            )
 
         up_block = UpProject if self.config.deep_lab_v3_plus.use_fcrn_up_project else Up
 
@@ -117,42 +119,43 @@ class DeepLabV3Plus(Base):
                          use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
                          skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv)
             )
-            self.aux_head_corrector = nn.Sequential(
-                up_block(in_ch=self.config.deep_lab_v3_plus.aux_head_corrector.in_ch[0],
-                         out_ch=self.config.deep_lab_v3_plus.aux_head_corrector.out_ch[0],
-                         use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
-                         bilinear=self.config.deep_lab_v3_plus.up.bilinear,
-                         channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
-                         use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
-                         skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv),
-                up_block(in_ch=self.config.deep_lab_v3_plus.aux_head_corrector.in_ch[1],
-                         out_ch=self.config.deep_lab_v3_plus.aux_head_corrector.out_ch[1],
-                         use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
-                         bilinear=self.config.deep_lab_v3_plus.up.bilinear,
-                         channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
-                         use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
-                         skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv),
-                up_block(in_ch=self.config.deep_lab_v3_plus.aux_head_corrector.in_ch[2],
-                         out_ch=self.config.deep_lab_v3_plus.aux_head_corrector.out_ch[2],
-                         use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
-                         bilinear=self.config.deep_lab_v3_plus.up.bilinear,
-                         channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
-                         as_last_layer=True,
-                         use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
-                         skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv)
-            )
+            if self.with_aux_head:
+                self.aux_head_corrector = nn.Sequential(
+                    up_block(in_ch=self.config.deep_lab_v3_plus.aux_head_corrector.in_ch[0],
+                             out_ch=self.config.deep_lab_v3_plus.aux_head_corrector.out_ch[0],
+                             use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
+                             bilinear=self.config.deep_lab_v3_plus.up.bilinear,
+                             channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
+                             use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
+                             skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv),
+                    up_block(in_ch=self.config.deep_lab_v3_plus.aux_head_corrector.in_ch[1],
+                             out_ch=self.config.deep_lab_v3_plus.aux_head_corrector.out_ch[1],
+                             use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
+                             bilinear=self.config.deep_lab_v3_plus.up.bilinear,
+                             channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
+                             use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
+                             skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv),
+                    up_block(in_ch=self.config.deep_lab_v3_plus.aux_head_corrector.in_ch[2],
+                             out_ch=self.config.deep_lab_v3_plus.aux_head_corrector.out_ch[2],
+                             use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
+                             bilinear=self.config.deep_lab_v3_plus.up.bilinear,
+                             channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
+                             as_last_layer=True,
+                             use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
+                             skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv)
+                )
         else:
             self.head_corrector = nn.Sequential(
                 nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0),
                 nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0)
             )
-            self.aux_head_corrector = nn.Sequential(
-                nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0),
-                nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0)
-            )
+            if self.with_aux_head:
+                self.aux_head_corrector = nn.Sequential(
+                    nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0),
+                    nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0)
+                )
 
         self.use_correctors = self.config.deep_lab_v3_plus.use_correctors
-        self.with_aux_head = self.config.deep_lab_v3_plus.with_aux_head
 
         self.init_weights(pretrained=self.config.deep_lab_v3_plus.pretrained)
 
@@ -177,16 +180,20 @@ class DeepLabV3Plus(Base):
                 size=x.shape[2:],
                 mode='bilinear',
                 align_corners=self.align_corners)
-            out2 = resize(
-                input=out2,
-                size=x.shape[2:],
-                mode='bilinear',
-                align_corners=self.align_corners)
+            if self.with_aux_head:
+                out2 = resize(
+                    input=out2,
+                    size=x.shape[2:],
+                    mode='bilinear',
+                    align_corners=self.align_corners)
 
         if self.use_correctors:
             out1 = self.head_corrector(out1)
-            out2 = self.aux_head_corrector(out2)
-        return out1, out2
+            if self.with_aux_head:
+                out2 = self.aux_head_corrector(out2)
+        if self.with_aux_head:
+            return out1, out2
+        return out1
 
     def calculate_loss(self, pred, target):
         return torch.stack([self.loss_function(p, target) for p in pred])
