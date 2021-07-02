@@ -3,7 +3,7 @@ from typing import Tuple, Optional, Callable
 import torch
 from mmseg.models import ResNetV1c, DepthwiseSeparableASPPHead, FCNHead
 from mmseg.ops import resize
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from torch import nn
 from torch.utils.data import Dataset
 from torchvision.models.segmentation import deeplabv3_resnet50, deeplabv3_resnet101, deeplabv3_mobilenet_v3_large
@@ -81,7 +81,7 @@ class DeepLabV3Plus(Base):
             c1_in_channels=256,
             c1_channels=48,
             dropout_ratio=0.1,
-            num_classes=1,
+            num_classes=self.config.deep_lab_v3_plus.head.out_ch,
             norm_cfg=norm_cfg,
             align_corners=self.align_corners
         )
@@ -92,7 +92,7 @@ class DeepLabV3Plus(Base):
             num_convs=1,
             concat_input=False,
             dropout_ratio=0.1,
-            num_classes=1,
+            num_classes=self.config.deep_lab_v3_plus.aux_head.out_ch,
             norm_cfg=norm_cfg,
             align_corners=self.align_corners
         )
@@ -101,15 +101,15 @@ class DeepLabV3Plus(Base):
 
         if self.config.deep_lab_v3_plus.use_up_module:
             self.head_corrector = nn.Sequential(
-                up_block(in_ch=self.config.deep_lab_v3_plus.up.in_ch,
-                         out_ch=self.config.deep_lab_v3_plus.up.out_ch,
+                up_block(in_ch=self.config.deep_lab_v3_plus.head_corrector.in_ch[0],
+                         out_ch=self.config.deep_lab_v3_plus.head_corrector.out_ch[0],
                          use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
                          bilinear=self.config.deep_lab_v3_plus.up.bilinear,
                          channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
                          use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
                          skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv),
-                up_block(in_ch=self.config.deep_lab_v3_plus.up.in_ch,
-                         out_ch=self.config.deep_lab_v3_plus.up.out_ch,
+                up_block(in_ch=self.config.deep_lab_v3_plus.head_corrector.in_ch[1],
+                         out_ch=self.config.deep_lab_v3_plus.head_corrector.out_ch[1],
                          use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
                          bilinear=self.config.deep_lab_v3_plus.up.bilinear,
                          channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
@@ -118,22 +118,22 @@ class DeepLabV3Plus(Base):
                          skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv)
             )
             self.aux_head_corrector = nn.Sequential(
-                up_block(in_ch=self.config.deep_lab_v3_plus.up.in_ch,
-                         out_ch=self.config.deep_lab_v3_plus.up.out_ch,
+                up_block(in_ch=self.config.deep_lab_v3_plus.aux_head_corrector.in_ch[0],
+                         out_ch=self.config.deep_lab_v3_plus.aux_head_corrector.out_ch[0],
                          use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
                          bilinear=self.config.deep_lab_v3_plus.up.bilinear,
                          channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
                          use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
                          skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv),
-                up_block(in_ch=self.config.deep_lab_v3_plus.up.in_ch,
-                         out_ch=self.config.deep_lab_v3_plus.up.out_ch,
+                up_block(in_ch=self.config.deep_lab_v3_plus.aux_head_corrector.in_ch[1],
+                         out_ch=self.config.deep_lab_v3_plus.aux_head_corrector.out_ch[1],
                          use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
                          bilinear=self.config.deep_lab_v3_plus.up.bilinear,
                          channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
                          use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
                          skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv),
-                up_block(in_ch=self.config.deep_lab_v3_plus.up.in_ch,
-                         out_ch=self.config.deep_lab_v3_plus.up.out_ch,
+                up_block(in_ch=self.config.deep_lab_v3_plus.aux_head_corrector.in_ch[2],
+                         out_ch=self.config.deep_lab_v3_plus.aux_head_corrector.out_ch[2],
                          use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
                          bilinear=self.config.deep_lab_v3_plus.up.bilinear,
                          channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
@@ -198,7 +198,7 @@ class DeepLabV3Plus(Base):
 
 
 if __name__ == '__main__':
-    m = DeepLabV3Plus({}, None, None)
+    m = DeepLabV3Plus(OmegaConf.load('../../src/position_maps/config/model/model.yaml'), None, None)
     inp = torch.randn((2, 3, 480, 480))
     o = m(inp)
     print()

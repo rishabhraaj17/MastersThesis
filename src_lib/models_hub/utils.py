@@ -1,6 +1,7 @@
 import torch
-from mmcv.cnn import build_norm_layer
+from mmcv.cnn import build_norm_layer, kaiming_init, constant_init
 from torch import nn
+from torch.nn.modules.batchnorm import _BatchNorm
 
 
 class SingleConv(nn.Module):
@@ -14,7 +15,7 @@ class SingleConv(nn.Module):
         norm_cfg = dict(type=norm_type, requires_grad=norm_grad)
         if as_last_layer:
             self.net = nn.Sequential(
-                nn.Conv2d(out_ch, out_ch, kernel_size=1, stride=1, padding=0)
+                nn.Conv2d(in_ch, out_ch, kernel_size=1, stride=1, padding=0)
             )
         else:
             self.net = nn.Sequential(
@@ -64,29 +65,39 @@ class Up(nn.Module):
         super().__init__()
         self.up = None
         self.skip_double_conv = skip_double_conv
+        upsample_out_ch = out_ch if skip_double_conv else in_ch // channels_div_factor
         if use_conv_trans2d:
-            self.up = nn.ConvTranspose2d(in_ch, in_ch // channels_div_factor, kernel_size=2, stride=2)
+            self.up = nn.ConvTranspose2d(in_ch, upsample_out_ch, kernel_size=2, stride=2)
         else:
             if bilinear:
                 self.up = nn.Sequential(
                     nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True),
-                    nn.Conv2d(in_ch, in_ch // channels_div_factor, kernel_size=1),
+                    nn.Conv2d(in_ch, upsample_out_ch, kernel_size=1),
                 )
             else:
                 self.up = nn.Sequential(
                     nn.Upsample(scale_factor=2, mode="nearest"),
-                    nn.Conv2d(in_ch, in_ch // channels_div_factor, kernel_size=1),
+                    nn.Conv2d(in_ch, upsample_out_ch, kernel_size=1),
                 )
 
         if not skip_double_conv:
             self.conv = DoubleConv(in_ch, out_ch, as_last_layer=as_last_layer) \
                 if use_double_conv else SingleConv(in_ch, out_ch, as_last_layer=as_last_layer)
 
+        self.init_weights()
+
     def forward(self, x):
         x = self.up(x)
         if self.skip_double_conv:
             return x
         return self.conv(x)
+
+    def init_weights(self):
+        for m in self.modules():
+            if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
+                kaiming_init(m)
+            elif isinstance(m, (_BatchNorm, nn.GroupNorm)):
+                constant_init(m, 1)
 
 
 class UpProject(nn.Module):  # loss goes to nan

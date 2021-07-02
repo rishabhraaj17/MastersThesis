@@ -157,11 +157,30 @@ deep_lab_v3_plus:
   up:
     in_ch: 1
     out_ch: 1
-    use_convt2d: False
+    use_convt2d: True
     bilinear: False
     ch_div_factor: 1
     skip_double_conv: False
-    use_double_conv: False
+    use_double_conv: True
+
+  head:
+#    out_ch: 1
+    out_ch: 64
+  aux_head:
+    out_ch: 32
+#    out_ch: 1
+
+  head_corrector:
+    in_ch: [ 64, 32 ]
+#    in_ch: [ 1, 1 ]
+    out_ch: [ 32, 1 ]
+#    out_ch: [ 1, 1 ]
+
+  aux_head_corrector:
+    in_ch: [ 32, 16, 8 ]
+#    in_ch: [ 1, 1, 1 ]
+    out_ch: [ 16, 8, 1 ]
+#    out_ch: [ 1, 1, 1 ]
 
 ccnet:
   norm:
@@ -221,7 +240,7 @@ hrnet:
   norm:
     type: 'BN'
     requires_grad: True
-  use_up_module: True
+  use_up_module: False
   align_corners: True
   use_correctors: True
   pretrained: null # or url
