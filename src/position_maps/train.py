@@ -26,9 +26,9 @@ import models as model_zoo
 from losses import CenterNetFocalLoss
 from src_lib.models_hub.ccnet import CCNet
 from src_lib.models_hub.danet import DANet
-from src_lib.models_hub.deeplab import DeepLabV3, DeepLabV3Plus
+from src_lib.models_hub.deeplab import DeepLabV3, DeepLabV3Plus, UNetDeepLabV3Plus
 from src_lib.models_hub.dmnet import DMNet
-from src_lib.models_hub.hrnet import HRNetwork
+from src_lib.models_hub.hrnet import HRNetwork, HRPoseNetwork
 from src_lib.models_hub.msanet import MSANet
 from src_lib.models_hub.ocrnet import OCRNet, OCRResNet
 from src_lib.models_hub.pspnet import PSPUNet, PSPNet
@@ -421,10 +421,10 @@ def overfit(cfg):
     # bfl_fn = BinaryFocalLossWithLogits(alpha=0.9, gamma=4)
     gauss_loss_fn = CenterNetFocalLoss()
     g_weight = 0.5
-    image_pad_factor = 16 if cfg.model_hub.model == 'PSPUNet' else 8
+    image_pad_factor = 16 if cfg.model_hub.model in ['PSPUNet', 'UNetDeepLabV3Plus'] else 8
 
     model_hub_models = ['DeepLabV3', 'DeepLabV3Plus', 'PSPUNet', 'DANet', 'DMNet', 'PSPNet', 'CCNet', 'HRNet', 'OCRNet',
-                        'OCRResNet']
+                        'OCRResNet', 'UNetDeepLabV3Plus', 'HRPoseNetwork']
     if cfg.from_model_hub:
         if cfg.model_hub.model == 'MSANet':
             model = MSANet(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
@@ -439,9 +439,17 @@ def overfit(cfg):
                                   loss_function=loss_fn, collate_fn=None,
                                   desired_output_shape=None)
         elif cfg.model_hub.model == 'DeepLabV3':
+            keys_to_remove = ['classifier.4.weight', 'classifier.4.bias',
+                              'aux_classifier.4.weight', 'aux_classifier.4.bias']
+            pretrained_state_dict = torch.load(
+                '/home/rishabh/.cache/torch/hub/checkpoints/deeplabv3_resnet50_coco-cd0a2569.pth',
+                map_location=cfg.device)
+            pretrained_state_dict = {k: v for k, v in pretrained_state_dict.items() if k not in keys_to_remove}
+
             model = DeepLabV3(config=cfg, train_dataset=None, val_dataset=None,
                               loss_function=loss_fn, collate_fn=None,
                               desired_output_shape=None)
+            model.net.load_state_dict(pretrained_state_dict, strict=False)
         elif cfg.model_hub.model == 'PSPUNet':
             model = PSPUNet(config=cfg, train_dataset=None, val_dataset=None,
                             loss_function=loss_fn, collate_fn=None,
@@ -474,6 +482,14 @@ def overfit(cfg):
             model = OCRResNet(config=cfg, train_dataset=None, val_dataset=None,
                               loss_function=loss_fn, collate_fn=None,
                               desired_output_shape=None)
+        elif cfg.model_hub.model == 'UNetDeepLabV3Plus':
+            model = UNetDeepLabV3Plus(config=cfg, train_dataset=None, val_dataset=None,
+                                      loss_function=loss_fn, collate_fn=None,
+                                      desired_output_shape=None)
+        elif cfg.model_hub.model == 'HRPoseNetwork':
+            model = HRPoseNetwork(config=cfg, train_dataset=None, val_dataset=None,
+                                  loss_function=loss_fn, collate_fn=None,
+                                  desired_output_shape=None)
     else:
         if network_type.__name__ == 'HourGlassPositionMapNetwork':
             model = network_type.from_config(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
@@ -522,7 +538,7 @@ def overfit(cfg):
         model.train()
 
         train_loss = []
-        for data in train_loader:
+        for t_idx, data in enumerate(train_loader):
             # opt.zero_grad()
 
             frames, heat_masks, position_map, distribution_map, class_maps, meta = data
@@ -574,10 +590,15 @@ def overfit(cfg):
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, norm_type=2)
             # opt.step()
 
-        if epoch % 6 == 0 or epoch == cfg.overfit.num_epochs - 1:
-            opt.step()
-            opt.zero_grad()
+            if t_idx % 6 == 0 or t_idx == (len(train_loader)) - 1:
+                opt.step()
+                opt.zero_grad()
         sch.step(np.array(train_loss).mean())
+
+        # if epoch % 6 == 0 or epoch == cfg.overfit.num_epochs - 1:
+        #     opt.step()
+        #     opt.zero_grad()
+        # sch.step(np.array(train_loss).mean())
 
         logger.info(f"Epoch: {epoch} | Train Loss: {np.array(train_loss).mean()}")
 
@@ -636,7 +657,7 @@ def overfit(cfg):
                 random_idx = np.random.choice(cfg.overfit.batch_size, 1, replace=False).item()
 
                 if cfg.from_model_hub:
-                    show = np.random.choice(2, 1, replace=False, p=[0.65, 0.35]).item()
+                    show = np.random.choice(2, 1, replace=False, p=[0.85, 0.15]).item()
 
                     if cfg.model_hub.model in model_hub_models:
                         if isinstance(out, (list, tuple)):

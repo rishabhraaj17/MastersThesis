@@ -1,6 +1,7 @@
 from typing import Tuple, Optional, Callable
 
 import torch
+from mmpose.models import TopdownHeatmapSimpleHead
 from mmseg.models import HRNet, FCNHead
 from mmseg.ops import resize
 from omegaconf import DictConfig, OmegaConf
@@ -20,6 +21,7 @@ class HRNetwork(Base):
             desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
         )
         self.align_corners = self.config.hrnet.align_corners
+        self.use_correctors = self.config.hrnet.use_correctors
 
         norm_cfg = dict(type=self.config.hrnet.norm.type,
                         requires_grad=self.config.hrnet.norm.requires_grad)
@@ -84,13 +86,13 @@ class HRNetwork(Base):
                    use_double_conv=self.config.hrnet.up.use_double_conv,
                    skip_double_conv=self.config.hrnet.up.skip_double_conv)
             )
-        else:
+        elif self.use_correctors:
             self.head_corrector = nn.Sequential(
                 nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0),
                 nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0)
             )
-
-        self.use_correctors = self.config.hrnet.use_correctors
+        else:
+            self.head_corrector = nn.Identity()
 
         self.init_weights(pretrained=self.config.hrnet.pretrained)
 
@@ -121,8 +123,115 @@ class HRNetwork(Base):
         return weight_factor * loss_function(pred.sigmoid(), target)
 
 
+class HRPoseNetwork(Base):
+    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                 collate_fn: Optional[Callable] = None):
+        super(HRPoseNetwork, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
+        )
+        self.align_corners = self.config.hrposenet.align_corners
+        self.use_correctors = self.config.hrposenet.use_correctors
+
+        norm_cfg = dict(type=self.config.hrposenet.norm.type,
+                        requires_grad=self.config.hrposenet.norm.requires_grad)
+        self.backbone = HRNet(
+            in_channels=3,
+            extra=dict(
+                stage1=dict(
+                    num_modules=1,
+                    num_branches=1,
+                    block='BOTTLENECK',
+                    num_blocks=(4,),
+                    num_channels=(64,)),
+                stage2=dict(
+                    num_modules=1,
+                    num_branches=2,
+                    block='BASIC',
+                    num_blocks=(4, 4),
+                    num_channels=(32, 64)),
+                stage3=dict(
+                    num_modules=4,
+                    num_branches=3,
+                    block='BASIC',
+                    num_blocks=(4, 4, 4),
+                    num_channels=(32, 64, 128)),
+                stage4=dict(
+                    num_modules=3,
+                    num_branches=4,
+                    block='BASIC',
+                    num_blocks=(4, 4, 4, 4),
+                    num_channels=(32, 64, 128, 256)))
+        )
+        self.head = TopdownHeatmapSimpleHead(
+            in_channels=32,
+            out_channels=1,
+            num_deconv_layers=2,
+            num_deconv_filters=(256, 256),
+            num_deconv_kernels=(4, 4),
+            extra=dict(final_conv_kernel=1, ),
+            align_corners=self.align_corners,
+            loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True)
+        )
+
+        if self.config.hrposenet.use_up_module:
+            self.head_corrector = nn.Sequential(
+                Up(in_ch=self.config.hrposenet.up.in_ch,
+                   out_ch=self.config.hrposenet.up.out_ch,
+                   use_conv_trans2d=self.config.hrposenet.up.use_convt2d,
+                   bilinear=self.config.hrposenet.up.bilinear,
+                   channels_div_factor=self.config.hrposenet.up.ch_div_factor,
+                   use_double_conv=self.config.hrposenet.up.use_double_conv,
+                   skip_double_conv=self.config.hrposenet.up.skip_double_conv),
+                Up(in_ch=self.config.hrposenet.up.in_ch,
+                   out_ch=self.config.hrposenet.up.out_ch,
+                   use_conv_trans2d=self.config.hrposenet.up.use_convt2d,
+                   bilinear=self.config.hrposenet.up.bilinear,
+                   channels_div_factor=self.config.hrposenet.up.ch_div_factor,
+                   as_last_layer=True,
+                   use_double_conv=self.config.hrposenet.up.use_double_conv,
+                   skip_double_conv=self.config.hrposenet.up.skip_double_conv)
+            )
+        elif self.use_correctors:
+            self.head_corrector = nn.Sequential(
+                nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0),
+                nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0)
+            )
+        else:
+            self.head_corrector = nn.Identity()
+
+        self.init_weights(pretrained=self.config.hrposenet.pretrained)
+
+    def init_weights(self, pretrained=None):
+        self.backbone.init_weights(pretrained=pretrained)
+        self.head.init_weights()
+
+    def forward(self, x):
+        feats = self.backbone(x)
+        out = self.head(feats)
+
+        if not self.config.hrposenet.use_up_module and out.shape[2:] != x.shape[2:]:
+            out = resize(
+                input=out,
+                size=x.shape[2:],
+                mode='bilinear',
+                align_corners=self.align_corners)
+
+        out = self.head_corrector(out)
+        return out
+
+    def calculate_loss(self, pred, target):
+        return self.loss_function(pred, target)
+
+    @staticmethod
+    def calculate_additional_loss(loss_function, pred, target, apply_sigmoid=True, weight_factor=1.0):
+        pred = pred.sigmoid() if apply_sigmoid else pred
+        return weight_factor * loss_function(pred.sigmoid(), target)
+
+
 if __name__ == '__main__':
-    m = HRNetwork(OmegaConf.load('../../src/position_maps/config/model/model.yaml'), None, None)
+    m = HRPoseNetwork(OmegaConf.load('../../src/position_maps/config/model/model.yaml'), None, None)
     inp = torch.randn((2, 3, 480, 480))
     o = m(inp)
     print()
