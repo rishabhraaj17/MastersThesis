@@ -24,6 +24,7 @@ from log import get_logger
 from dataset import SDDFrameAndAnnotationDataset
 import models as model_zoo
 from losses import CenterNetFocalLoss
+import src_lib.models_hub as hub
 from src_lib.models_hub.ccnet import CCNet
 from src_lib.models_hub.danet import DANet
 from src_lib.models_hub.deeplab import DeepLabV3, DeepLabV3Plus, UNetDeepLabV3Plus
@@ -389,6 +390,46 @@ def train(cfg):
         model = network_type(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
                              loss_function=loss_fn, collate_fn=heat_map_collate_fn,
                              desired_output_shape=target_max_shape)
+
+    logger.info(f'Setting up Trainer...')
+
+    model, trainer = setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset)
+    logger.info(f'Starting training...')
+
+    trainer.fit(model)
+
+
+def build_loss(cfg):
+    loss_fn = BinaryFocalLossWithLogits(
+        alpha=cfg.loss.bfl.alpha, gamma=cfg.loss.bfl.gamma, reduction=cfg.loss.reduction)
+    gauss_loss_fn = CenterNetFocalLoss()
+    return loss_fn, gauss_loss_fn
+
+
+def build_model(cfg, train_dataset, val_dataset, loss_function, collate_fn=None, desired_output_shape=None):
+    return getattr(hub, cfg.model)(
+        config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
+        loss_function=loss_function, collate_fn=collate_fn,
+        desired_output_shape=desired_output_shape)
+
+
+@hydra.main(config_path="config", config_name="config")
+def train_v1(cfg):
+    logger.info(f'Setting up DataLoader and Model...')
+
+    # runtime config adjustments
+    if cfg.trainer.accelerator in ['ddp', 'ddp_cpu']:
+        cfg.num_workers = 0
+        cfg.dataset_workers = 0
+
+    # train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
+    train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
+
+    loss_fn, gaussian_loss_fn = build_loss(cfg)
+
+    # todo: make model consume multiple losses with weights
+    model = build_model(cfg, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_fn,
+                        collate_fn=heat_map_collate_fn, desired_output_shape=target_max_shape)
 
     logger.info(f'Setting up Trainer...')
 
