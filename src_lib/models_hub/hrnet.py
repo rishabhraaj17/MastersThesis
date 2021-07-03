@@ -11,6 +11,192 @@ from torch.utils.data import Dataset
 from src_lib.models_hub.base import Base
 from src_lib.models_hub.utils import Up
 
+HEAD_CONFIG = {
+    'zero': {
+        'num_deconv_layers': 0,
+        'num_deconv_filters': (256, 256),
+        'num_deconv_kernels': (4, 4),
+        'extra': dict(final_conv_kernel=1, )
+    },
+    'two_four': {
+        'num_deconv_layers': 2,
+        'num_deconv_filters': (256, 256),
+        'num_deconv_kernels': (4, 4),
+        'extra': dict(final_conv_kernel=1, )
+    },
+    'two_two': {
+        'num_deconv_layers': 2,
+        'num_deconv_filters': (256, 256),
+        'num_deconv_kernels': (2, 2),
+        'extra': dict(final_conv_kernel=1, )
+    },
+    'two_one': {
+        'num_deconv_layers': 2,
+        'num_deconv_filters': (256, 256),
+        'num_deconv_kernels': (1, 1),
+        'extra': dict(final_conv_kernel=1, )
+    }
+}
+
+CONFIG = {
+    'hr18': {
+        'stage1': {
+            'num_modules': 1,
+            'num_branches': 1,
+            'num_blocks': (4,),
+            'num_channels': (64,),
+        },
+        'stage2': {
+            'num_modules': 1,
+            'num_branches': 2,
+            'num_blocks': (4, 4),
+            'num_channels': (18, 36),
+        },
+        'stage3': {
+            'num_modules': 4,
+            'num_branches': 3,
+            'num_blocks': (4, 4, 4),
+            'num_channels': (18, 36, 72),
+        },
+        'stage4': {
+            'num_modules': 3,
+            'num_branches': 4,
+            'num_blocks': (4, 4, 4, 4),
+            'num_channels': (18, 36, 72, 144),
+        },
+    },
+    'hr18_small': {
+        'stage1': {
+            'num_modules': 1,
+            'num_branches': 1,
+            'num_blocks': (2,),
+            'num_channels': (64,),
+        },
+        'stage2': {
+            'num_modules': 1,
+            'num_branches': 2,
+            'num_blocks': (2, 2),
+            'num_channels': (18, 36),
+        },
+        'stage3': {
+            'num_modules': 3,
+            'num_branches': 3,
+            'num_blocks': (2, 2, 2),
+            'num_channels': (18, 36, 72),
+        },
+        'stage4': {
+            'num_modules': 2,
+            'num_branches': 4,
+            'num_blocks': (2, 2, 2, 2),
+            'num_channels': (18, 36, 72, 144),
+        },
+    },
+    'hr32': {
+        'stage1': {
+            'num_modules': 1,
+            'num_branches': 1,
+            'num_blocks': (4,),
+            'num_channels': (64,),
+        },
+        'stage2': {
+            'num_modules': 1,
+            'num_branches': 2,
+            'num_blocks': (4, 4),
+            'num_channels': (32, 64),
+        },
+        'stage3': {
+            'num_modules': 4,
+            'num_branches': 3,
+            'num_blocks': (4, 4, 4),
+            'num_channels': (32, 64, 128),
+        },
+        'stage4': {
+            'num_modules': 3,
+            'num_branches': 4,
+            'num_blocks': (4, 4, 4, 4),
+            'num_channels': (32, 64, 128, 256),
+        },
+    },
+    'hr32_small': {
+        'stage1': {
+            'num_modules': 1,
+            'num_branches': 1,
+            'num_blocks': (2,),
+            'num_channels': (64,),
+        },
+        'stage2': {
+            'num_modules': 1,
+            'num_branches': 2,
+            'num_blocks': (2, 2),
+            'num_channels': (32, 64),
+        },
+        'stage3': {
+            'num_modules': 3,
+            'num_branches': 3,
+            'num_blocks': (2, 2, 2),
+            'num_channels': (32, 64, 128),
+        },
+        'stage4': {
+            'num_modules': 2,
+            'num_branches': 4,
+            'num_blocks': (2, 2, 2, 2),
+            'num_channels': (32, 64, 128, 256),
+        },
+    },
+    'hr48': {
+        'stage1': {
+            'num_modules': 1,
+            'num_branches': 1,
+            'num_blocks': (4,),
+            'num_channels': (64,),
+        },
+        'stage2': {
+            'num_modules': 1,
+            'num_branches': 2,
+            'num_blocks': (4, 4),
+            'num_channels': (48, 96),
+        },
+        'stage3': {
+            'num_modules': 4,
+            'num_branches': 3,
+            'num_blocks': (4, 4, 4),
+            'num_channels': (48, 96, 192),
+        },
+        'stage4': {
+            'num_modules': 3,
+            'num_branches': 4,
+            'num_blocks': (4, 4, 4, 4),
+            'num_channels': (48, 96, 192, 384),
+        },
+    },
+    'hr48_small': {
+        'stage1': {
+            'num_modules': 1,
+            'num_branches': 1,
+            'num_blocks': (2,),
+            'num_channels': (64,),
+        },
+        'stage2': {
+            'num_modules': 1,
+            'num_branches': 2,
+            'num_blocks': (2, 2),
+            'num_channels': (48, 96),
+        },
+        'stage3': {
+            'num_modules': 3,
+            'num_branches': 3,
+            'num_blocks': (2, 2, 2),
+            'num_channels': (48, 96, 192),
+        },
+        'stage4': {
+            'num_modules': 2,
+            'num_branches': 4,
+            'num_blocks': (2, 2, 2, 2),
+            'num_channels': (48, 96, 192, 384),
+        },
+    },
+}
+
 
 class HRNetwork(Base):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
@@ -140,37 +326,42 @@ class HRPoseNetwork(Base):
             in_channels=3,
             extra=dict(
                 stage1=dict(
-                    num_modules=1,
-                    num_branches=1,
+                    num_modules=CONFIG[self.config.hrposenet.model]['stage1']['num_modules'],
+                    num_branches=CONFIG[self.config.hrposenet.model]['stage1']['num_branches'],
+                    num_blocks=CONFIG[self.config.hrposenet.model]['stage1']['num_blocks'],
+                    num_channels=CONFIG[self.config.hrposenet.model]['stage1']['num_channels'],
                     block='BOTTLENECK',
-                    num_blocks=(4,),
-                    num_channels=(64,)),
+                ),
                 stage2=dict(
-                    num_modules=1,
-                    num_branches=2,
+                    num_modules=CONFIG[self.config.hrposenet.model]['stage2']['num_modules'],
+                    num_branches=CONFIG[self.config.hrposenet.model]['stage2']['num_branches'],
+                    num_blocks=CONFIG[self.config.hrposenet.model]['stage2']['num_blocks'],
+                    num_channels=CONFIG[self.config.hrposenet.model]['stage2']['num_channels'],
                     block='BASIC',
-                    num_blocks=(4, 4),
-                    num_channels=(32, 64)),
+                ),
                 stage3=dict(
-                    num_modules=4,
-                    num_branches=3,
+                    num_modules=CONFIG[self.config.hrposenet.model]['stage3']['num_modules'],
+                    num_branches=CONFIG[self.config.hrposenet.model]['stage3']['num_branches'],
+                    num_blocks=CONFIG[self.config.hrposenet.model]['stage3']['num_blocks'],
+                    num_channels=CONFIG[self.config.hrposenet.model]['stage3']['num_channels'],
                     block='BASIC',
-                    num_blocks=(4, 4, 4),
-                    num_channels=(32, 64, 128)),
+                ),
                 stage4=dict(
-                    num_modules=3,
-                    num_branches=4,
+                    num_modules=CONFIG[self.config.hrposenet.model]['stage4']['num_modules'],
+                    num_branches=CONFIG[self.config.hrposenet.model]['stage4']['num_branches'],
+                    num_blocks=CONFIG[self.config.hrposenet.model]['stage4']['num_blocks'],
+                    num_channels=CONFIG[self.config.hrposenet.model]['stage4']['num_channels'],
                     block='BASIC',
-                    num_blocks=(4, 4, 4, 4),
-                    num_channels=(32, 64, 128, 256)))
+                ),
+            )
         )
         self.head = TopdownHeatmapSimpleHead(
             in_channels=32,
             out_channels=1,
-            num_deconv_layers=2,
-            num_deconv_filters=(256, 256),
-            num_deconv_kernels=(4, 4),
-            extra=dict(final_conv_kernel=1, ),
+            num_deconv_layers=HEAD_CONFIG[self.config.hrposenet.head_conf]['num_deconv_layers'],
+            num_deconv_filters=HEAD_CONFIG[self.config.hrposenet.head_conf]['num_deconv_filters'],
+            num_deconv_kernels=HEAD_CONFIG[self.config.hrposenet.head_conf]['num_deconv_kernels'],
+            extra=HEAD_CONFIG[self.config.hrposenet.head_conf]['extra'],
             align_corners=self.align_corners,
             loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True)
         )
