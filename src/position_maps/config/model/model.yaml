@@ -155,6 +155,7 @@ deep_lab_v3_plus:
   use_correctors: False
   with_aux_head: True
   pretrained: 'open-mmlab://resnet50_v1c' # or url
+
   up:
     in_ch: 1
     out_ch: 1
@@ -164,7 +165,9 @@ deep_lab_v3_plus:
     skip_double_conv: True
     use_double_conv: True
 
-  aspp_head: True  # if false then DepthwiseSeparableASPPHead
+  aspp_head: False  # if false then DepthwiseSeparableASPPHead
+  with_deconv_head: True
+  head_conf: 'three_two'
   resnet_depth: 50
 
   head:
@@ -264,8 +267,8 @@ hrposenet:
   use_up_module: False
   align_corners: True
   use_correctors: False
-  pretrained: 'https://download.openmmlab.com/mmpose/pretrain_models/hrnet_w32-36af842e.pth' # or url
-  head_conf: 'zero'
+  pretrained: null # 'https://download.openmmlab.com/mmpose/pretrain_models/hrnet_w32-36af842e.pth' # or url
+  head_conf: 'two_two'
   model: 'hr32'
   up:
     in_ch: 1
