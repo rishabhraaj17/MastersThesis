@@ -19,13 +19,15 @@ def weights_init(m):
 class Base(LightningModule):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
                  desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
-                 collate_fn: Optional[Callable] = None):
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
         super(Base, self).__init__()
         self.config = config
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
 
         self.loss_function = loss_function
+        self.additional_loss_functions = additional_loss_functions
+
         self.collate_fn = collate_fn
         self.desired_output_shape = desired_output_shape
 
@@ -84,10 +86,11 @@ class Base(LightningModule):
 class BaseDDP(Base):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
                  desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
-                 collate_fn: Optional[Callable] = None):
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
         super(BaseDDP, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset,
-            desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
         )
 
     def training_step(self, batch, batch_idx):

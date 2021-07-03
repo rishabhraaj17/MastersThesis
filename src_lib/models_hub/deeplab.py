@@ -1,4 +1,4 @@
-from typing import Tuple, Optional, Callable
+from typing import Tuple, Optional, Callable, List
 
 import torch
 from mmpose.models import TopdownHeatmapSimpleHead
@@ -50,10 +50,11 @@ HEAD_CONFIG = {
 class DeepLabV3(Base):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
                  desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
-                 collate_fn: Optional[Callable] = None):
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
         super(DeepLabV3, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset,
-            desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
+            desired_output_shape=desired_output_shape, loss_function=loss_function, 
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
         )
         if self.config.deep_lab_v3.backbone == 'r50':
             self.net = deeplabv3_resnet50(pretrained=self.config.deep_lab_v3.pretrained,
@@ -88,10 +89,11 @@ class DeepLabV3(Base):
 class DeepLabV3Plus(Base):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
                  desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
-                 collate_fn: Optional[Callable] = None):
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
         super(DeepLabV3Plus, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset,
-            desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
+            desired_output_shape=desired_output_shape, loss_function=loss_function, 
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
         )
         self.align_corners = self.config.deep_lab_v3_plus.align_corners
         self.with_aux_head = self.config.deep_lab_v3_plus.with_aux_head
@@ -278,10 +280,11 @@ class DeepLabV3Plus(Base):
 class UNetDeepLabV3Plus(Base):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
                  desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
-                 collate_fn: Optional[Callable] = None):
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
         super(UNetDeepLabV3Plus, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset,
-            desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
+            desired_output_shape=desired_output_shape, loss_function=loss_function, 
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
         )
         self.align_corners = self.config.deep_lab_v3_plus.align_corners
         self.with_aux_head = self.config.deep_lab_v3_plus.with_aux_head

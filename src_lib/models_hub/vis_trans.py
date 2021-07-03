@@ -1,4 +1,4 @@
-from typing import Tuple, Callable, Optional
+from typing import Tuple, Callable, Optional, List
 
 import hydra
 import torch
@@ -53,10 +53,11 @@ class VITSegmentationHead(nn.Module):
 class VisionTransformerSegmentation(Base):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
                  desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
-                 collate_fn: Optional[Callable] = None):
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
         super(VisionTransformerSegmentation, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset,
-            desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
+            desired_output_shape=desired_output_shape, loss_function=loss_function, 
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
         )
         self.backbone = VisionTransformer(
             img_size=tuple(self.config.vit.img_size), patch_size=self.config.vit.patch_size,

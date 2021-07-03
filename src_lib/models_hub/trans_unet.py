@@ -2,7 +2,7 @@ import copy
 import math
 from collections import OrderedDict
 from os.path import join as pjoin
-from typing import Tuple, Optional, Callable
+from typing import Tuple, Optional, Callable, List
 
 import ml_collections
 import numpy as np
@@ -805,10 +805,11 @@ class VisionTransformer(nn.Module):
 class TransUNet(Base):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
                  desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
-                 collate_fn: Optional[Callable] = None):
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
         super(TransUNet, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset,
-            desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
         )
         self.net = VisionTransformer(config=CONFIGS[self.config.trans_unet.config],
                                      img_size=self.config.trans_unet.img_size,

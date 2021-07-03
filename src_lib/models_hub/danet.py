@@ -1,4 +1,4 @@
-from typing import Tuple, Optional, Callable
+from typing import Tuple, Optional, Callable, List
 
 import torch
 from mmseg.models import ResNetV1c, DAHead, FCNHead
@@ -14,10 +14,11 @@ from src_lib.models_hub.utils import Up
 class DANet(Base):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
                  desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
-                 collate_fn: Optional[Callable] = None):
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
         super(DANet, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset,
-            desired_output_shape=desired_output_shape, loss_function=loss_function, collate_fn=collate_fn
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
         )
         self.align_corners = self.config.danet.align_corners
 
