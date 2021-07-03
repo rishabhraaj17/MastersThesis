@@ -266,7 +266,7 @@ class DeepLabV3Plus(Base):
             return out1, out3
         if self.with_aux_head:
             return out1, out2
-        return out1
+        return [out1]
 
     def calculate_loss(self, pred, target):
         return torch.stack([self.loss_function(p, target) for p in pred])

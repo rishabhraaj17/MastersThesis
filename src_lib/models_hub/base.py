@@ -42,6 +42,13 @@ class Base(LightningModule):
     def calculate_loss(self, pred, target):
         return NotImplementedError
 
+    def calculate_additional_losses(self, pred, target, weights, apply_sigmoid):
+        losses = []
+        for loss_fn, weight, use_sigmoid in zip(self.additional_loss_functions, weights, apply_sigmoid):
+            pred = [p.sigmoid() if use_sigmoid else p for p in pred]
+            losses.append(torch.stack([weight * loss_fn(p, target) for p in pred]))
+        return torch.stack(losses)
+
     def training_step(self, batch, batch_idx):
         loss = self._one_step(batch)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
