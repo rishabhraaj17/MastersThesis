@@ -265,6 +265,27 @@ hrposenet:
   align_corners: True
   use_correctors: False
   pretrained: 'https://download.openmmlab.com/mmpose/pretrain_models/hrnet_w32-36af842e.pth' # or url
+  head_conf: 'zero'
+  model: 'hr32'
+  up:
+    in_ch: 1
+    out_ch: 1
+    use_convt2d: False
+    bilinear: False
+    ch_div_factor: 1
+    skip_double_conv: False
+    use_double_conv: False
+
+topdownposenet:
+  norm:
+    type: 'BN'
+    requires_grad: True
+  use_up_module: False
+  align_corners: True
+  use_correctors: False
+  pretrained: null # or url
+  head_conf: 'two_two'
+  backbone: 'resnet50'
   up:
     in_ch: 1
     out_ch: 1

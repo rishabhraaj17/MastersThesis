@@ -30,7 +30,7 @@ HEAD_CONFIG = {
         'num_deconv_kernels': (2, 2),
         'extra': dict(final_conv_kernel=1, )
     },
-    'two_one': {
+    'two_one': {  # not supported
         'num_deconv_layers': 2,
         'num_deconv_filters': (256, 256),
         'num_deconv_kernels': (1, 1),
