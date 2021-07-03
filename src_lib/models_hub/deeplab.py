@@ -1,6 +1,7 @@
 from typing import Tuple, Optional, Callable
 
 import torch
+from mmpose.models import TopdownHeatmapSimpleHead
 from mmseg.models import ResNetV1c, DepthwiseSeparableASPPHead, FCNHead, ASPPHead, UNet
 from mmseg.ops import resize
 from omegaconf import DictConfig, OmegaConf
@@ -10,6 +11,40 @@ from torchvision.models.segmentation import deeplabv3_resnet50, deeplabv3_resnet
 
 from src_lib.models_hub.base import Base
 from src_lib.models_hub.utils import Up, UpProject
+
+
+HEAD_CONFIG = {
+    'zero': {
+        'num_deconv_layers': 0,
+        'num_deconv_filters': (256, 256, 256),
+        'num_deconv_kernels': (4, 4, 4),
+        'extra': dict(final_conv_kernel=1, )
+    },
+    'three_four': {
+        'num_deconv_layers': 3,
+        'num_deconv_filters': (256, 256, 256),
+        'num_deconv_kernels': (4, 4, 4),
+        'extra': dict(final_conv_kernel=1, )
+    },
+    'three_two': {
+        'num_deconv_layers': 3,
+        'num_deconv_filters': (256, 256, 256),
+        'num_deconv_kernels': (2, 2, 2),
+        'extra': dict(final_conv_kernel=1, )
+    },
+    'two_four': {
+        'num_deconv_layers': 2,
+        'num_deconv_filters': (256, 256),
+        'num_deconv_kernels': (4, 4),
+        'extra': dict(final_conv_kernel=1, )
+    },
+    'two_two': {
+        'num_deconv_layers': 2,
+        'num_deconv_filters': (256, 256),
+        'num_deconv_kernels': (2, 2),
+        'extra': dict(final_conv_kernel=1, )
+    },
+}
 
 
 class DeepLabV3(Base):
@@ -60,6 +95,7 @@ class DeepLabV3Plus(Base):
         )
         self.align_corners = self.config.deep_lab_v3_plus.align_corners
         self.with_aux_head = self.config.deep_lab_v3_plus.with_aux_head
+        self.with_deconv_head = self.config.deep_lab_v3_plus.with_deconv_head
         self.use_correctors = self.config.deep_lab_v3_plus.use_correctors
 
         norm_cfg = dict(type=self.config.deep_lab_v3_plus.norm.type,
@@ -110,6 +146,18 @@ class DeepLabV3Plus(Base):
                 num_classes=self.config.deep_lab_v3_plus.aux_head.out_ch,
                 norm_cfg=norm_cfg,
                 align_corners=self.align_corners
+            )
+        if self.with_deconv_head:
+            self.deconv_head = TopdownHeatmapSimpleHead(
+                in_channels=1024,  # 2048,
+                out_channels=1,
+                in_index=2,  # 3,
+                num_deconv_layers=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['num_deconv_layers'],
+                num_deconv_filters=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['num_deconv_filters'],
+                num_deconv_kernels=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['num_deconv_kernels'],
+                extra=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['extra'],
+                align_corners=self.align_corners,
+                loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True)
             )
 
         up_block = UpProject if self.config.deep_lab_v3_plus.use_fcrn_up_project else Up
@@ -189,6 +237,8 @@ class DeepLabV3Plus(Base):
         out1 = self.head(feats)
         if self.with_aux_head:
             out2 = self.aux_head(feats)
+        if self.with_deconv_head:
+            out3 = self.deconv_head(list(feats))
 
         if not self.config.deep_lab_v3_plus.use_up_module:
             out1 = resize(
@@ -207,6 +257,11 @@ class DeepLabV3Plus(Base):
             out1 = self.head_corrector(out1)
             if self.with_aux_head:
                 out2 = self.aux_head_corrector(out2)
+
+        if self.with_aux_head and self.with_deconv_head:
+            return out1, out2, out3
+        if self.with_deconv_head:
+            return out1, out3
         if self.with_aux_head:
             return out1, out2
         return out1
