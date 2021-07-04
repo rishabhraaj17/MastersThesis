@@ -103,6 +103,11 @@ class DeepLabV3Plus(Base):
 
         norm_cfg = dict(type=self.config.deep_lab_v3_plus.norm.type,
                         requires_grad=self.config.deep_lab_v3_plus.norm.requires_grad)
+
+        # init_cfg = None
+        # if self.config.deep_lab_v3_plus.pretrained is not None:
+        #     init_cfg = dict(type='Pretrained', checkpoint=self.config.deep_lab_v3_plus.pretrained)
+
         self.backbone = ResNetV1c(
             depth=self.config.deep_lab_v3_plus.resnet_depth,
             num_stages=4,
@@ -112,7 +117,9 @@ class DeepLabV3Plus(Base):
             norm_cfg=norm_cfg,
             norm_eval=False,
             style='pytorch',
-            contract_dilation=True
+            contract_dilation=True,
+            init_cfg=None,
+            pretrained=self.config.deep_lab_v3_plus.pretrained
         )
         if self.config.deep_lab_v3_plus.aspp_head:
             self.head = ASPPHead(
@@ -223,10 +230,10 @@ class DeepLabV3Plus(Base):
             if self.with_aux_head:
                 self.aux_head_corrector = nn.Identity()
 
-        self.init_weights(pretrained=self.config.deep_lab_v3_plus.pretrained)
+        self.init_weights()
 
-    def init_weights(self, pretrained=None):
-        self.backbone.init_weights(pretrained=pretrained)
+    def init_weights(self):
+        self.backbone.init_weights()
         self.head.init_weights()
         if self.with_aux_head:
             if isinstance(self.aux_head, nn.ModuleList):
@@ -234,6 +241,12 @@ class DeepLabV3Plus(Base):
                     a_head.init_weights()
             else:
                 self.aux_head.init_weights()
+        if self.with_deconv_head:
+            if isinstance(self.deconv_head, nn.ModuleList):
+                for d_head in self.deconv_head:
+                    d_head.init_weights()
+            else:
+                self.deconv_head.init_weights()
 
     def forward(self, x):
         feats = self.backbone(x)
