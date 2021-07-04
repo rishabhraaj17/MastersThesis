@@ -509,6 +509,9 @@ class DeepLabV3PlusDDP(BaseDDP):
         self.with_deconv_head = self.config.deep_lab_v3_plus.with_deconv_head
         self.use_correctors = self.config.deep_lab_v3_plus.use_correctors
 
+        if self.config.deep_lab_v3_plus.load_pretrained_manually:
+            self.config.deep_lab_v3_plus.pretrained = None
+
         norm_cfg = dict(type='SyncBN',
                         requires_grad=self.config.deep_lab_v3_plus.norm.requires_grad)
         self.backbone = ResNetV1c(
@@ -641,6 +644,12 @@ class DeepLabV3PlusDDP(BaseDDP):
 
     def init_weights(self):
         self.backbone.init_weights()
+        if self.config.deep_lab_v3_plus.load_pretrained_manually:
+            print(f'Loading pretrained model locally from {self.config.deep_lab_v3_plus.local_pretrained_path}')
+            state_dict = torch.load(self.config.deep_lab_v3_plus.local_pretrained_path,
+                                    map_location=self.config.device)
+            missing_keys = self.backbone.load_state_dict(state_dict=state_dict['state_dict'],
+                                                         strict=self.config.deep_lab_v3_plus.load_strictly)
         self.head.init_weights()
         if self.with_aux_head:
             if isinstance(self.aux_head, nn.ModuleList):

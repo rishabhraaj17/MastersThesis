@@ -18,6 +18,7 @@ from torchvision.datasets.video_utils import VideoClips
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from average_image.utils import SDDMeta
 from utils import generate_position_map, plot_samples, scale_annotations
+from patch_utils import quick_viz
 from unsupervised_tp_0.dataset import sort_list
 
 
