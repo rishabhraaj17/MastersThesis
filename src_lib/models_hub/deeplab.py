@@ -13,7 +13,6 @@ from src.position_maps.utils import ImagePadder
 from src_lib.models_hub.base import Base, BaseDDP
 from src_lib.models_hub.utils import Up, UpProject
 
-
 HEAD_CONFIG = {
     'zero': {
         'num_deconv_layers': 0,
@@ -54,7 +53,7 @@ class DeepLabV3(Base):
                  additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
         super(DeepLabV3, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset,
-            desired_output_shape=desired_output_shape, loss_function=loss_function, 
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
             additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
         )
         if self.config.deep_lab_v3.backbone == 'r50':
@@ -93,7 +92,7 @@ class DeepLabV3Plus(Base):
                  additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
         super(DeepLabV3Plus, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset,
-            desired_output_shape=desired_output_shape, loss_function=loss_function, 
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
             additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
         )
         self.align_corners = self.config.deep_lab_v3_plus.align_corners
@@ -104,6 +103,7 @@ class DeepLabV3Plus(Base):
         norm_cfg = dict(type=self.config.deep_lab_v3_plus.norm.type,
                         requires_grad=self.config.deep_lab_v3_plus.norm.requires_grad)
 
+        # proper way, but mmsegentation has a bug now
         # init_cfg = None
         # if self.config.deep_lab_v3_plus.pretrained is not None:
         #     init_cfg = dict(type='Pretrained', checkpoint=self.config.deep_lab_v3_plus.pretrained)
@@ -297,7 +297,7 @@ class UNetDeepLabV3Plus(Base):
                  additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
         super(UNetDeepLabV3Plus, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset,
-            desired_output_shape=desired_output_shape, loss_function=loss_function, 
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
             additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
         )
         self.align_corners = self.config.deep_lab_v3_plus.align_corners
@@ -529,7 +529,9 @@ class DeepLabV3PlusDDP(BaseDDP):
                 dropout_ratio=0.1,
                 num_classes=self.config.deep_lab_v3_plus.head.out_ch,
                 norm_cfg=norm_cfg,
-                align_corners=self.align_corners
+                align_corners=self.align_corners,
+                init_cfg=None,
+                pretrained=self.config.deep_lab_v3_plus.pretrained
             )
         else:
             self.head = DepthwiseSeparableASPPHead(
@@ -633,10 +635,10 @@ class DeepLabV3PlusDDP(BaseDDP):
         self.additional_loss_weights = self.config.loss.gaussian_weight
         self.additional_loss_activation = self.config.loss.apply_sigmoid
 
-        self.init_weights(pretrained=self.config.deep_lab_v3_plus.pretrained)
+        self.init_weights()
 
-    def init_weights(self, pretrained=None):
-        self.backbone.init_weights(pretrained=pretrained)
+    def init_weights(self):
+        self.backbone.init_weights()
         self.head.init_weights()
         if self.with_aux_head:
             if isinstance(self.aux_head, nn.ModuleList):
@@ -644,6 +646,12 @@ class DeepLabV3PlusDDP(BaseDDP):
                     a_head.init_weights()
             else:
                 self.aux_head.init_weights()
+        if self.with_deconv_head:
+            if isinstance(self.deconv_head, nn.ModuleList):
+                for d_head in self.deconv_head:
+                    d_head.init_weights()
+            else:
+                self.deconv_head.init_weights()
 
     def forward(self, x):
         feats = self.backbone(x)
