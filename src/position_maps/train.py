@@ -332,7 +332,8 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                           fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
                           accelerator=cfg.trainer.accelerator, deterministic=cfg.trainer.deterministic,
                           replace_sampler_ddp=cfg.trainer.replace_sampler_ddp,
-                          num_nodes=cfg.trainer.num_nodes, plugins=plugins)
+                          num_nodes=cfg.trainer.num_nodes, plugins=plugins,
+                          gradient_clip_val=cfg.trainer.gradient_clip_val)
     else:
         if cfg.resume_mode:
             checkpoint_path = f'{cfg.resume.checkpoint.path}{cfg.resume.checkpoint.version}/checkpoints/'
@@ -349,13 +350,15 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                               resume_from_checkpoint=checkpoint_file, accelerator=cfg.trainer.accelerator,
                               deterministic=cfg.trainer.deterministic,
                               replace_sampler_ddp=cfg.trainer.replace_sampler_ddp,
-                              num_nodes=cfg.trainer.num_nodes, plugins=plugins)
+                              num_nodes=cfg.trainer.num_nodes, plugins=plugins,
+                              gradient_clip_val=cfg.trainer.gradient_clip_val)
         else:
             trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                               fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
                               accelerator=cfg.trainer.accelerator, deterministic=cfg.trainer.deterministic,
                               replace_sampler_ddp=cfg.trainer.replace_sampler_ddp,
-                              num_nodes=cfg.trainer.num_nodes, plugins=plugins)
+                              num_nodes=cfg.trainer.num_nodes, plugins=plugins,
+                              gradient_clip_val=cfg.trainer.gradient_clip_val)
     return model, trainer
 
 
@@ -403,13 +406,14 @@ def build_loss(cfg):
     loss_fn = BinaryFocalLossWithLogits(
         alpha=cfg.loss.bfl.alpha, gamma=cfg.loss.bfl.gamma, reduction=cfg.loss.reduction)
     gauss_loss_fn = CenterNetFocalLoss()
-    return loss_fn, gauss_loss_fn
+    return loss_fn, [gauss_loss_fn]
 
 
-def build_model(cfg, train_dataset, val_dataset, loss_function, collate_fn=None, desired_output_shape=None):
+def build_model(cfg, train_dataset, val_dataset, loss_function, additional_loss_functions=(),
+                collate_fn=None, desired_output_shape=None):
     return getattr(hub, cfg.model)(
         config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
-        loss_function=loss_function, collate_fn=collate_fn,
+        loss_function=loss_function, collate_fn=collate_fn, additional_loss_functions=additional_loss_functions,
         desired_output_shape=desired_output_shape)
 
 
@@ -422,14 +426,13 @@ def train_v1(cfg):
         cfg.num_workers = 0
         cfg.dataset_workers = 0
 
-    # train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
     train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
 
     loss_fn, gaussian_loss_fn = build_loss(cfg)
 
-    # todo: make model consume multiple losses with weights
     model = build_model(cfg, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_fn,
-                        collate_fn=heat_map_collate_fn, desired_output_shape=target_max_shape)
+                        additional_loss_functions=gaussian_loss_fn, collate_fn=heat_map_collate_fn,
+                        desired_output_shape=target_max_shape)
 
     logger.info(f'Setting up Trainer...')
 
@@ -455,7 +458,7 @@ def overfit(cfg):
                                  'HourGlassPositionMapNetwork']:
         # loss_fn = BinaryFocalLossWithLogits(alpha=cfg.overfit.focal_loss_alpha, reduction='mean')
         # loss_fn = GaussianFocalLoss(alpha=cfg.overfit.gaussuan_focal_loss_alpha, reduction='mean')
-        loss_fn = BinaryFocalLossWithLogits(alpha=0.8, gamma=4, reduction=reduction)
+        loss_fn = BinaryFocalLossWithLogits(alpha=0.85, gamma=4, reduction=reduction)
     else:
         loss_fn = MSELoss()
 
@@ -728,6 +731,19 @@ def overfit(cfg):
                                                     additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
                                                                     f"| Epoch: {epoch} "
                                                                     f"| Threshold: {cfg.prediction.threshold}")
+
+                                if cfg.model_hub.model == 'DeepLabV3Plus':
+                                    plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                                        heat_masks[random_idx].squeeze().cpu(),
+                                                        torch.nn.functional.threshold(
+                                                            out[-2][random_idx].sigmoid(),
+                                                            threshold=cfg.prediction.threshold,
+                                                            value=cfg.prediction.fill_value,
+                                                            inplace=True),
+                                                        logits_mask=out[-2][random_idx].sigmoid(),
+                                                        additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                                        f"| Epoch: {epoch} "
+                                                                        f"| Threshold: {cfg.prediction.threshold}")
                         else:
                             out = out.cpu().squeeze(1)
                             if show:
@@ -1280,5 +1296,6 @@ if __name__ == '__main__':
 
         # selected_patch_overfit()
         # patch_based_overfit()
-        overfit()
+        # overfit()
         # train()
+        train_v1()

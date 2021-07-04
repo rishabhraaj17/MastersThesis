@@ -5,7 +5,7 @@ data_augmentation: True
 
 # optimizer
 # Adam
-lr: 1e-4
+lr: 2e-3
 weight_decay: 0
 amsgrad: False
 
@@ -35,11 +35,12 @@ trainer:
   gpus: 1
   fast_dev_run: False
   num_checkpoints_to_save: 4
-  deterministic: True
+  deterministic: False
   accelerator: 'ddp' #'ddp_cpu' # null  # 'ddp', 'ddp_cpu'
   replace_sampler_ddp: False
   num_nodes: 1
   find_unused_parameters: True
+  gradient_clip_val: 2.0
 
 
 # dataset
@@ -96,7 +97,7 @@ plot_samples: False
 # gaussian
 heatmap_shape: null
 return_combined_heatmaps: True
-sigma: 1.0 # 0.7
+sigma: 2.5 # 3.2 # 0.7
 
 seg_map_objectness_threshold: 0.5
 heatmap_region_limit_threshold: 0.0
@@ -104,8 +105,21 @@ focal_loss_alpha: 0.8
 gaussuan_focal_loss_alpha: 2.0
 use_center_net_gaussian_focal_loss: True
 
+model: 'DeepLabV3PlusDDP'
+
+preproccesing:
+  pad_factor: 8
+
+loss:
+  reduction: 'mean'
+  gaussian_weight: [0.5]
+  apply_sigmoid: [True]
+  bfl:
+    alpha: 0.85
+    gamma: 4.0
+
 prediction:
-  threshold: 0.3
+  threshold: 0.4
   fill_value: 0.0
 
 warm_restart:
