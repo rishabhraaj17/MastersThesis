@@ -239,7 +239,9 @@ class HRNetwork(Base):
                     num_branches=4,
                     block='BASIC',
                     num_blocks=(4, 4, 4, 4),
-                    num_channels=(18, 36, 72, 144)))
+                    num_channels=(18, 36, 72, 144))),
+            init_cfg=None,
+            pretrained=self.config.hrnet.pretrained
         )
         self.head = FCNHead(
             in_channels=[18, 36, 72, 144],
@@ -281,10 +283,10 @@ class HRNetwork(Base):
         else:
             self.head_corrector = nn.Identity()
 
-        self.init_weights(pretrained=self.config.hrnet.pretrained)
+        self.init_weights()
 
-    def init_weights(self, pretrained=None):
-        self.backbone.init_weights(pretrained=pretrained)
+    def init_weights(self):
+        self.backbone.init_weights()
         self.head.init_weights()
 
     def forward(self, x):
@@ -355,7 +357,9 @@ class HRPoseNetwork(Base):
                     num_channels=CONFIG[self.config.hrposenet.model]['stage4']['num_channels'],
                     block='BASIC',
                 ),
-            )
+            ),
+            init_cfg=None,
+            pretrained=self.config.hrposenet.pretrained
         )
         self.head = TopdownHeatmapSimpleHead(
             in_channels=32,
@@ -394,10 +398,10 @@ class HRPoseNetwork(Base):
         else:
             self.head_corrector = nn.Identity()
 
-        self.init_weights(pretrained=self.config.hrposenet.pretrained)
+        self.init_weights()
 
-    def init_weights(self, pretrained=None):
-        self.backbone.init_weights(pretrained=pretrained)
+    def init_weights(self):
+        self.backbone.init_weights()
         self.head.init_weights()
 
     def forward(self, x):

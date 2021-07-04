@@ -208,7 +208,9 @@ class OCRNet(Base):
                     num_blocks=CONFIG[self.config.ocrnet.model]['stage4']['num_blocks'],
                     num_channels=CONFIG[self.config.ocrnet.model]['stage4']['num_channels'],
                     block='BASIC',
-                ))
+                )),
+            init_cfg=None,
+            pretrained=self.config.ocrnet.pretrained
         )
         self.fcn_head = FCNHead(
             in_channels=CONFIG[self.config.ocrnet.model]['fcn_head']['in_channels'],
@@ -284,10 +286,10 @@ class OCRNet(Base):
             self.ocr_head_corrector = nn.Identity()
             print('Correctors not in use!')
 
-        self.init_weights(pretrained=self.config.ocrnet.pretrained)
+        self.init_weights()
 
-    def init_weights(self, pretrained=None):
-        self.backbone.init_weights(pretrained=pretrained)
+    def init_weights(self):
+        self.backbone.init_weights()
         self.fcn_head.init_weights()
         self.ocr_head.init_weights()
 
@@ -345,7 +347,9 @@ class OCRResNet(Base):
             norm_cfg=norm_cfg,
             norm_eval=False,
             style='pytorch',
-            contract_dilation=True
+            contract_dilation=True,
+            init_cfg=None,
+            pretrained=self.config.ocrnet.pretrained
         )
         self.fcn_head = FCNHead(
             in_channels=1024,
@@ -418,10 +422,10 @@ class OCRResNet(Base):
             self.ocr_head_corrector = nn.Identity()
             print('Correctors not in use!')
 
-        self.init_weights(pretrained=self.config.ocrnet.pretrained)
+        self.init_weights()
 
-    def init_weights(self, pretrained=None):
-        self.backbone.init_weights(pretrained=pretrained)
+    def init_weights(self):
+        self.backbone.init_weights()
         self.fcn_head.init_weights()
         self.ocr_head.init_weights()
 

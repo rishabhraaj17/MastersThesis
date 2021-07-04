@@ -33,7 +33,9 @@ class CCNet(Base):
             norm_cfg=norm_cfg,
             norm_eval=False,
             style='pytorch',
-            contract_dilation=True
+            contract_dilation=True,
+            init_cfg=None,
+            pretrained=self.config.ccnet.pretrained
         )
         self.head = CCHead(
             in_channels=2048,
@@ -119,10 +121,10 @@ class CCNet(Base):
         self.use_correctors = self.config.ccnet.use_correctors
         self.with_aux_head = self.config.ccnet.with_aux_head
 
-        self.init_weights(pretrained=self.config.ccnet.pretrained)
+        self.init_weights()
 
-    def init_weights(self, pretrained=None):
-        self.backbone.init_weights(pretrained=pretrained)
+    def init_weights(self):
+        self.backbone.init_weights()
         self.head.init_weights()
         if self.with_aux_head:
             if isinstance(self.aux_head, nn.ModuleList):

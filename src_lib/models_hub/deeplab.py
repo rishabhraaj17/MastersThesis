@@ -321,7 +321,9 @@ class UNetDeepLabV3Plus(Base):
             norm_cfg=norm_cfg,
             act_cfg=dict(type='ReLU'),
             upsample_cfg=dict(type='InterpConv'),
-            norm_eval=False
+            norm_eval=False,
+            init_cfg=None,
+            pretrained=self.config.deep_lab_v3_plus.pretrained
         )
         self.head = ASPPHead(
             in_channels=64,
@@ -406,10 +408,10 @@ class UNetDeepLabV3Plus(Base):
             if self.with_aux_head:
                 self.aux_head_corrector = nn.Identity()
 
-        self.init_weights(pretrained=self.config.deep_lab_v3_plus.pretrained)
+        self.init_weights()
 
-    def init_weights(self, pretrained=None):
-        self.backbone.init_weights(pretrained=pretrained)
+    def init_weights(self):
+        self.backbone.init_weights()
         self.head.init_weights()
         if self.with_aux_head:
             if isinstance(self.aux_head, nn.ModuleList):

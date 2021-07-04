@@ -33,7 +33,9 @@ class DMNet(Base):
             norm_cfg=norm_cfg,
             norm_eval=False,
             style='pytorch',
-            contract_dilation=True
+            contract_dilation=True,
+            init_cfg=None,
+            pretrained=self.config.dmnet.pretrained
         )
         self.head = DMHead(
             in_channels=2048,
@@ -119,10 +121,10 @@ class DMNet(Base):
         self.use_correctors = self.config.dmnet.use_correctors
         self.with_aux_head = self.config.dmnet.with_aux_head
 
-        self.init_weights(pretrained=self.config.dmnet.pretrained)
+        self.init_weights()
 
-    def init_weights(self, pretrained=None):
-        self.backbone.init_weights(pretrained=pretrained)
+    def init_weights(self):
+        self.backbone.init_weights()
         self.head.init_weights()
         if self.with_aux_head:
             if isinstance(self.aux_head, nn.ModuleList):
