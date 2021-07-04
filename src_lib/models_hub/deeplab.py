@@ -518,7 +518,9 @@ class DeepLabV3PlusDDP(BaseDDP):
             norm_cfg=norm_cfg,
             norm_eval=False,
             style='pytorch',
-            contract_dilation=True
+            contract_dilation=True,
+            init_cfg=None,
+            pretrained=self.config.deep_lab_v3_plus.pretrained
         )
         if self.config.deep_lab_v3_plus.aspp_head:
             self.head = ASPPHead(
@@ -530,8 +532,6 @@ class DeepLabV3PlusDDP(BaseDDP):
                 num_classes=self.config.deep_lab_v3_plus.head.out_ch,
                 norm_cfg=norm_cfg,
                 align_corners=self.align_corners,
-                init_cfg=None,
-                pretrained=self.config.deep_lab_v3_plus.pretrained
             )
         else:
             self.head = DepthwiseSeparableASPPHead(
