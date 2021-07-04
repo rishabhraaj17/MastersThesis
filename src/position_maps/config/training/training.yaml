@@ -147,11 +147,11 @@ postion_map_network_type: 'HourGlassPositionMapNetworkDDP'
 
 from_model_hub: True
 model_hub:
-  model: 'MSANet'
+  model: 'DeepLabV3Plus'
 
 overfit:
   num_epochs: 6000
-  batch_size: 1
+  batch_size: 2
   num_workers: 0
   pin_memory: True
   drop_last: False
@@ -160,7 +160,7 @@ overfit:
   focal_loss_alpha: 0.9
   gaussuan_focal_loss_alpha: 2.0
 
-  subset_indices: [ 0, 85, 32, 5, 125, 200 ]
+  subset_indices: 64  # 450  # [ 0, 85, 32, 5, 125, 200 ]
   #  subset_indices: [0]
 
   plot_checkpoint: 99
@@ -224,13 +224,13 @@ patch_mode:
 
   patch_size: [256, 256]
   num_epochs: 6000
-  batch_size: 1
+  batch_size: 2
   mini_batch_size: 2
   num_workers: 0
   pin_memory: True
-  drop_last: False
+  drop_last: True
 
-  model: 'TransUNet'
+  model: 'DeepLabV3Plus'
   focal_loss_alpha: 0.9
   gaussuan_focal_loss_alpha: 2.0
 
