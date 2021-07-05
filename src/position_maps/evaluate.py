@@ -32,7 +32,8 @@ from losses import CenterNetFocalLoss
 from patch_utils import quick_viz
 from train import setup_multiple_datasets_core, setup_single_transform, setup_single_common_transform
 from utils import heat_map_collate_fn, plot_predictions, get_blob_count, overlay_images, plot_predictions_with_overlay, \
-    get_scaled_shapes_with_pad_values, plot_image_with_features, ImagePadder, get_ensemble
+    get_scaled_shapes_with_pad_values, plot_image_with_features, ImagePadder, get_ensemble, plot_predictions_v2
+import src_lib.models_hub as hub
 
 seed_everything(42)
 logger = get_logger(__name__)
@@ -252,7 +253,7 @@ def setup_test_transform(cfg, test_h, test_w):
     return transform
 
 
-def setup_multiple_test_datasets(cfg):
+def setup_multiple_test_datasets(cfg, return_dummy_transform=True):
     meta = SDDMeta(cfg.root + 'H_SDD.txt')
     df, rgb_max_shape = get_scaled_shapes_with_pad_values(
         root_path=cfg.root, video_classes=cfg.eval.test.video_classes_to_use,
@@ -269,12 +270,17 @@ def setup_multiple_test_datasets(cfg):
                                             num_videos=cfg.eval.test.num_videos,
                                             multiple_videos=cfg.eval.test.multiple_videos,
                                             df=df, df_target=df_target, rgb_max_shape=rgb_max_shape)
+    if return_dummy_transform:
+        return datasets, None, target_max_shape
     return datasets, target_max_shape
 
 
 def setup_eval(cfg):
     logger.info(f'Setting up DataLoader')
-    test_dataset, test_transform, target_max_shape = setup_dataset(cfg)
+
+    # test_dataset, test_transform, target_max_shape = setup_dataset(cfg)
+    test_dataset, test_transform, target_max_shape = setup_multiple_test_datasets(cfg)
+
     test_loader = DataLoader(test_dataset, batch_size=cfg.eval.batch_size, shuffle=False,
                              num_workers=cfg.eval.num_workers, collate_fn=heat_map_collate_fn,
                              pin_memory=cfg.eval.pin_memory, drop_last=cfg.eval.drop_last)
@@ -535,8 +541,186 @@ def evaluate(cfg):
             cfg.eval.video_fps)
 
 
+@hydra.main(config_path="config", config_name="config")
+def evaluate_v1(cfg):
+    sdd_meta = SDDMeta(cfg.eval.root + 'H_SDD.txt')
+    # to_pil = ToPILImage()
+
+    logger.info(f'Setting up DataLoader')
+
+    test_dataset, target_max_shape = setup_multiple_test_datasets(cfg, return_dummy_transform=False)
+
+    test_loader = DataLoader(test_dataset, batch_size=cfg.eval.batch_size, shuffle=False,
+                             num_workers=cfg.eval.num_workers, collate_fn=heat_map_collate_fn,
+                             pin_memory=cfg.eval.pin_memory, drop_last=cfg.eval.drop_last)
+
+    loss_fn = BinaryFocalLossWithLogits(
+        alpha=cfg.eval.loss.bfl.alpha, gamma=cfg.eval.loss.bfl.gamma, reduction=cfg.eval.loss.reduction)
+    gauss_loss_fn = [CenterNetFocalLoss()]
+
+    model = getattr(hub, cfg.eval.model)(
+        config=cfg, train_dataset=None, val_dataset=None,
+        loss_function=loss_fn, collate_fn=heat_map_collate_fn, additional_loss_functions=gauss_loss_fn,
+        desired_output_shape=None)
+
+    checkpoint_path = f'{cfg.eval.checkpoint.root}{cfg.eval.checkpoint.path}{cfg.eval.checkpoint.version}/checkpoints/'
+    checkpoint_files = os.listdir(checkpoint_path)
+
+    epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
+    epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
+    checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
+
+    checkpoint_file = checkpoint_path + checkpoint_files[-cfg.eval.checkpoint.top_k]
+
+    load_dict = torch.load(checkpoint_file, map_location=cfg.eval.device)
+    model.load_state_dict(load_dict['state_dict'])
+
+    model.to(cfg.eval.device)
+    model.eval()
+
+    ratio = float(sdd_meta.get_meta(getattr(SDDVideoDatasets, cfg.eval.video_meta_class)
+                                    , cfg.eval.test.video_number_to_use)[0]['Ratio'].to_numpy()[0])
+
+    logger.info(f'Starting evaluation...')
+
+    total_loss = []
+    tp_list, fp_list, fn_list = [], [], []
+
+    video_frames = []
+    for idx, data in enumerate(tqdm(test_loader)):
+        frames, heat_masks, position_map, distribution_map, class_maps, meta = data
+
+        padder = ImagePadder(frames.shape[-2:], factor=cfg.eval.preproccesing.pad_factor)
+        frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
+        frames, heat_masks = frames.to(cfg.eval.device), heat_masks.to(cfg.eval.device)
+
+        with torch.no_grad():
+            out = model(frames)
+
+        loss1 = getattr(torch.Tensor, cfg.eval.loss.reduction)(model.calculate_loss(out, heat_masks))
+        loss2 = getattr(torch.Tensor, cfg.eval.loss.reduction)(model.calculate_additional_losses(
+            out, heat_masks, cfg.eval.loss.gaussian_weight, cfg.eval.loss.apply_sigmoid))
+        loss = loss1 + loss2
+
+        total_loss.append(loss.item())
+
+        if cfg.eval.evaluate_precision_recall:
+            blobs_per_image, _ = get_blobs_per_image_for_metrics(cfg, meta, out)
+
+            for f in range(len(meta)):
+                frame_number = meta[f]['item']
+                rgb_frame = frames[f].cpu()
+                gt_heatmap = heat_masks[f].cpu()
+                pred_heatmap = out.sigmoid().round()[f].cpu()
+
+                gt_bbox_centers, pred_centers, rgb_frame, supervised_boxes = get_gt_annotations_for_metrics(
+                    blobs_per_image, cfg, f, frame_number, meta, rgb_frame, test_loader)
+
+                fn, fp, precision, recall, tp = get_precision_recall_for_metrics(cfg, gt_bbox_centers, pred_centers,
+                                                                                 ratio)
+
+                if cfg.eval.show_plots or cfg.eval.make_video:
+                    fig = plot_image_with_features(
+                        rgb_frame.squeeze(dim=0).permute(1, 2, 0).numpy(), gt_bbox_centers,
+                        np.stack(pred_centers), boxes=supervised_boxes,
+                        txt=f'Frame Number: {frame_number}\n'
+                            f'Agent Count: GT-{len(gt_bbox_centers)} | Pred-{len(pred_centers)}'
+                            f'\nPrecision: {precision} | Recall: {recall}',
+                        footnote_txt=f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
+                                     f'Video Number: {cfg.eval.test.video_number_to_use}'
+                                     f'\n\nL2 Matching Threshold: '
+                                     f'{cfg.eval.gt_pred_loc_distance_threshold}m',
+                        video_mode=cfg.eval.make_video,
+                        plot_heatmaps=True,
+                        gt_heatmap=gt_heatmap.squeeze(dim=0).numpy(),
+                        pred_heatmap=pred_heatmap.squeeze(dim=0).numpy())
+
+                    if cfg.eval.make_video:
+                        video_frame = get_image_array_from_figure(fig)
+
+                        if video_frame.shape[0] != meta[f]['original_shape'][1] \
+                                or video_frame.shape[1] != meta[f]['original_shape'][0]:
+                            video_frame = skimage.transform.resize(
+                                video_frame, (meta[f]['original_shape'][1], meta[f]['original_shape'][0]))
+                            video_frame = (video_frame * 255).astype(np.uint8)
+
+                            video_frame = process_numpy_video_frame_to_tensor(video_frame)
+                            video_frames.append(video_frame)
+
+                tp_list.append(tp)
+                fp_list.append(fp)
+                fn_list.append(fn)
+
+        if cfg.eval.show_plots and idx % cfg.eval.plot_checkpoint == 0:
+            random_idx = np.random.choice(cfg.eval.batch_size, 1, replace=False).item()
+            current_random_frame = meta[random_idx]['item']
+
+            save_dir = f'{cfg.eval.plot_save_dir}{model._get_name()}_{loss_fn._get_name()}/' \
+                       f'version_{cfg.eval.checkpoint.version}/{os.path.split(checkpoint_file)[-1][:-5]}/'
+            save_image_name = f'frame_{current_random_frame}'
+
+            additional_text = f"{model._get_name()} | {loss_fn._get_name()} | Frame: {current_random_frame}\n" \
+                              f""
+            show = np.random.choice(2, 1, replace=False, p=[0.20, 0.80]).item()
+
+            out = [o.cpu().squeeze(1) for o in out]
+            if show:
+                plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                    heat_masks[random_idx].squeeze().cpu(),
+                                    torch.nn.functional.threshold(out[0][random_idx].sigmoid(),
+                                                                  threshold=cfg.prediction.threshold,
+                                                                  value=cfg.prediction.fill_value,
+                                                                  inplace=True),
+                                    logits_mask=out[0][random_idx].sigmoid(),
+                                    additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                    f"| Epoch: {idx} "
+                                                    f"| Threshold: {cfg.prediction.threshold}")
+                plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                    heat_masks[random_idx].squeeze().cpu(),
+                                    torch.nn.functional.threshold(out[-1][random_idx].sigmoid(),
+                                                                  threshold=cfg.prediction.threshold,
+                                                                  value=cfg.prediction.fill_value,
+                                                                  inplace=True),
+                                    logits_mask=out[-1][random_idx].sigmoid(),
+                                    additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                    f"| Epoch: {idx} "
+                                                    f"| Threshold: {cfg.prediction.threshold}")
+
+                if cfg.model_hub.model == 'DeepLabV3Plus' and len(out) > 2:
+                    plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                        heat_masks[random_idx].squeeze().cpu(),
+                                        torch.nn.functional.threshold(
+                                            out[-2][random_idx].sigmoid(),
+                                            threshold=cfg.prediction.threshold,
+                                            value=cfg.prediction.fill_value,
+                                            inplace=True),
+                                        logits_mask=out[-2][random_idx].sigmoid(),
+                                        additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                        f"| Epoch: {idx} "
+                                                        f"| Threshold: {cfg.prediction.threshold}")
+
+    final_precision = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fp_list).sum())
+    final_recall = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fn_list).sum())
+
+    logger.info(f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
+                f'Video Number: {cfg.eval.test.video_number_to_use}')
+    logger.info(f"Threshold: {cfg.eval.gt_pred_loc_distance_threshold}m")
+    logger.info(f"Test Loss: {np.array(total_loss).mean()}")
+    logger.info(f"Precision: {final_precision} | Recall: {final_recall}")
+
+    if cfg.eval.make_video:
+        logger.info(f"Writing Video")
+        Path(os.path.join(os.getcwd(), 'videos')).mkdir(parents=True, exist_ok=True)
+        torchvision.io.write_video(
+            f'videos/{getattr(SDDVideoClasses, cfg.eval.video_meta_class).name}_'
+            f'{cfg.eval.test.video_number_to_use}.avi',
+            torch.cat(video_frames).permute(0, 2, 3, 1),
+            cfg.eval.video_fps)
+
+
 if __name__ == '__main__':
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
-        evaluate()
+        # evaluate()
+        evaluate_v1()

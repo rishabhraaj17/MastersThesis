@@ -21,6 +21,9 @@ from utils import generate_position_map, plot_samples, scale_annotations
 from patch_utils import quick_viz
 from unsupervised_tp_0.dataset import sort_list
 
+# PAD_MODE = 'constant'
+PAD_MODE = 'replicate'
+
 
 class SDDFrameAndAnnotationDataset(Dataset):
     def __init__(
@@ -208,13 +211,17 @@ class SDDFrameAndAnnotationDataset(Dataset):
             target_boxes = np.stack(out['bboxes'])
             target_bbox_centers = np.stack(out['keypoints'])
 
-            img = pad(torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0), self.target_pad_value)
-            downscale_shape = (img.shape[-2], img.shape[-1])
+            # img = pad(torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0), self.target_pad_value)# , mode='replicate')
+            # downscale_shape = (img.shape[-2], img.shape[-1])
+            downscale_shape = (img.shape[0], img.shape[1])
 
         heat_mask = torch.from_numpy(
             generate_position_map(list(downscale_shape), target_bbox_centers, sigma=self.sigma,
                                   heatmap_shape=self.heatmap_shape,
                                   return_combined=self.return_combined_heatmaps, hw_mode=True))
+        heat_mask = pad(
+            heat_mask.unsqueeze(0).unsqueeze(0),
+            self.target_pad_value, mode='constant').squeeze(0).squeeze(0)
 
         key_points = torch.round(torch.from_numpy(target_bbox_centers)).long()
         position_map = heat_mask.clone().clamp(min=0, max=1).int().float()
@@ -340,7 +347,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
                          plot_boxes=True, additional_text=f'Frame Number: {item} | Video Idx: {video_idx}')
 
         pre_padded_video = video.clone()
-        video = pad(video, self.rgb_pad_value)
+        video = pad(video, self.rgb_pad_value, mode=PAD_MODE)
         new_shape = (video.shape[-2], video.shape[-1])
 
         meta = {'boxes': target_boxes, 'bbox_centers': target_bbox_centers,
