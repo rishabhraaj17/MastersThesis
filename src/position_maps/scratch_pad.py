@@ -5,7 +5,7 @@ import torch
 import torchvision.ops
 from kornia.losses import BinaryFocalLossWithLogits
 # from mmseg.models import VisionTransformer, HRNet
-from mmdet.models.utils.gaussian_target import get_local_maximum, get_topk_from_heatmap
+from mmdet.models.utils.gaussian_target import get_local_maximum
 from torch.nn.functional import pad
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Subset
@@ -19,12 +19,10 @@ from torch.utils.data import DataLoader, Subset
 # from mmpose.datasets.pipelines import HeatmapGenerator, TopDownGenerateTarget
 from tqdm import tqdm
 
-from baselinev2.plot_utils import plot_one_with_bounding_boxes
 from evaluate import setup_multiple_test_datasets
 from losses import CenterNetFocalLoss
-from utils import heat_map_collate_fn, ImagePadder, plot_predictions_v2
-from patch_utils import quick_viz
 from src_lib.models_hub import DeepLabV3, DeepLabV3PlusSmall
+from utils import heat_map_collate_fn, ImagePadder, plot_predictions_v2
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -67,57 +65,59 @@ def patch_experiment(cfg):
                             factor=0.1,
                             min_lr=1e-10)
 
-    for idx, data in enumerate(tqdm(test_loader)):
-        frames, heat_masks, position_map, distribution_map, class_maps, meta = data
+    epochs = 200
+    batch_size_per_iter = 6
+    for epoch in tqdm(range(epochs)):
+        for idx, data in enumerate(test_loader):
+            frames, heat_masks, position_map, distribution_map, class_maps, meta = data
 
-        padder = ImagePadder(frames.shape[-2:], factor=cfg.eval.preproccesing.pad_factor)
-        frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
-        frames, heat_masks = frames.to(device), heat_masks.to(device)
+            padder = ImagePadder(frames.shape[-2:], factor=cfg.eval.preproccesing.pad_factor)
+            frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
+            frames, heat_masks = frames.to(device), heat_masks.to(device)
 
-        with torch.no_grad():
-            out = model(frames)
+            with torch.no_grad():
+                out = model(frames)
 
-        loss1 = getattr(torch.Tensor, cfg.eval.loss.reduction)(model.calculate_loss(out, heat_masks))
-        loss2 = getattr(torch.Tensor, cfg.eval.loss.reduction)(model.calculate_additional_losses(
-            out, heat_masks, cfg.eval.loss.gaussian_weight, cfg.eval.loss.apply_sigmoid))
-        loss = loss1 + loss2
-        # print(loss.item())
+            loss1 = getattr(torch.Tensor, cfg.eval.loss.reduction)(model.calculate_loss(out, heat_masks))
+            loss2 = getattr(torch.Tensor, cfg.eval.loss.reduction)(model.calculate_additional_losses(
+                out, heat_masks, cfg.eval.loss.gaussian_weight, cfg.eval.loss.apply_sigmoid))
+            loss = loss1 + loss2
+            # print(loss.item())
 
-        out = [o.cpu().squeeze(1) for o in out]
+            out = [o.cpu().squeeze(1) for o in out]
 
-        random_idx = np.random.choice(frames.shape[0], 1, replace=False).item()
-        plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                            heat_masks[random_idx].squeeze().cpu(),
-                            torch.nn.functional.threshold(out[0][random_idx].sigmoid(),
-                                                          threshold=cfg.prediction.threshold,
-                                                          value=cfg.prediction.fill_value,
-                                                          inplace=True),
-                            logits_mask=out[0][random_idx].sigmoid(),
-                            additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
-                                            f"| Epoch: {idx} "
-                                            f"| Threshold: {cfg.prediction.threshold}")
-        plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
-                            heat_masks[random_idx].squeeze().cpu(),
-                            torch.nn.functional.threshold(out[-1][random_idx].sigmoid(),
-                                                          threshold=cfg.prediction.threshold,
-                                                          value=cfg.prediction.fill_value,
-                                                          inplace=True),
-                            logits_mask=out[-1][random_idx].sigmoid(),
-                            additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
-                                            f"| Epoch: {idx} "
-                                            f"| Threshold: {cfg.prediction.threshold}")
+            random_idx = np.random.choice(frames.shape[0], 1, replace=False).item()
+            show = np.random.choice(2, 1, replace=False, p=[1.0, 0.0]).item()
+            if show:
+                plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                    heat_masks[random_idx].squeeze().cpu(),
+                                    torch.nn.functional.threshold(out[0][random_idx].sigmoid(),
+                                                                  threshold=cfg.prediction.threshold,
+                                                                  value=cfg.prediction.fill_value,
+                                                                  inplace=True),
+                                    logits_mask=out[0][random_idx].sigmoid(),
+                                    additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                    f"| Epoch: {idx} "
+                                                    f"| Threshold: {cfg.prediction.threshold}")
+                plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                    heat_masks[random_idx].squeeze().cpu(),
+                                    torch.nn.functional.threshold(out[-1][random_idx].sigmoid(),
+                                                                  threshold=cfg.prediction.threshold,
+                                                                  value=cfg.prediction.fill_value,
+                                                                  inplace=True),
+                                    logits_mask=out[-1][random_idx].sigmoid(),
+                                    additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                    f"| Epoch: {idx} "
+                                                    f"| Threshold: {cfg.prediction.threshold}")
 
-        # get locations from heatmap
-        kernel = 3
-        loc_cutoff = 0.05
-        marker_size = 3
+            # get locations from heatmap
+            kernel = 3
+            loc_cutoff = 0.05
+            marker_size = 3
 
-        pruned_locations = locations_from_heatmaps(frames, kernel, loc_cutoff, marker_size, out)
+            pruned_locations = locations_from_heatmaps(frames, kernel, loc_cutoff, marker_size, out, vis_on=False)
 
-        # train patch model
-        epochs = 200
-        batch_size_per_iter = 6
-        for epoch in range(epochs):
+            # train patch model
             patch_model.train()
             train_loss = []
 
@@ -129,6 +129,7 @@ def patch_experiment(cfg):
                                                                                            frames, heat_masks,
                                                                                            l_idx, locations)
 
+                # train
                 till = (crops_filtered.shape[0] + batch_size_per_iter) - \
                        (crops_filtered.shape[0] % batch_size_per_iter) - batch_size_per_iter \
                     if crops_filtered.shape[0] % batch_size_per_iter == 0 \
@@ -140,6 +141,10 @@ def patch_experiment(cfg):
                     crops_filtered_in, target_crops_gt = \
                         crops_filtered[b_idx: b_idx + batch_size_per_iter].to(device), \
                         target_crops[b_idx: b_idx + batch_size_per_iter].to(device)
+
+                    if crops_filtered_in.shape[0] <= 1:
+                        crops_filtered_in = crops_filtered_in.repeat(2, 1, 1, 1)
+                        target_crops_gt = target_crops_gt.repeat(2, 1, 1, 1)
 
                     out = patch_model(crops_filtered_in)
 
@@ -155,6 +160,8 @@ def patch_experiment(cfg):
 
                 patch_model.eval()
                 val_loss = []
+
+                all_out = [[], []]
 
                 for b_idx in range(0, till, batch_size_per_iter):
                     crops_filtered_in, target_crops_gt = \
@@ -173,8 +180,10 @@ def patch_experiment(cfg):
                     random_idx = np.random.choice(crops_filtered_in.shape[0], 1, replace=False).item()
 
                     out = [o.cpu().squeeze(1) for o in out]
+                    all_out[0].append(out[0])
+                    all_out[1].append(out[1])
 
-                    show = np.random.choice(2, 1, replace=False, p=[0.3, 0.7]).item()
+                    show = np.random.choice(2, 1, replace=False, p=[0.99, 0.01]).item()
                     if show:
                         plot_predictions_v2(crops_filtered[random_idx].squeeze().cpu().permute(1, 2, 0),
                                             target_crops[random_idx].squeeze().cpu(),
@@ -197,45 +206,62 @@ def patch_experiment(cfg):
                                                             f"| Epoch: {epoch} "
                                                             f"| Threshold: {cfg.prediction.threshold}")
 
+                # arrange out_patches
+                assp_out = torch.cat(all_out[0]).unsqueeze(1)
+                dcl_out = torch.cat(all_out[1]).unsqueeze(1)
+
                 # train over
                 target_patches_to_target_map = torch.zeros_like(heat_masks[l_idx], device='cpu')
+                target_patches_to_target_map_assp = torch.zeros_like(heat_masks[l_idx], device='cpu')
+                target_patches_to_target_map_dcl = torch.zeros_like(heat_masks[l_idx], device='cpu')
                 for v_idx, v_box in enumerate(valid_boxes):
                     x1, y1, w, h = v_box
                     x1, y1, w, h = x1.item(), y1.item(), w.item(), h.item()
-                    if x1 + w > target_patches_to_target_map.shape[-2] and y1 + h > target_patches_to_target_map.shape[-1]:
+                    if x1 + w > target_patches_to_target_map.shape[-2] and y1 + h > target_patches_to_target_map.shape[
+                        -1]:
                         valid_height = target_patches_to_target_map.shape[-2] - x1
                         valid_width = target_patches_to_target_map.shape[-1] - y1
                         patch = target_crops[v_idx][:, :valid_height, :valid_width]
+                        patch_aspp = assp_out[v_idx][:, :valid_height, :valid_width]
+                        patch_dcl = dcl_out[v_idx][:, :valid_height, :valid_width]
                     elif x1 + w > target_patches_to_target_map.shape[-2]:
                         valid_height = target_patches_to_target_map.shape[-2] - x1
                         patch = target_crops[v_idx][:, :valid_height, :]
+                        patch_aspp = assp_out[v_idx][:, :valid_height, :]
+                        patch_dcl = dcl_out[v_idx][:, :valid_height, :]
                     elif y1 + h > target_patches_to_target_map.shape[-1]:
                         valid_width = target_patches_to_target_map.shape[-1] - y1
                         patch = target_crops[v_idx][:, :, :valid_width]
+                        patch_aspp = assp_out[v_idx][:, :, :valid_width]
+                        patch_dcl = dcl_out[v_idx][:, :, :valid_width]
                     else:
                         patch = target_crops[v_idx]
-                    target_patches_to_target_map[:, x1:x1+w, y1:y1+h] += patch
+                        patch_aspp = assp_out[v_idx]
+                        patch_dcl = dcl_out[v_idx]
 
-                plt.imshow(heat_masks[l_idx][0].cpu())
-                plt.show()
+                    target_patches_to_target_map[:, x1:x1 + w, y1:y1 + h] += patch
+                    target_patches_to_target_map_assp[:, x1:x1 + w, y1:y1 + h] += patch_aspp
+                    target_patches_to_target_map_dcl[:, x1:x1 + w, y1:y1 + h] += patch_dcl
 
-                plt.imshow(target_patches_to_target_map[0])
-                plt.show()
+                show = np.random.choice(2, 1, replace=False, p=[0.65, 0.35]).item()
 
-                grid = torchvision.utils.make_grid(crops_filtered)
+                if show:
+                    fig, ax = plt.subplots(1, 4, sharex='none', sharey='none', figsize=(16, 8))
+                    gt_ax, big_net_out_ax, small_out_aspp_ax, small_out_dcn_ax = ax
 
-                plt.imshow(grid.permute(1, 2, 0))
-                plt.show()
+                    gt_ax.imshow(heat_masks[l_idx][0].cpu(), cmap='hot')
+                    big_net_out_ax.imshow(target_patches_to_target_map[0], cmap='hot')
+                    small_out_aspp_ax.imshow(target_patches_to_target_map_assp[0], cmap='hot')
+                    small_out_dcn_ax.imshow(target_patches_to_target_map_dcl[0], cmap='hot')
 
-                target_grid = torchvision.utils.make_grid(target_crops)
+                    gt_ax.set_title('GT Mask')
+                    big_net_out_ax.set_title('1st stage out')
+                    small_out_aspp_ax.set_title('2nd stage out - DepthWiseAssp')
+                    small_out_dcn_ax.set_title('2nd stage out - DCL')
 
-                plt.imshow(target_grid.permute(1, 2, 0))
-                plt.show()
+                    plt.tight_layout()
+                    plt.show()
 
-                # plot_one_with_bounding_boxes(frames[l_idx].permute(1, 2, 0).cpu(), crop_box_ijwh)
-                print()
-
-        print()
     print()
 
 
@@ -279,7 +305,7 @@ def get_boxes_for_patches(crop_h, crop_w, locations):
     return crop_box_ijwh
 
 
-def locations_from_heatmaps(frames, kernel, loc_cutoff, marker_size, out):
+def locations_from_heatmaps(frames, kernel, loc_cutoff, marker_size, out, vis_on=False):
     out = [o.sigmoid() for o in out]
     pruned_locations = []
     loc_maxima_per_output = [get_local_maximum(o, kernel) for o in out]
@@ -292,12 +318,13 @@ def locations_from_heatmaps(frames, kernel, loc_cutoff, marker_size, out):
             temp_locations.append(loc)
 
             # viz
-            plt.imshow(frames[out_img_idx].cpu().permute(1, 2, 0))
-            plt.plot(w_loc, h_loc, 'o', markerfacecolor='r', markeredgecolor='k', markersize=marker_size)
+            if vis_on:
+                plt.imshow(frames[out_img_idx].cpu().permute(1, 2, 0))
+                plt.plot(w_loc, h_loc, 'o', markerfacecolor='r', markeredgecolor='k', markersize=marker_size)
 
-            plt.title(f'Out - {li} - {out_img_idx}')
-            plt.tight_layout()
-            plt.show()
+                plt.title(f'Out - {li} - {out_img_idx}')
+                plt.tight_layout()
+                plt.show()
 
         pruned_locations.append(temp_locations)
     return pruned_locations
