@@ -112,69 +112,22 @@ def patch_experiment(cfg):
         loc_cutoff = 0.05
         marker_size = 3
 
-        out = [o.sigmoid() for o in out]
+        pruned_locations = locations_from_heatmaps(frames, kernel, loc_cutoff, marker_size, out)
 
-        pruned_locations = []
-        loc_maxima_per_output = [get_local_maximum(o, kernel) for o in out]
-        for li, loc_max_out in enumerate(loc_maxima_per_output):
-            temp_locations = []
-            for out_img_idx in range(loc_max_out.shape[0]):
-                h_loc, w_loc = torch.where(loc_max_out[out_img_idx] > loc_cutoff)
-                loc = torch.stack((w_loc, h_loc)).t()
+        # train patch model
+        epochs = 200
+        batch_size_per_iter = 6
+        for epoch in range(epochs):
+            patch_model.train()
+            train_loss = []
 
-                temp_locations.append(loc)
+            crop_h, crop_w = 128, 128
+            for l_idx, (loc_from_0, loc_from_1) in enumerate(zip(*pruned_locations)):
+                locations = loc_from_0 if loc_from_0.shape[0] > loc_from_1.shape[0] else loc_from_1
 
-                # viz
-                plt.imshow(frames[out_img_idx].cpu().permute(1, 2, 0))
-                plt.plot(w_loc, h_loc, 'o', markerfacecolor='r', markeredgecolor='k', markersize=marker_size)
-
-                plt.title(f'Out - {li} - {out_img_idx}')
-                plt.tight_layout()
-                plt.show()
-
-            pruned_locations.append(temp_locations)
-
-        crop_h, crop_w = 128, 128
-        for l_idx, (loc_from_0, loc_from_1) in enumerate(zip(*pruned_locations)):
-            locations = loc_from_0 if loc_from_0.shape[0] > loc_from_1.shape[0] else loc_from_1
-
-            crop_box_cxcywh = torch.stack([torch.tensor([kp[0], kp[1], crop_w, crop_h]) for kp in locations])
-            crop_box_ijwh = torchvision.ops.box_convert(crop_box_cxcywh, 'cxcywh', 'xywh')
-
-            crop_box_ijwh = torch.stack([torch.tensor([b[1], b[0], b[2], b[3]]) for b in crop_box_ijwh])
-
-            crops = [torchvision.transforms.F.crop(
-                frames[l_idx].unsqueeze(0).cpu(), box[0].item(), box[1].item(), box[2].item(), box[3].item())
-                for box in crop_box_ijwh.to(dtype=torch.int32)]
-            target_crops = [torchvision.transforms.F.crop(
-                heat_masks[l_idx].unsqueeze(0).cpu(), box[0].item(), box[1].item(), box[2].item(), box[3].item())
-                for box in crop_box_ijwh.to(dtype=torch.int32)]
-
-            crops_filtered, target_crops_filtered, filtered_idx = [], [], []
-            for f_idx, (c, tc) in enumerate(zip(crops, target_crops)):
-                if c.numel() != 0:
-                    if c.shape[-1] != crop_w or c.shape[-2] != crop_h:
-                        diff_h = crop_h - c.shape[2]
-                        diff_w = crop_w - c.shape[3]
-
-                        c = pad(c, [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2],
-                                mode='replicate')
-                        tc = pad(tc, [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2],
-                                 mode='constant')
-                    crops_filtered.append(c)
-                    target_crops_filtered.append(tc)
-                    filtered_idx.append(f_idx)
-
-            crops_filtered = torch.cat(crops_filtered)
-            target_crops = torch.cat(target_crops_filtered)
-            valid_boxes = crop_box_ijwh[filtered_idx].to(dtype=torch.int32)
-
-            # train patch model
-            epochs = 200
-            batch_size_per_iter = 6
-            for epoch in range(epochs):
-                patch_model.train()
-                train_loss = []
+                crops_filtered, target_crops, valid_boxes = get_processed_patches_to_train(crop_h, crop_w,
+                                                                                           frames, heat_masks,
+                                                                                           l_idx, locations)
 
                 till = (crops_filtered.shape[0] + batch_size_per_iter) - \
                        (crops_filtered.shape[0] % batch_size_per_iter) - batch_size_per_iter \
@@ -244,46 +197,110 @@ def patch_experiment(cfg):
                                                             f"| Epoch: {epoch} "
                                                             f"| Threshold: {cfg.prediction.threshold}")
 
-            # train over
-            target_patches_to_target_map = torch.zeros_like(heat_masks[l_idx], device='cpu')
-            for v_idx, v_box in enumerate(valid_boxes):
-                x1, y1, w, h = v_box
-                x1, y1, w, h = x1.item(), y1.item(), w.item(), h.item()
-                if x1 + w > target_patches_to_target_map.shape[-2] and y1 + h > target_patches_to_target_map.shape[-1]:
-                    valid_height = target_patches_to_target_map.shape[-2] - x1
-                    valid_width = target_patches_to_target_map.shape[-1] - y1
-                    patch = target_crops[v_idx][:, :valid_height, :valid_width]
-                elif x1 + w > target_patches_to_target_map.shape[-2]:
-                    valid_height = target_patches_to_target_map.shape[-2] - x1
-                    patch = target_crops[v_idx][:, :valid_height, :]
-                elif y1 + h > target_patches_to_target_map.shape[-1]:
-                    valid_width = target_patches_to_target_map.shape[-1] - y1
-                    patch = target_crops[v_idx][:, :, :valid_width]
-                else:
-                    patch = target_crops[v_idx]
-                target_patches_to_target_map[:, x1:x1+w, y1:y1+h] += patch
+                # train over
+                target_patches_to_target_map = torch.zeros_like(heat_masks[l_idx], device='cpu')
+                for v_idx, v_box in enumerate(valid_boxes):
+                    x1, y1, w, h = v_box
+                    x1, y1, w, h = x1.item(), y1.item(), w.item(), h.item()
+                    if x1 + w > target_patches_to_target_map.shape[-2] and y1 + h > target_patches_to_target_map.shape[-1]:
+                        valid_height = target_patches_to_target_map.shape[-2] - x1
+                        valid_width = target_patches_to_target_map.shape[-1] - y1
+                        patch = target_crops[v_idx][:, :valid_height, :valid_width]
+                    elif x1 + w > target_patches_to_target_map.shape[-2]:
+                        valid_height = target_patches_to_target_map.shape[-2] - x1
+                        patch = target_crops[v_idx][:, :valid_height, :]
+                    elif y1 + h > target_patches_to_target_map.shape[-1]:
+                        valid_width = target_patches_to_target_map.shape[-1] - y1
+                        patch = target_crops[v_idx][:, :, :valid_width]
+                    else:
+                        patch = target_crops[v_idx]
+                    target_patches_to_target_map[:, x1:x1+w, y1:y1+h] += patch
 
-            plt.imshow(heat_masks[l_idx][0].cpu())
-            plt.show()
+                plt.imshow(heat_masks[l_idx][0].cpu())
+                plt.show()
 
-            plt.imshow(target_patches_to_target_map[0])
-            plt.show()
+                plt.imshow(target_patches_to_target_map[0])
+                plt.show()
 
-            grid = torchvision.utils.make_grid(crops_filtered)
+                grid = torchvision.utils.make_grid(crops_filtered)
 
-            plt.imshow(grid.permute(1, 2, 0))
-            plt.show()
+                plt.imshow(grid.permute(1, 2, 0))
+                plt.show()
 
-            target_grid = torchvision.utils.make_grid(target_crops)
+                target_grid = torchvision.utils.make_grid(target_crops)
 
-            plt.imshow(target_grid.permute(1, 2, 0))
-            plt.show()
+                plt.imshow(target_grid.permute(1, 2, 0))
+                plt.show()
 
-            # plot_one_with_bounding_boxes(frames[l_idx].permute(1, 2, 0).cpu(), crop_box_ijwh)
-            print()
+                # plot_one_with_bounding_boxes(frames[l_idx].permute(1, 2, 0).cpu(), crop_box_ijwh)
+                print()
 
         print()
     print()
+
+
+def get_processed_patches_to_train(crop_h, crop_w, frames, heat_masks, l_idx, locations):
+    crops_filtered, target_crops_filtered, filtered_idx = [], [], []
+    crop_box_ijwh, crops, target_crops = get_patches(crop_h, crop_w, frames, heat_masks, l_idx, locations)
+    for f_idx, (c, tc) in enumerate(zip(crops, target_crops)):
+        if c.numel() != 0:
+            if c.shape[-1] != crop_w or c.shape[-2] != crop_h:
+                diff_h = crop_h - c.shape[2]
+                diff_w = crop_w - c.shape[3]
+
+                c = pad(c, [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2],
+                        mode='replicate')
+                tc = pad(tc, [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2],
+                         mode='constant')
+            crops_filtered.append(c)
+            target_crops_filtered.append(tc)
+            filtered_idx.append(f_idx)
+    crops_filtered = torch.cat(crops_filtered)
+    target_crops = torch.cat(target_crops_filtered)
+    valid_boxes = crop_box_ijwh[filtered_idx].to(dtype=torch.int32)
+    return crops_filtered, target_crops, valid_boxes
+
+
+def get_patches(crop_h, crop_w, frames, heat_masks, l_idx, locations):
+    crop_box_ijwh = get_boxes_for_patches(crop_h, crop_w, locations)
+    crops = [torchvision.transforms.F.crop(
+        frames[l_idx].unsqueeze(0).cpu(), box[0].item(), box[1].item(), box[2].item(), box[3].item())
+        for box in crop_box_ijwh.to(dtype=torch.int32)]
+    target_crops = [torchvision.transforms.F.crop(
+        heat_masks[l_idx].unsqueeze(0).cpu(), box[0].item(), box[1].item(), box[2].item(), box[3].item())
+        for box in crop_box_ijwh.to(dtype=torch.int32)]
+    return crop_box_ijwh, crops, target_crops
+
+
+def get_boxes_for_patches(crop_h, crop_w, locations):
+    crop_box_cxcywh = torch.stack([torch.tensor([kp[0], kp[1], crop_w, crop_h]) for kp in locations])
+    crop_box_ijwh = torchvision.ops.box_convert(crop_box_cxcywh, 'cxcywh', 'xywh')
+    crop_box_ijwh = torch.stack([torch.tensor([b[1], b[0], b[2], b[3]]) for b in crop_box_ijwh])
+    return crop_box_ijwh
+
+
+def locations_from_heatmaps(frames, kernel, loc_cutoff, marker_size, out):
+    out = [o.sigmoid() for o in out]
+    pruned_locations = []
+    loc_maxima_per_output = [get_local_maximum(o, kernel) for o in out]
+    for li, loc_max_out in enumerate(loc_maxima_per_output):
+        temp_locations = []
+        for out_img_idx in range(loc_max_out.shape[0]):
+            h_loc, w_loc = torch.where(loc_max_out[out_img_idx] > loc_cutoff)
+            loc = torch.stack((w_loc, h_loc)).t()
+
+            temp_locations.append(loc)
+
+            # viz
+            plt.imshow(frames[out_img_idx].cpu().permute(1, 2, 0))
+            plt.plot(w_loc, h_loc, 'o', markerfacecolor='r', markeredgecolor='k', markersize=marker_size)
+
+            plt.title(f'Out - {li} - {out_img_idx}')
+            plt.tight_layout()
+            plt.show()
+
+        pruned_locations.append(temp_locations)
+    return pruned_locations
 
 
 if __name__ == '__main__':
