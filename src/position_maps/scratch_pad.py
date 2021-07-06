@@ -131,6 +131,8 @@ def patch_experiment(cfg):
                 crops_filtered, target_crops, valid_boxes = get_processed_patches_to_train(crop_h, crop_w,
                                                                                            frames, heat_masks,
                                                                                            l_idx, locations)
+                if len(crops_filtered) == 0 or len(target_crops) == 0 or len(valid_boxes) == 0:
+                    continue
 
                 # train
                 till = (crops_filtered.shape[0] + batch_size_per_iter) - \
@@ -285,9 +287,9 @@ def get_processed_patches_to_train(crop_h, crop_w, frames, heat_masks, l_idx, lo
             crops_filtered.append(c)
             target_crops_filtered.append(tc)
             filtered_idx.append(f_idx)
-    crops_filtered = torch.cat(crops_filtered)
-    target_crops = torch.cat(target_crops_filtered)
-    valid_boxes = crop_box_ijwh[filtered_idx].to(dtype=torch.int32)
+    crops_filtered = torch.cat(crops_filtered) if len(crops_filtered) != 0 else []
+    target_crops = torch.cat(target_crops_filtered) if len(target_crops) != 0 else []
+    valid_boxes = crop_box_ijwh[filtered_idx].to(dtype=torch.int32) if len(filtered_idx) != 0 else []
     return crops_filtered, target_crops, valid_boxes
 
 
