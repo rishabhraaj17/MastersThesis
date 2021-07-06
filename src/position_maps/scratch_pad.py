@@ -243,7 +243,7 @@ def patch_experiment(cfg):
                     target_patches_to_target_map_assp[:, x1:x1 + w, y1:y1 + h] += patch_aspp
                     target_patches_to_target_map_dcl[:, x1:x1 + w, y1:y1 + h] += patch_dcl
 
-                show = np.random.choice(2, 1, replace=False, p=[0.65, 0.35]).item()
+                show = np.random.choice(2, 1, replace=False, p=[0.90, 0.10]).item()
 
                 if show:
                     fig, ax = plt.subplots(1, 4, sharex='none', sharey='none', figsize=(16, 8))
@@ -260,6 +260,7 @@ def patch_experiment(cfg):
                     small_out_dcn_ax.set_title('2nd stage out - DCL')
 
                     plt.tight_layout()
+                    plt.suptitle(f"Epoch {epoch}")
                     plt.show()
 
     print()
