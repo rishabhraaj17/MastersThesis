@@ -10,7 +10,7 @@ from torch.utils.data import Dataset
 from torchvision.models.segmentation import deeplabv3_resnet50, deeplabv3_resnet101, deeplabv3_mobilenet_v3_large
 
 from src.position_maps.utils import ImagePadder
-from src_lib.models_hub.base import Base, BaseDDP, weights_init
+from src_lib.models_hub.base import Base, BaseDDP, weights_init, BaseGAN
 from src_lib.models_hub.utils import Up, UpProject
 
 HEAD_CONFIG = {
@@ -947,8 +947,8 @@ class DeepLabV3Discriminator(nn.Module):
         super(DeepLabV3Discriminator, self).__init__()
         self.config = config
 
-        self.with_aux_head = self.config.deep_lab_v3_plus.with_aux_head
-        self.with_deconv_head = self.config.deep_lab_v3_plus.with_deconv_head
+        self.with_aux_head = self.config.deep_lab_v3_gan.with_aux_head
+        self.with_deconv_head = self.config.deep_lab_v3_gan.with_deconv_head
 
         self.discriminator = ResNetV1c(
             depth=18,
@@ -995,15 +995,15 @@ class DeepLabV3Generator(nn.Module):
         super(DeepLabV3Generator, self).__init__()
         self.config = config
 
-        self.align_corners = self.config.deep_lab_v3_plus.align_corners
-        self.with_aux_head = self.config.deep_lab_v3_plus.with_aux_head
-        self.with_deconv_head = self.config.deep_lab_v3_plus.with_deconv_head
+        self.align_corners = self.config.deep_lab_v3_gan.align_corners
+        self.with_aux_head = self.config.deep_lab_v3_gan.with_aux_head
+        self.with_deconv_head = self.config.deep_lab_v3_gan.with_deconv_head
 
-        norm_cfg = dict(type=self.config.deep_lab_v3_plus.norm.type,
-                        requires_grad=self.config.deep_lab_v3_plus.norm.requires_grad)
+        norm_cfg = dict(type=self.config.deep_lab_v3_gan.norm.type,
+                        requires_grad=self.config.deep_lab_v3_gan.norm.requires_grad)
 
         self.backbone = ResNetV1c(
-            depth=self.config.deep_lab_v3_plus.resnet_depth,
+            depth=self.config.deep_lab_v3_gan.resnet_depth,
             num_stages=4,
             out_indices=(0, 1, 2, 3),
             dilations=(1, 1, 2, 4),
@@ -1013,16 +1013,16 @@ class DeepLabV3Generator(nn.Module):
             style='pytorch',
             contract_dilation=True,
             init_cfg=None,
-            pretrained=self.config.deep_lab_v3_plus.pretrained
+            pretrained=self.config.deep_lab_v3_gan.pretrained
         )
-        if self.config.deep_lab_v3_plus.aspp_head:
+        if self.config.deep_lab_v3_gan.aspp_head:
             self.head = ASPPHead(
                 in_channels=2048,
                 in_index=3,
                 channels=512,
                 dilations=(1, 12, 24, 36),
                 dropout_ratio=0.1,
-                num_classes=self.config.deep_lab_v3_plus.head.out_ch,
+                num_classes=self.config.deep_lab_v3_gan.head.out_ch,
                 norm_cfg=norm_cfg,
                 align_corners=self.align_corners
             )
@@ -1035,7 +1035,7 @@ class DeepLabV3Generator(nn.Module):
                 c1_in_channels=256,
                 c1_channels=48,
                 dropout_ratio=0.1,
-                num_classes=self.config.deep_lab_v3_plus.head.out_ch,
+                num_classes=self.config.deep_lab_v3_gan.head.out_ch,
                 norm_cfg=norm_cfg,
                 align_corners=self.align_corners
             )
@@ -1047,7 +1047,7 @@ class DeepLabV3Generator(nn.Module):
                 num_convs=1,
                 concat_input=False,
                 dropout_ratio=0.1,
-                num_classes=self.config.deep_lab_v3_plus.aux_head.out_ch,
+                num_classes=self.config.deep_lab_v3_gan.aux_head.out_ch,
                 norm_cfg=norm_cfg,
                 align_corners=self.align_corners
             )
@@ -1056,10 +1056,10 @@ class DeepLabV3Generator(nn.Module):
                 in_channels=1024,  # 2048,
                 out_channels=1,
                 in_index=2,  # 3,
-                num_deconv_layers=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['num_deconv_layers'],
-                num_deconv_filters=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['num_deconv_filters'],
-                num_deconv_kernels=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['num_deconv_kernels'],
-                extra=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['extra'],
+                num_deconv_layers=HEAD_CONFIG[self.config.deep_lab_v3_gan.head_conf]['num_deconv_layers'],
+                num_deconv_filters=HEAD_CONFIG[self.config.deep_lab_v3_gan.head_conf]['num_deconv_filters'],
+                num_deconv_kernels=HEAD_CONFIG[self.config.deep_lab_v3_gan.head_conf]['num_deconv_kernels'],
+                extra=HEAD_CONFIG[self.config.deep_lab_v3_gan.head_conf]['extra'],
                 align_corners=self.align_corners,
                 loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True)
             )
@@ -1114,23 +1114,30 @@ class DeepLabV3Generator(nn.Module):
         return [out1]
 
 
-class DeepLabV3GAN(Base):
+class DeepLabV3GAN(BaseGAN):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
                  desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
-                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
+                 additional_loss_functions: List[nn.Module] = None, desc_loss_function: nn.Module = None,
+                 collate_fn: Optional[Callable] = None):
         super(DeepLabV3GAN, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset,
             desired_output_shape=desired_output_shape, loss_function=loss_function,
             additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
         )
         self.config = config
-        self.with_aux_head = self.config.deep_lab_v3_plus.with_aux_head
-        self.with_deconv_head = self.config.deep_lab_v3_plus.with_deconv_head
+        self.with_aux_head = self.config.deep_lab_v3_gan.with_aux_head
+        self.with_deconv_head = self.config.deep_lab_v3_gan.with_deconv_head
 
         self.generator = DeepLabV3Generator(config=config)
         self.discriminator = DeepLabV3Discriminator(config=config)
+        
+        self.loss_reducer = getattr(torch.Tensor, self.config.loss.reduction)
+        self.additional_loss_weights = self.config.loss.gaussian_weight
+        self.additional_loss_activation = self.config.loss.apply_sigmoid
+        
+        self.desc_loss_function = desc_loss_function
 
-    def forward(self, x):
+    def forward_gen_desc(self, x):
         gen_out = self.generator(x)
 
         des_out = self.discriminator(gen_out)
@@ -1146,16 +1153,87 @@ class DeepLabV3GAN(Base):
             return (out1, out2), des_out
         return [gen_out], des_out
 
+    def forward(self, x):
+        gen_out = self.generator(x)
+        return [gen_out]
+
     def calculate_loss(self, pred, target):
         return torch.stack([self.loss_function(p, target) for p in pred])
-
-    @staticmethod
-    def calculate_additional_loss(loss_function, pred, target, apply_sigmoid=True, weight_factor=1.0):
-        pred = [p.sigmoid() if apply_sigmoid else p for p in pred]
-        return torch.stack([weight_factor * loss_function(p, target) for p in pred])
+    
+    def calculate_additional_losses(self, pred, target, weights, apply_sigmoid):
+        losses = []
+        for loss_fn, weight, use_sigmoid in zip(self.additional_loss_functions, weights, apply_sigmoid):
+            pred = [p.sigmoid() if use_sigmoid else p for p in pred]
+            losses.append(torch.stack([weight * loss_fn(p, target) for p in pred]))
+        return torch.stack(losses)
 
     def configure_optimizers(self):
-        pass
+        opt_disc = torch.optim.Adam(self.discriminator.parameters(), lr=self.config.deep_lab_v3_gan.discriminator.lr,
+                                    weight_decay=self.config.deep_lab_v3_gan.discriminator.weight_decay,
+                                    amsgrad=self.config.deep_lab_v3_gan.discriminator.weight_decay)
+        opt_gen = torch.optim.Adam(self.generator.parameters(), lr=self.config.deep_lab_v3_gan.generator.lr,
+                                   weight_decay=self.config.deep_lab_v3_gan.generator.weight_decay,
+                                   amsgrad=self.config.deep_lab_v3_gan.generator.weight_decay)
+        return [opt_disc, opt_gen], []
+
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        frames, heat_masks, _, _, _, meta = batch
+
+        # Train discriminator
+        result = None
+        if optimizer_idx == 0:
+            result = self._disc_step((frames, heat_masks))
+
+        # Train generator
+        if optimizer_idx == 1:
+            result = self._gen_step((frames, heat_masks))
+
+        return result
+
+    def _disc_step(self, x):
+        disc_loss = self._get_disc_loss(x)
+        self.log("loss/disc", disc_loss, on_epoch=True)
+        return disc_loss
+
+    def _gen_step(self, x):
+        gen_loss = self._get_gen_loss(x)
+        self.log("loss/gen", gen_loss, on_epoch=True)
+        return gen_loss
+
+    def _get_disc_loss(self, x):
+        frames, heat_masks = x
+
+        # Train with real
+        real_pred = self.discriminator(heat_masks)
+        real_gt = torch.ones_like(real_pred)
+        real_loss = self.desc_loss_function(real_pred, real_gt)
+
+        # Train with fake
+        fake_pred = self.generator(frames)  # with no grad?
+        fake_pred = [self.discriminator(f) for f in fake_pred]
+        fake_gt = torch.ones_like(fake_pred[0])
+        fake_loss = [self.discriminator_criterion(f, fake_gt) for f in fake_pred]
+        fake_loss = self.loss_reducer(torch.stack(fake_loss))
+
+        disc_loss = real_loss + fake_loss
+
+        return disc_loss
+
+    def _get_gen_loss(self, x):
+        frames, heat_masks = x
+
+        padder = ImagePadder(frames.shape[-2:], factor=self.config.preproccesing.pad_factor)
+        frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
+
+        out = self.generator(frames)
+
+        loss1 = self.loss_reducer(self.calculate_loss(out, heat_masks))
+        loss2 = self.loss_reducer(self.calculate_additional_losses(
+            out, heat_masks, self.additional_loss_weights, self.additional_loss_activation))
+        
+        gen_loss = loss1 + loss2
+
+        return gen_loss
 
 
 if __name__ == '__main__':

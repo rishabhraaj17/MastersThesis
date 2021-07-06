@@ -136,3 +136,51 @@ class BaseDDP(Base):
             collate_fn=self.collate_fn, pin_memory=self.config.pin_memory,
             drop_last=self.config.drop_last,
             sampler=torch.utils.data.distributed.DistributedSampler(self.val_dataset, shuffle=False))
+
+
+class BaseGAN(LightningModule):
+    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
+        super(BaseGAN, self).__init__()
+        self.config = config
+        self.train_dataset = train_dataset
+        self.val_dataset = val_dataset
+
+        self.loss_function = loss_function
+        self.additional_loss_functions = additional_loss_functions
+
+        self.collate_fn = collate_fn
+        self.desired_output_shape = desired_output_shape
+
+        self.save_hyperparameters(self.config)
+
+    def forward(self, x):
+        return NotImplementedError
+
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        loss = self._one_step(batch)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx, optimizer_idx):
+        loss = self._one_step(batch)
+        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return loss
+
+    def configure_optimizers(self):
+        return NotImplemented
+
+    def train_dataloader(self) -> DataLoader:
+        return DataLoader(
+            dataset=self.train_dataset, batch_size=self.config.batch_size,
+            shuffle=False, num_workers=self.config.num_workers,
+            collate_fn=self.collate_fn, pin_memory=self.config.pin_memory,
+            drop_last=self.config.drop_last)
+
+    def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
+        return DataLoader(
+            dataset=self.val_dataset, batch_size=self.config.batch_size * self.config.val_batch_size_factor,
+            shuffle=False, num_workers=self.config.num_workers,
+            collate_fn=self.collate_fn, pin_memory=self.config.pin_memory,
+            drop_last=self.config.drop_last)
