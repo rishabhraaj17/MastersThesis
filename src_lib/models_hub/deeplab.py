@@ -10,7 +10,7 @@ from torch.utils.data import Dataset
 from torchvision.models.segmentation import deeplabv3_resnet50, deeplabv3_resnet101, deeplabv3_mobilenet_v3_large
 
 from src.position_maps.utils import ImagePadder
-from src_lib.models_hub.base import Base, BaseDDP
+from src_lib.models_hub.base import Base, BaseDDP, weights_init
 from src_lib.models_hub.utils import Up, UpProject
 
 HEAD_CONFIG = {
@@ -942,15 +942,59 @@ class DeepLabV3PlusSmall(Base):
         return torch.stack([weight_factor * loss_function(p, target) for p in pred])
 
 
-class DeepLabV3GAN(Base):
-    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
-                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
-                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
-        super(DeepLabV3GAN, self).__init__(
-            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
-            desired_output_shape=desired_output_shape, loss_function=loss_function,
-            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
+class DeepLabV3Discriminator(nn.Module):
+    def __init__(self, config: DictConfig):
+        super(DeepLabV3Discriminator, self).__init__()
+        self.config = config
+
+        self.with_aux_head = self.config.deep_lab_v3_plus.with_aux_head
+        self.with_deconv_head = self.config.deep_lab_v3_plus.with_deconv_head
+
+        self.discriminator = ResNetV1c(
+            depth=18,
+            in_channels=1,
+            out_indices=(3,),
+            norm_eval=False,
+            norm_cfg=dict(type='BN'),
         )
+        self.discriminator_fc = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(512, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+        )
+
+        self.init_weights()
+
+    def init_weights(self):
+        self.discriminator.init_weights()
+        self.discriminator_fc.apply(weights_init)
+
+    def forward(self, x):
+        if self.with_aux_head and self.with_deconv_head:
+            out1, out2, out3 = x
+            d_out = self.discriminator(torch.cat((out1, out2, out3)))
+        elif self.with_aux_head:
+            out1, out2 = x
+            d_out = self.discriminator(torch.cat((out1, out2)))
+        elif self.with_deconv_head:
+            out1, out3 = x
+            d_out = self.discriminator(torch.cat((out1, out3)))
+        else:
+            d_out = self.discriminator(x)
+
+        d_out = d_out[-1]
+        d_out = self.discriminator_fc(d_out)
+
+        return d_out
+
+
+class DeepLabV3Generator(nn.Module):
+    def __init__(self, config: DictConfig):
+        super(DeepLabV3Generator, self).__init__()
+        self.config = config
+
         self.align_corners = self.config.deep_lab_v3_plus.align_corners
         self.with_aux_head = self.config.deep_lab_v3_plus.with_aux_head
         self.with_deconv_head = self.config.deep_lab_v3_plus.with_deconv_head
@@ -1020,22 +1064,7 @@ class DeepLabV3GAN(Base):
                 loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True)
             )
 
-        self.discriminator = ResNetV1c(
-            depth=18,
-            in_channels=1,
-            out_indices=(3,),
-            norm_eval=False,
-            norm_cfg=dict(type='BN'),
-        )
-        self.discriminator_fc = nn.Sequential(
-            nn.AdaptiveAvgPool2d((1, 1)),
-            nn.Flatten(),
-            nn.Linear(512, 64),
-            nn.ReLU(),
-            nn.Linear(64, 1)
-        )
-
-        self.init_weights()
+            self.init_weights()
 
     def init_weights(self):
         self.backbone.init_weights()
@@ -1076,26 +1105,46 @@ class DeepLabV3GAN(Base):
         if self.with_deconv_head:
             out3 = self.deconv_head(feats)
 
-        # discriminator
         if self.with_aux_head and self.with_deconv_head:
-            d_out = self.discriminator(torch.cat((out1, out2, out3)))
-        elif self.with_aux_head:
-            d_out = self.discriminator(torch.cat((out1, out2)))
-        elif self.with_deconv_head:
-            d_out = self.discriminator(torch.cat((out1, out3)))
-        else:
-            d_out = self.discriminator(out1)
-
-        d_out = d_out[-1]
-        d_out = self.discriminator_fc(d_out)
-
-        if self.with_aux_head and self.with_deconv_head:
-            return (out1, out2, out3), d_out
+            return out1, out2, out3
         if self.with_deconv_head:
-            return (out1, out3), d_out
+            return out1, out3
         if self.with_aux_head:
-            return (out1, out2), d_out
-        return [out1], d_out
+            return out1, out2
+        return [out1]
+
+
+class DeepLabV3GAN(Base):
+    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
+        super(DeepLabV3GAN, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
+        )
+        self.config = config
+        self.with_aux_head = self.config.deep_lab_v3_plus.with_aux_head
+        self.with_deconv_head = self.config.deep_lab_v3_plus.with_deconv_head
+
+        self.generator = DeepLabV3Generator(config=config)
+        self.discriminator = DeepLabV3Discriminator(config=config)
+
+    def forward(self, x):
+        gen_out = self.generator(x)
+
+        des_out = self.discriminator(gen_out)
+
+        if self.with_aux_head and self.with_deconv_head:
+            out1, out2, out3 = gen_out
+            return (out1, out2, out3), des_out
+        if self.with_deconv_head:
+            out1, out3 = gen_out
+            return (out1, out3), des_out
+        if self.with_aux_head:
+            out1, out2 = gen_out
+            return (out1, out2), des_out
+        return [gen_out], des_out
 
     def calculate_loss(self, pred, target):
         return torch.stack([self.loss_function(p, target) for p in pred])
@@ -1110,7 +1159,7 @@ class DeepLabV3GAN(Base):
 
 
 if __name__ == '__main__':
-    m = DeepLabV3PlusSmall(OmegaConf.load('../../src/position_maps/config/model/model.yaml'), None, None)
+    m = DeepLabV3GAN(OmegaConf.load('../../src/position_maps/config/model/model.yaml'), None, None)
     inp = torch.randn((2, 3, 480, 480))
     o = m(inp)
     print()

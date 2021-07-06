@@ -8,12 +8,23 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import Dataset, DataLoader
 
 
-def weights_init(m):
-    if type(m) == nn.Conv2d or type(m) == nn.ConvTranspose2d:
-        nn.init.xavier_normal(m.weight.data)
-    elif type(m) == nn.BatchNorm2d:
-        m.weight.data.normal_(1.0, 0.02)
-        m.bias.data.fill_(0)
+def weights_init(m, init_type='normal'):
+    if init_type == 'normal':
+        if type(m) == nn.Conv2d or type(m) == nn.ConvTranspose2d:
+            nn.init.xavier_normal(m.weight.data)
+        elif type(m) == nn.Linear:
+            nn.init.kaiming_normal(m.weight.data)
+        elif type(m) == nn.BatchNorm2d:
+            m.weight.data.normal_(1.0, 0.02)
+            m.bias.data.fill_(0)
+    else:
+        if type(m) == nn.Conv2d or type(m) == nn.ConvTranspose2d:
+            nn.init.xavier_uniform(m.weight.data)
+        elif type(m) == nn.Linear:
+            nn.init.kaiming_uniform(m.weight.data)
+        elif type(m) == nn.BatchNorm2d:
+            m.weight.data.normal_(1.0, 0.02)
+            m.bias.data.fill_(0)
 
 
 class Base(LightningModule):
