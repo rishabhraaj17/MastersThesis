@@ -125,6 +125,9 @@ def patch_experiment(cfg):
             for l_idx, (loc_from_0, loc_from_1) in enumerate(zip(*pruned_locations)):
                 locations = loc_from_0 if loc_from_0.shape[0] > loc_from_1.shape[0] else loc_from_1
 
+                if locations.numel() == 0:
+                    continue
+
                 crops_filtered, target_crops, valid_boxes = get_processed_patches_to_train(crop_h, crop_w,
                                                                                            frames, heat_masks,
                                                                                            l_idx, locations)
@@ -156,7 +159,7 @@ def patch_experiment(cfg):
 
                     loss.backward()
                     opt.step()
-                sch.step(np.array(train_loss).mean())
+                # sch.step(np.array(train_loss).mean())
 
                 patch_model.eval()
                 val_loss = []
@@ -240,8 +243,8 @@ def patch_experiment(cfg):
                         patch_dcl = dcl_out[v_idx]
 
                     target_patches_to_target_map[:, x1:x1 + w, y1:y1 + h] += patch
-                    target_patches_to_target_map_assp[:, x1:x1 + w, y1:y1 + h] += patch_aspp
-                    target_patches_to_target_map_dcl[:, x1:x1 + w, y1:y1 + h] += patch_dcl
+                    target_patches_to_target_map_assp[:, x1:x1 + w, y1:y1 + h] += patch_aspp.sigmoid()
+                    target_patches_to_target_map_dcl[:, x1:x1 + w, y1:y1 + h] += patch_dcl.sigmoid()
 
                 show = np.random.choice(2, 1, replace=False, p=[0.90, 0.10]).item()
 
