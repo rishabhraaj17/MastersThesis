@@ -323,9 +323,11 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
         verbose=cfg.verbose
     )
 
+    sync_bn = False
     plugins = None
     if cfg.trainer.accelerator in ['ddp', 'ddp_cpu']:
         plugins = DDPPlugin(find_unused_parameters=cfg.trainer.find_unused_parameters)
+        sync_bn = True
 
     if cfg.warm_restart.enable:
         checkpoint_root_path = f'{cfg.warm_restart.checkpoint.root}{cfg.warm_restart.checkpoint.path}' \
@@ -363,7 +365,8 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                           accelerator=cfg.trainer.accelerator, deterministic=cfg.trainer.deterministic,
                           replace_sampler_ddp=cfg.trainer.replace_sampler_ddp,
                           num_nodes=cfg.trainer.num_nodes, plugins=plugins,
-                          gradient_clip_val=cfg.trainer.gradient_clip_val)
+                          gradient_clip_val=cfg.trainer.gradient_clip_val,
+                          sync_batchnorm=sync_bn)
     else:
         if cfg.resume_mode:
             checkpoint_path = f'{cfg.resume.checkpoint.path}{cfg.resume.checkpoint.version}/checkpoints/'
@@ -381,14 +384,16 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                               deterministic=cfg.trainer.deterministic,
                               replace_sampler_ddp=cfg.trainer.replace_sampler_ddp,
                               num_nodes=cfg.trainer.num_nodes, plugins=plugins,
-                              gradient_clip_val=cfg.trainer.gradient_clip_val)
+                              gradient_clip_val=cfg.trainer.gradient_clip_val,
+                              sync_batchnorm=sync_bn)
         else:
             trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                               fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
                               accelerator=cfg.trainer.accelerator, deterministic=cfg.trainer.deterministic,
                               replace_sampler_ddp=cfg.trainer.replace_sampler_ddp,
                               num_nodes=cfg.trainer.num_nodes, plugins=plugins,
-                              gradient_clip_val=cfg.trainer.gradient_clip_val)
+                              gradient_clip_val=cfg.trainer.gradient_clip_val,
+                              sync_batchnorm=sync_bn)
     return model, trainer
 
 
