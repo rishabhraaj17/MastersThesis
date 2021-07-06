@@ -58,7 +58,7 @@ def patch_experiment(cfg):
 
     patch_model.to(device)
 
-    opt = torch.optim.Adam(patch_model.parameters(), lr=1e-3, weight_decay=0, amsgrad=False)
+    opt = torch.optim.Adam(patch_model.parameters(), lr=2e-3, weight_decay=0, amsgrad=False)
     sch = ReduceLROnPlateau(opt,
                             patience=50,
                             verbose=True,
@@ -140,8 +140,10 @@ def patch_experiment(cfg):
                     if crops_filtered.shape[0] % batch_size_per_iter == 0 \
                     else (crops_filtered.shape[0] + batch_size_per_iter) - \
                          (crops_filtered.shape[0] % batch_size_per_iter)
+                total_train_iter = len(list(range(0, till, batch_size_per_iter)))
+                train_iter, done_iter = 0, 0
                 for b_idx in range(0, till, batch_size_per_iter):
-                    opt.zero_grad()
+                    # opt.zero_grad()
 
                     crops_filtered_in, target_crops_gt = \
                         crops_filtered[b_idx: b_idx + batch_size_per_iter].to(device), \
@@ -160,7 +162,13 @@ def patch_experiment(cfg):
                     train_loss.append(loss.item())
 
                     loss.backward()
-                    opt.step()
+                    train_iter += 1
+                    done_iter += 1
+                    if train_iter % 6 == 0 or (total_train_iter - done_iter) < 6 or train_iter == total_train_iter - 1:
+                        opt.step()
+                        opt.zero_grad()
+                        train_iter = 0
+                    # opt.step()
                 # sch.step(np.array(train_loss).mean())
                 print(f"Loss : {np.array(train_loss).mean()}")
 
