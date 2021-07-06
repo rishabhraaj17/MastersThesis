@@ -21,7 +21,7 @@ from tqdm import tqdm
 
 from evaluate import setup_multiple_test_datasets
 from losses import CenterNetFocalLoss
-from src_lib.models_hub import DeepLabV3, DeepLabV3PlusSmall
+from src_lib.models_hub import DeepLabV3, DeepLabV3PlusSmall, DeepLabV3Plus, AttentionUNet
 from utils import heat_map_collate_fn, ImagePadder, plot_predictions_v2
 
 
@@ -45,7 +45,7 @@ def patch_experiment(cfg):
         config=cfg, train_dataset=None, val_dataset=None,
         loss_function=loss_fn, collate_fn=heat_map_collate_fn, additional_loss_functions=gauss_loss_fn,
         desired_output_shape=None)
-    patch_model = DeepLabV3PlusSmall(
+    patch_model = AttentionUNet(
         config=cfg, train_dataset=None, val_dataset=None,
         loss_function=loss_fn, collate_fn=heat_map_collate_fn, additional_loss_functions=gauss_loss_fn,
         desired_output_shape=None)
@@ -58,7 +58,7 @@ def patch_experiment(cfg):
 
     patch_model.to(device)
 
-    opt = torch.optim.Adam(patch_model.parameters(), lr=2e-3, weight_decay=0, amsgrad=False)
+    opt = torch.optim.Adam(patch_model.parameters(), lr=1e-3, weight_decay=0, amsgrad=False)
     sch = ReduceLROnPlateau(opt,
                             patience=50,
                             verbose=True,
@@ -66,7 +66,7 @@ def patch_experiment(cfg):
                             min_lr=1e-10)
 
     epochs = 200
-    batch_size_per_iter = 6
+    batch_size_per_iter = 2
     for epoch in tqdm(range(epochs)):
         for idx, data in enumerate(test_loader):
             frames, heat_masks, position_map, distribution_map, class_maps, meta = data
@@ -166,7 +166,7 @@ def patch_experiment(cfg):
                 patch_model.eval()
                 val_loss = []
 
-                all_out = [[], []]
+                all_out = [] if patch_model._get_name() == 'AttentionUNet' else [[], []]
 
                 for b_idx in range(0, till, batch_size_per_iter):
                     crops_filtered_in, target_crops_gt = \
@@ -184,36 +184,56 @@ def patch_experiment(cfg):
 
                     random_idx = np.random.choice(crops_filtered_in.shape[0], 1, replace=False).item()
 
-                    out = [o.cpu().squeeze(1) for o in out]
-                    all_out[0].append(out[0])
-                    all_out[1].append(out[1])
+                    if patch_model._get_name() == 'AttentionUNet':
+                        out = out.cpu().squeeze(1)
+                        all_out.append(out)
+                    else:
+                        out = [o.cpu().squeeze(1) for o in out]
+                        all_out[0].append(out[0])
+                        all_out[1].append(out[1])
 
                     show = np.random.choice(2, 1, replace=False, p=[0.99, 0.01]).item()
                     if show:
-                        plot_predictions_v2(crops_filtered[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                            target_crops[random_idx].squeeze().cpu(),
-                                            torch.nn.functional.threshold(out[0][random_idx].sigmoid(),
-                                                                          threshold=cfg.prediction.threshold,
-                                                                          value=cfg.prediction.fill_value,
-                                                                          inplace=True),
-                                            logits_mask=out[0][random_idx].sigmoid(),
-                                            additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
-                                                            f"| Epoch: {epoch} "
-                                                            f"| Threshold: {cfg.prediction.threshold}")
-                        plot_predictions_v2(crops_filtered[random_idx].squeeze().cpu().permute(1, 2, 0),
-                                            target_crops[random_idx].squeeze().cpu(),
-                                            torch.nn.functional.threshold(out[-1][random_idx].sigmoid(),
-                                                                          threshold=cfg.prediction.threshold,
-                                                                          value=cfg.prediction.fill_value,
-                                                                          inplace=True),
-                                            logits_mask=out[-1][random_idx].sigmoid(),
-                                            additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
-                                                            f"| Epoch: {epoch} "
-                                                            f"| Threshold: {cfg.prediction.threshold}")
+                        if patch_model._get_name() == 'AttentionUNet':
+                            plot_predictions_v2(crops_filtered_in[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                                target_crops_gt[random_idx].squeeze().cpu(),
+                                                torch.nn.functional.threshold(out[random_idx].sigmoid(),
+                                                                              threshold=cfg.prediction.threshold,
+                                                                              value=cfg.prediction.fill_value,
+                                                                              inplace=True),
+                                                logits_mask=out[random_idx].sigmoid(),
+                                                additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                                f"| Epoch: {epoch} "
+                                                                f"| Threshold: {cfg.prediction.threshold}")
+                        else:
+                            plot_predictions_v2(crops_filtered_in[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                                target_crops_gt[random_idx].squeeze().cpu(),
+                                                torch.nn.functional.threshold(out[0][random_idx].sigmoid(),
+                                                                              threshold=cfg.prediction.threshold,
+                                                                              value=cfg.prediction.fill_value,
+                                                                              inplace=True),
+                                                logits_mask=out[0][random_idx].sigmoid(),
+                                                additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                                f"| Epoch: {epoch} "
+                                                                f"| Threshold: {cfg.prediction.threshold}")
+                            plot_predictions_v2(crops_filtered_in[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                                target_crops_gt[random_idx].squeeze().cpu(),
+                                                torch.nn.functional.threshold(out[-1][random_idx].sigmoid(),
+                                                                              threshold=cfg.prediction.threshold,
+                                                                              value=cfg.prediction.fill_value,
+                                                                              inplace=True),
+                                                logits_mask=out[-1][random_idx].sigmoid(),
+                                                additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                                f"| Epoch: {epoch} "
+                                                                f"| Threshold: {cfg.prediction.threshold}")
 
                 # arrange out_patches
-                assp_out = torch.cat(all_out[0]).unsqueeze(1)
-                dcl_out = torch.cat(all_out[1]).unsqueeze(1)
+                if patch_model._get_name() == 'AttentionUNet':
+                    assp_out = torch.cat(all_out).unsqueeze(1)
+                    dcl_out = torch.cat(all_out).unsqueeze(1)
+                else:
+                    assp_out = torch.cat(all_out[0]).unsqueeze(1)
+                    dcl_out = torch.cat(all_out[1]).unsqueeze(1)
 
                 # train over
                 target_patches_to_target_map = torch.zeros_like(heat_masks[l_idx], device='cpu')
@@ -251,21 +271,23 @@ def patch_experiment(cfg):
                 show = np.random.choice(2, 1, replace=False, p=[0.90, 0.10]).item()
 
                 if show:
-                    fig, ax = plt.subplots(1, 4, sharex='none', sharey='none', figsize=(16, 8))
-                    gt_ax, big_net_out_ax, small_out_aspp_ax, small_out_dcn_ax = ax
+                    fig, ax = plt.subplots(1, 5, sharex='none', sharey='none', figsize=(20, 6))
+                    gt_ax, big_net_out_ax, rgb_ax, small_out_aspp_ax, small_out_dcn_ax = ax
 
                     gt_ax.imshow(heat_masks[l_idx][0].cpu(), cmap='hot')
                     big_net_out_ax.imshow(target_patches_to_target_map[0], cmap='hot')
+                    rgb_ax.imshow(frames[l_idx].cpu().permute(1, 2, 0))
                     small_out_aspp_ax.imshow(target_patches_to_target_map_assp[0], cmap='hot')
                     small_out_dcn_ax.imshow(target_patches_to_target_map_dcl[0], cmap='hot')
 
                     gt_ax.set_title('GT Mask')
                     big_net_out_ax.set_title('1st stage out')
+                    rgb_ax.set_title('RGB')
                     small_out_aspp_ax.set_title('2nd stage out - DepthWiseAssp')
                     small_out_dcn_ax.set_title('2nd stage out - DCL')
 
                     plt.tight_layout()
-                    plt.suptitle(f"Epoch {epoch}")
+                    plt.suptitle(f"Epoch {epoch} - {patch_model._get_name()}")
                     plt.show()
 
     print()
