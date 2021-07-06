@@ -7,6 +7,7 @@ from kornia.losses import BinaryFocalLossWithLogits
 # from mmseg.models import VisionTransformer, HRNet
 from mmdet.models.utils.gaussian_target import get_local_maximum, get_topk_from_heatmap
 from torch.nn.functional import pad
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Subset
 # from torchvision.models.detection.rpn import RegionProposalNetwork
 # from mmdet.models.backbones.hourglass import HourglassNet
@@ -23,7 +24,7 @@ from evaluate import setup_multiple_test_datasets
 from losses import CenterNetFocalLoss
 from utils import heat_map_collate_fn, ImagePadder, plot_predictions_v2
 from patch_utils import quick_viz
-from src_lib.models_hub import DeepLabV3
+from src_lib.models_hub import DeepLabV3, DeepLabV3PlusSmall
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -46,12 +47,25 @@ def patch_experiment(cfg):
         config=cfg, train_dataset=None, val_dataset=None,
         loss_function=loss_fn, collate_fn=heat_map_collate_fn, additional_loss_functions=gauss_loss_fn,
         desired_output_shape=None)
+    patch_model = DeepLabV3PlusSmall(
+        config=cfg, train_dataset=None, val_dataset=None,
+        loss_function=loss_fn, collate_fn=heat_map_collate_fn, additional_loss_functions=gauss_loss_fn,
+        desired_output_shape=None)
 
     load_dict = torch.load('death_circle4_deeplabv3.pt', map_location=device)
     model.load_state_dict(load_dict)
 
     model.to(device)
     model.eval()
+
+    patch_model.to(device)
+
+    opt = torch.optim.Adam(patch_model.parameters(), lr=2e-3, weight_decay=0, amsgrad=False)
+    sch = ReduceLROnPlateau(opt,
+                            patience=50,
+                            verbose=True,
+                            factor=0.1,
+                            min_lr=1e-10)
 
     for idx, data in enumerate(tqdm(test_loader)):
         frames, heat_masks, position_map, distribution_map, class_maps, meta = data
@@ -155,6 +169,82 @@ def patch_experiment(cfg):
             target_crops = torch.cat(target_crops_filtered)
             valid_boxes = crop_box_ijwh[filtered_idx].to(dtype=torch.int32)
 
+            # train patch model
+            epochs = 200
+            batch_size_per_iter = 6
+            for epoch in range(epochs):
+                patch_model.train()
+                train_loss = []
+
+                till = (crops_filtered.shape[0] + batch_size_per_iter) - \
+                       (crops_filtered.shape[0] % batch_size_per_iter) - batch_size_per_iter \
+                    if crops_filtered.shape[0] % batch_size_per_iter == 0 \
+                    else (crops_filtered.shape[0] + batch_size_per_iter) - \
+                         (crops_filtered.shape[0] % batch_size_per_iter)
+                for b_idx in range(0, till, batch_size_per_iter):
+                    opt.zero_grad()
+
+                    crops_filtered_in, target_crops_gt = \
+                        crops_filtered[b_idx: b_idx + batch_size_per_iter].to(device), \
+                        target_crops[b_idx: b_idx + batch_size_per_iter].to(device)
+
+                    out = patch_model(crops_filtered_in)
+
+                    loss1 = patch_model.calculate_loss(out, target_crops_gt).mean()
+                    loss2 = patch_model.calculate_additional_losses(out, target_crops_gt, [0.5], [True]).mean()
+                    loss = loss1 + loss2
+
+                    train_loss.append(loss.item())
+
+                    loss.backward()
+                    opt.step()
+                sch.step(np.array(train_loss).mean())
+
+                patch_model.eval()
+                val_loss = []
+
+                for b_idx in range(0, till, batch_size_per_iter):
+                    crops_filtered_in, target_crops_gt = \
+                        crops_filtered[b_idx: b_idx + batch_size_per_iter].to(device), \
+                        target_crops[b_idx: b_idx + batch_size_per_iter].to(device)
+
+                    with torch.no_grad():
+                        out = patch_model(crops_filtered_in)
+
+                    loss1 = patch_model.calculate_loss(out, target_crops_gt).mean()
+                    loss2 = patch_model.calculate_additional_losses(out, target_crops_gt, [0.5], [True]).mean()
+                    loss = loss1 + loss2
+
+                    val_loss.append(loss.item())
+
+                    random_idx = np.random.choice(crops_filtered_in.shape[0], 1, replace=False).item()
+
+                    out = [o.cpu().squeeze(1) for o in out]
+
+                    show = np.random.choice(2, 1, replace=False, p=[0.3, 0.7]).item()
+                    if show:
+                        plot_predictions_v2(crops_filtered[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                            target_crops[random_idx].squeeze().cpu(),
+                                            torch.nn.functional.threshold(out[0][random_idx].sigmoid(),
+                                                                          threshold=cfg.prediction.threshold,
+                                                                          value=cfg.prediction.fill_value,
+                                                                          inplace=True),
+                                            logits_mask=out[0][random_idx].sigmoid(),
+                                            additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                            f"| Epoch: {epoch} "
+                                                            f"| Threshold: {cfg.prediction.threshold}")
+                        plot_predictions_v2(crops_filtered[random_idx].squeeze().cpu().permute(1, 2, 0),
+                                            target_crops[random_idx].squeeze().cpu(),
+                                            torch.nn.functional.threshold(out[-1][random_idx].sigmoid(),
+                                                                          threshold=cfg.prediction.threshold,
+                                                                          value=cfg.prediction.fill_value,
+                                                                          inplace=True),
+                                            logits_mask=out[-1][random_idx].sigmoid(),
+                                            additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
+                                                            f"| Epoch: {epoch} "
+                                                            f"| Threshold: {cfg.prediction.threshold}")
+
+            # train over
             target_patches_to_target_map = torch.zeros_like(heat_masks[l_idx], device='cpu')
             for v_idx, v_box in enumerate(valid_boxes):
                 x1, y1, w, h = v_box
