@@ -249,6 +249,36 @@ def setup_multiple_datasets(cfg):
     return train_datasets, val_datasets, target_max_shape
 
 
+def setup_single_video_dataset(cfg):
+    meta = SDDMeta(cfg.root + 'H_SDD.txt')
+
+    df, rgb_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=cfg.single_video_mode.video_classes_to_use,
+        video_numbers=cfg.single_video_mode.video_numbers_to_use,
+        desired_ratio=cfg.desired_pixel_to_meter_ratio_rgb)
+
+    df_target, target_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=cfg.single_video_mode.video_classes_to_use,
+        video_numbers=cfg.single_video_mode.video_numbers_to_use,
+        desired_ratio=cfg.desired_pixel_to_meter_ratio)
+
+    dataset = setup_multiple_datasets_core(
+        cfg, meta, video_classes_to_use=cfg.single_video_mode.video_classes_to_use,
+        video_numbers_to_use=cfg.single_video_mode.video_numbers_to_use,
+        num_videos=cfg.single_video_mode.num_videos,
+        multiple_videos=cfg.single_video_mode.multiple_videos,
+        df=df, df_target=df_target, rgb_max_shape=rgb_max_shape)
+
+    val_dataset_len = round(len(dataset) * cfg.single_video_mode.val_percent)
+    train_indices = torch.arange(start=0, end=len(dataset) - val_dataset_len)
+    val_indices = torch.arange(start=len(dataset) - val_dataset_len, end=len(dataset))
+
+    train_dataset = Subset(dataset, train_indices)
+    val_dataset = Subset(dataset, val_indices)
+
+    return train_dataset, val_dataset, target_max_shape
+
+
 def setup_multiple_datasets_core(cfg, meta, video_classes_to_use, video_numbers_to_use, num_videos, multiple_videos,
                                  df, df_target, rgb_max_shape, use_common_transforms=True):
     datasets = []
@@ -309,7 +339,7 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
         epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
         checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
 
-        model_path = checkpoint_root_path + checkpoint_files[-cfg.overfit.use_pretrained.checkpoint.top_k]
+        model_path = checkpoint_root_path + checkpoint_files[-cfg.warm_restart.checkpoint.top_k]
         # model_path = checkpoint_root_path + os.listdir(checkpoint_root_path)[0]
         logger.info(f'Resuming from : {model_path}')
         if cfg.warm_restart.custom_load:
@@ -426,7 +456,10 @@ def train_v1(cfg):
         cfg.num_workers = 0
         cfg.dataset_workers = 0
 
-    train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
+    if cfg.single_video_mode.enabled:
+        train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg)
+    else:
+        train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
 
     loss_fn, gaussian_loss_fn = build_loss(cfg)
 
@@ -446,7 +479,10 @@ def train_v1(cfg):
 def overfit(cfg):
     logger.info(f'Overfit - Setting up DataLoader and Model...')
 
-    train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
+    if cfg.single_video_mode.enabled:
+        train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg)
+    else:
+        train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
     # train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
 
     reduction = 'mean'

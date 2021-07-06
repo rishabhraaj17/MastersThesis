@@ -153,7 +153,72 @@ deep_lab_v3_plus:
   use_fcrn_up_project: False
   align_corners: True
   use_correctors: False
-  with_aux_head: True
+  with_aux_head: False
+  pretrained: 'open-mmlab://resnet50_v1c' # or url
+
+  small:
+    pretrained: 'open-mmlab://resnet18_v1c' # or url
+    with_aux_head: True
+    align_corners: True
+    aspp_head: False  # if false then DepthwiseSeparableASPPHead
+    with_deconv_head: True
+    head_conf: 'three_two_small'
+    resnet_depth: 18
+
+    load_pretrained_manually: False
+    #  local_pretrained_path: '/usr/stud/rajr/.cache/torch/hub/checkpoints/resnet18_v1c-2cccc1ad.pth'
+    local_pretrained_path: '/home/rishabh/.cache/torch/hub/checkpoints/resnet18_v1c-2cccc1ad.pth'
+    load_strictly: False
+
+  up:
+    in_ch: 1
+    out_ch: 1
+    use_convt2d: False
+    bilinear: False
+    ch_div_factor: 1
+    skip_double_conv: True
+    use_double_conv: True
+
+  aspp_head: False  # if false then DepthwiseSeparableASPPHead
+  with_deconv_head: True
+  head_conf: 'three_two'
+  resnet_depth: 50
+
+  load_pretrained_manually: True
+  #  local_pretrained_path: '/usr/stud/rajr/.cache/torch/hub/checkpoints/resnet50_v1c-2cccc1ad.pth'
+  local_pretrained_path: '/home/rishabh/.cache/torch/hub/checkpoints/resnet50_v1c-2cccc1ad.pth'
+  load_strictly: False
+
+  head:
+    out_ch: 1
+  #    out_ch: 64
+  aux_head:
+    #    out_ch: 32
+    out_ch: 1
+
+  head_corrector:
+    in_ch: [ 64, 32 ]
+    #    in_ch: [ 1, 1 ]
+    out_ch: [ 32, 1 ]
+  #    out_ch: [ 1, 1 ]
+
+  aux_head_corrector:
+    in_ch: [ 32, 16, 8 ]
+    #    in_ch: [ 1, 1, 1 ]
+    out_ch: [ 16, 8, 1 ]
+#    out_ch: [ 1, 1, 1 ]
+
+
+deep_lab_v3_gan:
+  norm:
+    type: 'BN'
+    requires_grad: True
+
+  use_up_module: False
+  use_fcrn_up_project: False
+  align_corners: True
+  use_correctors: False
+  with_aux_head: False
   pretrained: 'open-mmlab://resnet50_v1c' # or url
 
   up:
@@ -193,6 +258,7 @@ deep_lab_v3_plus:
     #    in_ch: [ 1, 1, 1 ]
     out_ch: [ 16, 8, 1 ]
 #    out_ch: [ 1, 1, 1 ]
+
 
 ccnet:
   norm:

@@ -82,7 +82,7 @@ def reconstruct_from_patches_2d(patches, img_shape, step=[1.0, 1.0], batch_first
     return img
 
 
-def quick_viz(im1, im2=None, img_idx=0):
+def quick_viz(im1, im2=None, img_idx=0, c_map=None):
     im1 = preprocess_image(im1, img_idx)
 
     if im2 is None:
@@ -94,14 +94,14 @@ def quick_viz(im1, im2=None, img_idx=0):
         fig, ax = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(14, 12))
         image_axis, stitched_image_axis = ax
 
-        s_im = stitched_image_axis.imshow(im2)
+        s_im = stitched_image_axis.imshow(im2, cmap=c_map)
         stitched_image_axis.set_title('Stitched')
 
         divider = make_axes_locatable(stitched_image_axis)
         cax = divider.append_axes('right', size='5%', pad=0.10)
         fig.colorbar(s_im, cax=cax, orientation='vertical')
 
-    i_im = image_axis.imshow(im1)
+    i_im = image_axis.imshow(im1, cmap=c_map)
     image_axis.set_title('Original')
 
     divider = make_axes_locatable(image_axis)

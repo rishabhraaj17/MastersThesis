@@ -44,6 +44,12 @@ HEAD_CONFIG = {
         'num_deconv_kernels': (2, 2),
         'extra': dict(final_conv_kernel=1, )
     },
+    'three_two_small': {
+        'num_deconv_layers': 3,
+        'num_deconv_filters': (64, 64, 64),
+        'num_deconv_kernels': (2, 2, 2),
+        'extra': dict(final_conv_kernel=1, )
+    },
 }
 
 
@@ -736,8 +742,375 @@ class DeepLabV3PlusDDP(BaseDDP):
         return torch.stack([weight_factor * loss_function(p, target) for p in pred])
 
 
+class DeepLabV3PlusSmall(Base):
+    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
+        super(DeepLabV3PlusSmall, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
+        )
+        self.align_corners = self.config.deep_lab_v3_plus.small.align_corners
+        self.with_aux_head = self.config.deep_lab_v3_plus.small.with_aux_head
+        self.with_deconv_head = self.config.deep_lab_v3_plus.small.with_deconv_head
+        self.use_correctors = False  # self.config.deep_lab_v3_plus.use_correctors
+
+        norm_cfg = dict(type=self.config.deep_lab_v3_plus.norm.type,
+                        requires_grad=self.config.deep_lab_v3_plus.norm.requires_grad)
+
+        self.backbone = ResNetV1c(
+            depth=self.config.deep_lab_v3_plus.small.resnet_depth,
+            num_stages=4,
+            out_indices=(0, 1, 2, 3),
+            dilations=(1, 1, 2, 4),
+            strides=(1, 2, 1, 1),
+            norm_cfg=norm_cfg,
+            norm_eval=False,
+            style='pytorch',
+            contract_dilation=True,
+            init_cfg=None,
+            pretrained=self.config.deep_lab_v3_plus.small.pretrained
+        )
+        if self.config.deep_lab_v3_plus.small.aspp_head:
+            self.head = ASPPHead(
+                in_channels=512,
+                in_index=3,
+                channels=128,
+                dilations=(1, 12, 24, 36),
+                dropout_ratio=0.1,
+                num_classes=self.config.deep_lab_v3_plus.head.out_ch,
+                norm_cfg=norm_cfg,
+                align_corners=self.align_corners
+            )
+        else:
+            self.head = DepthwiseSeparableASPPHead(
+                in_channels=512,
+                in_index=3,
+                channels=128,
+                dilations=(1, 12, 24, 36),
+                c1_in_channels=64,
+                c1_channels=12,
+                dropout_ratio=0.1,
+                num_classes=self.config.deep_lab_v3_plus.head.out_ch,
+                norm_cfg=norm_cfg,
+                align_corners=self.align_corners
+            )
+        if self.with_aux_head:
+            self.aux_head = FCNHead(
+                in_channels=256,
+                in_index=2,
+                channels=64,
+                num_convs=1,
+                concat_input=False,
+                dropout_ratio=0.1,
+                num_classes=self.config.deep_lab_v3_plus.aux_head.out_ch,
+                norm_cfg=norm_cfg,
+                align_corners=self.align_corners
+            )
+        if self.with_deconv_head:
+            self.deconv_head = TopdownHeatmapSimpleHead(
+                in_channels=256,  # 2048,
+                out_channels=1,
+                in_index=2,  # 3,
+                num_deconv_layers=HEAD_CONFIG[self.config.deep_lab_v3_plus.small.head_conf]['num_deconv_layers'],
+                num_deconv_filters=HEAD_CONFIG[self.config.deep_lab_v3_plus.small.head_conf]['num_deconv_filters'],
+                num_deconv_kernels=HEAD_CONFIG[self.config.deep_lab_v3_plus.small.head_conf]['num_deconv_kernels'],
+                extra=HEAD_CONFIG[self.config.deep_lab_v3_plus.small.head_conf]['extra'],
+                align_corners=self.align_corners,
+                loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True)
+            )
+
+        up_block = UpProject if self.config.deep_lab_v3_plus.use_fcrn_up_project else Up
+
+        if self.config.deep_lab_v3_plus.use_up_module:
+            self.head_corrector = nn.Sequential(
+                up_block(in_ch=self.config.deep_lab_v3_plus.head_corrector.in_ch[0],
+                         out_ch=self.config.deep_lab_v3_plus.head_corrector.out_ch[0],
+                         use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
+                         bilinear=self.config.deep_lab_v3_plus.up.bilinear,
+                         channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
+                         use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
+                         skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv),
+                up_block(in_ch=self.config.deep_lab_v3_plus.head_corrector.in_ch[1],
+                         out_ch=self.config.deep_lab_v3_plus.head_corrector.out_ch[1],
+                         use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
+                         bilinear=self.config.deep_lab_v3_plus.up.bilinear,
+                         channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
+                         as_last_layer=True,
+                         use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
+                         skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv)
+            )
+            if self.with_aux_head:
+                self.aux_head_corrector = nn.Sequential(
+                    up_block(in_ch=self.config.deep_lab_v3_plus.aux_head_corrector.in_ch[0],
+                             out_ch=self.config.deep_lab_v3_plus.aux_head_corrector.out_ch[0],
+                             use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
+                             bilinear=self.config.deep_lab_v3_plus.up.bilinear,
+                             channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
+                             use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
+                             skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv),
+                    up_block(in_ch=self.config.deep_lab_v3_plus.aux_head_corrector.in_ch[1],
+                             out_ch=self.config.deep_lab_v3_plus.aux_head_corrector.out_ch[1],
+                             use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
+                             bilinear=self.config.deep_lab_v3_plus.up.bilinear,
+                             channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
+                             use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
+                             skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv),
+                    up_block(in_ch=self.config.deep_lab_v3_plus.aux_head_corrector.in_ch[2],
+                             out_ch=self.config.deep_lab_v3_plus.aux_head_corrector.out_ch[2],
+                             use_conv_trans2d=self.config.deep_lab_v3_plus.up.use_convt2d,
+                             bilinear=self.config.deep_lab_v3_plus.up.bilinear,
+                             channels_div_factor=self.config.deep_lab_v3_plus.up.ch_div_factor,
+                             as_last_layer=True,
+                             use_double_conv=self.config.deep_lab_v3_plus.up.use_double_conv,
+                             skip_double_conv=self.config.deep_lab_v3_plus.up.skip_double_conv)
+                )
+        elif self.use_correctors:
+            self.head_corrector = nn.Sequential(
+                nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0),
+                nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0)
+            )
+            if self.with_aux_head:
+                self.aux_head_corrector = nn.Sequential(
+                    nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0),
+                    nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1, stride=1, padding=0)
+                )
+        else:
+            self.head_corrector = nn.Identity()
+            if self.with_aux_head:
+                self.aux_head_corrector = nn.Identity()
+
+        self.init_weights()
+
+    def init_weights(self):
+        self.backbone.init_weights()
+        self.head.init_weights()
+        if self.with_aux_head:
+            if isinstance(self.aux_head, nn.ModuleList):
+                for a_head in self.aux_head:
+                    a_head.init_weights()
+            else:
+                self.aux_head.init_weights()
+        if self.with_deconv_head:
+            if isinstance(self.deconv_head, nn.ModuleList):
+                for d_head in self.deconv_head:
+                    d_head.init_weights()
+            else:
+                self.deconv_head.init_weights()
+
+    def forward(self, x):
+        feats = self.backbone(x)
+        out1 = self.head(feats)
+        if self.with_aux_head:
+            out2 = self.aux_head(feats)
+        if self.with_deconv_head:
+            out3 = self.deconv_head(list(feats))
+
+        if not self.config.deep_lab_v3_plus.use_up_module:
+            out1 = resize(
+                input=out1,
+                size=x.shape[2:],
+                mode='bilinear',
+                align_corners=self.align_corners)
+            if self.with_aux_head:
+                out2 = resize(
+                    input=out2,
+                    size=x.shape[2:],
+                    mode='bilinear',
+                    align_corners=self.align_corners)
+
+        if self.use_correctors:
+            out1 = self.head_corrector(out1)
+            if self.with_aux_head:
+                out2 = self.aux_head_corrector(out2)
+
+        if self.with_aux_head and self.with_deconv_head:
+            return out1, out2, out3
+        if self.with_deconv_head:
+            return out1, out3
+        if self.with_aux_head:
+            return out1, out2
+        return [out1]
+
+    def calculate_loss(self, pred, target):
+        return torch.stack([self.loss_function(p, target) for p in pred])
+
+    @staticmethod
+    def calculate_additional_loss(loss_function, pred, target, apply_sigmoid=True, weight_factor=1.0):
+        pred = [p.sigmoid() if apply_sigmoid else p for p in pred]
+        return torch.stack([weight_factor * loss_function(p, target) for p in pred])
+
+
+class DeepLabV3GAN(Base):
+    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
+        super(DeepLabV3GAN, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
+        )
+        self.align_corners = self.config.deep_lab_v3_plus.align_corners
+        self.with_aux_head = self.config.deep_lab_v3_plus.with_aux_head
+        self.with_deconv_head = self.config.deep_lab_v3_plus.with_deconv_head
+
+        norm_cfg = dict(type=self.config.deep_lab_v3_plus.norm.type,
+                        requires_grad=self.config.deep_lab_v3_plus.norm.requires_grad)
+
+        self.backbone = ResNetV1c(
+            depth=self.config.deep_lab_v3_plus.resnet_depth,
+            num_stages=4,
+            out_indices=(0, 1, 2, 3),
+            dilations=(1, 1, 2, 4),
+            strides=(1, 2, 1, 1),
+            norm_cfg=norm_cfg,
+            norm_eval=False,
+            style='pytorch',
+            contract_dilation=True,
+            init_cfg=None,
+            pretrained=self.config.deep_lab_v3_plus.pretrained
+        )
+        if self.config.deep_lab_v3_plus.aspp_head:
+            self.head = ASPPHead(
+                in_channels=2048,
+                in_index=3,
+                channels=512,
+                dilations=(1, 12, 24, 36),
+                dropout_ratio=0.1,
+                num_classes=self.config.deep_lab_v3_plus.head.out_ch,
+                norm_cfg=norm_cfg,
+                align_corners=self.align_corners
+            )
+        else:
+            self.head = DepthwiseSeparableASPPHead(
+                in_channels=2048,
+                in_index=3,
+                channels=512,
+                dilations=(1, 12, 24, 36),
+                c1_in_channels=256,
+                c1_channels=48,
+                dropout_ratio=0.1,
+                num_classes=self.config.deep_lab_v3_plus.head.out_ch,
+                norm_cfg=norm_cfg,
+                align_corners=self.align_corners
+            )
+        if self.with_aux_head:
+            self.aux_head = FCNHead(
+                in_channels=1024,
+                in_index=2,
+                channels=256,
+                num_convs=1,
+                concat_input=False,
+                dropout_ratio=0.1,
+                num_classes=self.config.deep_lab_v3_plus.aux_head.out_ch,
+                norm_cfg=norm_cfg,
+                align_corners=self.align_corners
+            )
+        if self.with_deconv_head:
+            self.deconv_head = TopdownHeatmapSimpleHead(
+                in_channels=1024,  # 2048,
+                out_channels=1,
+                in_index=2,  # 3,
+                num_deconv_layers=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['num_deconv_layers'],
+                num_deconv_filters=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['num_deconv_filters'],
+                num_deconv_kernels=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['num_deconv_kernels'],
+                extra=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['extra'],
+                align_corners=self.align_corners,
+                loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True)
+            )
+
+        self.discriminator = ResNetV1c(
+            depth=18,
+            in_channels=1,
+            out_indices=(3,),
+            norm_eval=False,
+            norm_cfg=dict(type='BN'),
+        )
+        self.discriminator_fc = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(512, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+        )
+
+        self.init_weights()
+
+    def init_weights(self):
+        self.backbone.init_weights()
+        self.head.init_weights()
+        if self.with_aux_head:
+            if isinstance(self.aux_head, nn.ModuleList):
+                for a_head in self.aux_head:
+                    a_head.init_weights()
+            else:
+                self.aux_head.init_weights()
+        if self.with_deconv_head:
+            if isinstance(self.deconv_head, nn.ModuleList):
+                for d_head in self.deconv_head:
+                    d_head.init_weights()
+            else:
+                self.deconv_head.init_weights()
+
+    def forward(self, x):
+        feats = self.backbone(x)
+
+        # add noise
+        feats = [f + torch.randn_like(f) for f in feats]
+        out1 = self.head(feats)
+        out1 = resize(
+            input=out1,
+            size=x.shape[2:],
+            mode='bilinear',
+            align_corners=self.align_corners)
+
+        if self.with_aux_head:
+            out2 = self.aux_head(feats)
+            out2 = resize(
+                input=out2,
+                size=x.shape[2:],
+                mode='bilinear',
+                align_corners=self.align_corners)
+
+        if self.with_deconv_head:
+            out3 = self.deconv_head(feats)
+
+        # discriminator
+        if self.with_aux_head and self.with_deconv_head:
+            d_out = self.discriminator(torch.cat((out1, out2, out3)))
+        elif self.with_aux_head:
+            d_out = self.discriminator(torch.cat((out1, out2)))
+        elif self.with_deconv_head:
+            d_out = self.discriminator(torch.cat((out1, out3)))
+        else:
+            d_out = self.discriminator(out1)
+
+        d_out = d_out[-1]
+        d_out = self.discriminator_fc(d_out)
+
+        if self.with_aux_head and self.with_deconv_head:
+            return (out1, out2, out3), d_out
+        if self.with_deconv_head:
+            return (out1, out3), d_out
+        if self.with_aux_head:
+            return (out1, out2), d_out
+        return [out1], d_out
+
+    def calculate_loss(self, pred, target):
+        return torch.stack([self.loss_function(p, target) for p in pred])
+
+    @staticmethod
+    def calculate_additional_loss(loss_function, pred, target, apply_sigmoid=True, weight_factor=1.0):
+        pred = [p.sigmoid() if apply_sigmoid else p for p in pred]
+        return torch.stack([weight_factor * loss_function(p, target) for p in pred])
+
+    def configure_optimizers(self):
+        pass
+
+
 if __name__ == '__main__':
-    m = DeepLabV3Plus(OmegaConf.load('../../src/position_maps/config/model/model.yaml'), None, None)
+    m = DeepLabV3PlusSmall(OmegaConf.load('../../src/position_maps/config/model/model.yaml'), None, None)
     inp = torch.randn((2, 3, 480, 480))
     o = m(inp)
     print()
