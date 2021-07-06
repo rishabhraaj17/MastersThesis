@@ -97,8 +97,6 @@ def patch_experiment(cfg):
         kernel = 3
         loc_cutoff = 0.05
         marker_size = 3
-        # padder = ImagePadder(out[-1].shape[-2:], factor=3)
-        # out = [padder.pad(o.unsqueeze(1))[0].sigmoid().squeeze(1) for o in out]
 
         out = [o.sigmoid() for o in out]
 
@@ -125,6 +123,7 @@ def patch_experiment(cfg):
         crop_h, crop_w = 128, 128
         for l_idx, (loc_from_0, loc_from_1) in enumerate(zip(*pruned_locations)):
             locations = loc_from_0 if loc_from_0.shape[0] > loc_from_1.shape[0] else loc_from_1
+
             crop_box_cxcywh = torch.stack([torch.tensor([kp[0], kp[1], crop_w, crop_h]) for kp in locations])
             crop_box_ijwh = torchvision.ops.box_convert(crop_box_cxcywh, 'cxcywh', 'xywh')
 
@@ -137,10 +136,10 @@ def patch_experiment(cfg):
                 heat_masks[l_idx].unsqueeze(0).cpu(), box[0].item(), box[1].item(), box[2].item(), box[3].item())
                 for box in crop_box_ijwh.to(dtype=torch.int32)]
 
-            crops_filtered, target_crops_filtered = [], []
-            for c, tc in zip(crops, target_crops):
+            crops_filtered, target_crops_filtered, filtered_idx = [], [], []
+            for f_idx, (c, tc) in enumerate(zip(crops, target_crops)):
                 if c.numel() != 0:
-                    if not (c.shape[-1] == crop_w) or not (c.shape[-2] == crop_h):
+                    if c.shape[-1] != crop_w or c.shape[-2] != crop_h:
                         diff_h = crop_h - c.shape[2]
                         diff_w = crop_w - c.shape[3]
 
@@ -150,9 +149,35 @@ def patch_experiment(cfg):
                                  mode='constant')
                     crops_filtered.append(c)
                     target_crops_filtered.append(tc)
+                    filtered_idx.append(f_idx)
 
             crops_filtered = torch.cat(crops_filtered)
             target_crops = torch.cat(target_crops_filtered)
+            valid_boxes = crop_box_ijwh[filtered_idx].to(dtype=torch.int32)
+
+            target_patches_to_target_map = torch.zeros_like(heat_masks[l_idx], device='cpu')
+            for v_idx, v_box in enumerate(valid_boxes):
+                x1, y1, w, h = v_box
+                x1, y1, w, h = x1.item(), y1.item(), w.item(), h.item()
+                if x1 + w > target_patches_to_target_map.shape[-2] and y1 + h > target_patches_to_target_map.shape[-1]:
+                    valid_height = target_patches_to_target_map.shape[-2] - x1
+                    valid_width = target_patches_to_target_map.shape[-1] - y1
+                    patch = target_crops[v_idx][:, :valid_height, :valid_width]
+                elif x1 + w > target_patches_to_target_map.shape[-2]:
+                    valid_height = target_patches_to_target_map.shape[-2] - x1
+                    patch = target_crops[v_idx][:, :valid_height, :]
+                elif y1 + h > target_patches_to_target_map.shape[-1]:
+                    valid_width = target_patches_to_target_map.shape[-1] - y1
+                    patch = target_crops[v_idx][:, :, :valid_width]
+                else:
+                    patch = target_crops[v_idx]
+                target_patches_to_target_map[:, x1:x1+w, y1:y1+h] += patch
+
+            plt.imshow(heat_masks[l_idx][0].cpu())
+            plt.show()
+
+            plt.imshow(target_patches_to_target_map[0])
+            plt.show()
 
             grid = torchvision.utils.make_grid(crops_filtered)
 
@@ -164,7 +189,7 @@ def patch_experiment(cfg):
             plt.imshow(target_grid.permute(1, 2, 0))
             plt.show()
 
-            plot_one_with_bounding_boxes(frames[l_idx].permute(1, 2, 0).cpu(), crop_box_ijwh)
+            # plot_one_with_bounding_boxes(frames[l_idx].permute(1, 2, 0).cpu(), crop_box_ijwh)
             print()
 
         print()
