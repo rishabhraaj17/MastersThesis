@@ -162,6 +162,7 @@ def patch_experiment(cfg):
                     loss.backward()
                     opt.step()
                 # sch.step(np.array(train_loss).mean())
+                print(f"Loss : {np.array(train_loss).mean()}")
 
                 patch_model.eval()
                 val_loss = []
