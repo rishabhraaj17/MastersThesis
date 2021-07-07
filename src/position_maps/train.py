@@ -38,7 +38,7 @@ from src_lib.models_hub.unets import R2AttentionUNet, AttentionUNet
 from src_lib.models_hub.vis_trans import VisionTransformerSegmentation
 from src.position_maps.patch_utils import extract_patches_2d, reconstruct_from_patches_2d, quick_viz
 from utils import heat_map_collate_fn, plot_predictions, get_scaled_shapes_with_pad_values, ImagePadder, \
-    TensorDatasetForTwo, plot_predictions_v2
+    TensorDatasetForTwo, plot_predictions_v2, plot_samples
 
 warnings.filterwarnings("ignore")
 
@@ -246,6 +246,10 @@ def setup_multiple_datasets(cfg):
                                                 num_videos=cfg.val.num_videos,
                                                 multiple_videos=cfg.val.multiple_videos,
                                                 df=df, df_target=df_target, rgb_max_shape=rgb_max_shape)
+
+    # test
+    # check_dataset_sanity(train_datasets)
+
     return train_datasets, val_datasets, target_max_shape
 
 
@@ -276,7 +280,22 @@ def setup_single_video_dataset(cfg):
     train_dataset = Subset(dataset, train_indices)
     val_dataset = Subset(dataset, val_indices)
 
+    # test
+    # check_dataset_sanity(val_dataset)
+
     return train_dataset, val_dataset, target_max_shape
+
+
+def check_dataset_sanity(dataset):
+    loader = DataLoader(dataset, batch_size=1, shuffle=False, collate_fn=heat_map_collate_fn)
+    for data in loader:
+        frames, heat_masks, _, _, _, meta = data
+        meta = meta[0]
+        plot_samples(img=frames.squeeze().permute(1, 2, 0), mask=heat_masks.squeeze(), boxes=meta['boxes'],
+                     box_centers=meta['bbox_centers'], rgb_boxes=meta['rgb_boxes'],
+                     rgb_box_centers=meta['rgb_bbox_centers'],
+                     plot_boxes=True, additional_text=f'Frame Number: {meta["item"]} | Video Idx: {meta["video_idx"]}')
+        print()
 
 
 def setup_multiple_datasets_core(cfg, meta, video_classes_to_use, video_numbers_to_use, num_videos, multiple_videos,
@@ -488,7 +507,7 @@ def overfit(cfg):
         train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg)
     else:
         train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
-    # train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
+        # train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
 
     reduction = 'mean'
     network_type = getattr(model_zoo, cfg.overfit.postion_map_network_type)
@@ -600,7 +619,7 @@ def overfit(cfg):
         logger.info(f'Loading weights from: {checkpoint_file}')
         load_dict = torch.load(checkpoint_file, map_location=cfg.device)
 
-        model.load_state_dict(load_dict['state_dict'])
+        model.load_state_dict(load_dict['state_dict'], strict=False)
 
     model.to(cfg.device)
 
@@ -773,7 +792,7 @@ def overfit(cfg):
                                                                     f"| Epoch: {epoch} "
                                                                     f"| Threshold: {cfg.prediction.threshold}")
 
-                                if cfg.model_hub.model == 'DeepLabV3Plus':
+                                if cfg.model_hub.model == 'DeepLabV3Plus' and len(out) > 2:
                                     plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                                         heat_masks[random_idx].squeeze().cpu(),
                                                         torch.nn.functional.threshold(
@@ -1337,6 +1356,6 @@ if __name__ == '__main__':
 
         # selected_patch_overfit()
         # patch_based_overfit()
-        # overfit()
+        overfit()
         # train()
-        train_v1()
+        # train_v1()
