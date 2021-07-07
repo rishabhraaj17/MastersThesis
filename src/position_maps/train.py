@@ -342,6 +342,14 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
         verbose=cfg.verbose
     )
 
+    limit_val_batches = 1.0
+    if len(train_dataset.datasets) == 1 \
+            and len(val_dataset.datasets) == 1 \
+            and train_dataset.datasets[0].video_clips_metadata['video_paths'][0] \
+            == val_dataset.datasets[0].video_clips_metadata['video_paths'][0]:
+        limit_val_batches = 0.2
+        logger.info(f'Limiting Val Dataset to {limit_val_batches} for same dataset!')
+
     sync_bn = False
     plugins = None
     if cfg.trainer.accelerator in ['ddp', 'ddp_cpu']:
@@ -385,7 +393,7 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                           replace_sampler_ddp=cfg.trainer.replace_sampler_ddp,
                           num_nodes=cfg.trainer.num_nodes, plugins=plugins,
                           gradient_clip_val=cfg.trainer.gradient_clip_val,
-                          sync_batchnorm=sync_bn)
+                          sync_batchnorm=sync_bn, limit_val_batches=limit_val_batches)
     else:
         if cfg.resume_mode:
             checkpoint_path = f'{cfg.resume.checkpoint.path}{cfg.resume.checkpoint.version}/checkpoints/'
@@ -404,7 +412,7 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                               replace_sampler_ddp=cfg.trainer.replace_sampler_ddp,
                               num_nodes=cfg.trainer.num_nodes, plugins=plugins,
                               gradient_clip_val=cfg.trainer.gradient_clip_val,
-                              sync_batchnorm=sync_bn)
+                              sync_batchnorm=sync_bn, limit_val_batches=limit_val_batches)
         else:
             trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                               fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
@@ -412,7 +420,7 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                               replace_sampler_ddp=cfg.trainer.replace_sampler_ddp,
                               num_nodes=cfg.trainer.num_nodes, plugins=plugins,
                               gradient_clip_val=cfg.trainer.gradient_clip_val,
-                              sync_batchnorm=sync_bn)
+                              sync_batchnorm=sync_bn, limit_val_batches=limit_val_batches)
     return model, trainer
 
 
