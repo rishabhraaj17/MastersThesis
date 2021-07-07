@@ -141,6 +141,72 @@ def setup_dataset(cfg):
     return train_dataset, val_dataset, target_max_shape
 
 
+def setup_overfit_dataset(cfg):
+    df, rgb_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=[cfg.video_class, cfg.video_class],
+        video_numbers=[[cfg.train.video_number_to_use], [cfg.val.video_number_to_use]],
+        desired_ratio=cfg.desired_pixel_to_meter_ratio_rgb)
+
+    df_target, target_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=[cfg.video_class, cfg.video_class],
+        video_numbers=[[cfg.train.video_number_to_use], [cfg.val.video_number_to_use]],
+        desired_ratio=cfg.desired_pixel_to_meter_ratio)
+
+    train_condition = (df.CLASS == cfg.video_class) & (df.NUMBER == cfg.train.video_number_to_use)
+    train_h, train_w = df[train_condition].RESCALED_SHAPE.values[0]
+    train_pad_values = df[train_condition].PAD_VALUES.values[0]
+
+    target_train_h, target_train_w = df_target[train_condition].RESCALED_SHAPE.values[0]
+    target_train_pad_values = df_target[train_condition].PAD_VALUES.values[0]
+
+    val_condition = (df.CLASS == cfg.video_class) & (df.NUMBER == cfg.val.video_number_to_use)
+    val_h, val_w = df[val_condition].RESCALED_SHAPE.values[0]
+    val_pad_values = df[val_condition].PAD_VALUES.values[0]
+
+    target_val_h, target_val_w = df_target[val_condition].RESCALED_SHAPE.values[0]
+    target_val_pad_values = df_target[val_condition].PAD_VALUES.values[0]
+
+    # (train_w, train_h), (val_w, val_h) = get_resize_dims(cfg)
+
+    train_transform, val_transform = setup_transforms_for_single_instance(train_h=target_train_h,
+                                                                          train_w=target_train_w,
+                                                                          val_h=target_val_h,
+                                                                          val_w=target_val_w)
+    rgb_train_transform, rgb_val_transform = setup_transforms_for_single_instance(train_h=train_h,
+                                                                                  train_w=train_w,
+                                                                                  val_h=val_h,
+                                                                                  val_w=val_w)
+    rgb_plot_train_transform, _ = setup_transforms_for_single_instance(train_h=rgb_max_shape[0],
+                                                                       train_w=rgb_max_shape[1],
+                                                                       val_h=val_h,
+                                                                       val_w=val_w)
+    common_transform = setup_single_common_transform(use_replay_compose=cfg.using_replay_compose)
+
+    train_dataset = setup_single_dataset_instance(cfg, train_transform, video_class=cfg.video_class,
+                                                  num_videos=cfg.train.num_videos,
+                                                  video_number_to_use=cfg.train.video_number_to_use,
+                                                  multiple_videos=cfg.train.multiple_videos,
+                                                  rgb_transform_fn=rgb_train_transform,
+                                                  rgb_new_shape=(train_h, train_w),
+                                                  rgb_pad_value=train_pad_values,
+                                                  target_pad_value=target_train_pad_values,
+                                                  rgb_plot_transform=rgb_plot_train_transform,
+                                                  common_transform=common_transform,
+                                                  using_replay_compose=cfg.using_replay_compose)
+    val_dataset = setup_single_dataset_instance(cfg, val_transform, video_class=cfg.video_class,
+                                                num_videos=cfg.val.num_videos,
+                                                video_number_to_use=cfg.val.video_number_to_use,
+                                                multiple_videos=cfg.val.multiple_videos,
+                                                rgb_transform_fn=rgb_val_transform,
+                                                rgb_new_shape=(val_h, val_w),
+                                                rgb_pad_value=val_pad_values,
+                                                target_pad_value=target_val_pad_values,
+                                                rgb_plot_transform=rgb_plot_train_transform,
+                                                common_transform=common_transform,
+                                                using_replay_compose=cfg.using_replay_compose)
+    return train_dataset, val_dataset, target_max_shape
+
+
 def setup_single_dataset_instance(cfg, transform, video_class, num_videos, video_number_to_use, multiple_videos,
                                   rgb_transform_fn, rgb_new_shape, rgb_pad_value, target_pad_value,
                                   rgb_plot_transform, common_transform, using_replay_compose):
@@ -514,7 +580,8 @@ def overfit(cfg):
     if cfg.single_video_mode.enabled:
         train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg)
     else:
-        train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
+        train_dataset, val_dataset, target_max_shape = setup_overfit_dataset(cfg)
+        # train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
         # train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
 
     reduction = 'mean'
