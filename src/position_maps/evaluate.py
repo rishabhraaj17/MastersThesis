@@ -17,7 +17,7 @@ from mmdet.models import GaussianFocalLoss
 from pytorch_lightning import seed_everything
 from torch.nn import MSELoss
 from torch.nn.functional import interpolate
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from torchvision.transforms import ToPILImage
 from tqdm import tqdm
 
@@ -273,6 +273,36 @@ def setup_multiple_test_datasets(cfg, return_dummy_transform=True):
     if return_dummy_transform:
         return datasets, None, target_max_shape
     return datasets, target_max_shape
+
+
+def setup_single_video_dataset(cfg):
+    meta = SDDMeta(cfg.eval.root + 'H_SDD.txt')
+
+    df, rgb_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.eval.root, video_classes=cfg.eval.test.single_video_mode.video_classes_to_use,
+        video_numbers=cfg.eval.test.single_video_mode.video_numbers_to_use,
+        desired_ratio=cfg.eval.desired_pixel_to_meter_ratio_rgb)
+
+    df_target, target_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.eval.root, video_classes=cfg.eval.test.single_video_mode.video_classes_to_use,
+        video_numbers=cfg.eval.test.single_video_mode.video_numbers_to_use,
+        desired_ratio=cfg.eval.desired_pixel_to_meter_ratio)
+
+    dataset = setup_multiple_datasets_core(
+        cfg.eval, meta, video_classes_to_use=cfg.eval.test.single_video_mode.video_classes_to_use,
+        video_numbers_to_use=cfg.eval.test.single_video_mode.video_numbers_to_use,
+        num_videos=cfg.eval.test.single_video_mode.num_videos,
+        multiple_videos=cfg.eval.test.single_video_mode.multiple_videos,
+        df=df, df_target=df_target, rgb_max_shape=rgb_max_shape)
+
+    val_dataset_len = round(len(dataset) * cfg.eval.test.single_video_mode.val_percent)
+    train_indices = torch.arange(start=0, end=len(dataset) - val_dataset_len)
+    val_indices = torch.arange(start=len(dataset) - val_dataset_len, end=len(dataset))
+
+    train_dataset = Subset(dataset, train_indices)
+    test_dataset = Subset(dataset, val_indices)
+
+    return train_dataset, test_dataset, target_max_shape
 
 
 def setup_eval(cfg):
@@ -548,7 +578,10 @@ def evaluate_v1(cfg):
 
     logger.info(f'Setting up DataLoader')
 
-    test_dataset, target_max_shape = setup_multiple_test_datasets(cfg, return_dummy_transform=False)
+    if cfg.eval.test.single_video_mode.enabled:
+        train_dataset, test_dataset, target_max_shape = setup_single_video_dataset(cfg)
+    else:
+        test_dataset, target_max_shape = setup_multiple_test_datasets(cfg, return_dummy_transform=False)
 
     test_loader = DataLoader(test_dataset, batch_size=cfg.eval.batch_size, shuffle=False,
                              num_workers=cfg.eval.num_workers, collate_fn=heat_map_collate_fn,

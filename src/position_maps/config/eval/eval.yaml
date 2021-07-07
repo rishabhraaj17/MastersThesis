@@ -32,6 +32,16 @@ eval:
     video_numbers_to_use: [ [ 3, 0 ] ]  # [ [ 4 ], [ 3 ], [ 0 ] ]
     multiple_videos: False
 
+    single_video_mode:
+      enabled: False
+
+      num_videos: -1
+      video_classes_to_use: [ LITTLE ]
+      video_numbers_to_use: [ [ 0 ] ] # nexus 3, 4 are bad
+      multiple_videos: False
+
+      val_percent: 0.2
+
   dataset_workers: 12
   # keep one of them null at one time
   scale_factor: null # 0.25
@@ -74,7 +84,7 @@ eval:
   plot_checkpoint: 1
   plot_save_dir: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/proposed_method/v0/position_maps/'
   plot_with_overlay: True
-  plots_do_nothing: True
+  plots_do_nothing: False
 
   evaluate_precision_recall: False
   blob_threshold: 0.2
@@ -96,5 +106,5 @@ eval:
   checkpoint:
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
     path: "lightning_logs/version_"
-    version: 508470 # 497829 # 492265 #424798 # 437363  # 424798
+    version: 509506 # 497829 # 492265 #424798 # 437363  # 424798 # 509506 (best-dpv3-r50)
     top_k: 1

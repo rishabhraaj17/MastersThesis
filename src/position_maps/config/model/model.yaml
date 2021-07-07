@@ -214,6 +214,16 @@ deep_lab_v3_gan:
     type: 'BN'
     requires_grad: True
 
+  generator:
+    lr: 1e-3
+    amsgrad: False
+    weight_decay: 0
+
+  discriminator:
+    lr: 1e-3
+    amsgrad: False
+    weight_decay: 0
+
   use_up_module: False
   use_fcrn_up_project: False
   align_corners: True
