@@ -139,6 +139,22 @@ attn_unet:
     kernel: 2
     stride: 2
 
+mm_segmentator:
+  align_corners: True
+  with_aux_head: False
+  with_secondary_aux_head: False
+
+  norm:
+    type: 'BN'
+    requires_grad: True
+
+  pretrained: null # or url
+
+  backbone: 'mobile_net_v3_large'
+  head: 'lraspp_large'
+  aux_head: ''
+  secondary_aux_head: ''
+
 deep_lab_v3:
   backbone: 'r50'  # 'r50', 'r101', 'mnv3_large'
   pretrained: False
