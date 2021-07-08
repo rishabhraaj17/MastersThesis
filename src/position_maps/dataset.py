@@ -190,6 +190,11 @@ class SDDFrameAndAnnotationDataset(Dataset):
         return self.video_clips.num_clips()
 
     def __getitem__(self, item):
+        class_maps, distribution_map, heat_mask, meta, position_map, video = self._get_item_core(item)
+
+        return video, heat_mask, position_map, distribution_map, class_maps, meta
+
+    def _get_item_core(self, item):
         video, audio, info, video_idx = self.video_clips.get_clip(item)
         video = video.permute(0, 3, 1, 2)
         original_shape = new_shape = downscale_shape = (video.shape[-2], video.shape[-1])
@@ -197,6 +202,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
         fps = info['video_fps']
         item = int(math.floor(item * (float(self.video_clips.video_fps[video_idx]) / fps)))
         # item = max(0, (item - 1) + (item * (int(round(self.video_clips.video_fps[video_idx]) // fps) - 1)))
+
         bbox_centers, boxes, track_idx, class_labels = self.get_annotation_for_frame(item, video_idx, original_shape)
 
         while bbox_centers.size == 0 and boxes.size == 0:
@@ -234,7 +240,6 @@ class SDDFrameAndAnnotationDataset(Dataset):
 
         key_points = torch.round(torch.from_numpy(target_bbox_centers)).long()
         position_map = heat_mask.clone().clamp(min=0, max=1).int().float()
-
         class_maps = heat_mask.clone()
         class_maps = torch.where(class_maps > self.seg_map_objectness_threshold, 1.0, 0.0)
 
@@ -358,7 +363,6 @@ class SDDFrameAndAnnotationDataset(Dataset):
         pre_padded_video = video.clone()
         video = pad(video, self.rgb_pad_value, mode=PAD_MODE)
         new_shape = (video.shape[-2], video.shape[-1])
-
         meta = {'boxes': target_boxes, 'bbox_centers': target_bbox_centers,
                 'rgb_boxes': rgb_boxes, 'rgb_bbox_centers': rgb_bbox_centers,
                 'pre_pad_rgb': pre_padded_video,
@@ -367,7 +371,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
                 'downscale_shape': downscale_shape,
                 'video_idx': video_idx}
 
-        return video, heat_mask, position_map, distribution_map, class_maps, meta
+        return class_maps, distribution_map, heat_mask, meta, position_map, video
 
     def get_annotation_for_frame(self, item, video_idx, original_shape):
         h, w = original_shape
