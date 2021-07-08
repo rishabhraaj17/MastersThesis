@@ -126,7 +126,8 @@ def setup_dataset(cfg):
                                                   target_pad_value=target_train_pad_values,
                                                   rgb_plot_transform=rgb_plot_train_transform,
                                                   common_transform=common_transform,
-                                                  using_replay_compose=cfg.using_replay_compose)
+                                                  using_replay_compose=cfg.using_replay_compose,
+                                                  frame_rate=cfg.frame_rate)
     val_dataset = setup_single_dataset_instance(cfg, val_transform, video_class=cfg.video_class,
                                                 num_videos=cfg.val.num_videos,
                                                 video_number_to_use=cfg.val.video_number_to_use,
@@ -137,7 +138,8 @@ def setup_dataset(cfg):
                                                 target_pad_value=target_val_pad_values,
                                                 rgb_plot_transform=rgb_plot_train_transform,
                                                 common_transform=common_transform,
-                                                using_replay_compose=cfg.using_replay_compose)
+                                                using_replay_compose=cfg.using_replay_compose,
+                                                frame_rate=cfg.frame_rate)
     return train_dataset, val_dataset, target_max_shape
 
 
@@ -192,7 +194,8 @@ def setup_overfit_dataset(cfg):
                                                   target_pad_value=target_train_pad_values,
                                                   rgb_plot_transform=rgb_plot_train_transform,
                                                   common_transform=common_transform,
-                                                  using_replay_compose=cfg.using_replay_compose)
+                                                  using_replay_compose=cfg.using_replay_compose,
+                                                  frame_rate=cfg.frame_rate)
     val_dataset = setup_single_dataset_instance(cfg, val_transform, video_class=cfg.video_class,
                                                 num_videos=cfg.val.num_videos,
                                                 video_number_to_use=cfg.val.video_number_to_use,
@@ -203,13 +206,14 @@ def setup_overfit_dataset(cfg):
                                                 target_pad_value=target_val_pad_values,
                                                 rgb_plot_transform=rgb_plot_train_transform,
                                                 common_transform=common_transform,
-                                                using_replay_compose=cfg.using_replay_compose)
+                                                using_replay_compose=cfg.using_replay_compose,
+                                                frame_rate=cfg.frame_rate)
     return train_dataset, val_dataset, target_max_shape
 
 
 def setup_single_dataset_instance(cfg, transform, video_class, num_videos, video_number_to_use, multiple_videos,
                                   rgb_transform_fn, rgb_new_shape, rgb_pad_value, target_pad_value,
-                                  rgb_plot_transform, common_transform, using_replay_compose):
+                                  rgb_plot_transform, common_transform, using_replay_compose, frame_rate):
     dataset = SDDFrameAndAnnotationDataset(
         root=cfg.root, video_label=getattr(SDDVideoClasses, video_class),
         num_videos=num_videos, transform=transform if cfg.data_augmentation else None,
@@ -233,7 +237,9 @@ def setup_single_dataset_instance(cfg, transform, video_class, num_videos, video
         rgb_plot_transform=rgb_plot_transform,
         common_transform=common_transform,
         using_replay_compose=using_replay_compose,
-        manual_annotation_processing=cfg.manual_annotation_processing
+        manual_annotation_processing=cfg.manual_annotation_processing,
+        frame_rate=frame_rate,
+        config=cfg
     )
     return dataset
 
@@ -396,7 +402,8 @@ def setup_multiple_datasets_core(cfg, meta, video_classes_to_use, video_numbers_
                                                           target_pad_value=target_pad_values,
                                                           rgb_plot_transform=rgb_plot_transform,
                                                           common_transform=common_transform,
-                                                          using_replay_compose=cfg.using_replay_compose))
+                                                          using_replay_compose=cfg.using_replay_compose,
+                                                          frame_rate=cfg.frame_rate))
     return ConcatDataset(datasets)
 
 

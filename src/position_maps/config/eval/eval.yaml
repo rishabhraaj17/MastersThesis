@@ -22,6 +22,7 @@ eval:
   downscale_only_target_maps: False
   using_replay_compose: True
   manual_annotation_processing: False
+  frame_rate: 30.  # 30.
 
   test:
     num_videos: -1

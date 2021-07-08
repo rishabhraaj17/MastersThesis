@@ -229,7 +229,9 @@ def setup_dataset(cfg):
         rgb_plot_transform=rgb_plot_transform,
         common_transform=common_transform,
         using_replay_compose=cfg.eval.using_replay_compose,
-        manual_annotation_processing=cfg.eval.manual_annotation_processing
+        manual_annotation_processing=cfg.eval.manual_annotation_processing,
+        frame_rate=cfg.eval.frame_rate,
+        config=cfg
     )
     return test_dataset, transform, target_max_shape
 
@@ -264,7 +266,7 @@ def setup_multiple_test_datasets(cfg, return_dummy_transform=True):
         root_path=cfg.root, video_classes=cfg.eval.test.video_classes_to_use,
         video_numbers=cfg.eval.test.video_numbers_to_use,
         desired_ratio=cfg.eval.desired_pixel_to_meter_ratio)
-    # note: downscale_only_target_maps=cfg.downscale_only_target_maps may not point to eval cfg
+    # note: downscale_only_target_maps=cfg.downscale_only_target_maps may not point to eval cfg & frame_rate
     datasets = setup_multiple_datasets_core(cfg, meta, video_classes_to_use=cfg.eval.test.video_classes_to_use,
                                             video_numbers_to_use=cfg.eval.test.video_numbers_to_use,
                                             num_videos=cfg.eval.test.num_videos,

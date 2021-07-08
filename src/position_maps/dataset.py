@@ -1,3 +1,4 @@
+import math
 import os
 from typing import Optional, Callable, Tuple, Sequence
 
@@ -8,7 +9,7 @@ import torch
 import torchvision
 from albumentations import normalize_bboxes, denormalize_bboxes
 from albumentations.augmentations.functional import bbox_hflip, keypoint_hflip, bbox_vflip, keypoint_vflip
-from omegaconf import ListConfig
+from omegaconf import ListConfig, DictConfig
 from torch.nn.functional import pad
 from torch.utils.data import Dataset
 from torchvision.datasets.folder import make_dataset
@@ -39,7 +40,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
             rgb_transform: Optional[Callable] = None, rgb_new_shape: Tuple[int, int] = None,
             rgb_pad_value: Sequence[int] = None, target_pad_value: Sequence[int] = None,
             rgb_plot_transform: Optional[Callable] = None, common_transform: Optional[Callable] = None,
-            using_replay_compose: bool = False, manual_annotation_processing: bool = False):
+            using_replay_compose: bool = False, manual_annotation_processing: bool = False, config: DictConfig = None):
         super(SDDFrameAndAnnotationDataset, self).__init__()
 
         _mid_path = video_label.value
@@ -161,6 +162,8 @@ class SDDFrameAndAnnotationDataset(Dataset):
         self.downscale_only_target_maps = downscale_only_target_maps
         self.using_replay_compose = using_replay_compose
         self.manual_annotation_processing = manual_annotation_processing
+        self.config = config
+        self.frame_rate = frame_rate
 
     @property
     def metadata(self):
@@ -191,6 +194,9 @@ class SDDFrameAndAnnotationDataset(Dataset):
         video = video.permute(0, 3, 1, 2)
         original_shape = new_shape = downscale_shape = (video.shape[-2], video.shape[-1])
 
+        fps = info['video_fps']
+        item = int(math.floor(item * (float(self.video_clips.video_fps[video_idx]) / fps)))
+        # item = max(0, (item - 1) + (item * (int(round(self.video_clips.video_fps[video_idx]) // fps) - 1)))
         bbox_centers, boxes, track_idx, class_labels = self.get_annotation_for_frame(item, video_idx, original_shape)
 
         while bbox_centers.size == 0 and boxes.size == 0:
@@ -199,9 +205,12 @@ class SDDFrameAndAnnotationDataset(Dataset):
             video, audio, info, video_idx = self.video_clips.get_clip(random_frame_num)
             video = video.permute(0, 3, 1, 2)
 
+            item = random_frame_num
+            item = int(math.floor(item * (float(self.video_clips.video_fps[video_idx]) / fps)))
+            # item = max(0, (item - 1) + (item * (int(round(self.video_clips.video_fps[video_idx]) // fps) - 1)))
+
             bbox_centers, boxes, track_idx, class_labels = self.get_annotation_for_frame(item, video_idx,
                                                                                          original_shape)
-            item = random_frame_num
 
         video = video.float() / 255.0
         if self.transform is not None:

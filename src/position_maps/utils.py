@@ -97,6 +97,7 @@ def plot_samples(img, mask, rgb_boxes, rgb_box_centers, boxes, box_centers, plot
 
     fig.suptitle(additional_text)
 
+    plt.tight_layout()
     plt.show()
 
 
