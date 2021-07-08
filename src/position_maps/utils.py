@@ -605,6 +605,26 @@ def heat_map_collate_fn(batch):
     return rgb_img_list, mask_list, position_map_list, distribution_map_list, cm_list, meta_list
 
 
+def heat_map_temporal_collate_fn(batch):
+    rgb_img_list, mask_list, position_map_list, distribution_map_list, cm_list, meta_list = [], [], [], [], [], []
+    for batch_item in batch:
+        rgb, mask, position_map, distribution_map, class_maps, meta = batch_item
+        rgb_img_list.append(rgb)
+        mask_list.append(mask)
+        meta_list.append(meta)
+        position_map_list.append(position_map)
+        distribution_map_list.append(distribution_map)
+        cm_list.append(class_maps)
+
+    rgb_img_list = torch.stack(rgb_img_list)
+    mask_list = torch.stack(mask_list)
+    position_map_list = torch.stack(position_map_list)
+    distribution_map_list = torch.stack(distribution_map_list)
+    cm_list = torch.stack(cm_list)
+
+    return rgb_img_list, mask_list, position_map_list, distribution_map_list, cm_list, meta_list
+
+
 # https://stackoverflow.com/questions/58125495/how-to-count-how-many-white-balls-there-are-in-an-image-with-opencv-python
 # https://scikit-image.org/docs/dev/auto_examples/features_detection/plot_blob.html
 def get_blob_count(image, kernel_size=(1, 1), plot=False):
