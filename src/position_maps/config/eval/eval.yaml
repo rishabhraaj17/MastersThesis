@@ -24,6 +24,10 @@ eval:
   manual_annotation_processing: False
   frame_rate: 30.  # 30.
 
+  video_based:
+    enabled: False
+    frames_per_clip: 8  # for video based
+
   test:
     num_videos: -1
     video_number_to_use: 2
@@ -96,6 +100,7 @@ eval:
     kernel: 3
     loc_cutoff: 0.05
     marker_size: 3
+    index_select: 0
 
   make_video: True
   video_fps: 2

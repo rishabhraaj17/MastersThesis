@@ -239,7 +239,8 @@ def setup_single_dataset_instance(cfg, transform, video_class, num_videos, video
         using_replay_compose=using_replay_compose,
         manual_annotation_processing=cfg.manual_annotation_processing,
         frame_rate=frame_rate,
-        config=cfg
+        config=cfg,
+        frames_per_clip=cfg.video_based.frames_per_clip if cfg.video_based.enabled else 1
     )
     return dataset
 

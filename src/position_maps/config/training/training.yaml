@@ -64,6 +64,10 @@ using_replay_compose: True
 manual_annotation_processing: False
 frame_rate: 15.  # 30.
 
+video_based:  # !!!!! Keep an eye !!!!
+  enabled: False
+  frames_per_clip: 8  # for video based
+
 train:
   num_videos: -1
   video_number_to_use: 4

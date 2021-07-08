@@ -685,8 +685,9 @@ def evaluate_v1(cfg):
             locations = locations_from_heatmaps(frames, cfg.eval.objectness.kernel,
                                                 cfg.eval.objectness.loc_cutoff,
                                                 cfg.eval.objectness.marker_size, out, vis_on=False)
-            metrics_out = out[-1]
-            blobs_per_image, _ = get_adjusted_object_locations(locations[-1], metrics_out, meta)
+            metrics_out = out[cfg.eval.objectness.index_select]
+            blobs_per_image, _ = get_adjusted_object_locations(
+                locations[cfg.eval.objectness.index_select], metrics_out, meta)
 
             for f in range(len(meta)):
                 frame_number = meta[f]['item']
