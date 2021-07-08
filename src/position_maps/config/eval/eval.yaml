@@ -11,7 +11,7 @@ eval:
   use_ensemble: False
 
   data_augmentation: True
-  resize_transform_only: False  # set true to plot both supervised and unsupervised boxes
+  resize_transform_only: True  # set true to plot both supervised and unsupervised boxes
 
   # dataset
   root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
@@ -92,7 +92,12 @@ eval:
   objectness_threshold: 0.2
   gt_pred_loc_distance_threshold: 2 # meters
 
-  make_video: False
+  objectness:
+    kernel: 3
+    loc_cutoff: 0.05
+    marker_size: 3
+
+  make_video: True
   video_fps: 2
 
   max_pool:

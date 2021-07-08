@@ -12,8 +12,10 @@ import skimage
 import torch
 import torchvision
 from kornia.losses import BinaryFocalLossWithLogits
+from matplotlib import pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from mmdet.models import GaussianFocalLoss
+from mmdet.models.utils.gaussian_target import get_local_maximum
 from pytorch_lightning import seed_everything
 from torch.nn import MSELoss
 from torch.nn.functional import interpolate
@@ -96,6 +98,20 @@ def get_blobs_per_image_for_metrics(cfg, meta, out):
     masks = np.stack(scaled_images)
 
     return blobs_per_image, out
+
+
+def get_adjusted_object_locations(locations, heat_masks, meta):
+    adjusted_locations, scaled_images = [], []
+    for blobs, m, mask in zip(locations, meta, heat_masks):
+        original_shape = m['original_shape']
+        transform = get_position_correction_transform(original_shape)
+        out = transform(image=mask.squeeze(0).numpy(), keypoints=blobs.numpy())
+        adjusted_locations.append(out['keypoints'])
+        scaled_images.append(out['image'])
+
+    masks = np.stack(scaled_images)
+
+    return adjusted_locations, masks
 
 
 def get_gt_annotations_for_metrics(blobs_per_image, cfg, f, frame_number, meta, rgb_frame, test_loader):
@@ -374,6 +390,31 @@ def setup_eval(cfg):
     return loss_fn, model, network_type, test_loader, checkpoint_file, test_transform
 
 
+def locations_from_heatmaps(frames, kernel, loc_cutoff, marker_size, out, vis_on=False):
+    out = [o.sigmoid() for o in out]
+    pruned_locations = []
+    loc_maxima_per_output = [get_local_maximum(o, kernel) for o in out]
+    for li, loc_max_out in enumerate(loc_maxima_per_output):
+        temp_locations = []
+        for out_img_idx in range(loc_max_out.shape[0]):
+            h_loc, w_loc = torch.where(loc_max_out[out_img_idx].squeeze(0) > loc_cutoff)
+            loc = torch.stack((w_loc, h_loc)).t()
+
+            temp_locations.append(loc)
+
+            # viz
+            if vis_on:
+                plt.imshow(frames[out_img_idx].cpu().permute(1, 2, 0))
+                plt.plot(w_loc, h_loc, 'o', markerfacecolor='r', markeredgecolor='k', markersize=marker_size)
+
+                plt.title(f'Out - {li} - {out_img_idx}')
+                plt.tight_layout()
+                plt.show()
+
+        pruned_locations.append(temp_locations)
+    return pruned_locations
+
+
 @hydra.main(config_path="config", config_name="config")
 def evaluate(cfg):
     sdd_meta = SDDMeta(cfg.eval.root + 'H_SDD.txt')
@@ -583,7 +624,8 @@ def evaluate_v1(cfg):
     if cfg.eval.test.single_video_mode.enabled:
         train_dataset, test_dataset, target_max_shape = setup_single_video_dataset(cfg)
     else:
-        test_dataset, target_max_shape = setup_multiple_test_datasets(cfg, return_dummy_transform=False)
+        # test_dataset, target_max_shape = setup_multiple_test_datasets(cfg, return_dummy_transform=False)
+        test_dataset, _, target_max_shape = setup_dataset(cfg)
 
     test_loader = DataLoader(test_dataset, batch_size=cfg.eval.batch_size, shuffle=False,
                              num_workers=cfg.eval.num_workers, collate_fn=heat_map_collate_fn,
@@ -640,13 +682,17 @@ def evaluate_v1(cfg):
         total_loss.append(loss.item())
 
         if cfg.eval.evaluate_precision_recall:
-            blobs_per_image, _ = get_blobs_per_image_for_metrics(cfg, meta, out)
+            locations = locations_from_heatmaps(frames, cfg.eval.objectness.kernel,
+                                                cfg.eval.objectness.loc_cutoff,
+                                                cfg.eval.objectness.marker_size, out, vis_on=False)
+            metrics_out = out[-1]
+            blobs_per_image, _ = get_adjusted_object_locations(locations[-1], metrics_out, meta)
 
             for f in range(len(meta)):
                 frame_number = meta[f]['item']
                 rgb_frame = frames[f].cpu()
                 gt_heatmap = heat_masks[f].cpu()
-                pred_heatmap = out.sigmoid().round()[f].cpu()
+                pred_heatmap = metrics_out.sigmoid()[f].cpu()
 
                 gt_bbox_centers, pred_centers, rgb_frame, supervised_boxes = get_gt_annotations_for_metrics(
                     blobs_per_image, cfg, f, frame_number, meta, rgb_frame, test_loader)
