@@ -416,11 +416,10 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
     )
 
     limit_val_batches = 1.0
-    if len(train_dataset.datasets) == 1 \
+    if not cfg.single_video_mode.enabled and len(train_dataset.datasets) == 1 \
             and len(val_dataset.datasets) == 1 \
             and train_dataset.datasets[0].video_clips_metadata['video_paths'][0] \
-            == val_dataset.datasets[0].video_clips_metadata['video_paths'][0] \
-            and not cfg.single_video_mode.enabled:
+            == val_dataset.datasets[0].video_clips_metadata['video_paths'][0]:
         limit_val_batches = 0.2
         logger.info(f'Limiting Val Dataset to {limit_val_batches} for same dataset!')
 
