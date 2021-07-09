@@ -786,7 +786,8 @@ def evaluate_v1(cfg):
 
     logger.info(f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
                 f'Video Number: {cfg.eval.test.video_number_to_use}')
-    logger.info(f"Threshold: {cfg.eval.gt_pred_loc_distance_threshold}m")
+    logger.info(f"Threshold: {cfg.eval.gt_pred_loc_distance_threshold}m | "
+                f"Max-Pool kernel size: {cfg.eval.objectness.kernel}")
     logger.info(f"Test Loss: {np.array(total_loss).mean()}")
     logger.info(f"Precision: {final_precision} | Recall: {final_recall}")
 

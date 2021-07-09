@@ -616,11 +616,11 @@ def heat_map_temporal_collate_fn(batch):
         distribution_map_list.append(distribution_map)
         cm_list.append(class_maps)
 
-    rgb_img_list = torch.stack(rgb_img_list)
-    mask_list = torch.stack(mask_list)
-    position_map_list = torch.stack(position_map_list)
-    distribution_map_list = torch.stack(distribution_map_list)
-    cm_list = torch.stack(cm_list)
+    rgb_img_list = torch.stack(rgb_img_list).transpose(1, 2)
+    mask_list = torch.stack(mask_list).transpose(1, 2)
+    position_map_list = torch.stack(position_map_list).transpose(1, 2)
+    distribution_map_list = torch.stack(distribution_map_list).transpose(1, 2)
+    cm_list = torch.stack(cm_list).transpose(1, 2)
 
     return rgb_img_list, mask_list, position_map_list, distribution_map_list, cm_list, meta_list
 
