@@ -21,6 +21,26 @@ interval: 'epoch'
 frequency: 1
 mode: 'min'
 
+# TP module
+# scheduler
+tp_module:
+  scheduler:
+    patience: 5
+    verbose: True
+    factor: 0.1
+    min_lr: 1e-10
+    # extra
+    monitor: 'val_loss_epoch'
+    interval: 'epoch'
+    frequency: 1
+    mode: 'min'
+
+  # Adam
+  optimizer:
+    lr: 2e-3
+    weight_decay: 0
+    amsgrad: False
+
 # loaders
 batch_size: 2
 shuffle: False  # keep it always False
@@ -64,7 +84,7 @@ using_replay_compose: True
 manual_annotation_processing: False
 frame_rate: 15.  # 30.
 
-video_based:  # !!!!! Keep an eye !!!!
+video_based: # !!!!! Keep an eye !!!!
   enabled: False
   frames_per_clip: 8  # for video based
 
@@ -127,8 +147,8 @@ preproccesing:
 
 loss:
   reduction: 'mean'
-  gaussian_weight: [0.5]
-  apply_sigmoid: [True]
+  gaussian_weight: [ 0.5 ]
+  apply_sigmoid: [ True ]
   bfl:
     alpha: 0.85
     gamma: 4.0
@@ -176,7 +196,7 @@ overfit:
   focal_loss_alpha: 0.9
   gaussuan_focal_loss_alpha: 2.0
 
-  subset_indices: 64  # 450  # [ 0, 85, 32, 5, 125, 200 ]
+  subset_indices: 128  # 450  # [ 0, 85, 32, 5, 125, 200 ]
   #  subset_indices: [0]
 
   plot_checkpoint: 99
@@ -190,8 +210,33 @@ overfit:
     checkpoint:
       root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
       path: "lightning_logs/version_"
-      version: 502496 # 492265 # 497829 # 492265 #424798 # 437363  # 424798
+      version: 509506 # 492265 # 497829 # 492265 #424798 # 437363  # 424798
       top_k: 1
+
+interplay_v0:
+  num_epochs: 400
+
+  use_pretrained:
+    enabled: True
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+      path: "lightning_logs/version_"
+      version: 509506 # 492265 # 497829 # 492265 #424798 # 437363  # 424798
+      top_k: 1
+
+  train_position_model: True
+
+  subset_indices: 128  # 450  # [ 0, 85, 32, 5, 125, 200 ]
+
+  batch_size: 2
+  shuffle: False  # keep it always False
+  num_workers: 12
+  pin_memory: True
+  drop_last: True
+
+  min_history: 4
+  inactive_tracks_keep_alive: 5
+
 
 interact:
   device: 'cuda:0'
