@@ -116,6 +116,7 @@ class DeepLabV3Plus(Base):
 
         self.backbone = ResNetV1c(
             depth=self.config.deep_lab_v3_plus.resnet_depth,
+            in_channels=self.config.deep_lab_v3_plus.in_channels,
             num_stages=4,
             out_indices=(0, 1, 2, 3),
             dilations=(1, 1, 2, 4),

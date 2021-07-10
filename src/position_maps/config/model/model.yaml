@@ -162,6 +162,8 @@ deep_lab_v3:
   num_classes: 1
 
 deep_lab_v3_plus:
+  in_channels: 3
+
   norm:
     type: 'BN'
     requires_grad: True

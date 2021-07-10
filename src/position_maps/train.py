@@ -38,7 +38,7 @@ from src_lib.models_hub.unets import R2AttentionUNet, AttentionUNet
 from src_lib.models_hub.vis_trans import VisionTransformerSegmentation
 from src.position_maps.patch_utils import extract_patches_2d, reconstruct_from_patches_2d, quick_viz
 from utils import heat_map_collate_fn, plot_predictions, get_scaled_shapes_with_pad_values, ImagePadder, \
-    TensorDatasetForTwo, plot_predictions_v2, plot_samples
+    TensorDatasetForTwo, plot_predictions_v2, plot_samples, heat_map_temporal_4d_collate_fn
 
 warnings.filterwarnings("ignore")
 
@@ -585,6 +585,11 @@ def train_v1(cfg):
 def overfit(cfg):
     logger.info(f'Overfit - Setting up DataLoader and Model...')
 
+    if cfg.overfit.temporal_stacked.enabled:
+        cfg.video_based.enabled = True
+        cfg.video_based.frames_per_clip = cfg.overfit.temporal_stacked.frames_per_clip
+        cfg.deep_lab_v3_plus.in_channels = cfg.overfit.temporal_stacked.frames_per_clip * 3
+
     if cfg.single_video_mode.enabled:
         train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg)
     else:
@@ -718,9 +723,17 @@ def overfit(cfg):
     else:
         indices = np.random.choice(len(train_dataset), cfg.overfit.subset_indices, replace=False)
     train_subset = Subset(dataset=train_dataset, indices=indices)
+
+    if cfg.overfit.temporal_stacked.enabled:
+        collate_fn = heat_map_temporal_4d_collate_fn
+    else:
+        collate_fn = heat_map_collate_fn
+
     train_loader = DataLoader(train_subset, batch_size=cfg.overfit.batch_size, shuffle=False,
-                              num_workers=cfg.overfit.num_workers, collate_fn=heat_map_collate_fn,
+                              num_workers=cfg.overfit.num_workers, collate_fn=collate_fn,
                               pin_memory=cfg.overfit.pin_memory, drop_last=cfg.overfit.drop_last)
+    heat_map_gt_idx = -1
+
     for epoch in range(cfg.overfit.num_epochs):
         model.train()
 
@@ -747,6 +760,9 @@ def overfit(cfg):
                     frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
             out = model(frames)
+
+            if cfg.overfit.temporal_stacked.enabled:
+                heat_masks = heat_masks[:, heat_map_gt_idx, None, ...]
 
             if cfg.from_model_hub:
                 if cfg.model_hub.model in model_hub_models:
@@ -815,6 +831,9 @@ def overfit(cfg):
                 with torch.no_grad():
                     out = model(frames)
 
+                if cfg.overfit.temporal_stacked.enabled:
+                    heat_masks = heat_masks[:, heat_map_gt_idx, None, ...]
+
                 if cfg.from_model_hub:
                     if cfg.model_hub.model in model_hub_models:
                         loss = getattr(torch.Tensor, reduction)(model.calculate_loss(out, heat_masks)) + \
@@ -854,6 +873,8 @@ def overfit(cfg):
 
                             out = [o.cpu().squeeze(1) for o in out]
                             if show:
+                                if cfg.overfit.temporal_stacked.enabled:
+                                    frames = frames[:, -3:, ...]
                                 plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                                     heat_masks[random_idx].squeeze().cpu(),
                                                     torch.nn.functional.threshold(out[0][random_idx].sigmoid(),

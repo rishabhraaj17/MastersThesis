@@ -378,18 +378,31 @@ class SDDFrameAndAnnotationDataset(Dataset):
         return class_maps, distribution_map, heat_mask, meta, position_map, video
 
     def _get_item_core_temporal(self, item):
+        annotations = None
         v_idx, _ = self.video_clips.get_clip_location(item)
         while self.annotations_df[v_idx].frame_number.max() < \
-                self.video_clips.resampling_idxs[v_idx][item].max().item():
+                self.video_clips.resampling_idxs[v_idx][item].max().item() or annotations is None:
             item = np.random.choice(len(self), 1, replace=False).item()
 
-        video, audio, info, video_idx = self.video_clips.get_clip(item)
+            video, audio, info, video_idx = self.video_clips.get_clip(item)
+            video = video.permute(0, 3, 1, 2)
+            original_shape = new_shape = downscale_shape = (video.shape[-2], video.shape[-1])
 
-        video = video.permute(0, 3, 1, 2)
-        original_shape = new_shape = downscale_shape = (video.shape[-2], video.shape[-1])
+            annotations = [self.get_annotation_for_frame(i.item(), v_idx, original_shape)
+                           for i in self.video_clips.resampling_idxs[v_idx][item]]
+            for annotation in annotations:
+                bbox_centers, boxes, track_idx, class_labels = annotation
+                if bbox_centers.size == 0 or boxes.size == 0 or track_idx.size == 0:
+                    annotations = None
+                    break
 
-        annotations = [self.get_annotation_for_frame(i.item(), video_idx, original_shape)
-                       for i in self.video_clips.resampling_idxs[video_idx][item]]
+        # video, audio, info, video_idx = self.video_clips.get_clip(item)
+
+        # video = video.permute(0, 3, 1, 2)
+        # original_shape = new_shape = downscale_shape = (video.shape[-2], video.shape[-1])
+
+        # annotations = [self.get_annotation_for_frame(i.item(), video_idx, original_shape)
+        #                for i in self.video_clips.resampling_idxs[video_idx][item]]
 
         video = video.float() / 255.0
         if self.transform is not None:
