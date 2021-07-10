@@ -2,9 +2,10 @@
 
 eval:
   batch_size: 4
-  num_workers: 12
+  num_workers: 0  # 12
   pin_memory: True
   drop_last: False
+  shuffle: True
 
   device: 'cpu'  # 'cuda:0', 'cpu'
   use_lightning_loader: False
@@ -17,8 +18,8 @@ eval:
   root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
   video_class: DEATH_CIRCLE
   video_meta_class: DEATH_CIRCLE
-  desired_pixel_to_meter_ratio: 0.10
-  desired_pixel_to_meter_ratio_rgb: 0.10 # 0.07 # 0.25 # 0.05
+  desired_pixel_to_meter_ratio: 0.07
+  desired_pixel_to_meter_ratio_rgb: 0.07 # 0.07 # 0.25 # 0.05
   downscale_only_target_maps: False
   using_replay_compose: True
   manual_annotation_processing: False
@@ -30,11 +31,11 @@ eval:
 
   test:
     num_videos: -1
-    video_number_to_use: 2
+    video_number_to_use: 4
     #    video_classes_to_use: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
     #    video_numbers_to_use: [ [ 6 ], [ 3 ], [ 3 ], [ 7 ], [ 9, 14 ], [ 0 ], [ 6 ], [ 0 ] ]
     video_classes_to_use: [ DEATH_CIRCLE ]  # [ GATES, DEATH_CIRCLE, LITTLE ]
-    video_numbers_to_use: [ [ 3, 0 ] ]  # [ [ 4 ], [ 3 ], [ 0 ] ]
+    video_numbers_to_use: [ [ 4 ] ]  # [ [ 4 ], [ 3 ], [ 0 ] ]
     multiple_videos: False
 
     single_video_mode:
@@ -100,7 +101,7 @@ eval:
     kernel: 3
     loc_cutoff: 0.05
     marker_size: 3
-    index_select: 0
+    index_select: -1
 
   make_video: True
   video_fps: 2
@@ -117,5 +118,5 @@ eval:
   checkpoint:
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
     path: "lightning_logs/version_"
-    version: 509506 # 497829 # 492265 #424798 # 437363  # 424798 # 509506 (best-dpv3-r50)
+    version: 509506  # 509506 # 497829 # 492265 #424798 # 437363  # 424798 # 509506 (best-dpv3-r50)
     top_k: 1

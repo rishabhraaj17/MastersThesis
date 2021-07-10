@@ -627,7 +627,7 @@ def evaluate_v1(cfg):
         # test_dataset, target_max_shape = setup_multiple_test_datasets(cfg, return_dummy_transform=False)
         test_dataset, _, target_max_shape = setup_dataset(cfg)
 
-    test_loader = DataLoader(test_dataset, batch_size=cfg.eval.batch_size, shuffle=False,
+    test_loader = DataLoader(test_dataset, batch_size=cfg.eval.batch_size, shuffle=cfg.eval.shuffle,
                              num_workers=cfg.eval.num_workers, collate_fn=heat_map_collate_fn,
                              pin_memory=cfg.eval.pin_memory, drop_last=cfg.eval.drop_last)
 
@@ -648,6 +648,7 @@ def evaluate_v1(cfg):
     checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
 
     checkpoint_file = checkpoint_path + checkpoint_files[-cfg.eval.checkpoint.top_k]
+    logger.info(f'Loading weights : {checkpoint_file}')
 
     load_dict = torch.load(checkpoint_file, map_location=cfg.eval.device)
     model.load_state_dict(load_dict['state_dict'])
@@ -756,7 +757,9 @@ def evaluate_v1(cfg):
                                     logits_mask=out[0][random_idx].sigmoid(),
                                     additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
                                                     f"| Epoch: {idx} "
-                                                    f"| Threshold: {cfg.prediction.threshold}")
+                                                    f"| Frame Number: {current_random_frame} "
+                                                    f"| Threshold: {cfg.prediction.threshold} | "
+                                                    f"Out Idx: 0")
                 plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                     heat_masks[random_idx].squeeze().cpu(),
                                     torch.nn.functional.threshold(out[-1][random_idx].sigmoid(),
@@ -766,7 +769,9 @@ def evaluate_v1(cfg):
                                     logits_mask=out[-1][random_idx].sigmoid(),
                                     additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
                                                     f"| Epoch: {idx} "
-                                                    f"| Threshold: {cfg.prediction.threshold}")
+                                                    f"| Frame Number: {current_random_frame} "
+                                                    f"| Threshold: {cfg.prediction.threshold} | "
+                                                    f"Out Idx: -1")
 
                 if cfg.model_hub.model == 'DeepLabV3Plus' and len(out) > 2:
                     plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
@@ -779,7 +784,9 @@ def evaluate_v1(cfg):
                                         logits_mask=out[-2][random_idx].sigmoid(),
                                         additional_text=f"{model._get_name()} | {loss_fn._get_name()} "
                                                         f"| Epoch: {idx} "
-                                                        f"| Threshold: {cfg.prediction.threshold}")
+                                                        f"| Frame Number: {current_random_frame} "
+                                                        f"| Threshold: {cfg.prediction.threshold} | "
+                                                        f"Out Idx: -2")
 
     final_precision = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fp_list).sum())
     final_recall = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fn_list).sum())
@@ -787,7 +794,8 @@ def evaluate_v1(cfg):
     logger.info(f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
                 f'Video Number: {cfg.eval.test.video_number_to_use}')
     logger.info(f"Threshold: {cfg.eval.gt_pred_loc_distance_threshold}m | "
-                f"Max-Pool kernel size: {cfg.eval.objectness.kernel}")
+                f"Max-Pool kernel size: {cfg.eval.objectness.kernel} | "
+                f"Head Used: {cfg.eval.objectness.index_select}")
     logger.info(f"Test Loss: {np.array(total_loss).mean()}")
     logger.info(f"Precision: {final_precision} | Recall: {final_recall}")
 
