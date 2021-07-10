@@ -579,6 +579,37 @@ def train_v1(cfg):
     logger.info(f'Starting training...')
 
     trainer.fit(model)
+    
+    
+@hydra.main(config_path="config", config_name="config")
+def train_temporal_2d_v1(cfg):
+    logger.info(f'Temporal 2D Training')
+    logger.info(f'Setting up DataLoader and Model...')
+    
+    cfg.video_based.enabled = True
+
+    # runtime config adjustments
+    if cfg.trainer.accelerator in ['ddp', 'ddp_cpu']:
+        cfg.num_workers = 0
+        cfg.dataset_workers = 0
+
+    if cfg.single_video_mode.enabled:
+        train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg)
+    else:
+        train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
+
+    loss_fn, gaussian_loss_fn = build_loss(cfg)
+
+    model = build_model(cfg, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_fn,
+                        additional_loss_functions=gaussian_loss_fn, collate_fn=heat_map_temporal_4d_collate_fn,
+                        desired_output_shape=target_max_shape)
+
+    logger.info(f'Setting up Trainer...')
+
+    model, trainer = setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset)
+    logger.info(f'Starting training...')
+
+    trainer.fit(model)
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -1463,3 +1494,4 @@ if __name__ == '__main__':
         overfit()
         # train()
         # train_v1()
+        # train_temporal_2d_v1()
