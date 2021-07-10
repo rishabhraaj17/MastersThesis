@@ -743,6 +743,48 @@ class DeepLabV3PlusDDP(BaseDDP):
         return torch.stack([weight_factor * loss_function(p, target) for p in pred])
 
 
+class DeepLabV3PlusTemporal2DDDP(DeepLabV3PlusDDP):
+    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
+        super(DeepLabV3PlusTemporal2DDDP, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
+        )
+        norm_cfg = dict(type='SyncBN',
+                        requires_grad=self.config.deep_lab_v3_plus.norm.requires_grad)
+        self.backbone = ResNetV1c(
+            in_channels=self.config.deep_lab_v3_plus.in_channels * self.config.video_based.frames_per_clip,
+            depth=self.config.deep_lab_v3_plus.resnet_depth,
+            num_stages=4,
+            out_indices=(0, 1, 2, 3),
+            dilations=(1, 1, 2, 4),
+            strides=(1, 2, 1, 1),
+            norm_cfg=norm_cfg,
+            norm_eval=False,
+            style='pytorch',
+            contract_dilation=True,
+            init_cfg=None,
+            pretrained=self.config.deep_lab_v3_plus.pretrained
+        )
+        
+    def _one_step(self, batch):
+        frames, heat_masks, _, _, _, meta = batch
+
+        padder = ImagePadder(frames.shape[-2:], factor=self.config.preproccesing.pad_factor)
+        frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
+
+        out = self(frames)
+
+        heat_masks = heat_masks[:, self.config.video_based.gt_idx, None, ...]
+
+        loss1 = self.loss_reducer(self.calculate_loss(out, heat_masks))
+        loss2 = self.loss_reducer(self.calculate_additional_losses(
+            out, heat_masks, self.additional_loss_weights, self.additional_loss_activation))
+        return loss1, loss2
+
+
 class DeepLabV3PlusSmall(Base):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
                  desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
@@ -1131,11 +1173,11 @@ class DeepLabV3GAN(BaseGAN):
 
         self.generator = DeepLabV3Generator(config=config)
         self.discriminator = DeepLabV3Discriminator(config=config)
-        
+
         self.loss_reducer = getattr(torch.Tensor, self.config.loss.reduction)
         self.additional_loss_weights = self.config.loss.gaussian_weight
         self.additional_loss_activation = self.config.loss.apply_sigmoid
-        
+
         self.desc_loss_function = desc_loss_function
 
     def forward_gen_desc(self, x):
@@ -1160,7 +1202,7 @@ class DeepLabV3GAN(BaseGAN):
 
     def calculate_loss(self, pred, target):
         return torch.stack([self.loss_function(p, target) for p in pred])
-    
+
     def calculate_additional_losses(self, pred, target, weights, apply_sigmoid):
         losses = []
         for loss_fn, weight, use_sigmoid in zip(self.additional_loss_functions, weights, apply_sigmoid):
@@ -1231,7 +1273,7 @@ class DeepLabV3GAN(BaseGAN):
         loss1 = self.loss_reducer(self.calculate_loss(out, heat_masks))
         loss2 = self.loss_reducer(self.calculate_additional_losses(
             out, heat_masks, self.additional_loss_weights, self.additional_loss_activation))
-        
+
         gen_loss = loss1 + loss2
 
         return gen_loss

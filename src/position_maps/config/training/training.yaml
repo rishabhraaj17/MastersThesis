@@ -87,6 +87,7 @@ frame_rate: 15.  # 30.
 video_based: # !!!!! Keep an eye !!!!
   enabled: False
   frames_per_clip: 8  # for video based
+  gt_idx: -1
 
 train:
   num_videos: -1
