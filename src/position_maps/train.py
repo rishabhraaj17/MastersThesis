@@ -326,6 +326,58 @@ def setup_multiple_datasets(cfg):
     return train_datasets, val_datasets, target_max_shape
 
 
+def setup_multiple_datasets_v2(cfg):
+    video_classes = copy.deepcopy(cfg.train.video_classes_to_use)
+    video_numbers = copy.deepcopy(cfg.train.video_numbers_to_use)
+    for val_clz, val_v_num in zip(cfg.val.video_classes_to_use, cfg.val.video_numbers_to_use):
+        if val_clz in video_classes:
+            idx = video_classes.index(val_clz)
+            video_numbers[idx] = (list(set(video_numbers[idx] + val_v_num)))
+        else:
+            video_classes.append(val_clz)
+            video_numbers.append(val_v_num)
+
+    df, rgb_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=video_classes,
+        video_numbers=video_numbers,
+        desired_ratio=cfg.desired_pixel_to_meter_ratio_rgb)
+
+    df_target, target_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=video_classes,
+        video_numbers=video_numbers,
+        desired_ratio=cfg.desired_pixel_to_meter_ratio)
+
+    pixel_sizes_train = []
+    for v_idx, video_clz in enumerate(cfg.train.video_classes_to_use):
+        for video_num in cfg.train.video_numbers_to_use[v_idx]:
+            r_shape = df[(df.CLASS == video_clz) & (df.NUMBER == video_num)].RESCALED_SHAPE.item()
+            pixel_sizes_train.append(r_shape[0] * r_shape[1])
+
+    pixel_sizes_val = []
+    for v_idx, video_clz in enumerate(cfg.val.video_classes_to_use):
+        for video_num in cfg.val.video_numbers_to_use[v_idx]:
+            r_shape = df[(df.CLASS == video_clz) & (df.NUMBER == video_num)].RESCALED_SHAPE.item()
+            pixel_sizes_val.append(r_shape[0] * r_shape[1])
+
+    train_datasets = setup_multiple_datasets_core_v2(
+        cfg, pixel_sizes_train, video_classes_to_use=cfg.train.video_classes_to_use,
+        video_numbers_to_use=cfg.train.video_numbers_to_use,
+        num_videos=cfg.train.num_videos,
+        multiple_videos=cfg.train.multiple_videos,
+        df=df, df_target=df_target, rgb_max_shape=rgb_max_shape)
+    val_datasets = setup_multiple_datasets_core_v2(
+        cfg, pixel_sizes_val, video_classes_to_use=cfg.val.video_classes_to_use,
+        video_numbers_to_use=cfg.val.video_numbers_to_use,
+        num_videos=cfg.val.num_videos,
+        multiple_videos=cfg.val.multiple_videos,
+        df=df, df_target=df_target, rgb_max_shape=rgb_max_shape, for_val=True)
+
+    # test
+    # check_dataset_sanity(train_datasets)
+
+    return train_datasets, val_datasets, target_max_shape
+
+
 def setup_single_video_dataset(cfg):
     meta = SDDMeta(cfg.root + 'H_SDD.txt')
 
@@ -360,7 +412,7 @@ def setup_single_video_dataset(cfg):
 
 
 def check_dataset_sanity(dataset):
-    loader = DataLoader(dataset, batch_size=1, shuffle=False, collate_fn=heat_map_collate_fn)
+    loader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=heat_map_collate_fn)
     for data in loader:
         frames, heat_masks, _, _, _, meta = data
         meta = meta[0]
@@ -405,6 +457,47 @@ def setup_multiple_datasets_core(cfg, meta, video_classes_to_use, video_numbers_
                                                           common_transform=common_transform,
                                                           using_replay_compose=cfg.using_replay_compose,
                                                           frame_rate=cfg.frame_rate))
+    return ConcatDataset(datasets)
+
+
+def setup_multiple_datasets_core_v2(cfg, pixel_count_list, video_classes_to_use, video_numbers_to_use, num_videos,
+                                    multiple_videos, df, df_target, rgb_max_shape, use_common_transforms=True,
+                                    for_val=False):
+    datasets = []
+    for idx, v_clz in enumerate(video_classes_to_use):
+        for v_num in video_numbers_to_use[idx]:
+            logger.info(f"Setting up {v_clz} - {v_num}")
+            condition = (df.CLASS == v_clz) & (df.NUMBER == v_num)
+            h, w = df[condition].RESCALED_SHAPE.values.item()
+            pad_values = [0 for _ in df[condition].PAD_VALUES.values.item()]
+
+            target_h, target_w = df_target[condition].RESCALED_SHAPE.values.item()
+            target_pad_values = [0 for _ in df_target[condition].PAD_VALUES.values.item()]
+
+            transform = setup_single_transform(height=target_h, width=target_w)
+            rgb_transform_fn = setup_single_transform(height=h, width=w)
+            rgb_plot_transform = setup_single_transform(height=rgb_max_shape[0], width=rgb_max_shape[1])
+            if use_common_transforms:
+                common_transform = setup_single_common_transform(use_replay_compose=cfg.using_replay_compose)
+            else:
+                common_transform = None
+
+            datasets.append(setup_single_dataset_instance(cfg=cfg, transform=transform,
+                                                          video_class=v_clz,
+                                                          num_videos=num_videos,
+                                                          video_number_to_use=v_num,
+                                                          multiple_videos=multiple_videos,
+                                                          rgb_transform_fn=rgb_transform_fn,
+                                                          rgb_new_shape=(h, w),
+                                                          rgb_pad_value=pad_values,
+                                                          target_pad_value=target_pad_values,
+                                                          rgb_plot_transform=rgb_plot_transform,
+                                                          common_transform=common_transform,
+                                                          using_replay_compose=cfg.using_replay_compose,
+                                                          frame_rate=cfg.frame_rate))
+    batch_size = cfg.batch_size * cfg.val_batch_size_factor if for_val else cfg.batch_size
+    datasets = [Subset(d, indices=np.arange(start=0, stop=len(d) - (len(d) % batch_size))) for d in datasets]
+    datasets = [x for _, x in sorted(zip(pixel_count_list, datasets), key=lambda pair: pair[0], reverse=True)]
     return ConcatDataset(datasets)
 
 
@@ -511,7 +604,8 @@ def train(cfg):
         cfg.dataset_workers = 0
 
     # train_dataset, val_dataset, target_max_shape = setup_dataset(cfg)
-    train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
+    multiple_dataset_fn = setup_multiple_datasets_v2 if cfg.use_multiple_datasets_v2 else setup_multiple_datasets
+    train_dataset, val_dataset, target_max_shape = multiple_dataset_fn(cfg)
 
     network_type = getattr(model_zoo, cfg.postion_map_network_type)
 
@@ -568,7 +662,8 @@ def train_v1(cfg):
     if cfg.single_video_mode.enabled:
         train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg)
     else:
-        train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
+        multiple_dataset_fn = setup_multiple_datasets_v2 if cfg.use_multiple_datasets_v2 else setup_multiple_datasets
+        train_dataset, val_dataset, target_max_shape = multiple_dataset_fn(cfg)
 
     loss_fn, gaussian_loss_fn = build_loss(cfg)
 
@@ -582,13 +677,13 @@ def train_v1(cfg):
     logger.info(f'Starting training...')
 
     trainer.fit(model)
-    
-    
+
+
 @hydra.main(config_path="config", config_name="config")
 def train_temporal_2d_v1(cfg):
     logger.info(f'Temporal 2D Training')
     logger.info(f'Setting up DataLoader and Model...')
-    
+
     cfg.video_based.enabled = True
 
     # runtime config adjustments
@@ -599,7 +694,8 @@ def train_temporal_2d_v1(cfg):
     if cfg.single_video_mode.enabled:
         train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg)
     else:
-        train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
+        multiple_dataset_fn = setup_multiple_datasets_v2 if cfg.use_multiple_datasets_v2 else setup_multiple_datasets
+        train_dataset, val_dataset, target_max_shape = multiple_dataset_fn(cfg)
 
     loss_fn, gaussian_loss_fn = build_loss(cfg)
 
