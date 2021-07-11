@@ -467,7 +467,8 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                           replace_sampler_ddp=cfg.trainer.replace_sampler_ddp,
                           num_nodes=cfg.trainer.num_nodes, plugins=plugins,
                           gradient_clip_val=cfg.trainer.gradient_clip_val,
-                          sync_batchnorm=sync_bn, limit_val_batches=limit_val_batches)
+                          sync_batchnorm=sync_bn, limit_val_batches=limit_val_batches,
+                          accumulate_grad_batches=cfg.trainer.accumulate_grad_batches)
     else:
         if cfg.resume_mode:
             checkpoint_path = f'{cfg.resume.checkpoint.path}{cfg.resume.checkpoint.version}/checkpoints/'
@@ -486,7 +487,8 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                               replace_sampler_ddp=cfg.trainer.replace_sampler_ddp,
                               num_nodes=cfg.trainer.num_nodes, plugins=plugins,
                               gradient_clip_val=cfg.trainer.gradient_clip_val,
-                              sync_batchnorm=sync_bn, limit_val_batches=limit_val_batches)
+                              sync_batchnorm=sync_bn, limit_val_batches=limit_val_batches,
+                              accumulate_grad_batches=cfg.trainer.accumulate_grad_batches)
         else:
             trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                               fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
@@ -494,7 +496,8 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                               replace_sampler_ddp=cfg.trainer.replace_sampler_ddp,
                               num_nodes=cfg.trainer.num_nodes, plugins=plugins,
                               gradient_clip_val=cfg.trainer.gradient_clip_val,
-                              sync_batchnorm=sync_bn, limit_val_batches=limit_val_batches)
+                              sync_batchnorm=sync_bn, limit_val_batches=limit_val_batches,
+                              accumulate_grad_batches=cfg.trainer.accumulate_grad_batches)
     return model, trainer
 
 
