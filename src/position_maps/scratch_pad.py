@@ -7,9 +7,10 @@ from kornia.losses import BinaryFocalLossWithLogits
 # from mmseg.models import VisionTransformer, HRNet
 from mmaction.models import ResNet3dSlowFast, SlowFastHead
 from mmdet.models.utils.gaussian_target import get_local_maximum
+from torch import nn
 from torch.nn.functional import pad, interpolate
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Subset, TensorDataset, ConcatDataset
 # from torchvision.models.detection.rpn import RegionProposalNetwork
 # from mmdet.models.backbones.hourglass import HourglassNet
 # from mmdet.models.dense_heads.centernet_head import CenterNetHead
@@ -389,11 +390,39 @@ def video_experiment(cfg):
         print()
 
 
+def diff_size_in_experiment():
+    batch_size = 5
+
+    dataset1 = TensorDataset(torch.randn((128, 3, 256, 256)))
+    dataset2 = TensorDataset(torch.randn((37, 3, 320, 240)))
+    dataset3 = TensorDataset(torch.randn((59, 3, 480, 360)))
+
+    dataset1 = Subset(dataset1, indices=np.arange(start=0, stop=len(dataset1) - (len(dataset1) % batch_size)))
+    dataset2 = Subset(dataset2, indices=np.arange(start=0, stop=len(dataset2) - (len(dataset2) % batch_size)))
+    dataset3 = Subset(dataset3, indices=np.arange(start=0, stop=len(dataset3) - (len(dataset3) % batch_size)))
+
+    inp_pixel_count = [256*256, 320*240, 480*360]
+    datasets = [dataset1, dataset2, dataset3]
+    datasets = [x for _, x in sorted(zip(inp_pixel_count, datasets), key=lambda pair: pair[0], reverse=True)]
+    dataset = ConcatDataset(datasets)
+
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, drop_last=True)
+
+    model = nn.Sequential(nn.Conv2d(3, out_channels=6, kernel_size=3))
+
+    for data in loader:
+        data = data[0]
+        print(data.shape)
+        o = model(data)
+    print()
+
+
 if __name__ == '__main__':
     # import matplotlib.pyplot as plt
     # plt.imshow(torch.randn((25, 25)))
     # plt.show()
-    video_experiment()
+    # video_experiment()
+    diff_size_in_experiment()
     patch_experiment()
     # a = torch.randn((1, 3, 720, 360))
     # h_net = HourglassNet()
