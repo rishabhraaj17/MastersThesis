@@ -226,6 +226,31 @@ deep_lab_v3_plus:
     out_ch: [ 16, 8, 1 ]
 #    out_ch: [ 1, 1, 1 ]
 
+slow_fast:
+  in_channels: 3
+
+  norm:
+    type: 'BN'
+    requires_grad: True
+
+  align_corners: True
+  with_aux_head: False
+  pretrained: null  # 'open-mmlab://resnet50_v1c' # or url
+
+  aspp_head: False  # if false then DepthwiseSeparableASPPHead
+  with_deconv_head: True
+  head_conf: 'three_two_small'
+  resnet_depth: 50
+
+  load_pretrained_manually: False
+  #  local_pretrained_path: '/usr/stud/rajr/.cache/torch/hub/checkpoints/resnet50_v1c-2cccc1ad.pth'
+  local_pretrained_path: '/home/rishabh/.cache/torch/hub/checkpoints/resnet50_v1c-2cccc1ad.pth'
+  load_strictly: False
+
+  head:
+    out_ch: 1
+  aux_head:
+    out_ch: 1
 
 deep_lab_v3_gan:
   norm:

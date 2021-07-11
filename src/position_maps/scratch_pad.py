@@ -5,8 +5,9 @@ import torch
 import torchvision.ops
 from kornia.losses import BinaryFocalLossWithLogits
 # from mmseg.models import VisionTransformer, HRNet
+from mmaction.models import ResNet3dSlowFast, SlowFastHead
 from mmdet.models.utils.gaussian_target import get_local_maximum
-from torch.nn.functional import pad
+from torch.nn.functional import pad, interpolate
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Subset
 # from torchvision.models.detection.rpn import RegionProposalNetwork
@@ -22,7 +23,9 @@ from tqdm import tqdm
 from evaluate import setup_multiple_test_datasets
 from losses import CenterNetFocalLoss
 from src_lib.models_hub import DeepLabV3, DeepLabV3PlusSmall, DeepLabV3Plus, AttentionUNet
-from utils import heat_map_collate_fn, ImagePadder, plot_predictions_v2
+from src_lib.models_hub.spatio_temporal.slowfast import SlowFast
+from utils import heat_map_collate_fn, ImagePadder, plot_predictions_v2, heat_map_temporal_collate_fn, \
+    heat_map_temporal_4d_collate_fn
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -367,10 +370,30 @@ def locations_from_heatmaps(frames, kernel, loc_cutoff, marker_size, out, vis_on
     return pruned_locations
 
 
+@hydra.main(config_path="config", config_name="config")
+def video_experiment(cfg):
+    cfg.video_based.enabled = True
+    test_dataset, target_max_shape = setup_multiple_test_datasets(cfg, return_dummy_transform=False)
+
+    loader = DataLoader(test_dataset, batch_size=4, shuffle=True, collate_fn=heat_map_temporal_collate_fn)
+
+    # model = ResNet3dSlowFast(pretrained=None).cuda()
+    model = SlowFast(cfg, None, None).cuda()
+
+    for data in loader:
+        frames, heat_masks, position_map, distribution_map, class_maps, meta = data
+        frames = interpolate(frames, size=(8, 360, 240)).cuda()
+        out = model(frames)
+
+        # conv3d 1x1 to reduce channel -> stack -> decode
+        print()
+
+
 if __name__ == '__main__':
     # import matplotlib.pyplot as plt
     # plt.imshow(torch.randn((25, 25)))
     # plt.show()
+    video_experiment()
     patch_experiment()
     # a = torch.randn((1, 3, 720, 360))
     # h_net = HourglassNet()
