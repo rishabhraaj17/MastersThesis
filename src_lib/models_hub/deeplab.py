@@ -785,6 +785,80 @@ class DeepLabV3PlusTemporal2DDDP(DeepLabV3PlusDDP):
         return loss1, loss2
 
 
+class DeepLabV3PlusTemporal2D(DeepLabV3PlusTemporal2DDDP):
+    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
+        super(DeepLabV3PlusTemporal2D, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
+        )
+        norm_cfg = dict(type='BN', requires_grad=self.config.deep_lab_v3_plus.norm.requires_grad)
+        self.backbone = ResNetV1c(
+            in_channels=self.config.deep_lab_v3_plus.in_channels * self.config.video_based.frames_per_clip,
+            depth=self.config.deep_lab_v3_plus.resnet_depth,
+            num_stages=4,
+            out_indices=(0, 1, 2, 3),
+            dilations=(1, 1, 2, 4),
+            strides=(1, 2, 1, 1),
+            norm_cfg=norm_cfg,
+            norm_eval=False,
+            style='pytorch',
+            contract_dilation=True,
+            init_cfg=None,
+            pretrained=self.config.deep_lab_v3_plus.pretrained
+        )
+        if self.config.deep_lab_v3_plus.aspp_head:
+            self.head = ASPPHead(
+                in_channels=2048,
+                in_index=3,
+                channels=512,
+                dilations=(1, 12, 24, 36),
+                dropout_ratio=0.1,
+                num_classes=self.config.deep_lab_v3_plus.head.out_ch,
+                norm_cfg=norm_cfg,
+                align_corners=self.align_corners,
+            )
+        else:
+            self.head = DepthwiseSeparableASPPHead(
+                in_channels=2048,
+                in_index=3,
+                channels=512,
+                dilations=(1, 12, 24, 36),
+                c1_in_channels=256,
+                c1_channels=48,
+                dropout_ratio=0.1,
+                num_classes=self.config.deep_lab_v3_plus.head.out_ch,
+                norm_cfg=norm_cfg,
+                align_corners=self.align_corners
+            )
+        if self.with_aux_head:
+            self.aux_head = FCNHead(
+                in_channels=1024,
+                in_index=2,
+                channels=256,
+                num_convs=1,
+                concat_input=False,
+                dropout_ratio=0.1,
+                num_classes=self.config.deep_lab_v3_plus.aux_head.out_ch,
+                norm_cfg=norm_cfg,
+                align_corners=self.align_corners
+            )
+        if self.with_deconv_head:
+            self.deconv_head = TopdownHeatmapSimpleHead(
+                in_channels=1024,  # 2048,
+                out_channels=1,
+                in_index=2,  # 3,
+                num_deconv_layers=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['num_deconv_layers'],
+                num_deconv_filters=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['num_deconv_filters'],
+                num_deconv_kernels=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['num_deconv_kernels'],
+                extra=HEAD_CONFIG[self.config.deep_lab_v3_plus.head_conf]['extra'],
+                align_corners=self.align_corners,
+                loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True)
+            )
+
+
 class DeepLabV3PlusSmall(Base):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
                  desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,

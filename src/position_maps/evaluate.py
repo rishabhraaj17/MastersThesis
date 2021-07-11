@@ -34,7 +34,8 @@ from losses import CenterNetFocalLoss
 from patch_utils import quick_viz
 from train import setup_multiple_datasets_core, setup_single_transform, setup_single_common_transform
 from utils import heat_map_collate_fn, plot_predictions, get_blob_count, overlay_images, plot_predictions_with_overlay, \
-    get_scaled_shapes_with_pad_values, plot_image_with_features, ImagePadder, get_ensemble, plot_predictions_v2
+    get_scaled_shapes_with_pad_values, plot_image_with_features, ImagePadder, get_ensemble, plot_predictions_v2, \
+    heat_map_temporal_4d_collate_fn
 import src_lib.models_hub as hub
 
 seed_everything(42)
@@ -627,8 +628,9 @@ def evaluate_v1(cfg):
         # test_dataset, target_max_shape = setup_multiple_test_datasets(cfg, return_dummy_transform=False)
         test_dataset, _, target_max_shape = setup_dataset(cfg)
 
+    collate_fn = heat_map_temporal_4d_collate_fn if cfg.eval.video_based.enabled else heat_map_collate_fn
     test_loader = DataLoader(test_dataset, batch_size=cfg.eval.batch_size, shuffle=cfg.eval.shuffle,
-                             num_workers=cfg.eval.num_workers, collate_fn=heat_map_collate_fn,
+                             num_workers=cfg.eval.num_workers, collate_fn=collate_fn,
                              pin_memory=cfg.eval.pin_memory, drop_last=cfg.eval.drop_last)
 
     loss_fn = BinaryFocalLossWithLogits(
@@ -675,6 +677,10 @@ def evaluate_v1(cfg):
         with torch.no_grad():
             out = model(frames)
 
+        if cfg.eval.video_based.enabled:
+            frames = frames[:, -3:, ...]
+            heat_masks = heat_masks[:, cfg.eval.video_based.gt_idx, None, ...]
+            
         loss1 = getattr(torch.Tensor, cfg.eval.loss.reduction)(model.calculate_loss(out, heat_masks))
         loss2 = getattr(torch.Tensor, cfg.eval.loss.reduction)(model.calculate_additional_losses(
             out, heat_masks, cfg.eval.loss.gaussian_weight, cfg.eval.loss.apply_sigmoid))

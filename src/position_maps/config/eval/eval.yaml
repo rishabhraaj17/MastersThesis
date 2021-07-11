@@ -27,7 +27,8 @@ eval:
 
   video_based:
     enabled: False
-    frames_per_clip: 8  # for video based
+    frames_per_clip: 5  # for video based
+    gt_idx: -1
 
   test:
     num_videos: -1
@@ -65,7 +66,7 @@ eval:
       alpha: 0.85
       gamma: 4.0
 
-  model: 'DeepLabV3Plus'
+  model: 'DeepLabV3Plus'  # DeepLabV3PlusTemporal2D
 
   preproccesing:
     pad_factor: 8
@@ -103,7 +104,7 @@ eval:
     marker_size: 3
     index_select: -1
 
-  make_video: True
+  make_video: False
   video_fps: 2
 
   max_pool:
