@@ -1,17 +1,21 @@
 import os
 import warnings
+from typing import Optional, Callable, List, Tuple
 
 import hydra
 import numpy as np
 import torch
-from omegaconf import ListConfig
+from mmcls.models import ResNet_CIFAR, GlobalAveragePooling, LinearClsHead
+from omegaconf import ListConfig, DictConfig
 from pytorch_lightning import seed_everything
+from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import Subset, DataLoader
+from torch.utils.data import Subset, DataLoader, Dataset
 from tqdm import tqdm
 
 from log import get_logger
 from src.position_maps.location_utils import locations_from_heatmaps, get_adjusted_object_locations
+from src_lib.models_hub import Base
 from train import setup_single_video_dataset, setup_multiple_datasets, build_model, build_loss
 from utils import heat_map_collate_fn, ImagePadder
 
@@ -19,6 +23,43 @@ warnings.filterwarnings("ignore")
 
 seed_everything(42)
 logger = get_logger(__name__)
+
+
+class CropClassifier(Base):
+    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
+        super(CropClassifier, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
+        )
+        self.backbone = ResNet_CIFAR(
+            depth=18,
+            num_stages=4,
+            out_indices=(3,),
+            style='pytorch'
+        )
+        self.neck = GlobalAveragePooling()
+        self.head = LinearClsHead(
+            num_classes=1,
+            in_channels=512,
+            loss=dict(type='CrossEntropyLoss', loss_weight=1.0),
+        )
+
+    @classmethod
+    def from_config(cls, config: DictConfig, train_dataset: Dataset = None, val_dataset: Dataset = None,
+                    desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                    additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
+        return CropClassifier(config=config, train_dataset=train_dataset, val_dataset=val_dataset,
+                              desired_output_shape=desired_output_shape, loss_function=loss_function,
+                              additional_loss_functions=additional_loss_functions, collate_fn=collate_fn)
+
+    def forward(self, x):
+        out = self.backbone(x)
+        out = self.neck(out)
+        out = self.head(out)
+        return out
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -74,7 +115,7 @@ def train_crop_classifier_v0(cfg):
     position_model.eval()
 
     # classifier model
-    model = ...
+    model = CropClassifier.from_config(config=cfg)
 
     opt = torch.optim.Adam(model.parameters(), lr=cfg.crop_classifier.lr,
                            weight_decay=cfg.crop_classifier.weight_decay, amsgrad=cfg.crop_classifier.amsgrad)
