@@ -296,6 +296,18 @@ def interplay_v0(cfg):
                 # out_trajectory_dxdy = trajectory_dxdy[:, -cfg.interplay_v0.batch_size:, ...]
 
                 # fixed last min_history is taken
+
+                # new one
+                # in_trajectory_xy = trajectory_xy[:, -cfg.interplay_v0.min_history:, ...]
+                # in_trajectory_dxdy = trajectory_dxdy[:, -cfg.interplay_v0.min_history + 1:, ...]
+                #
+                # out_trajectory_xy = trajectory_xy[:,
+                #                    -(cfg.interplay_v0.min_history + cfg.interplay_v0.batch_size):
+                #                    -cfg.interplay_v0.min_history, ...]
+                # out_trajectory_dxdy = trajectory_dxdy[:,
+                #                    -(cfg.interplay_v0.min_history + cfg.interplay_v0.batch_size):
+                #                    -cfg.interplay_v0.min_history + 1, ...]
+
                 in_trajectory_xy = trajectory_xy[:,
                                    -(cfg.interplay_v0.min_history + cfg.interplay_v0.batch_size):
                                    -cfg.interplay_v0.batch_size, ...]
@@ -307,13 +319,7 @@ def interplay_v0(cfg):
                 out_trajectory_dxdy = trajectory_dxdy[:, -cfg.interplay_v0.batch_size:, ...]
 
                 # vis trajectory division
-                fig, ax = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
-                ax.imshow(first_frame.squeeze().permute(1, 2, 0))
-                for in_t_xy in in_trajectory_xy:
-                    add_features_to_axis(ax, in_t_xy, marker_size=3, marker_color='r')
-                for out_t_xy in out_trajectory_xy:
-                    add_features_to_axis(ax, out_t_xy, marker_size=3, marker_color='g')
-                plt.show()
+                viz_divided_trajectories_together(first_frame, in_trajectory_xy, out_trajectory_xy)
                 print()
             print()
             # inputs are
@@ -337,6 +343,19 @@ def interplay_v0(cfg):
             # augment that location with a gaussian as TP
 
             # backpropogate position map loss
+
+
+def viz_divided_trajectories_together(first_frame, in_trajectory_xy, out_trajectory_xy, show=True):
+    fig, ax = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+    ax.imshow(first_frame.squeeze().permute(1, 2, 0))
+    for in_t_xy in in_trajectory_xy:
+        add_features_to_axis(ax, in_t_xy, marker_size=3, marker_color='r')
+    for out_t_xy in out_trajectory_xy:
+        add_features_to_axis(ax, out_t_xy, marker_size=3, marker_color='g')
+    if show:
+        plt.show()
+    else:
+        plt.close()
 
 
 def construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled, batch_start_idx=0):
