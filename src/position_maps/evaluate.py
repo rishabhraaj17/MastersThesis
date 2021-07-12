@@ -248,7 +248,8 @@ def setup_dataset(cfg):
         using_replay_compose=cfg.eval.using_replay_compose,
         manual_annotation_processing=cfg.eval.manual_annotation_processing,
         frame_rate=cfg.eval.frame_rate,
-        config=cfg
+        config=cfg,
+        frames_per_clip=cfg.eval.video_based.frames_per_clip if cfg.eval.video_based.enabled else 1
     )
     return test_dataset, transform, target_max_shape
 
