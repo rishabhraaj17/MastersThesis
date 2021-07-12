@@ -296,18 +296,6 @@ def interplay_v0(cfg):
                 # out_trajectory_dxdy = trajectory_dxdy[:, -cfg.interplay_v0.batch_size:, ...]
 
                 # fixed last min_history is taken
-
-                # new one
-                # in_trajectory_xy = trajectory_xy[:, -cfg.interplay_v0.min_history:, ...]
-                # in_trajectory_dxdy = trajectory_dxdy[:, -cfg.interplay_v0.min_history + 1:, ...]
-                #
-                # out_trajectory_xy = trajectory_xy[:,
-                #                    -(cfg.interplay_v0.min_history + cfg.interplay_v0.batch_size):
-                #                    -cfg.interplay_v0.min_history, ...]
-                # out_trajectory_dxdy = trajectory_dxdy[:,
-                #                    -(cfg.interplay_v0.min_history + cfg.interplay_v0.batch_size):
-                #                    -cfg.interplay_v0.min_history + 1, ...]
-
                 in_trajectory_xy = trajectory_xy[:,
                                    -(cfg.interplay_v0.min_history + cfg.interplay_v0.batch_size):
                                    -cfg.interplay_v0.batch_size, ...]
