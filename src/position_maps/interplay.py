@@ -241,6 +241,7 @@ def interplay_v0(cfg):
 
                 # init tracks
                 for agent_pred_loc in pred_object_locations_scaled[0]:
+                    agent_pred_loc = list(agent_pred_loc)
                     track = Track(idx=current_track, frames=[frame_numbers[0]], locations=[agent_pred_loc])
 
                     active_tracks.tracks.append(track)
@@ -257,9 +258,64 @@ def interplay_v0(cfg):
                 construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled)
 
             viz_tracks(active_tracks, first_frame)
-            print()
             # if we have min history tracks
             # prepare for tp model input
+
+            trajectory_xy, trajectory_dxdy = [], []
+            if all([len(t.locations) >= cfg.interplay_v0.min_history + cfg.interplay_v0.batch_size
+                    for t in active_tracks.tracks]):
+                # pad trajectories if they are less than expected
+                length_per_trajectory = [len(t.locations) for t in active_tracks.tracks]
+                for lpt, t in zip(length_per_trajectory, active_tracks.tracks):
+                    if lpt < cfg.interplay_v0.in_trajectory_length + cfg.interplay_v0.batch_size:
+                        to_pad_location = [list(t.locations[0])]
+                        pad_count = cfg.interplay_v0.in_trajectory_length - lpt
+                        to_pad_location = to_pad_location * pad_count
+                        traj = to_pad_location + t.locations
+
+                        trajectory_xy.append(traj)
+                    else:
+                        trajectory_xy.append(t.locations)
+
+                # prepare trajectories
+                for t_xy in trajectory_xy:
+                    temp_dxdy = []
+                    for xy in range(1, len(t_xy)):
+                        temp_dxdy.append((np.array(t_xy[xy]) - np.array(t_xy[xy - 1])).tolist())
+                    trajectory_dxdy.append(temp_dxdy)
+
+                trajectory_xy = torch.from_numpy(np.stack(trajectory_xy))
+                trajectory_dxdy = torch.from_numpy(np.stack(trajectory_dxdy))
+
+                # old batching when it was min-length * batch_size - takes all available history
+                # good to use all history if available! :)
+                # in_trajectory_xy = trajectory_xy[:, :-cfg.interplay_v0.batch_size, ...]
+                # in_trajectory_dxdy = trajectory_dxdy[:, :-cfg.interplay_v0.batch_size, ...]
+                #
+                # out_trajectory_xy = trajectory_xy[:, -cfg.interplay_v0.batch_size:, ...]
+                # out_trajectory_dxdy = trajectory_dxdy[:, -cfg.interplay_v0.batch_size:, ...]
+
+                # fixed last min_history is taken
+                in_trajectory_xy = trajectory_xy[:,
+                                   -(cfg.interplay_v0.min_history + cfg.interplay_v0.batch_size):
+                                   -cfg.interplay_v0.batch_size, ...]
+                in_trajectory_dxdy = trajectory_dxdy[:,
+                                   -(cfg.interplay_v0.min_history + cfg.interplay_v0.batch_size):
+                                   -cfg.interplay_v0.batch_size, ...]
+
+                out_trajectory_xy = trajectory_xy[:, -cfg.interplay_v0.batch_size:, ...]
+                out_trajectory_dxdy = trajectory_dxdy[:, -cfg.interplay_v0.batch_size:, ...]
+
+                # vis trajectory division
+                fig, ax = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+                ax.imshow(first_frame.squeeze().permute(1, 2, 0))
+                for in_t_xy in in_trajectory_xy:
+                    add_features_to_axis(ax, in_t_xy, marker_size=3, marker_color='r')
+                for out_t_xy in out_trajectory_xy:
+                    add_features_to_axis(ax, out_t_xy, marker_size=3, marker_color='g')
+                plt.show()
+                print()
+            print()
             # inputs are
             # trajectories (encoded by lstm/transformer)
             # patch embeddings? - bring other agents active in consideration
