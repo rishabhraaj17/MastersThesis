@@ -245,7 +245,46 @@ interplay_v0:
     kernel: 3
     loc_cutoff: 0.05
     marker_size: 3
-    index_select: -1
+    index_select: 0
+
+crop_classifier:
+  num_epochs: 400
+
+  use_pretrained:
+    enabled: True
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+      path: "lightning_logs/version_"
+      version: 509506 # 492265 # 497829 # 492265 #424798 # 437363  # 424798
+      top_k: 1
+
+  subset_indices: 32  # 450  # [ 0, 85, 32, 5, 125, 200 ]
+
+  lr: 2e-3
+  weight_decay: 0
+  amsgrad: False
+
+  batch_size: 2
+  shuffle: False  # keep it always False
+  num_workers: 12
+  pin_memory: True
+  drop_last: True
+
+  patience: 5
+  verbose: True
+  factor: 0.1
+  min_lr: 1e-10
+  # extra
+  monitor: 'val_loss_epoch'
+  interval: 'epoch'
+  frequency: 1
+  mode: 'min'
+
+  objectness:
+    kernel: 3
+    loc_cutoff: 0.05
+    marker_size: 3
+    index_select: 0
 
 
 interact:

@@ -3,25 +3,22 @@ import os
 import warnings
 from typing import List
 
-import albumentations as A
 import hydra
 import numpy as np
 import torch
 from matplotlib import pyplot as plt
-from mmdet.models.utils.gaussian_target import get_local_maximum
 import motmetrics as mm
 from omegaconf import ListConfig
 from pytorch_lightning import seed_everything
-from scipy.optimize import linear_sum_assignment
 from torch.nn.functional import interpolate
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import Subset, DataLoader
 from tqdm import tqdm
 
-from baselinev2.plot_utils import add_line_to_axis, add_features_to_axis
+from baselinev2.plot_utils import add_features_to_axis
 from log import get_logger
 from models import TrajectoryModel
-from patch_utils import quick_viz
+from src.position_maps.location_utils import locations_from_heatmaps, get_adjusted_object_locations
 from train import setup_single_video_dataset, setup_multiple_datasets, build_model, build_loss
 from utils import heat_map_collate_fn, ImagePadder
 
@@ -56,54 +53,6 @@ class Tracks(object):
     @classmethod
     def init_with_empty_tracks(cls):
         return Tracks([])
-
-
-def locations_from_heatmaps(frames, kernel, loc_cutoff, marker_size, out, vis_on=False):
-    out = [o.sigmoid() for o in out]
-    pruned_locations = []
-    loc_maxima_per_output = [get_local_maximum(o, kernel) for o in out]
-    for li, loc_max_out in enumerate(loc_maxima_per_output):
-        temp_locations = []
-        for out_img_idx in range(loc_max_out.shape[0]):
-            h_loc, w_loc = torch.where(loc_max_out[out_img_idx].squeeze(0) > loc_cutoff)
-            loc = torch.stack((w_loc, h_loc)).t()
-
-            temp_locations.append(loc)
-
-            # viz
-            if vis_on:
-                plt.imshow(frames[out_img_idx].cpu().permute(1, 2, 0))
-                plt.plot(w_loc, h_loc, 'o', markerfacecolor='r', markeredgecolor='k', markersize=marker_size)
-
-                plt.title(f'Out - {li} - {out_img_idx}')
-                plt.tight_layout()
-                plt.show()
-
-        pruned_locations.append(temp_locations)
-    return pruned_locations
-
-
-def get_position_correction_transform(new_shape):
-    h, w = new_shape
-    transform = A.Compose(
-        [A.Resize(height=h, width=w)],
-        keypoint_params=A.KeypointParams(format='xy')
-    )
-    return transform
-
-
-def get_adjusted_object_locations(locations, heat_masks, meta):
-    adjusted_locations, scaled_images = [], []
-    for blobs, m, mask in zip(locations, meta, heat_masks):
-        original_shape = m['original_shape']
-        transform = get_position_correction_transform(original_shape)
-        out = transform(image=mask.squeeze(0).numpy(), keypoints=blobs.numpy())
-        adjusted_locations.append(out['keypoints'])
-        scaled_images.append(out['image'])
-
-    masks = np.stack(scaled_images)
-
-    return adjusted_locations, masks
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -340,6 +289,8 @@ def viz_divided_trajectories_together(first_frame, in_trajectory_xy, out_traject
         add_features_to_axis(ax, in_t_xy, marker_size=3, marker_color='r')
     for out_t_xy in out_trajectory_xy:
         add_features_to_axis(ax, out_t_xy, marker_size=3, marker_color='g')
+
+    plt.tight_layout()
     if show:
         plt.show()
     else:
