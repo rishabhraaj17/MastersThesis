@@ -200,13 +200,14 @@ def interplay_v0(cfg):
 
     track_ids_used = []
     current_track = 0
-    active_tracks = Tracks.init_with_empty_tracks()
-    inactive_tracks = Tracks.init_with_empty_tracks()
 
     # # using MOTAccumulator to verify ease - matches gt with hypothesis - maybe use in some other scenario
     # track_accumulator = mm.MOTAccumulator(auto_id=True)
 
     for epoch in range(cfg.interplay_v0.num_epochs):
+        active_tracks = Tracks.init_with_empty_tracks()
+        inactive_tracks = Tracks.init_with_empty_tracks()
+
         tp_model_opt.zero_grad()
         tp_model.train()
 
@@ -246,48 +247,8 @@ def interplay_v0(cfg):
                     track_ids_used.append(current_track)
                     current_track += 1
 
-                for b_idx in range(1, len(pred_object_locations_scaled)):
-                    # get last frame locations
-                    last_frame_locations = [t.locations[-1] for t in active_tracks.tracks]
-                    # get current frame locations
-                    current_frame_locations = [loc for loc in pred_object_locations_scaled[b_idx]]
-
-                    last_frame_locations = np.stack(last_frame_locations)
-                    current_frame_locations = np.stack(current_frame_locations)
-
-                    # try setting max dist to a reasonable number so that matches are reasonable within a distance
-                    distance_matrix = mm.distances.norm2squared_matrix(last_frame_locations, current_frame_locations)
-
-                    agent_associations = mm.lap.lsa_solve_scipy(distance_matrix)
-                    match_rows, match_cols = agent_associations
-                    # track_accumulator.update(np.arange(last_frame_locations.shape[0]),
-                    #                          np.arange(current_frame_locations.shape[0]), distance_matrix)
-
-                    # Hungarian
-                    # match_rows, match_cols = linear_sum_assignment(distance_matrix)
-
-                    rows_to_columns_association = {r: c for r, c in zip(match_rows, match_cols)}
-                    # track_ids to associations
-                    last_frame_track_id_to_association = {}
-                    for m_r in match_rows:
-                        last_frame_track_id_to_association[active_tracks.tracks[m_r].idx] = m_r
-
-                    # filter active tracks and extend tracks
-                    currently_active_tracks = []
-                    for track in active_tracks.tracks:
-                        if track.idx in last_frame_track_id_to_association.keys():
-                            track.frames.append(frame_numbers[b_idx])
-
-                            loc_idx = rows_to_columns_association[last_frame_track_id_to_association[track.idx]]
-                            loc = current_frame_locations[loc_idx]
-                            track.locations.append(loc.tolist())
-
-                            currently_active_tracks.append(track)
-                        else:
-                            track.inactive += 1
-                            inactive_tracks.tracks.append(track)
-
-                    active_tracks.tracks = copy.deepcopy(currently_active_tracks)
+                construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled,
+                                 batch_start_idx=1)
             else:
                 # get distance matrix
                 # connect objects
