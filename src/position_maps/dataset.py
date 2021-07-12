@@ -377,7 +377,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
 
         return class_maps, distribution_map, heat_mask, meta, position_map, video
 
-    def _get_item_core_temporal(self, item):
+    def _get_item_core_temporal_v0(self, item):
         annotations = None
         v_idx, _ = self.video_clips.get_clip_location(item)
         while self.annotations_df[v_idx].frame_number.max() < \
@@ -450,7 +450,84 @@ class SDDFrameAndAnnotationDataset(Dataset):
                 'downscale_shape': downscale_shape,
                 'video_idx': video_idx}
 
-        return torch.zeros_like(heat_mask), torch.zeros_like(heat_mask), heat_mask,\
+        return torch.zeros_like(heat_mask), torch.zeros_like(heat_mask), heat_mask, \
+               meta, torch.zeros_like(heat_mask), video
+
+    def _get_item_core_temporal(self, item):
+        # start_t = time.time()
+        annotations = None
+        v_idx, _ = self.video_clips.get_clip_location(item)
+        active_frame_idx = self.video_clips.resampling_idxs[v_idx][item]
+
+        while not np.isin(active_frame_idx, self.annotations_df[v_idx].frame_number.values).all():
+            # item = np.random.choice(self.annotations_df[v_idx].frame_number.values, 1, replace=False).item()
+            item = np.random.choice(len(self), 1, replace=False).item()
+            active_frame_idx = self.video_clips.resampling_idxs[v_idx][item]
+
+        video, audio, info, video_idx = self.video_clips.get_clip(item)
+        video = video.permute(0, 3, 1, 2)
+        original_shape = new_shape = downscale_shape = (video.shape[-2], video.shape[-1])
+
+        annotations = [self.get_annotation_for_frame(i.item(), video_idx, original_shape)
+                       for i in self.video_clips.resampling_idxs[video_idx][item]]
+
+        # video, audio, info, video_idx = self.video_clips.get_clip(item)
+
+        # video = video.permute(0, 3, 1, 2)
+        # original_shape = new_shape = downscale_shape = (video.shape[-2], video.shape[-1])
+
+        # annotations = [self.get_annotation_for_frame(i.item(), video_idx, original_shape)
+        #                for i in self.video_clips.resampling_idxs[video_idx][item]]
+
+        # print(f"Dataset - While loop took {time.time() - start_t} seconds")
+        video = video.float() / 255.0
+        if self.transform is not None:
+            rgb_images, target_boxes, target_bbox_centers, downscale_shape = [], [], [], []
+            for a_idx, annotation in enumerate(annotations):
+                bbox_centers, boxes, track_idx, class_labels = annotation
+                out = self.transform(image=video[a_idx].permute(1, 2, 0).numpy(), keypoints=bbox_centers,
+                                     bboxes=boxes, class_labels=class_labels)
+                img = out['image']
+                target_boxes.append(np.stack(out['bboxes']))
+                target_bbox_centers.append(np.stack(out['keypoints']))
+
+                downscale_shape.append((img.shape[0], img.shape[1]))
+                rgb_images.append(img)
+
+        heat_mask = [torch.from_numpy(
+            generate_position_map(list(d_shape), t_b_c, sigma=self.sigma,
+                                  heatmap_shape=self.heatmap_shape,
+                                  return_combined=self.return_combined_heatmaps, hw_mode=True))
+            for t_b_c, d_shape in zip(target_bbox_centers, downscale_shape)]
+
+        heat_mask = [pad(
+            h.unsqueeze(0).unsqueeze(0),
+            self.target_pad_value, mode='constant').squeeze(0).squeeze(0) for h in heat_mask]
+
+        video = torch.stack([torch.from_numpy(r).permute(2, 0, 1) for r in rgb_images])
+        heat_mask = torch.stack(heat_mask).unsqueeze(1)
+
+        if self.plot:
+            for a_idx, (bbox_centers, boxes, vid, mask, f_num) in \
+                    enumerate(zip(target_bbox_centers, target_boxes, video, heat_mask,
+                                  self.video_clips.resampling_idxs[video_idx][item])):
+                plot_samples(img=vid.permute(1, 2, 0), mask=mask.squeeze(0), boxes=boxes,
+                             box_centers=bbox_centers, rgb_boxes=boxes, rgb_box_centers=bbox_centers,
+                             plot_boxes=True, additional_text=f'Frame Number: {f_num} | Video Idx: {video_idx}')
+
+        pre_padded_video = video.clone()
+        video = pad(video, self.rgb_pad_value, mode=PAD_MODE)
+        new_shape = (video.shape[-2], video.shape[-1])
+        meta = {'boxes': target_boxes, 'bbox_centers': target_bbox_centers,
+                'rgb_boxes': target_boxes, 'rgb_bbox_centers': target_bbox_centers,
+                'pre_pad_rgb': pre_padded_video,
+                'track_idx': track_idx, 'item': item,
+                'original_shape': original_shape, 'new_shape': new_shape,
+                'downscale_shape': downscale_shape,
+                'video_idx': video_idx}
+
+        # print(f"Dataset - one fetch took {time.time() - start_t} seconds")
+        return torch.zeros_like(heat_mask), torch.zeros_like(heat_mask), heat_mask, \
                meta, torch.zeros_like(heat_mask), video
 
     def get_annotation_for_frame(self, item, video_idx, original_shape):
