@@ -378,7 +378,7 @@ def setup_multiple_datasets_v2(cfg):
     return train_datasets, val_datasets, target_max_shape
 
 
-def setup_single_video_dataset(cfg):
+def setup_single_video_dataset(cfg, use_common_transforms=True):
     meta = SDDMeta(cfg.root + 'H_SDD.txt')
 
     df, rgb_max_shape = get_scaled_shapes_with_pad_values(
@@ -396,7 +396,8 @@ def setup_single_video_dataset(cfg):
         video_numbers_to_use=cfg.single_video_mode.video_numbers_to_use,
         num_videos=cfg.single_video_mode.num_videos,
         multiple_videos=cfg.single_video_mode.multiple_videos,
-        df=df, df_target=df_target, rgb_max_shape=rgb_max_shape)
+        df=df, df_target=df_target, rgb_max_shape=rgb_max_shape,
+        use_common_transforms=use_common_transforms)
 
     val_dataset_len = round(len(dataset) * cfg.single_video_mode.val_percent)
     train_indices = torch.arange(start=0, end=len(dataset) - val_dataset_len)

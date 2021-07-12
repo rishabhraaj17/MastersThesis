@@ -1,3 +1,4 @@
+import copy
 import os
 import warnings
 from typing import List
@@ -8,11 +9,16 @@ import numpy as np
 import torch
 from matplotlib import pyplot as plt
 from mmdet.models.utils.gaussian_target import get_local_maximum
+import motmetrics as mm
 from omegaconf import ListConfig
 from pytorch_lightning import seed_everything
+from scipy.optimize import linear_sum_assignment
+from torch.nn.functional import interpolate
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import Subset, DataLoader
+from tqdm import tqdm
 
+from baselinev2.plot_utils import add_line_to_axis, add_features_to_axis
 from log import get_logger
 from models import TrajectoryModel
 from patch_utils import quick_viz
@@ -118,7 +124,7 @@ def interplay_v0(cfg):
         cfg.desired_pixel_to_meter_ratio_rgb = 0.07
         cfg.desired_pixel_to_meter_ratio = 0.07
 
-        train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg)
+        train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg, use_common_transforms=False)
     else:
         train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
 
@@ -190,17 +196,22 @@ def interplay_v0(cfg):
     # fow now
     position_model.freeze()
 
+    first_frame = None
+
     track_ids_used = []
     current_track = 0
     active_tracks = Tracks.init_with_empty_tracks()
     inactive_tracks = Tracks.init_with_empty_tracks()
+
+    # # using MOTAccumulator to verify ease - matches gt with hypothesis - maybe use in some other scenario
+    # track_accumulator = mm.MOTAccumulator(auto_id=True)
 
     for epoch in range(cfg.interplay_v0.num_epochs):
         tp_model_opt.zero_grad()
         tp_model.train()
 
         train_loss = []
-        for t_idx, data in enumerate(train_loader):
+        for t_idx, data in enumerate(tqdm(train_loader)):
             # position_model_opt.zero_grad()
 
             frames, heat_masks, _, _, _, meta = data
@@ -218,12 +229,15 @@ def interplay_v0(cfg):
                 frames, cfg.interplay_v0.objectness.kernel,
                 cfg.interplay_v0.objectness.loc_cutoff,
                 cfg.interplay_v0.objectness.marker_size, pred_position_maps,
-                vis_on=True)
+                vis_on=False)
             selected_head = pred_position_maps[cfg.interplay_v0.objectness.index_select]
             pred_object_locations_scaled, heat_maps_gt_scaled = get_adjusted_object_locations(
                 pred_object_locations[cfg.interplay_v0.objectness.index_select],
                 selected_head, meta)
             if t_idx == 0:
+                # store first frame to viz
+                first_frame = interpolate(frames[0, None, ...], size=meta[0]['original_shape'])
+
                 # init tracks
                 for agent_pred_loc in pred_object_locations_scaled[0]:
                     track = Track(idx=current_track, frames=[frame_numbers[0]], locations=[agent_pred_loc])
@@ -241,14 +255,48 @@ def interplay_v0(cfg):
                     last_frame_locations = np.stack(last_frame_locations)
                     current_frame_locations = np.stack(current_frame_locations)
 
-                    distance_matrix = np.zeros((last_frame_locations.shape[0], current_frame_locations.shape[0]))
+                    # try setting max dist to a reasonable number so that matches are reasonable within a distance
+                    distance_matrix = mm.distances.norm2squared_matrix(last_frame_locations, current_frame_locations)
+
+                    agent_associations = mm.lap.lsa_solve_scipy(distance_matrix)
+                    match_rows, match_cols = agent_associations
+                    # track_accumulator.update(np.arange(last_frame_locations.shape[0]),
+                    #                          np.arange(current_frame_locations.shape[0]), distance_matrix)
+
+                    # Hungarian
+                    # match_rows, match_cols = linear_sum_assignment(distance_matrix)
+
+                    rows_to_columns_association = {r: c for r, c in zip(match_rows, match_cols)}
+                    # track_ids to associations
+                    last_frame_track_id_to_association = {}
+                    for m_r in match_rows:
+                        last_frame_track_id_to_association[active_tracks.tracks[m_r].idx] = m_r
+
+                    # filter active tracks and extend tracks
+                    currently_active_tracks = []
+                    for track in active_tracks.tracks:
+                        if track.idx in last_frame_track_id_to_association.keys():
+                            track.frames.append(frame_numbers[b_idx])
+
+                            loc_idx = rows_to_columns_association[last_frame_track_id_to_association[track.idx]]
+                            loc = current_frame_locations[loc_idx]
+                            track.locations.append(loc.tolist())
+
+                            currently_active_tracks.append(track)
+                        else:
+                            track.inactive += 1
+                            inactive_tracks.tracks.append(track)
+
+                    active_tracks.tracks = copy.deepcopy(currently_active_tracks)
             else:
-                # connect objects
                 # get distance matrix
+                # connect objects
                 # Hungarian matching
                 # Associate tracks - active and inactive
-                pass
+                construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled)
 
+            viz_tracks(active_tracks, first_frame)
+            print()
             # if we have min history tracks
             # prepare for tp model input
             # inputs are
@@ -272,6 +320,65 @@ def interplay_v0(cfg):
             # augment that location with a gaussian as TP
 
             # backpropogate position map loss
+
+
+def construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled, batch_start_idx=0):
+    for b_idx in range(batch_start_idx, len(pred_object_locations_scaled)):
+        # get last frame locations
+        last_frame_locations = [t.locations[-1] for t in active_tracks.tracks]
+        # get current frame locations
+        current_frame_locations = [loc for loc in pred_object_locations_scaled[b_idx]]
+
+        last_frame_locations = np.stack(last_frame_locations)
+        current_frame_locations = np.stack(current_frame_locations)
+
+        # try setting max dist to a reasonable number so that matches are reasonable within a distance
+        distance_matrix = mm.distances.norm2squared_matrix(last_frame_locations, current_frame_locations)
+
+        agent_associations = mm.lap.lsa_solve_scipy(distance_matrix)
+        match_rows, match_cols = agent_associations
+        # track_accumulator.update(np.arange(last_frame_locations.shape[0]),
+        #                          np.arange(current_frame_locations.shape[0]), distance_matrix)
+
+        # Hungarian
+        # match_rows, match_cols = linear_sum_assignment(distance_matrix)
+
+        rows_to_columns_association = {r: c for r, c in zip(match_rows, match_cols)}
+        # track_ids to associations
+        last_frame_track_id_to_association = {}
+        for m_r in match_rows:
+            last_frame_track_id_to_association[active_tracks.tracks[m_r].idx] = m_r
+
+        # filter active tracks and extend tracks
+        currently_active_tracks = []
+        for track in active_tracks.tracks:
+            if track.idx in last_frame_track_id_to_association.keys():
+                track.frames.append(frame_numbers[b_idx])
+
+                loc_idx = rows_to_columns_association[last_frame_track_id_to_association[track.idx]]
+                loc = current_frame_locations[loc_idx]
+                track.locations.append(loc.tolist())
+
+                currently_active_tracks.append(track)
+            else:
+                track.inactive += 1
+                inactive_tracks.tracks.append(track)
+
+        active_tracks.tracks = copy.deepcopy(currently_active_tracks)
+
+
+def viz_tracks(active_tracks, first_frame, show=True):
+    active_tracks_to_vis = np.stack([t.locations for t in active_tracks.tracks])
+    fig, ax = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+    ax.imshow(first_frame.squeeze().permute(1, 2, 0))
+    for a_t in active_tracks_to_vis:
+        add_features_to_axis(ax=ax, features=a_t, marker_size=1, marker_color='g')
+        # add_line_to_axis(ax=ax, features=a_t)
+    plt.tight_layout()
+    if show:
+        plt.show()
+    else:
+        plt.close()
 
 
 if __name__ == '__main__':
