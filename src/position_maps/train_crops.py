@@ -36,7 +36,7 @@ def train_crop_classifier_v0(cfg):
 
     # adjust config here
     cfg.device = 'cpu'  # 'cuda:0'
-    cfg.single_video_mode.enabled = True  # for now we work on single video
+    cfg.single_video_mode.enabled = False
     cfg.preproccesing.pad_factor = 8
     cfg.frame_rate = 20
     cfg.video_based.enabled = False
@@ -50,6 +50,12 @@ def train_crop_classifier_v0(cfg):
 
         train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg, use_common_transforms=False)
     else:
+        cfg.train.video_classes_to_use = ['DEATH_CIRCLE']
+        cfg.train.video_numbers_to_use = [[2, 3, 4]]
+        cfg.desired_pixel_to_meter_ratio_rgb = 0.07
+        cfg.desired_pixel_to_meter_ratio = 0.07
+        cfg.frame_rate = 1.
+
         train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
 
     # loss config params are ok!
@@ -96,10 +102,10 @@ def train_crop_classifier_v0(cfg):
         indices = list(cfg.crop_classifier.subset_indices)
     else:
         indices = np.random.choice(len(train_dataset), cfg.crop_classifier.subset_indices, replace=False)
-    train_subset = Subset(dataset=train_dataset, indices=indices)
+    # train_subset = Subset(dataset=train_dataset, indices=indices)
 
     train_loader = DataLoader(
-        train_subset, batch_size=cfg.crop_classifier.batch_size, shuffle=cfg.crop_classifier.shuffle,
+        train_dataset, batch_size=cfg.crop_classifier.batch_size, shuffle=cfg.crop_classifier.shuffle,
         num_workers=cfg.crop_classifier.num_workers, collate_fn=heat_map_collate_fn,
         pin_memory=cfg.crop_classifier.pin_memory, drop_last=cfg.interplay_v0.drop_last)
 
@@ -115,6 +121,8 @@ def train_crop_classifier_v0(cfg):
         model.train()
 
         train_loss = []
+        gt_crops, gt_boxes = [], []  # gt boxes in xyxy
+        crops, boxes = [], []
         for t_idx, data in enumerate(tqdm(train_loader)):
             frames, heat_masks, _, _, _, meta = data
 
@@ -135,11 +143,11 @@ def train_crop_classifier_v0(cfg):
 
             selected_head, frames_scaled = get_adjusted_object_locations_rgb(
                 selected_head, frames, meta)
-            selected_head = [torch.from_numpy(np.stack(s)) for s in selected_head]
-            frames_scaled = torch.from_numpy(frames_scaled).permute(0, 3, 1, 2)
+            selected_head = [torch.from_numpy(np.stack(s)) for s in selected_head if len(s) != 0]
+            # frames_scaled = torch.from_numpy(frames_scaled).permute(0, 3, 1, 2)
+            frames_scaled = [torch.from_numpy(fs).permute(2, 0, 1) for fs in frames_scaled]
 
             # get tp crops
-            gt_crops, gt_boxes = [], []  # gt boxes in xyxy
             for l_idx, locs in enumerate(selected_head):
                 if locs.numel() == 0:
                     continue
@@ -151,12 +159,11 @@ def train_crop_classifier_v0(cfg):
 
                 # viz
                 viz_boxes_on_img(frames_scaled[l_idx], valid_boxes, show=False)
-                viz_crops(crops_filtered)
+                viz_crops(crops_filtered, show=False)
                 if len(crops_filtered) == 0 or len(valid_boxes) == 0:
                     continue
 
             # get tn crops
-            crops, boxes = [], []
 
             if gt_crops is None:
                 continue
@@ -186,11 +193,16 @@ def train_crop_classifier_v0(cfg):
                                                                       replaceable_tn_boxes, replacement_required,
                                                                       tn_boxes, tn_boxes_xyxy, tn_crops)
 
-                viz_crops(tn_crops)
+                viz_crops(tn_crops, show=False)
                 boxes.append(tn_boxes_xyxy)
                 crops.append(tn_crops)
-            print()
-            # train
+            # train loop ends
+        # epoch loop ends
+        gt_crops = torch.cat(gt_crops)
+        crops = torch.cat(crops)
+        gt_data = {'images': gt_crops, 'labels': torch.ones((gt_crops.shape[0]))}
+        tn_data = {'images': crops, 'labels': torch.ones((crops.shape[0]))}
+        torch.save((gt_data, tn_data), 'death_circle_crops.pt')
 
 
 def replace_tn_data_if_required(replaceable_boxes, replaceable_crops, replaceable_tn_boxes, replacement_required,

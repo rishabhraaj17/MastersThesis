@@ -67,7 +67,8 @@ def get_adjusted_object_locations_rgb(locations, rgb_frames, meta):
         adjusted_locations.append(out['keypoints'])
         scaled_images.append(out['image'])
 
-    masks = np.stack(scaled_images)
+    # masks = np.stack(scaled_images)  # problems in stacking diff images size
+    masks = scaled_images
 
     return adjusted_locations, masks
 

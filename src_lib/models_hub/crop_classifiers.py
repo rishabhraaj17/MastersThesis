@@ -1,5 +1,6 @@
 from typing import Tuple, List, Optional, Callable
 
+import torch
 from mmcls.models import ResNet_CIFAR, GlobalAveragePooling, LinearClsHead
 from omegaconf import DictConfig
 from torch import nn
@@ -24,11 +25,7 @@ class CropClassifier(Base):
             style='pytorch'
         )
         self.neck = GlobalAveragePooling()
-        self.head = LinearClsHead(
-            num_classes=1,
-            in_channels=512,
-            loss=dict(type='CrossEntropyLoss', loss_weight=1.0),
-        )
+        self.head = nn.Sequential(nn.Linear(512, 64), nn.ReLU6(), nn.Linear(64, 1))
 
     @classmethod
     def from_config(cls, config: DictConfig, train_dataset: Dataset = None, val_dataset: Dataset = None,
@@ -41,5 +38,12 @@ class CropClassifier(Base):
     def forward(self, x):
         out = self.backbone(x)
         out = self.neck(out)
-        out = self.head(out)
+        out = self.head.fc(out)
         return out
+
+
+if __name__ == '__main__':
+    m = CropClassifier.from_config({})
+    inp = torch.randn((2, 3, 64, 64))
+    o = m(inp)
+    print()
