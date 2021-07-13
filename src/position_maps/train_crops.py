@@ -1,21 +1,19 @@
 import os
 import warnings
-from typing import Optional, Callable, List, Tuple
 
 import hydra
 import numpy as np
 import torch
-from mmcls.models import ResNet_CIFAR, GlobalAveragePooling, LinearClsHead
-from omegaconf import ListConfig, DictConfig
+from omegaconf import ListConfig
 from pytorch_lightning import seed_everything
-from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import Subset, DataLoader, Dataset
+from torch.utils.data import Subset, DataLoader
 from tqdm import tqdm
 
 from log import get_logger
-from src.position_maps.location_utils import locations_from_heatmaps, get_adjusted_object_locations
-from src_lib.models_hub import Base
+from src.position_maps.location_utils import locations_from_heatmaps, get_processed_patches_to_train, \
+    get_adjusted_object_locations_rgb, get_processed_patches_to_train_rgb_only
+from src_lib.models_hub.crop_classifiers import CropClassifier
 from train import setup_single_video_dataset, setup_multiple_datasets, build_model, build_loss
 from utils import heat_map_collate_fn, ImagePadder
 
@@ -23,43 +21,6 @@ warnings.filterwarnings("ignore")
 
 seed_everything(42)
 logger = get_logger(__name__)
-
-
-class CropClassifier(Base):
-    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
-                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
-                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
-        super(CropClassifier, self).__init__(
-            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
-            desired_output_shape=desired_output_shape, loss_function=loss_function,
-            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
-        )
-        self.backbone = ResNet_CIFAR(
-            depth=18,
-            num_stages=4,
-            out_indices=(3,),
-            style='pytorch'
-        )
-        self.neck = GlobalAveragePooling()
-        self.head = LinearClsHead(
-            num_classes=1,
-            in_channels=512,
-            loss=dict(type='CrossEntropyLoss', loss_weight=1.0),
-        )
-
-    @classmethod
-    def from_config(cls, config: DictConfig, train_dataset: Dataset = None, val_dataset: Dataset = None,
-                    desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
-                    additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
-        return CropClassifier(config=config, train_dataset=train_dataset, val_dataset=val_dataset,
-                              desired_output_shape=desired_output_shape, loss_function=loss_function,
-                              additional_loss_functions=additional_loss_functions, collate_fn=collate_fn)
-
-    def forward(self, x):
-        out = self.backbone(x)
-        out = self.neck(out)
-        out = self.head(out)
-        return out
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -119,7 +80,7 @@ def train_crop_classifier_v0(cfg):
 
     opt = torch.optim.Adam(model.parameters(), lr=cfg.crop_classifier.lr,
                            weight_decay=cfg.crop_classifier.weight_decay, amsgrad=cfg.crop_classifier.amsgrad)
-    sch = ReduceLROnPlateau(model,
+    sch = ReduceLROnPlateau(opt,
                             patience=cfg.crop_classifier.patience,
                             verbose=cfg.crop_classifier.verbose,
                             factor=cfg.crop_classifier.factor,
@@ -143,14 +104,12 @@ def train_crop_classifier_v0(cfg):
 
     # training + logic
 
-    for epoch in range(cfg.interplay_v0.num_epochs):
+    for epoch in range(cfg.crop_classifier.num_epochs):
         opt.zero_grad()
         model.train()
 
         train_loss = []
         for t_idx, data in enumerate(tqdm(train_loader)):
-            # position_model_opt.zero_grad()
-
             frames, heat_masks, _, _, _, meta = data
 
             padder = ImagePadder(frames.shape[-2:], factor=cfg.preproccesing.pad_factor)
@@ -159,19 +118,29 @@ def train_crop_classifier_v0(cfg):
 
             pred_position_maps = position_model(frames)
 
-            noisy_gt_agents_count = [m['bbox_centers'].shape[0] for m in meta]
-            frame_numbers = [m['item'] for m in meta]
-
             pred_object_locations = locations_from_heatmaps(
-                frames, cfg.interplay_v0.objectness.kernel,
-                cfg.interplay_v0.objectness.loc_cutoff,
-                cfg.interplay_v0.objectness.marker_size, pred_position_maps,
-                vis_on=False)
-            selected_head = pred_position_maps[cfg.interplay_v0.objectness.index_select]
-            pred_object_locations_scaled, heat_maps_gt_scaled = get_adjusted_object_locations(
-                pred_object_locations[cfg.interplay_v0.objectness.index_select],
-                selected_head, meta)
+                frames, cfg.crop_classifier.objectness.kernel,
+                cfg.crop_classifier.objectness.loc_cutoff,
+                cfg.crop_classifier.objectness.marker_size, pred_position_maps,
+                vis_on=True, threshold=cfg.crop_classifier.objectness.threshold)
+
+            selected_head = pred_object_locations[cfg.crop_classifier.objectness.index_select]
+
+            selected_head, frames_scaled = get_adjusted_object_locations_rgb(
+                selected_head, frames, meta)
+            selected_head = [torch.from_numpy(np.stack(s)) for s in selected_head]
+            frames_scaled = torch.from_numpy(frames_scaled).permute(0, 3, 1, 2)
+
             # get tp crops
+            for l_idx, locs in enumerate(selected_head):
+                if locs.numel() == 0:
+                    continue
+
+                crops_filtered, valid_boxes = get_processed_patches_to_train_rgb_only(
+                    cfg.crop_classifier.crop_size[0], cfg.crop_classifier.crop_size[1], frames_scaled,
+                    l_idx, locs)
+                if len(crops_filtered) == 0 or len(valid_boxes) == 0:
+                    continue
             # get tn crops
             # train
 

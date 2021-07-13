@@ -238,7 +238,8 @@ interplay_v0:
   pin_memory: True
   drop_last: True
 
-  min_history: 4
+  min_history: 4  # x batchsize
+  in_trajectory_length: 4  # x batchsize
   inactive_tracks_keep_alive: 5
 
   objectness:
@@ -249,6 +250,8 @@ interplay_v0:
 
 crop_classifier:
   num_epochs: 400
+
+  crop_size: [ 64, 64 ]  # h, w
 
   use_pretrained:
     enabled: True
@@ -266,7 +269,7 @@ crop_classifier:
 
   batch_size: 2
   shuffle: False  # keep it always False
-  num_workers: 12
+  num_workers: 0
   pin_memory: True
   drop_last: True
 
@@ -285,6 +288,7 @@ crop_classifier:
     loc_cutoff: 0.05
     marker_size: 3
     index_select: 0
+    threshold: 0.10
 
 
 interact:
