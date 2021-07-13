@@ -2,16 +2,22 @@ import os
 import warnings
 
 import hydra
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torchvision.utils
 from omegaconf import ListConfig
 from pytorch_lightning import seed_everything
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import Subset, DataLoader
 from tqdm import tqdm
 
+from baselinev2.exceptions import TimeoutException
+from baselinev2.improve_metrics.crop_utils import sample_random_crops, replace_overlapping_boxes, REPLACEMENT_TIMEOUT
+from baselinev2.plot_utils import add_box_to_axes
+from baselinev2.utils import get_bbox_center
 from log import get_logger
-from src.position_maps.location_utils import locations_from_heatmaps, get_processed_patches_to_train, \
+from src.position_maps.location_utils import locations_from_heatmaps, \
     get_adjusted_object_locations_rgb, get_processed_patches_to_train_rgb_only
 from src_lib.models_hub.crop_classifiers import CropClassifier
 from train import setup_single_video_dataset, setup_multiple_datasets, build_model, build_loss
@@ -116,13 +122,14 @@ def train_crop_classifier_v0(cfg):
             frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
             frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
-            pred_position_maps = position_model(frames)
+            with torch.no_grad():
+                pred_position_maps = position_model(frames)
 
             pred_object_locations = locations_from_heatmaps(
                 frames, cfg.crop_classifier.objectness.kernel,
                 cfg.crop_classifier.objectness.loc_cutoff,
                 cfg.crop_classifier.objectness.marker_size, pred_position_maps,
-                vis_on=True, threshold=cfg.crop_classifier.objectness.threshold)
+                vis_on=False, threshold=cfg.crop_classifier.objectness.threshold)
 
             selected_head = pred_object_locations[cfg.crop_classifier.objectness.index_select]
 
@@ -132,17 +139,143 @@ def train_crop_classifier_v0(cfg):
             frames_scaled = torch.from_numpy(frames_scaled).permute(0, 3, 1, 2)
 
             # get tp crops
+            gt_crops, gt_boxes = [], []  # gt boxes in xyxy
             for l_idx, locs in enumerate(selected_head):
                 if locs.numel() == 0:
                     continue
 
-                crops_filtered, valid_boxes = get_processed_patches_to_train_rgb_only(
-                    cfg.crop_classifier.crop_size[0], cfg.crop_classifier.crop_size[1], frames_scaled,
-                    l_idx, locs)
+                crops_filtered, valid_boxes = get_gt_crops_and_boxes(cfg, frames_scaled, l_idx, locs)
+
+                gt_crops.append(crops_filtered)
+                gt_boxes.append(valid_boxes)
+
+                # viz
+                viz_boxes_on_img(frames_scaled[l_idx], valid_boxes, show=False)
+                viz_crops(crops_filtered)
                 if len(crops_filtered) == 0 or len(valid_boxes) == 0:
                     continue
+
             # get tn crops
+            crops, boxes = [], []
+
+            if gt_crops is None:
+                continue
+
+            for rgb_frame, gt_c, gt_b in zip(frames_scaled, gt_crops, gt_boxes):
+                tn_boxes, tn_boxes_xyxy, tn_crops = get_initial_tn_crops_and_boxes(cfg, gt_c, rgb_frame)
+
+                gt_bbox_centers, tn_boxes, tn_boxes_xyxy, tn_crops = get_radius_filtered_tn_crops_and_boxes(
+                    cfg, gt_b, tn_boxes, tn_boxes_xyxy, tn_crops)
+
+                boxes_to_replace = gt_c.shape[0] - tn_boxes_xyxy.shape[0]
+                replaceable_boxes, replaceable_tn_boxes, replaceable_crops = [], [], []
+                replacement_required = False
+
+                try:
+                    replacement_required = replace_overlapping_boxes(
+                        (cfg.crop_classifier.crop_size[0],
+                         cfg.crop_classifier.crop_size[1]), boxes_to_replace,
+                        gt_bbox_centers, gt_b, rgb_frame,
+                        cfg.crop_classifier.radius_elimination, replaceable_boxes, replaceable_crops,
+                        replaceable_tn_boxes, replacement_required)
+                except TimeoutException:
+                    logger.warning(f'Replacement timed-out : {REPLACEMENT_TIMEOUT}!! Skipping frame')
+                    return {}, {}
+
+                tn_boxes_xyxy, tn_crops = replace_tn_data_if_required(replaceable_boxes, replaceable_crops,
+                                                                      replaceable_tn_boxes, replacement_required,
+                                                                      tn_boxes, tn_boxes_xyxy, tn_crops)
+
+                viz_crops(tn_crops)
+                boxes.append(tn_boxes_xyxy)
+                crops.append(tn_crops)
+            print()
             # train
+
+
+def replace_tn_data_if_required(replaceable_boxes, replaceable_crops, replaceable_tn_boxes, replacement_required,
+                                tn_boxes, tn_boxes_xyxy, tn_crops):
+    if replacement_required:
+        replaceable_boxes = torch.cat(replaceable_boxes)
+        replaceable_tn_boxes = torch.cat(replaceable_tn_boxes)
+        replaceable_crops = torch.cat(replaceable_crops)
+
+        tn_boxes = torch.cat((tn_boxes, replaceable_boxes))
+        tn_boxes_xyxy = torch.cat((tn_boxes_xyxy, replaceable_tn_boxes))
+        tn_crops = torch.cat((tn_crops, replaceable_crops))
+    return tn_boxes_xyxy, tn_crops
+
+
+def get_radius_filtered_tn_crops_and_boxes(cfg, gt_b, tn_boxes, tn_boxes_xyxy, tn_crops):
+    boxes_iou = torchvision.ops.box_iou(gt_b, tn_boxes_xyxy)
+    gt_box_match, tn_boxes_xyxy_match = torch.where(boxes_iou)
+    tn_boxes_xyxy_match_numpy = tn_boxes_xyxy_match.numpy()
+    l2_distances_matrix = np.zeros(shape=(gt_b.shape[0], tn_boxes_xyxy.shape[0]))
+    if cfg.crop_classifier.radius_elimination is not None:
+        tn_boxes_xyxy_centers = np.stack(
+            [get_bbox_center(tn_box) for tn_box in tn_boxes_xyxy.numpy()]).squeeze()
+        gt_bbox_centers = np.stack(
+            [get_bbox_center(g_b) for g_b in gt_b.numpy()]).squeeze()
+
+        # for g_idx, gt_center in enumerate(gt_bbox_centers):
+        for g_idx, gt_center in enumerate(gt_bbox_centers):
+            if tn_boxes_xyxy_centers.ndim == 1:
+                tn_boxes_xyxy_centers = np.expand_dims(tn_boxes_xyxy_centers, axis=0)
+            for f_idx, fp_center in enumerate(tn_boxes_xyxy_centers):
+                l2_distances_matrix[g_idx, f_idx] = np.linalg.norm((gt_center - fp_center), ord=2, axis=-1)
+
+        # l2_distances_matrix = l2_distances_matrix[:gt_bbox_centers.shape[0], ...]
+        l2_distances_matrix = l2_distances_matrix[:gt_bbox_centers.shape[0], ...]
+        gt_r_invalid, fp_r_invalid = np.where(l2_distances_matrix < cfg.crop_classifier.radius_elimination)
+
+        tn_boxes_xyxy_match_numpy = np.union1d(tn_boxes_xyxy_match.numpy(), fp_r_invalid)
+    valid_tn_boxes_xyxy_idx = np.setdiff1d(np.arange(tn_boxes_xyxy.shape[0]), tn_boxes_xyxy_match_numpy)
+    tn_boxes_xyxy = tn_boxes_xyxy[valid_tn_boxes_xyxy_idx]
+    tn_boxes = tn_boxes[valid_tn_boxes_xyxy_idx]
+    tn_crops = tn_crops[valid_tn_boxes_xyxy_idx]
+    return gt_bbox_centers, tn_boxes, tn_boxes_xyxy, tn_crops
+
+
+def get_initial_tn_crops_and_boxes(cfg, gt_c, rgb_frame):
+    tn_crops, tn_boxes = sample_random_crops(rgb_frame,
+                                             (cfg.crop_classifier.crop_size[0],
+                                              cfg.crop_classifier.crop_size[1]),
+                                             gt_c.shape[0])
+    tn_boxes = [torch.tensor((b[1], b[0], b[2], b[3])) for b in tn_boxes]
+    tn_boxes = torch.stack(tn_boxes)
+    tn_boxes_xyxy = torchvision.ops.box_convert(tn_boxes, 'xywh', 'xyxy')
+    return tn_boxes, tn_boxes_xyxy, tn_crops
+
+
+def get_gt_crops_and_boxes(cfg, frames_scaled, l_idx, locs):
+    crops_filtered, valid_boxes = get_processed_patches_to_train_rgb_only(
+        cfg.crop_classifier.crop_size[0], cfg.crop_classifier.crop_size[1], frames_scaled,
+        l_idx, locs)
+    valid_boxes = [torch.tensor((b[1], b[0], b[2], b[3])) for b in valid_boxes]
+    valid_boxes = torch.stack(valid_boxes)
+    valid_boxes = torchvision.ops.box_convert(valid_boxes, 'xywh', 'xyxy')
+    return crops_filtered, valid_boxes
+
+
+def viz_boxes_on_img(frames_scaled, valid_boxes, show=True):
+    fig, ax = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
+    ax.imshow(frames_scaled.permute(1, 2, 0))
+    add_box_to_axes(ax, valid_boxes)
+    plt.tight_layout()
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+
+def viz_crops(crops_filtered, show=True):
+    crops_viz_image = torchvision.utils.make_grid(crops_filtered)
+    plt.imshow(crops_viz_image.permute(1, 2, 0))
+    plt.tight_layout()
+    if show:
+        plt.show()
+    else:
+        plt.close()
 
 
 if __name__ == '__main__':
