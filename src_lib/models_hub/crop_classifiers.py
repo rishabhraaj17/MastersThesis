@@ -38,7 +38,7 @@ class CropClassifier(Base):
     def forward(self, x):
         out = self.backbone(x)
         out = self.neck(out)
-        out = self.head.fc(out)
+        out = self.head(out)
         return out
 
 

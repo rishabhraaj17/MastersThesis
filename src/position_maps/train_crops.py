@@ -9,7 +9,7 @@ import torchvision.utils
 from omegaconf import ListConfig
 from pytorch_lightning import seed_everything
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import Subset, DataLoader
+from torch.utils.data import Subset, DataLoader, Dataset
 from tqdm import tqdm
 
 from baselinev2.exceptions import TimeoutException
@@ -29,8 +29,28 @@ seed_everything(42)
 logger = get_logger(__name__)
 
 
+class CropsTensorDataset(Dataset):
+    def __init__(self, path: str):
+        self.path = path
+        gt_data, tn_data = torch.load(self.path)
+
+        self.gt_crops = gt_data['images']
+        self.gt_labels = gt_data['labels']
+
+        self.tn_crops = tn_data['images']
+        self.tn_labels = tn_data['labels']
+
+    def __len__(self):
+        return len(self.gt_crops)
+
+    def __getitem__(self, item):
+        crops = torch.cat((self.gt_crops[item], self.tn_crops[item]))
+        labels = torch.cat((self.gt_labels[item], self.tn_labels[item]))
+        return crops, labels
+
+
 @hydra.main(config_path="config", config_name="config")
-def train_crop_classifier_v0(cfg):
+def generate_crops_v0(cfg):
     logger.info(f'Patch Classifier')
     logger.info(f'Setting up DataLoader and Model...')
 
@@ -291,4 +311,4 @@ def viz_crops(crops_filtered, show=True):
 
 
 if __name__ == '__main__':
-    train_crop_classifier_v0()
+    generate_crops_v0()

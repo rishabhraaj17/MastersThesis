@@ -81,47 +81,71 @@ class SDDFrameAndAnnotationDataset(Dataset):
         self.multiple_videos = multiple_videos
         if multiple_videos and num_videos == -1:
             annotation_path = self.annotation_list
-            self.annotations_df = [self._read_annotation_file(p, self.use_generated) for p in annotation_path]
+            # self.annotations_df = [self._read_annotation_file(p, self.use_generated) for p in annotation_path]
+
+            ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
+            ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
+            self.original_shape = [[r.shape[1], r.shape[2]] for r in ref_image]
+            self.annotations_df = [self._read_annotation_file_and_filter(p, os, self.use_generated)
+                                   for p, os in zip(annotation_path, self.original_shape)]
 
             video_list_subset = self.video_list
             video_list_idx_subset = self.video_list_idx
 
-            ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
-            ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
-            self.original_shape = [[r.shape[1], r.shape[2]] for r in ref_image]
+            # ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
+            # ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
+            # self.original_shape = [[r.shape[1], r.shape[2]] for r in ref_image]
         elif multiple_videos and (isinstance(num_videos, list) or isinstance(num_videos, ListConfig)):
             # restricted to number of videos
             num_videos = list(num_videos)
             annotation_path = [self.annotation_list[n] for n in num_videos]
-            self.annotations_df = [self._read_annotation_file(p, self.use_generated) for p in annotation_path]
+            # self.annotations_df = [self._read_annotation_file(p, self.use_generated) for p in annotation_path]
+
+            ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
+            ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
+            self.original_shape = [[r.shape[1], r.shape[2]] for r in ref_image]
+            self.annotations_df = [self._read_annotation_file_and_filter(p, os, self.use_generated)
+                                   for p, os in zip(annotation_path, self.original_shape)]
 
             video_list_subset = [self.video_list[n] for n in num_videos]
             video_list_idx_subset = [self.video_list_idx[n] for n in num_videos]
 
-            ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
-            ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
-            self.original_shape = [[r.shape[1], r.shape[2]] for r in ref_image]
+            # ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
+            # ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
+            # self.original_shape = [[r.shape[1], r.shape[2]] for r in ref_image]
         elif multiple_videos:
             # restricted to number of videos
             annotation_path = self.annotation_list[:num_videos]
-            self.annotations_df = [self._read_annotation_file(p, self.use_generated) for p in annotation_path]
+            # self.annotations_df = [self._read_annotation_file(p, self.use_generated) for p in annotation_path]
+
+            ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
+            ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
+            self.original_shape = [[r.shape[1], r.shape[2]] for r in ref_image]
+            self.annotations_df = [self._read_annotation_file_and_filter(p, os, self.use_generated)
+                                   for p, os in zip(annotation_path, self.original_shape)]
 
             video_list_subset = self.video_list[:num_videos]
             video_list_idx_subset = self.video_list_idx[:num_videos]
 
-            ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
-            ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
-            self.original_shape = [[r.shape[1], r.shape[2]] for r in ref_image]
+            # ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
+            # ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
+            # self.original_shape = [[r.shape[1], r.shape[2]] for r in ref_image]
         else:
             video_list_subset = [self.video_list[video_number_to_use]]
             video_list_idx_subset = [self.video_list_idx[video_number_to_use]]
 
             annotation_path = [self.annotation_list[video_list_idx_subset[0]]]
-            self.annotations_df = [self._read_annotation_file(p, self.use_generated) for p in annotation_path]
+            # self.annotations_df = [self._read_annotation_file(p, self.use_generated) for p in annotation_path]
 
             ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
             ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
             self.original_shape = [[r.shape[1], r.shape[2]] for r in ref_image]
+            self.annotations_df = [self._read_annotation_file_and_filter(p, os, self.use_generated)
+                                   for p, os in zip(annotation_path, self.original_shape)]
+
+            # ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
+            # ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
+            # self.original_shape = [[r.shape[1], r.shape[2]] for r in ref_image]
 
         video_clips = VideoClips(video_list_subset,
                                  frames_per_clip,
@@ -185,6 +209,18 @@ class SDDFrameAndAnnotationDataset(Dataset):
         dff = pd.read_csv(path)
         if not use_generated:
             dff = dff.drop(dff.columns[[0]], axis=1)
+        return dff
+    
+    @staticmethod
+    def _read_annotation_file_and_filter(path, original_shape, use_generated=False):
+        dff = pd.read_csv(path)
+        if not use_generated:
+            dff = dff.drop(dff.columns[[0]], axis=1)
+        # drop rows where bounding box is out of image
+        h, w = original_shape
+        h -= 1
+        w -= 1
+        dff = dff.drop(dff[(dff.x_min < 0) | (dff.x_max > w) | (dff.y_min < 0) | (dff.y_max > h)].index)
         return dff
 
     def __len__(self):
