@@ -7,9 +7,11 @@ import numpy as np
 import torch
 import torchvision.utils
 from omegaconf import ListConfig
-from pytorch_lightning import seed_everything
+from pytorch_lightning import seed_everything, Trainer
+from pytorch_lightning.callbacks import ModelCheckpoint
+from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import Subset, DataLoader, Dataset
+from torch.utils.data import Subset, DataLoader, Dataset, random_split
 from tqdm import tqdm
 
 from baselinev2.exceptions import TimeoutException
@@ -38,15 +40,43 @@ class CropsTensorDataset(Dataset):
         self.gt_labels = gt_data['labels']
 
         self.tn_crops = tn_data['images']
-        self.tn_labels = tn_data['labels']
+        self.tn_labels = torch.zeros_like(tn_data['labels'])
 
     def __len__(self):
         return len(self.gt_crops)
 
     def __getitem__(self, item):
-        crops = torch.cat((self.gt_crops[item], self.tn_crops[item]))
-        labels = torch.cat((self.gt_labels[item], self.tn_labels[item]))
+        crops = torch.stack((self.gt_crops[item], self.tn_crops[item]))
+        labels = torch.stack((self.gt_labels[item], self.tn_labels[item]))
         return crops, labels
+
+
+@hydra.main(config_path="config", config_name="config")
+def train_crop_classifier(cfg):
+    path = 'death_circle_crops0_1.pt'
+    path = os.path.join(os.getcwd(), path)
+    val_ratio = 0.2
+
+    dataset = CropsTensorDataset(path=path)
+    val_len = int(len(dataset) * val_ratio)
+    train_dataset, val_dataset = random_split(
+        dataset, [len(dataset) - val_len, val_len], generator=torch.Generator().manual_seed(42))
+
+    model = CropClassifier(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset, desired_output_shape=None,
+                           loss_function=nn.BCEWithLogitsLoss())
+    
+    checkpoint_callback = ModelCheckpoint(
+        monitor=cfg.crop_classifier.monitor,
+        save_top_k=cfg.crop_classifier.num_checkpoints_to_save,
+        mode=cfg.crop_classifier.mode,
+        verbose=cfg.crop_classifier.verbose
+    )
+
+    trainer = Trainer(max_epochs=cfg.crop_classifier.num_epochs, gpus=1,
+                      fast_dev_run=False, callbacks=[checkpoint_callback],
+                      deterministic=True, gradient_clip_val=2.0,
+                      accumulate_grad_batches=1)
+    trainer.fit(model)
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -221,8 +251,8 @@ def generate_crops_v0(cfg):
         gt_crops = torch.cat(gt_crops)
         crops = torch.cat(crops)
         gt_data = {'images': gt_crops, 'labels': torch.ones((gt_crops.shape[0]))}
-        tn_data = {'images': crops, 'labels': torch.ones((crops.shape[0]))}
-        torch.save((gt_data, tn_data), 'death_circle_crops.pt')
+        tn_data = {'images': crops, 'labels': torch.zeros((crops.shape[0]))}
+        torch.save((gt_data, tn_data), 'death_circle_crops_2_3_4.pt')
 
 
 def replace_tn_data_if_required(replaceable_boxes, replaceable_crops, replaceable_tn_boxes, replacement_required,
@@ -311,4 +341,5 @@ def viz_crops(crops_filtered, show=True):
 
 
 if __name__ == '__main__':
-    generate_crops_v0()
+    train_crop_classifier()
+    # generate_crops_v0()

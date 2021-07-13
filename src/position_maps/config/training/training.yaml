@@ -249,9 +249,11 @@ interplay_v0:
     index_select: 0
 
 crop_classifier:
-  num_epochs: 400
+  num_epochs: 1 # 400
 
   crop_size: [ 64, 64 ]  # h, w
+
+  radius_elimination: 200
 
   use_pretrained:
     enabled: True
@@ -268,10 +270,11 @@ crop_classifier:
   amsgrad: False
 
   batch_size: 2
-  shuffle: False  # keep it always False
-  num_workers: 0
+  shuffle: True  # keep it always False
+  num_workers: 0  # 12
   pin_memory: True
   drop_last: True
+  val_batch_size_factor: 2
 
   patience: 5
   verbose: True
@@ -282,6 +285,8 @@ crop_classifier:
   interval: 'epoch'
   frequency: 1
   mode: 'min'
+
+  num_checkpoints_to_save: 3
 
   objectness:
     kernel: 3
