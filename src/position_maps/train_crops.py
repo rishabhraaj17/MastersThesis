@@ -1,5 +1,6 @@
 import os
 import warnings
+from typing import Union, List
 
 import hydra
 import matplotlib.pyplot as plt
@@ -32,15 +33,32 @@ logger = get_logger(__name__)
 
 
 class CropsTensorDataset(Dataset):
-    def __init__(self, path: str):
+    def __init__(self, path: Union[List[str], str]):
         self.path = path
-        gt_data, tn_data = torch.load(self.path)
+        if isinstance(self.path, (list, tuple)):
+            self.gt_crops, self.gt_labels = [], []
+            self.tn_crops, self.tn_labels = [], []
+            for p in path:
+                gt_data, tn_data = torch.load(p)
 
-        self.gt_crops = gt_data['images']
-        self.gt_labels = gt_data['labels']
+                self.gt_crops.append(gt_data['images'])
+                self.gt_labels.append(gt_data['labels'])
 
-        self.tn_crops = tn_data['images']
-        self.tn_labels = torch.zeros_like(tn_data['labels'])
+                self.tn_crops.append(tn_data['images'])
+                self.tn_labels.append(torch.zeros_like(tn_data['labels']))
+                
+            self.gt_crops = torch.cat(self.gt_crops)
+            self.gt_labels = torch.cat(self.gt_labels)
+            self.tn_crops = torch.cat(self.tn_crops)
+            self.tn_labels = torch.cat(self.tn_labels)
+        else:
+            gt_data, tn_data = torch.load(self.path)
+    
+            self.gt_crops = gt_data['images']
+            self.gt_labels = gt_data['labels']
+    
+            self.tn_crops = tn_data['images']
+            self.tn_labels = torch.zeros_like(tn_data['labels'])
 
     def __len__(self):
         return len(self.gt_crops)
@@ -53,8 +71,12 @@ class CropsTensorDataset(Dataset):
 
 @hydra.main(config_path="config", config_name="config")
 def train_crop_classifier(cfg):
-    path = 'death_circle_crops0_1.pt'
-    path = os.path.join(os.getcwd(), path)
+    # path = 'death_circle_crops0_1.pt'
+    # path = os.path.join(os.getcwd(), path)
+    
+    path = ['death_circle_crops0_1.pt', 'death_circle_crops_2_3_4.pt']
+    path = [os.path.join(os.getcwd(), p) for p in path]
+
     val_ratio = 0.2
 
     dataset = CropsTensorDataset(path=path)

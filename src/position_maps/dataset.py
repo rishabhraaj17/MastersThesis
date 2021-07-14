@@ -581,7 +581,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
         bbox_centers = frame_annotation[:, 7:9].astype(int)
 
         inside_boxes_idx = [b for b, box in enumerate(boxes)
-                            if (box[0] > 0 and box[2] < w) and (box[1] > 0 and box[3] < h)]
+                            if (box[0] >= 0 and box[2] < w) and (box[1] >= 0 and box[3] < h)]
 
         boxes = boxes[inside_boxes_idx]
         track_idx = track_idx[inside_boxes_idx]
