@@ -80,8 +80,47 @@ def adjust_config(cfg):
     cfg.eval.gt_pred_loc_distance_threshold = 2  # in meters
 
     # video + plot
-    cfg.eval.show_plots = True
-    cfg.eval.make_video = False
+    cfg.eval.show_plots = False
+    cfg.eval.make_video = True
+
+
+def save_predictions_on_disk(cfg, frames_sequence, pred_head_0, pred_head_1, pred_head_2, filename):
+    save_path = os.path.join(os.getcwd(),
+                             f'HeatMapPredictions'
+                             f'/{getattr(SDDVideoClasses, cfg.eval.video_class).name}'
+                             f'/{cfg.eval.test.video_number_to_use}/')  # only for single dataset setup
+    Path(save_path).mkdir(parents=True, exist_ok=True)
+    save_dict = {
+        'out_head_0': torch.cat(pred_head_0),
+        'out_head_1': torch.cat(pred_head_1),
+        'out_head_2': torch.cat(pred_head_2),
+        'frames_sequence': frames_sequence,
+    }
+    torch.save(save_dict, save_path + filename)
+    logger.info(f"Saved Predictions at {save_path}{filename}")
+
+
+def join_parts_prediction(path):
+    files = [os.path.join(path, f) for f in os.listdir(path)]
+    pred_head_0, pred_head_1, pred_head_2, frames_sequences = [], [], [], []
+    for file in files:
+        data = torch.load(file)
+        out_head_0, out_head_1, out_head_2 = data['out_head_0'], data['out_head_1'], data['out_head_2']
+        frames_sequence = data['frames_sequence']
+
+        pred_head_0.append(out_head_0)
+        pred_head_1.append(out_head_1)
+        pred_head_2.append(out_head_2)
+        frames_sequences.append(torch.tensor(frames_sequence))
+
+    save_dict = {
+        'out_head_0': torch.cat(pred_head_0),
+        'out_head_1': torch.cat(pred_head_1),
+        'out_head_2': torch.cat(pred_head_2),
+        'frames_sequence': torch.cat(frames_sequences),
+    }
+    torch.save(save_dict, path + 'predictions.pt')
+    logger.info(f"Saved Predictions at {path}predictions.pt")
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -130,6 +169,11 @@ def evaluate_and_store_predicted_maps(cfg):
 
     total_loss = []
 
+    # chunk size to save
+    chunk_size = 3
+    chunks = np.linspace(0, len(test_loader) - 1, chunk_size, dtype=np.int32)
+    save_iter = chunks[1:]
+
     pred_head_0, pred_head_1, pred_head_2, frames_sequence = [], [], [], []
     for idx, data in enumerate(tqdm(test_loader)):
         frames, heat_masks, position_map, distribution_map, class_maps, meta = data
@@ -157,26 +201,17 @@ def evaluate_and_store_predicted_maps(cfg):
         pred_head_2.append(out[2])
         frames_sequence.extend([m['item'] for m in meta])
 
+        if idx in save_iter:
+            save_predictions_on_disk(cfg, frames_sequence, pred_head_0, pred_head_1, pred_head_2,
+                                     filename=f'predictions_chunk_size_{chunk_size}_idx{idx}.pt')
+            pred_head_0, pred_head_1, pred_head_2, frames_sequence = [], [], [], []
+
     logger.info(f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
                 f'Video Number: {cfg.eval.test.video_number_to_use}')
     logger.info(f"Threshold: {cfg.eval.gt_pred_loc_distance_threshold}m | "
                 f"Max-Pool kernel size: {cfg.eval.objectness.kernel} | "
                 f"Head Used: {cfg.eval.objectness.index_select}")
     logger.info(f"Test Loss: {np.array(total_loss).mean()}")
-
-    save_path = os.path.join(os.getcwd(),
-                             f'HeatMapPredictions'
-                             f'/{getattr(SDDVideoClasses, cfg.eval.video_class).name}'
-                             f'/{cfg.eval.test.video_number_to_use}/')  # only for single dataset setup
-    Path(save_path).mkdir(parents=True, exist_ok=True)
-    save_dict = {
-        'out_head_0': torch.cat(pred_head_0),
-        'out_head_1': torch.cat(pred_head_1),
-        'out_head_2': torch.cat(pred_head_2),
-        'frames_sequence': frames_sequence,
-    }
-    torch.save(save_dict, save_path + 'predictions.pt')
-    logger.info(f"Saved Predictions at {save_path}")
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -212,7 +247,6 @@ def evaluate_metrics(cfg):
     logger.info(f'Starting evaluation for metrics...')
 
     video_frames = []
-    total_loss = []
     tp_list, fp_list, fn_list = [], [], []
 
     pred_t_idx = 0
@@ -289,7 +323,6 @@ def evaluate_metrics(cfg):
     logger.info(f"Threshold: {cfg.eval.gt_pred_loc_distance_threshold}m | "
                 f"Max-Pool kernel size: {cfg.eval.objectness.kernel} | "
                 f"Head Used: {cfg.eval.objectness.index_select}")
-    logger.info(f"Test Loss: {np.array(total_loss).mean()}")
     logger.info(f"Precision: {final_precision} | Recall: {final_recall}")
 
     if cfg.eval.make_video:
@@ -307,4 +340,6 @@ if __name__ == '__main__':
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
-        evaluate_and_store_predicted_maps()
+        # evaluate_and_store_predicted_maps()
+        # join_parts_prediction(os.path.join(os.getcwd(), f'logs/HeatMapPredictions/DEATH_CIRCLE/4/'))
+        evaluate_metrics()
