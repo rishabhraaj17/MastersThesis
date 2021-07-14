@@ -4,6 +4,7 @@ from pathlib import Path
 
 import hydra
 import numpy as np
+import skimage
 import torch
 import torchvision
 from kornia.losses import BinaryFocalLossWithLogits
@@ -15,7 +16,8 @@ import src_lib.models_hub as hub
 from average_image.constants import SDDVideoDatasets, SDDVideoClasses
 from average_image.utils import SDDMeta
 from log import get_logger
-from src.position_maps.evaluate import setup_single_video_dataset, setup_dataset, get_gt_annotations_for_metrics
+from src.position_maps.evaluate import setup_single_video_dataset, setup_dataset, get_gt_annotations_for_metrics, \
+    get_precision_recall_for_metrics, get_image_array_from_figure, process_numpy_video_frame_to_tensor
 from src.position_maps.location_utils import locations_from_heatmaps, get_adjusted_object_locations
 from src.position_maps.losses import CenterNetFocalLoss
 from src.position_maps.utils import heat_map_temporal_4d_collate_fn, heat_map_collate_fn, ImagePadder, \
@@ -76,6 +78,10 @@ def adjust_config(cfg):
     cfg.eval.objectness.index_select = -1
 
     cfg.eval.gt_pred_loc_distance_threshold = 2  # in meters
+
+    # video + plot
+    cfg.eval.show_plots = True
+    cfg.eval.make_video = False
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -213,9 +219,133 @@ def evaluate_and_store_predicted_maps(cfg):
         'out_head_2': torch.cat(pred_head_2),
         'frames_sequence': frames_sequence,
     }
-    torch.save(save_dict, save_path)
+    torch.save(save_dict, save_path + 'predictions.pt')
     logger.info(f"Saved Predictions at {save_path}")
     # logger.info(f"Precision: {final_precision} | Recall: {final_recall}")
+
+
+@hydra.main(config_path="config", config_name="config")
+def evaluate_metrics(cfg):
+    adjust_config(cfg)
+
+    sdd_meta = SDDMeta(cfg.eval.root + 'H_SDD.txt')
+
+    logger.info(f'Setting up DataLoader')
+
+    if cfg.eval.test.single_video_mode.enabled:
+        train_dataset, test_dataset, target_max_shape = setup_single_video_dataset(cfg)
+    else:
+        # test_dataset, target_max_shape = setup_multiple_test_datasets(cfg, return_dummy_transform=False)
+        test_dataset, _, target_max_shape = setup_dataset(cfg)
+
+    collate_fn = heat_map_temporal_4d_collate_fn if cfg.eval.video_based.enabled else heat_map_collate_fn
+    test_loader = DataLoader(test_dataset, batch_size=cfg.eval.batch_size, shuffle=cfg.eval.shuffle,
+                             num_workers=cfg.eval.num_workers, collate_fn=collate_fn,
+                             pin_memory=cfg.eval.pin_memory, drop_last=cfg.eval.drop_last)
+
+    load_path = os.path.join(os.getcwd(),
+                             f'HeatMapPredictions'
+                             f'/{getattr(SDDVideoClasses, cfg.eval.video_class).name}'
+                             f'/{cfg.eval.test.video_number_to_use}/predictions.pt')
+    model = torch.load(load_path)  # mock the model
+    out_head_0, out_head_1, out_head_2 = model['out_head_0'], model['out_head_1'], model['out_head_2']
+    frames_sequence = model['frames_sequence']
+
+    ratio = float(sdd_meta.get_meta(getattr(SDDVideoDatasets, cfg.eval.video_meta_class)
+                                    , cfg.eval.test.video_number_to_use)[0]['Ratio'].to_numpy()[0])
+
+    logger.info(f'Starting evaluation for metrics...')
+
+    video_frames = []
+    total_loss = []
+    tp_list, fp_list, fn_list = [], [], []
+
+    pred_t_idx = 0
+    for idx, data in enumerate(tqdm(test_loader)):
+        frames, heat_masks, position_map, distribution_map, class_maps, meta = data
+
+        padder = ImagePadder(frames.shape[-2:], factor=cfg.eval.preproccesing.pad_factor)
+        frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
+
+        out = [
+            out_head_0[pred_t_idx: pred_t_idx + cfg.eval.batch_size, ...],
+            out_head_1[pred_t_idx: pred_t_idx + cfg.eval.batch_size, ...],
+            out_head_2[pred_t_idx: pred_t_idx + cfg.eval.batch_size, ...],
+        ]
+        frames_seq_stored = frames_sequence[pred_t_idx: pred_t_idx + cfg.eval.batch_size]
+
+        locations = locations_from_heatmaps(frames, cfg.eval.objectness.kernel,
+                                            cfg.eval.objectness.loc_cutoff,
+                                            cfg.eval.objectness.marker_size, out, vis_on=False)
+        metrics_out = out[cfg.eval.objectness.index_select]
+        blobs_per_image, _ = get_adjusted_object_locations(
+            locations[cfg.eval.objectness.index_select], metrics_out, meta)
+
+        for f in range(len(meta)):
+            frame_number = meta[f]['item']
+            rgb_frame = frames[f].cpu()
+            gt_heatmap = heat_masks[f].cpu()
+            pred_heatmap = metrics_out.sigmoid()[f].cpu()
+
+            gt_bbox_centers, pred_centers, rgb_frame, supervised_boxes = get_gt_annotations_for_metrics(
+                blobs_per_image, cfg, f, frame_number, meta, rgb_frame, test_loader)
+
+            fn, fp, precision, recall, tp = get_precision_recall_for_metrics(cfg, gt_bbox_centers, pred_centers,
+                                                                             ratio)
+            if cfg.eval.show_plots or cfg.eval.make_video:
+                fig = plot_image_with_features(
+                    rgb_frame.squeeze(dim=0).permute(1, 2, 0).numpy(), gt_bbox_centers,
+                    np.stack(pred_centers), boxes=supervised_boxes,
+                    txt=f'Frame Number: {frame_number}\n'
+                        f'Agent Count: GT-{len(gt_bbox_centers)} | Pred-{len(pred_centers)}'
+                        f'\nPrecision: {precision} | Recall: {recall}',
+                    footnote_txt=f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
+                                 f'Video Number: {cfg.eval.test.video_number_to_use}'
+                                 f'\n\nL2 Matching Threshold: '
+                                 f'{cfg.eval.gt_pred_loc_distance_threshold}m',
+                    video_mode=cfg.eval.make_video,
+                    plot_heatmaps=True,
+                    gt_heatmap=gt_heatmap.squeeze(dim=0).numpy(),
+                    pred_heatmap=pred_heatmap.squeeze(dim=0).numpy())
+
+                if cfg.eval.make_video:
+                    video_frame = get_image_array_from_figure(fig)
+
+                    if video_frame.shape[0] != meta[f]['original_shape'][1] \
+                            or video_frame.shape[1] != meta[f]['original_shape'][0]:
+                        video_frame = skimage.transform.resize(
+                            video_frame, (meta[f]['original_shape'][1], meta[f]['original_shape'][0]))
+                        video_frame = (video_frame * 255).astype(np.uint8)
+
+                        video_frame = process_numpy_video_frame_to_tensor(video_frame)
+                        video_frames.append(video_frame)
+
+            tp_list.append(tp)
+            fp_list.append(fp)
+            fn_list.append(fn)
+
+        pred_t_idx += cfg.eval.batch_size
+
+    final_precision = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fp_list).sum())
+    final_recall = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fn_list).sum())
+
+    logger.info(f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
+                f'Video Number: {cfg.eval.test.video_number_to_use}')
+    logger.info(f"Threshold: {cfg.eval.gt_pred_loc_distance_threshold}m | "
+                f"Max-Pool kernel size: {cfg.eval.objectness.kernel} | "
+                f"Head Used: {cfg.eval.objectness.index_select}")
+    logger.info(f"Test Loss: {np.array(total_loss).mean()}")
+    logger.info(f"Precision: {final_precision} | Recall: {final_recall}")
+
+    if cfg.eval.make_video:
+        logger.info(f"Writing Video")
+        Path(os.path.join(os.getcwd(), 'videos')).mkdir(parents=True, exist_ok=True)
+        torchvision.io.write_video(
+            f'videos/{getattr(SDDVideoClasses, cfg.eval.video_meta_class).name}_'
+            f'{cfg.eval.test.video_number_to_use}_threshold_{cfg.eval.gt_pred_loc_distance_threshold}m_'
+            f'max_pool_k_{cfg.eval.objectness.kernel}_head_used_{cfg.eval.objectness.index_select}.avi',
+            torch.cat(video_frames).permute(0, 2, 3, 1),
+            cfg.eval.video_fps)
 
 
 if __name__ == '__main__':
