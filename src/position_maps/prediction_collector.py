@@ -18,7 +18,8 @@ from average_image.utils import SDDMeta
 from log import get_logger
 from src.position_maps.evaluate import setup_single_video_dataset, setup_dataset, get_gt_annotations_for_metrics, \
     get_precision_recall_for_metrics, get_image_array_from_figure, process_numpy_video_frame_to_tensor
-from src.position_maps.location_utils import locations_from_heatmaps, get_adjusted_object_locations
+from src.position_maps.location_utils import locations_from_heatmaps, get_adjusted_object_locations, \
+    prune_locations_proximity_based
 from src.position_maps.losses import CenterNetFocalLoss
 from src.position_maps.utils import heat_map_temporal_4d_collate_fn, heat_map_collate_fn, ImagePadder, \
     plot_image_with_features
@@ -76,6 +77,7 @@ def adjust_config(cfg):
     cfg.eval.objectness.loc_cutoff = 0.05
     cfg.eval.objectness.marker_size = 3
     cfg.eval.objectness.index_select = -1
+    cfg.eval.objectness.prune_radius = 8  # need to change per video
 
     cfg.eval.gt_pred_loc_distance_threshold = 2  # in meters
 
@@ -266,9 +268,18 @@ def evaluate_metrics(cfg):
         locations = locations_from_heatmaps(frames, cfg.eval.objectness.kernel,
                                             cfg.eval.objectness.loc_cutoff,
                                             cfg.eval.objectness.marker_size, out, vis_on=False)
+
+        # filter out overlapping locations
+        selected_locations_pre_pruning = locations[cfg.eval.objectness.index_select]
+        selected_locations = []
+        for s_loc in selected_locations_pre_pruning:
+            pruned_locations, pruned_locations_idx = prune_locations_proximity_based(
+                s_loc.numpy(), cfg.eval.objectness.prune_radius)
+            selected_locations.append(torch.from_numpy(pruned_locations))
+
         metrics_out = out[cfg.eval.objectness.index_select]
         blobs_per_image, _ = get_adjusted_object_locations(
-            locations[cfg.eval.objectness.index_select], metrics_out, meta)
+            selected_locations, metrics_out, meta)
 
         for f in range(len(meta)):
             frame_number = meta[f]['item']
@@ -331,7 +342,8 @@ def evaluate_metrics(cfg):
         torchvision.io.write_video(
             f'videos/{getattr(SDDVideoClasses, cfg.eval.video_meta_class).name}_'
             f'{cfg.eval.test.video_number_to_use}_threshold_{cfg.eval.gt_pred_loc_distance_threshold}m_'
-            f'max_pool_k_{cfg.eval.objectness.kernel}_head_used_{cfg.eval.objectness.index_select}.avi',
+            f'max_pool_k_{cfg.eval.objectness.kernel}_head_used_{cfg.eval.objectness.index_select}'
+            f'prune_radius_{cfg.eval.objectness.prune_radius}.avi',
             torch.cat(video_frames).permute(0, 2, 3, 1),
             cfg.eval.video_fps)
 

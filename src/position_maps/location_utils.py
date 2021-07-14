@@ -6,6 +6,8 @@ from matplotlib import pyplot as plt
 from mmdet.models.utils.gaussian_target import get_local_maximum
 from torch.nn.functional import pad
 
+from baseline.extracted_of_optimization import find_points_inside_circle, is_point_inside_circle
+
 
 def locations_from_heatmaps(frames, kernel, loc_cutoff, marker_size, out, vis_on=False, threshold=None):
     if threshold is not None:
@@ -137,3 +139,44 @@ def get_boxes_for_patches(crop_h, crop_w, locations):
     crop_box_ijwh = torchvision.ops.box_convert(crop_box_cxcywh, 'cxcywh', 'xywh')
     crop_box_ijwh = torch.stack([torch.tensor([b[1], b[0], b[2], b[3]]) for b in crop_box_ijwh])
     return crop_box_ijwh
+
+
+def prune_locations_proximity_based(cluster_centers, radius):
+    rejected_cluster_centers = []
+    rejected_cluster_centers_idx = []
+    pruned_cluster_centers = []
+    pruned_cluster_centers_idx = []
+    for cluster_center in cluster_centers:
+        if not np.isin(cluster_center, pruned_cluster_centers).all() \
+                or not np.isin(cluster_center, rejected_cluster_centers).all():
+
+            centers_inside_idx = find_points_inside_circle(cluster_centers,
+                                                           circle_center=cluster_center,
+                                                           circle_radius=radius)
+            for center_inside_idx in centers_inside_idx:
+                if not is_cluster_center_in_the_radius_of_one_of_pruned_centers(
+                        cluster_centers[center_inside_idx], pruned_cluster_centers, radius, rejected_cluster_centers):
+
+                    if not np.isin(cluster_centers[center_inside_idx], pruned_cluster_centers).all() and \
+                            not np.isin(cluster_centers[center_inside_idx], rejected_cluster_centers).all():
+                        pruned_cluster_centers.append(cluster_centers[center_inside_idx])
+                        pruned_cluster_centers_idx.append(center_inside_idx)
+                else:
+                    if not np.isin(cluster_centers[center_inside_idx], rejected_cluster_centers).all() and \
+                            not np.isin(cluster_centers[center_inside_idx], pruned_cluster_centers).all():
+                        rejected_cluster_centers.append(cluster_centers[center_inside_idx])
+                        rejected_cluster_centers_idx.append(center_inside_idx)
+
+    pruned_cluster_centers = np.stack(pruned_cluster_centers)
+    return pruned_cluster_centers, pruned_cluster_centers_idx
+
+
+def is_cluster_center_in_the_radius_of_one_of_pruned_centers(cluster_center, pruned_cluster_centers, radius,
+                                                             rejected_cluster_centers):
+    for pruned_cluster_center in pruned_cluster_centers:
+        if is_point_inside_circle(circle_x=pruned_cluster_center[0], circle_y=pruned_cluster_center[1],
+                                  rad=radius, x=cluster_center[0], y=cluster_center[1]):
+            # rejected_cluster_centers.append(cluster_center)
+            return True
+
+    return False
