@@ -87,7 +87,6 @@ def adjust_config(cfg):
 @hydra.main(config_path="config", config_name="config")
 def evaluate_and_store_predicted_maps(cfg):
     adjust_config(cfg)
-    # sdd_meta = SDDMeta(cfg.eval.root + 'H_SDD.txt')
 
     logger.info(f'Setting up DataLoader')
 
@@ -127,13 +126,9 @@ def evaluate_and_store_predicted_maps(cfg):
     model.to(cfg.eval.device)
     model.eval()
 
-    # ratio = float(sdd_meta.get_meta(getattr(SDDVideoDatasets, cfg.eval.video_meta_class)
-    #                                 , cfg.eval.test.video_number_to_use)[0]['Ratio'].to_numpy()[0])
-
     logger.info(f'Starting evaluation for storing heatmaps...')
 
     total_loss = []
-    # tp_list, fp_list, fn_list = [], [], []
 
     pred_head_0, pred_head_1, pred_head_2, frames_sequence = [], [], [], []
     for idx, data in enumerate(tqdm(test_loader)):
@@ -162,45 +157,6 @@ def evaluate_and_store_predicted_maps(cfg):
         pred_head_2.append(out[2])
         frames_sequence.extend([m['item'] for m in meta])
 
-        # locations = locations_from_heatmaps(frames, cfg.eval.objectness.kernel,
-        #                                     cfg.eval.objectness.loc_cutoff,
-        #                                     cfg.eval.objectness.marker_size, out, vis_on=False)
-        # metrics_out = out[cfg.eval.objectness.index_select]
-        # blobs_per_image, _ = get_adjusted_object_locations(
-        #     locations[cfg.eval.objectness.index_select], metrics_out, meta)
-        #
-        # for f in range(len(meta)):
-        #     frame_number = meta[f]['item']
-        #     rgb_frame = frames[f].cpu()
-        #     gt_heatmap = heat_masks[f].cpu()
-        #     pred_heatmap = metrics_out.sigmoid()[f].cpu()
-        #
-        #     gt_bbox_centers, pred_centers, rgb_frame, supervised_boxes = get_gt_annotations_for_metrics(
-        #         blobs_per_image, cfg, f, frame_number, meta, rgb_frame, test_loader)
-        #
-        #     # fn, fp, precision, recall, tp = get_precision_recall_for_metrics(cfg, gt_bbox_centers, pred_centers,
-        #     #                                                                  ratio)
-        #     # tp_list.append(tp)
-        #     # fp_list.append(fp)
-        #     # fn_list.append(fn)
-        #
-        #     fig = plot_image_with_features(
-        #         rgb_frame.squeeze(dim=0).permute(1, 2, 0).numpy(), gt_bbox_centers,
-        #         np.stack(pred_centers), boxes=supervised_boxes,
-        #         txt=f'Frame Number: {frame_number}\n'
-        #             f'Agent Count: GT-{len(gt_bbox_centers)} | Pred-{len(pred_centers)}',
-        #         footnote_txt=f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
-        #                      f'Video Number: {cfg.eval.test.video_number_to_use}'
-        #                      f'\n\nL2 Matching Threshold: '
-        #                      f'{cfg.eval.gt_pred_loc_distance_threshold}m',
-        #         video_mode=False,
-        #         plot_heatmaps=True,
-        #         gt_heatmap=gt_heatmap.squeeze(dim=0).numpy(),
-        #         pred_heatmap=pred_heatmap.squeeze(dim=0).numpy())
-
-    # final_precision = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fp_list).sum())
-    # final_recall = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fn_list).sum())
-
     logger.info(f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
                 f'Video Number: {cfg.eval.test.video_number_to_use}')
     logger.info(f"Threshold: {cfg.eval.gt_pred_loc_distance_threshold}m | "
@@ -221,7 +177,6 @@ def evaluate_and_store_predicted_maps(cfg):
     }
     torch.save(save_dict, save_path + 'predictions.pt')
     logger.info(f"Saved Predictions at {save_path}")
-    # logger.info(f"Precision: {final_precision} | Recall: {final_recall}")
 
 
 @hydra.main(config_path="config", config_name="config")
