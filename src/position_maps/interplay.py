@@ -423,13 +423,6 @@ def extract_trajectories(cfg):
             position_model['out_head_0'], position_model['out_head_1'], position_model['out_head_2']
         frames_sequence = position_model['frames_sequence']
 
-    # if isinstance(cfg.interplay_v0.subset_indices, (list, ListConfig)):
-    #     indices = list(cfg.interplay_v0.subset_indices)
-    # else:
-    #     # indices = np.random.choice(len(train_dataset), cfg.interplay_v0.subset_indices, replace=False)
-    #     indices = np.arange(start=0, stop=cfg.interplay_v0.subset_indices * 12, step=12)
-    # train_subset = Subset(dataset=train_dataset, indices=indices)
-
     train_loader = DataLoader(train_dataset, batch_size=cfg.interplay_v0.batch_size, shuffle=cfg.interplay_v0.shuffle,
                               num_workers=cfg.interplay_v0.num_workers, collate_fn=heat_map_collate_fn,
                               pin_memory=cfg.interplay_v0.pin_memory, drop_last=cfg.interplay_v0.drop_last)
