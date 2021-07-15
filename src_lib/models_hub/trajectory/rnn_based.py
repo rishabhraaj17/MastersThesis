@@ -5,7 +5,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch import nn
 from torch.utils.data import Dataset
 
-from baselinev2.stochastic.model_modules import preprocess_dataset_elements
+from baselinev2.stochastic.model_modules import preprocess_dataset_elements, make_mlp
 from src_lib.models_hub import Base
 
 
@@ -237,11 +237,212 @@ class RNNBaselineGenerator(Base):
         return out
 
 
+class Discriminator(nn.Module):
+    """Implementation of discriminator of GOAL GAN
+
+       The model consists out of three main components:
+       1. encoder of input trajectory
+       2. encoder of
+       3. Routing Module with visual soft-attention
+
+       """
+
+    def __init__(self, config, **kwargs):
+
+        super().__init__()
+
+        self.__dict__.update(locals())
+
+        self.grad_status = True
+
+        self.config = config
+        net_params = self.config.trajectory_based.rnn.discriminator
+
+        self.encoder_h_dim_d = net_params.encoder_h_dim_d
+        self.embed_dim_scalar = net_params.embedding_dim_scalars
+        self.dropout_disc = net_params.dropout
+        self.mlp_scalar = net_params.mlp_scalar
+
+        self.batch_first = net_params.batch_first
+
+        self.social_attention = net_params.social_attention
+        self.social_dim_scalar = net_params.social_dim_scalar if self.social_attention else 0
+
+        self.encoder_observation = MotionEncoder(self.config)
+        self.EncoderPrediction = EncoderPrediction(self.config)
+
+        if self.social_attention:
+            raise NotImplementedError
+            # self.attention_net = SocialAttention(
+            #     embed_scalar=self.embed_dim_scalar,
+            #     h_scalar=self.encoder_h_dim_d,
+            #     social_dim_scalar=self.social_dim_scalar)
+
+    def init_c(self, batch_size):
+        return torch.zeros((1, batch_size, self.encoder_h_dim_d + self.social_dim_scalar))
+
+    def forward(self, in_xy, in_dxdy, out_xy, out_dxdy, seq_start_end=[], images_patches=None):
+
+        output_h, h = self.encoder_observation(in_dxdy)
+        final_pos = in_xy[-1] * 1.
+        if self.social_attention:
+            social_scalar = []
+            for (start, end) in seq_start_end:
+                s_scalar = self.attention_net(h_scalar=h[0, start:end], end_pos=final_pos[start:end])
+                social_scalar.append(s_scalar)
+            social_scalar = torch.cat(social_scalar).unsqueeze(0)
+            h = torch.cat((h, social_scalar), 2)
+
+        if self.batch_first:
+            batch_size = in_xy.size(0)
+        else:
+            batch_size = in_xy.size(1)
+        c = self.init_c(batch_size).to(in_xy)
+        state_tuple = (h, c)
+
+        dynamic_scores = self.EncoderPrediction(out_dxdy, images_patches, state_tuple)
+
+        return dynamic_scores
+
+    def grad(self, status):
+        if not self.grad_status == status:
+            self.grad_status = status
+            for p in self.parameters():
+                p.requires_grad = self.grad_status
+
+
+class EncoderPrediction(nn.Module):
+    """Part of Discriminator"""
+
+    def __init__(self, config):
+        super().__init__()
+
+        self.config = config
+        net_params = self.config.trajectory_based.rnn.discriminator.encoder_prediction
+
+        self.rnn_type = net_params.rnn_type
+        self.batch_first = net_params.batch_first
+
+        rnn = getattr(nn, self.rnn_type)
+
+        self.input_dim = net_params.in_features
+        self.encoder_h_dim_d = net_params.encoder_h_dim_d
+        self.embedding_dim = net_params.embedding_dim
+        self.dropout = net_params.dropout
+
+        self.batch_norm = net_params.batch_norm
+        self.dropout_cnn = net_params.dropout_cnn
+        self.mlp_dim = net_params.mlp_dim
+
+        activation = ['leakyrelu', None]
+
+        self.leakyrelu = nn.LeakyReLU()
+
+        self.encoder = rnn(self.embedding_dim, self.encoder_h_dim_d, dropout=self.dropout, batch_first=self.batch_first)
+
+        self.spatial_embedding = nn.Linear(2, self.embedding_dim)
+
+        real_classifier_dims = [self.encoder_h_dim_d, self.mlp_dim, 1]
+        self.real_classifier = make_mlp(
+            real_classifier_dims,
+            activation_list=activation,
+            dropout=self.dropout)
+
+    def init_hidden(self, batch, obs_traj):
+        return (torch.zeros(1, batch, self.encoder_h_dim_d).to(obs_traj),
+                torch.zeros(1, batch, self.encoder_h_dim_d).to(obs_traj))
+
+    def forward(self, dxdy, img_patch, state_tuple):
+        """
+        Inputs:
+        - last_pos: Tensor of shape (batch, 2)
+        - last_pos_rel: Tensor of shape (batch, 2)
+        - state_tuple: (hh, ch) each tensor of shape (num_layers, batch, h_dim)
+        Output:
+        - pred_traj_fake_rel: tensor of shape (self.seq_len, batch, 2)
+        - pred_traj_fake: tensor of shape (self.seq_len, batch, 2)
+        - state_tuple[0]: final hidden state
+        """
+
+        embedded_pos = self.spatial_embedding(dxdy).tanh()
+
+        encoder_input = embedded_pos
+        output, input_classifier = self.encoder(encoder_input, state_tuple)
+        dynamic_score = self.real_classifier(input_classifier[0])
+        return dynamic_score
+
+
+class MotionEncoder(nn.Module):
+    """MotionEncoder extracts dynamic features of the past trajectory and consists of an encoding LSTM network"""
+
+    def __init__(self, config):
+        """ Initialize MotionEncoder.
+        Parameters.
+            encoder_h_dim (int) - - dimensionality of hidden state
+            input_dim (int) - - input dimensionality of spatial coordinates
+            embedding_dim (int) - - dimensionality spatial embedding
+            dropout (float) - - dropout in LSTM layer
+        """
+        super(MotionEncoder, self).__init__()
+
+        self.config = config
+        net_params = self.config.trajectory_based.rnn.discriminator.motion_encoder
+
+        self.rnn_type = net_params.rnn_type
+        self.batch_first = net_params.batch_first
+
+        rnn = getattr(nn, self.rnn_type)
+
+        self.encoder_h_dim = net_params.encoder_h_dim
+        self.embedding_dim = net_params.embedding_dim
+        self.input_dim = net_params.in_features
+
+        if self.embedding_dim:
+            self.spatial_embedding = nn.Linear(self.input_dim, self.embedding_dim)
+            self.encoder = rnn(self.embedding_dim, self.encoder_h_dim, batch_first=self.batch_first)
+        else:
+            self.encoder = rnn(self.input_dim, self.encoder_h_dim, batch_first=self.batch_first)
+
+    def init_hidden(self, batch, obs_traj):
+        return (
+            torch.zeros(1, batch, self.encoder_h_dim).to(obs_traj),
+            torch.zeros(1, batch, self.encoder_h_dim).to(obs_traj)
+        )
+
+    def forward(self, obs_traj, state_tuple=None):
+        """ Calculates forward pass of MotionEncoder
+            Parameters:
+                obs_traj (tensor) - - Tensor of shape (obs_len, batch, 2)
+                state_tuple (tuple of tensors) - - Tuple with hidden state (1, batch, encoder_h_dim) and
+                cell state tensor (1, batch, encoder_h_dim)
+            Returns:
+                output (tensor) - - Output of LSTM netwok for all time steps (obs_len, batch, encoder_h_dim)
+                final_h (tensor) - - Final hidden state of LSTM network (1, batch, encoder_h_dim)
+        """
+        # Encode observed Trajectory
+        if self.batch_first:
+            batch = obs_traj.size(0)
+        else:
+            batch = obs_traj.size(1)
+
+        if not state_tuple:
+            state_tuple = self.init_hidden(batch, obs_traj)
+        if self.embedding_dim:
+            obs_traj = self.spatial_embedding(obs_traj)
+
+        output, state = self.encoder(obs_traj, state_tuple)
+        final_h = state[0]
+        return output, final_h
+
+
 if __name__ == '__main__':
-    m = RNNBaseline(OmegaConf.load('../../../src/position_maps/config/model/model.yaml'), None, None)
+    m = RNNBaselineGenerator(OmegaConf.load('../../../src/position_maps/config/model/model.yaml'), None, None)
     inp = {
         'in_dxdy': torch.randn((7, 2, 2)),
         'in_xy': torch.randn((8, 2, 2))
     }
     o = m(inp)
+
+    m2 = Discriminator(OmegaConf.load('../../../src/position_maps/config/model/model.yaml'))
+    o2 = m2(inp['in_xy'], inp['in_dxdy'], o['out_xy'], o['out_dxdy'])
     print()
