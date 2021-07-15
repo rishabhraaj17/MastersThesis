@@ -361,7 +361,7 @@ def viz_tracks(active_tracks, first_frame, show=True):
 
 @hydra.main(config_path="config", config_name="config")
 def extract_trajectories(cfg):
-    offline = True
+    offline = False
 
     logger.info(f'Extract Trajectories...')
     logger.info(f'Setting up DataLoader and Model...')
@@ -376,7 +376,7 @@ def extract_trajectories(cfg):
     if cfg.single_video_mode.enabled:
         # config adapt
         cfg.single_video_mode.video_classes_to_use = ['DEATH_CIRCLE']
-        cfg.single_video_mode.video_numbers_to_use = [[4]]
+        cfg.single_video_mode.video_numbers_to_use = [[0]]
         cfg.desired_pixel_to_meter_ratio_rgb = 0.07
         cfg.desired_pixel_to_meter_ratio = 0.07
 
@@ -494,7 +494,7 @@ def extract_trajectories(cfg):
         else:
             construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled)
 
-        viz_tracks(active_tracks, first_frame)
+        viz_tracks(active_tracks, first_frame, show=False)
 
         pred_t_idx += cfg.interplay_v0.batch_size
     # save extracted trajectories
