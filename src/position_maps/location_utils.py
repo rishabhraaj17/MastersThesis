@@ -1,5 +1,6 @@
 import albumentations as A
 import numpy as np
+import timeout_decorator
 import torch
 import torchvision
 from matplotlib import pyplot as plt
@@ -7,6 +8,9 @@ from mmdet.models.utils.gaussian_target import get_local_maximum
 from torch.nn.functional import pad
 
 from baseline.extracted_of_optimization import find_points_inside_circle, is_point_inside_circle
+from baselinev2.exceptions import TimeoutException
+
+TIMEOUT = 3  # seconds
 
 
 def locations_from_heatmaps(frames, kernel, loc_cutoff, marker_size, out, vis_on=False, threshold=None):
@@ -141,6 +145,7 @@ def get_boxes_for_patches(crop_h, crop_w, locations):
     return crop_box_ijwh
 
 
+@timeout_decorator.timeout(seconds=TIMEOUT, timeout_exception=TimeoutException)
 def prune_locations_proximity_based(cluster_centers, radius):
     rejected_cluster_centers = []
     rejected_cluster_centers_idx = []
