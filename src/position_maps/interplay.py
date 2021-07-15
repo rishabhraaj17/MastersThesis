@@ -1,13 +1,14 @@
 import copy
 import os
 import warnings
+from pathlib import Path
 from typing import List
 
 import hydra
+import motmetrics as mm
 import numpy as np
 import torch
 from matplotlib import pyplot as plt
-import motmetrics as mm
 from omegaconf import ListConfig
 from pytorch_lightning import seed_everything
 from torch.nn.functional import interpolate
@@ -251,8 +252,8 @@ def interplay_v0(cfg):
                                    -(cfg.interplay_v0.min_history + cfg.interplay_v0.batch_size):
                                    -cfg.interplay_v0.batch_size, ...]
                 in_trajectory_dxdy = trajectory_dxdy[:,
-                                   -(cfg.interplay_v0.min_history + cfg.interplay_v0.batch_size):
-                                   -cfg.interplay_v0.batch_size, ...]
+                                     -(cfg.interplay_v0.min_history + cfg.interplay_v0.batch_size):
+                                     -cfg.interplay_v0.batch_size, ...]
 
                 out_trajectory_xy = trajectory_xy[:, -cfg.interplay_v0.batch_size:, ...]
                 out_trajectory_dxdy = trajectory_dxdy[:, -cfg.interplay_v0.batch_size:, ...]
@@ -369,7 +370,7 @@ def extract_trajectories(cfg):
     cfg.device = 'cpu'  # 'cuda:0'
     cfg.single_video_mode.enabled = True  # for now we work on single video
     cfg.preproccesing.pad_factor = 8
-    cfg.frame_rate = 20
+    cfg.frame_rate = 30.
     cfg.video_based.enabled = False
 
     if cfg.single_video_mode.enabled:
@@ -422,14 +423,14 @@ def extract_trajectories(cfg):
             position_model['out_head_0'], position_model['out_head_1'], position_model['out_head_2']
         frames_sequence = position_model['frames_sequence']
 
-    if isinstance(cfg.interplay_v0.subset_indices, (list, ListConfig)):
-        indices = list(cfg.interplay_v0.subset_indices)
-    else:
-        # indices = np.random.choice(len(train_dataset), cfg.interplay_v0.subset_indices, replace=False)
-        indices = np.arange(start=0, stop=cfg.interplay_v0.subset_indices)
-    train_subset = Subset(dataset=train_dataset, indices=indices)
+    # if isinstance(cfg.interplay_v0.subset_indices, (list, ListConfig)):
+    #     indices = list(cfg.interplay_v0.subset_indices)
+    # else:
+    #     # indices = np.random.choice(len(train_dataset), cfg.interplay_v0.subset_indices, replace=False)
+    #     indices = np.arange(start=0, stop=cfg.interplay_v0.subset_indices * 12, step=12)
+    # train_subset = Subset(dataset=train_dataset, indices=indices)
 
-    train_loader = DataLoader(train_subset, batch_size=cfg.interplay_v0.batch_size, shuffle=cfg.interplay_v0.shuffle,
+    train_loader = DataLoader(train_dataset, batch_size=cfg.interplay_v0.batch_size, shuffle=cfg.interplay_v0.shuffle,
                               num_workers=cfg.interplay_v0.num_workers, collate_fn=heat_map_collate_fn,
                               pin_memory=cfg.interplay_v0.pin_memory, drop_last=cfg.interplay_v0.drop_last)
 
@@ -437,128 +438,85 @@ def extract_trajectories(cfg):
     track_ids_used = []
     current_track = 0
 
-    for epoch in range(cfg.interplay_v0.num_epochs):
-        active_tracks = Tracks.init_with_empty_tracks()
-        inactive_tracks = Tracks.init_with_empty_tracks()
+    active_tracks = Tracks.init_with_empty_tracks()
+    inactive_tracks = Tracks.init_with_empty_tracks()
 
-        first_frame = None
-        train_loss = []
-        pred_t_idx = 0
-        for t_idx, data in enumerate(tqdm(train_loader)):
-            frames, heat_masks, _, _, _, meta = data
+    first_frame = None
+    train_loss = []
+    pred_t_idx = 0
+    for t_idx, data in enumerate(tqdm(train_loader)):
+        frames, heat_masks, _, _, _, meta = data
 
-            padder = ImagePadder(frames.shape[-2:], factor=cfg.preproccesing.pad_factor)
-            frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
-            frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+        padder = ImagePadder(frames.shape[-2:], factor=cfg.preproccesing.pad_factor)
+        frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
+        frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
 
-            if not offline:
-                with torch.no_grad():
-                    pred_position_maps = position_model(frames)
-            else:
-                pred_position_maps = [
-                    out_head_0[pred_t_idx: pred_t_idx + cfg.interplay_v0.batch_size, ...],
-                    out_head_1[pred_t_idx: pred_t_idx + cfg.interplay_v0.batch_size, ...],
-                    out_head_2[pred_t_idx: pred_t_idx + cfg.interplay_v0.batch_size, ...],
-                ]
-                frames_seq_stored = frames_sequence[pred_t_idx: pred_t_idx + cfg.interplay_v0.batch_size]
+        if not offline:
+            with torch.no_grad():
+                pred_position_maps = position_model(frames)
+        else:
+            pred_position_maps = [
+                out_head_0[pred_t_idx: pred_t_idx + cfg.interplay_v0.batch_size, ...],
+                out_head_1[pred_t_idx: pred_t_idx + cfg.interplay_v0.batch_size, ...],
+                out_head_2[pred_t_idx: pred_t_idx + cfg.interplay_v0.batch_size, ...],
+            ]
+            frames_seq_stored = frames_sequence[pred_t_idx: pred_t_idx + cfg.interplay_v0.batch_size]
 
-            noisy_gt_agents_count = [m['bbox_centers'].shape[0] for m in meta]
-            frame_numbers = [m['item'] for m in meta]
+        noisy_gt_agents_count = [m['bbox_centers'].shape[0] for m in meta]
+        frame_numbers = [m['item'] for m in meta]
 
-            pred_object_locations = locations_from_heatmaps(
-                frames, cfg.interplay_v0.objectness.kernel,
-                cfg.interplay_v0.objectness.loc_cutoff,
-                cfg.interplay_v0.objectness.marker_size, pred_position_maps,
-                vis_on=False)
+        pred_object_locations = locations_from_heatmaps(
+            frames, cfg.interplay_v0.objectness.kernel,
+            cfg.interplay_v0.objectness.loc_cutoff,
+            cfg.interplay_v0.objectness.marker_size, pred_position_maps,
+            vis_on=False)
 
-            # filter out overlapping locations
-            selected_locations_pre_pruning = pred_object_locations[cfg.interplay_v0.objectness.index_select]
-            selected_locations = []
-            for s_loc in selected_locations_pre_pruning:
-                pruned_locations, pruned_locations_idx = prune_locations_proximity_based(
-                    s_loc.numpy(), cfg.eval.objectness.prune_radius)
-                selected_locations.append(torch.from_numpy(pruned_locations))
+        # filter out overlapping locations
+        selected_locations_pre_pruning = pred_object_locations[cfg.interplay_v0.objectness.index_select]
+        selected_locations = []
+        for s_loc in selected_locations_pre_pruning:
+            pruned_locations, pruned_locations_idx = prune_locations_proximity_based(
+                s_loc.numpy(), cfg.eval.objectness.prune_radius)
+            selected_locations.append(torch.from_numpy(pruned_locations))
 
-            selected_head = pred_position_maps[cfg.interplay_v0.objectness.index_select]
-            pred_object_locations_scaled, heat_maps_gt_scaled = get_adjusted_object_locations(
-                selected_locations, selected_head, meta)
+        selected_head = pred_position_maps[cfg.interplay_v0.objectness.index_select]
+        pred_object_locations_scaled, heat_maps_gt_scaled = get_adjusted_object_locations(
+            selected_locations, selected_head, meta)
 
-            if t_idx == 0:
-                # store first frame to viz
-                first_frame = interpolate(frames[0, None, ...], size=meta[0]['original_shape'])
+        if t_idx == 0:
+            # store first frame to viz
+            first_frame = interpolate(frames[0, None, ...], size=meta[0]['original_shape'])
 
-                # init tracks
-                for agent_pred_loc in pred_object_locations_scaled[0]:
-                    agent_pred_loc = list(agent_pred_loc)
-                    track = Track(idx=current_track, frames=[frame_numbers[0]], locations=[agent_pred_loc])
+            # init tracks
+            for agent_pred_loc in pred_object_locations_scaled[0]:
+                agent_pred_loc = list(agent_pred_loc)
+                track = Track(idx=current_track, frames=[frame_numbers[0]], locations=[agent_pred_loc])
 
-                    active_tracks.tracks.append(track)
-                    track_ids_used.append(current_track)
-                    current_track += 1
+                active_tracks.tracks.append(track)
+                track_ids_used.append(current_track)
+                current_track += 1
 
-                construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled,
-                                 batch_start_idx=1)
-            else:
-                # get distance matrix
-                # connect objects
-                # Hungarian matching
-                # Associate tracks - active and inactive
-                construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled)
+            construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled,
+                             batch_start_idx=1)
+        else:
+            construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled)
 
-            viz_tracks(active_tracks, first_frame)
+        viz_tracks(active_tracks, first_frame)
 
-            pred_t_idx += cfg.interplay_v0.batch_size
-            # if we have min history tracks
-            # prepare for tp model input
-
-            # trajectory_xy, trajectory_dxdy = [], []
-            # if all([len(t.locations) >= cfg.interplay_v0.min_history + cfg.interplay_v0.batch_size
-            #         for t in active_tracks.tracks]):
-            #     # pad trajectories if they are less than expected
-            #     length_per_trajectory = [len(t.locations) for t in active_tracks.tracks]
-            #     for lpt, t in zip(length_per_trajectory, active_tracks.tracks):
-            #         if lpt < cfg.interplay_v0.in_trajectory_length + cfg.interplay_v0.batch_size:
-            #             to_pad_location = [list(t.locations[0])]
-            #             pad_count = cfg.interplay_v0.in_trajectory_length - lpt
-            #             to_pad_location = to_pad_location * pad_count
-            #             traj = to_pad_location + t.locations
-            #
-            #             trajectory_xy.append(traj)
-            #         else:
-            #             trajectory_xy.append(t.locations)
-            #
-            #     # prepare trajectories
-            #     for t_xy in trajectory_xy:
-            #         temp_dxdy = []
-            #         for xy in range(1, len(t_xy)):
-            #             temp_dxdy.append((np.array(t_xy[xy]) - np.array(t_xy[xy - 1])).tolist())
-            #         trajectory_dxdy.append(temp_dxdy)
-            #
-            #     trajectory_xy = torch.from_numpy(np.stack(trajectory_xy))
-            #     trajectory_dxdy = torch.from_numpy(np.stack(trajectory_dxdy))
-
-                # old batching when it was min-length * batch_size - takes all available history
-                # good to use all history if available! :)
-                # in_trajectory_xy = trajectory_xy[:, :-cfg.interplay_v0.batch_size, ...]
-                # in_trajectory_dxdy = trajectory_dxdy[:, :-cfg.interplay_v0.batch_size, ...]
-                #
-                # out_trajectory_xy = trajectory_xy[:, -cfg.interplay_v0.batch_size:, ...]
-                # out_trajectory_dxdy = trajectory_dxdy[:, -cfg.interplay_v0.batch_size:, ...]
-
-                # fixed last min_history is taken
-                # in_trajectory_xy = trajectory_xy[:,
-                #                    -(cfg.interplay_v0.min_history + cfg.interplay_v0.batch_size):
-                #                    -cfg.interplay_v0.batch_size, ...]
-                # in_trajectory_dxdy = trajectory_dxdy[:,
-                #                    -(cfg.interplay_v0.min_history + cfg.interplay_v0.batch_size):
-                #                    -cfg.interplay_v0.batch_size, ...]
-                #
-                # out_trajectory_xy = trajectory_xy[:, -cfg.interplay_v0.batch_size:, ...]
-                # out_trajectory_dxdy = trajectory_dxdy[:, -cfg.interplay_v0.batch_size:, ...]
-
-                # vis trajectory division
-                # viz_divided_trajectories_together(first_frame, in_trajectory_xy, out_trajectory_xy)
-            print()
+        pred_t_idx += cfg.interplay_v0.batch_size
+    # save extracted trajectories
+    save_dict = {
+        'active': active_tracks,
+        'inactive': inactive_tracks,
+    }
+    filename = 'extracted_trajectories.pt'
+    save_path = os.path.join(os.getcwd(),
+                             f'ExtractedTrajectories'
+                             f'/{getattr(SDDVideoClasses, cfg.single_video_mode.video_classes_to_use[0]).name}'
+                             f'/{cfg.single_video_mode.video_numbers_to_use[0][0]}/')
+    Path(save_path).mkdir(parents=True, exist_ok=True)
+    torch.save(save_dict, save_path + filename)
+    logger.info(f"Saved Predictions at {save_path}{filename}")
 
 
 if __name__ == '__main__':
