@@ -37,10 +37,10 @@ class TransformerMotionEncoder(nn.Module):
         out = self.embedding(in_dxdy)
         out = self.encoder(out)
         return out
-    
-    
+
+
 class TransformerMotionDecoder(nn.Module):
-    def __init__(self, config: DictConfig):
+    def __init__(self, config: DictConfig, return_raw_logits=False):
         super(TransformerMotionDecoder, self).__init__()
 
         self.config = config
@@ -69,6 +69,7 @@ class TransformerMotionDecoder(nn.Module):
             nn.ReLU(),
             nn.Linear(in_features=net_params.d_model // 2, out_features=net_params.out_features)
         )
+        self.return_raw_logits = return_raw_logits
 
     def forward(self, x, encoder_out):
         in_xy, in_dxdy = x['in_xy'], x['in_dxdy']
@@ -82,6 +83,9 @@ class TransformerMotionDecoder(nn.Module):
             d_o = self.decoder(d_o, encoder_out)
             # for one ts autoregressive comment line below
             d_o = torch.cat((last_obs_vel, d_o))
+
+        if self.return_raw_logits:
+            return d_o[1:, ...]
 
         pred_dxdy = self.projector(d_o[1:, ...])
         out_xy = []
@@ -126,13 +130,56 @@ class TrajectoryTransformer(Base):
         return torch.linalg.norm((pred - target), ord=2, dim=0).mean(dim=0).mean()
 
 
+class TransformerMotionGenerator(nn.Module):
+    def __init__(self, config: DictConfig):
+        super(TransformerMotionGenerator, self).__init__()
+        self.config = config
+        net_params = self.config.trajectory_based.transformer.encoder
+
+        self.motion_encoder = TransformerMotionEncoder(config=self.config)
+        self.noise_embedding = nn.Sequential(
+            nn.Linear(in_features=net_params.d_model * 2, out_features=net_params.d_model)
+        )
+
+    def forward(self, x):
+        out = self.motion_encoder(x)
+        out = torch.cat((out, torch.randn_like(out)), dim=-1)
+        out = self.noise_embedding(out)
+        return out
+
+
+class TransformerMotionDiscriminator(nn.Module):
+    def __init__(self, config: DictConfig):
+        super(TransformerMotionDiscriminator, self).__init__()
+        self.config = config
+
+        self.motion_encoder = TransformerMotionEncoder(self.config)
+        self.motion_decoder = TransformerMotionDecoder(self.config, return_raw_logits=True)
+
+        self.classifier = nn.Sequential(
+            nn.Linear(in_features=self.config.trajectory_based.transformer.decoder.d_model,
+                      out_features=self.config.trajectory_based.transformer.decoder.d_model // 2),
+            nn.LeakyReLU(),
+            nn.Linear(in_features=self.config.trajectory_based.transformer.decoder.d_model // 2,
+                      out_features=1))
+
+    def forward(self, x):
+        enc_out = self.motion_encoder(x)
+        dec_out = self.motion_decoder(x, enc_out)
+        out = self.classifier(dec_out.mean(0))  # mean over all time-steps - can take 1st or last ts as well?
+        return out
+
+
 if __name__ == '__main__':
+    # todo: add Positional Encoding
     conf = OmegaConf.load('../../../src/position_maps/config/model/model.yaml')
     inp = {
         'in_dxdy': torch.randn((7, 2, 2)),
         'in_xy': torch.randn((8, 2, 2)),
         'gt_xy': torch.randn((12, 2, 2))
     }
-    m = TrajectoryTransformer(conf, None, None)
-    o = m._one_step(inp)
+    m = TransformerMotionGenerator(conf)
+    o = m(inp)
+    # m = TrajectoryTransformer(conf, None, None)
+    # o = m._one_step(inp)
     print()
