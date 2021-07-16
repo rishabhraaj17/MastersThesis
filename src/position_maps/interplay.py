@@ -300,7 +300,8 @@ def viz_divided_trajectories_together(first_frame, in_trajectory_xy, out_traject
         plt.close()
 
 
-def construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled, batch_start_idx=0):
+# does not start a new track :(
+def construct_tracks_v0(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled, batch_start_idx=0):
     for b_idx in range(batch_start_idx, len(pred_object_locations_scaled)):
         # get last frame locations
         last_frame_locations = [t.locations[-1] for t in active_tracks.tracks]
@@ -345,11 +346,83 @@ def construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_
         active_tracks.tracks = copy.deepcopy(currently_active_tracks)
 
 
+# active_tracks -> all tracks - add new tracks each frame
+# active_tracks_selective -> all tracks - add only tracks that makes sense each frame
+def construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled,
+                     active_tracks_selective, inactive_tracks_selective, do_selective_track_association,
+                     track_ids_used, current_track, track_ids_used_selective, current_track_selective, 
+                     init_track_each_frame=True, batch_start_idx=0):
+    current_track_local = current_track
+    current_track_selective_local = current_track_selective
+
+    for b_idx in range(batch_start_idx, len(pred_object_locations_scaled)):
+        # get last frame locations
+        last_frame_locations = [t.locations[-1] for t in active_tracks.tracks]
+        # get current frame locations
+        current_frame_locations = [loc for loc in pred_object_locations_scaled[b_idx]]
+
+        last_frame_locations = np.stack(last_frame_locations)
+        current_frame_locations = np.stack(current_frame_locations)
+
+        # try setting max dist to a reasonable number so that matches are reasonable within a distance
+        distance_matrix = mm.distances.norm2squared_matrix(last_frame_locations, current_frame_locations)
+
+        agent_associations = mm.lap.lsa_solve_scipy(distance_matrix)
+        match_rows, match_cols = agent_associations
+
+        # find agents in the current frame (potential new agents in the scene)
+        unmatched_agents_current_frame = np.setdiff1d(np.arange(current_frame_locations.shape[0]), match_cols)
+
+        # track_accumulator.update(np.arange(last_frame_locations.shape[0]),
+        #                          np.arange(current_frame_locations.shape[0]), distance_matrix)
+
+        # Hungarian
+        # match_rows, match_cols = linear_sum_assignment(distance_matrix)
+
+        rows_to_columns_association = {r: c for r, c in zip(match_rows, match_cols)}
+        # track_ids to associations
+        last_frame_track_id_to_association = {}
+        for m_r in match_rows:
+            last_frame_track_id_to_association[active_tracks.tracks[m_r].idx] = m_r
+
+        # filter active tracks and extend tracks
+        currently_active_tracks = []
+        for track in active_tracks.tracks:
+            if track.idx in last_frame_track_id_to_association.keys():
+                track.frames.append(frame_numbers[b_idx])
+
+                loc_idx = rows_to_columns_association[last_frame_track_id_to_association[track.idx]]
+                loc = current_frame_locations[loc_idx]
+                track.locations.append(loc.tolist())
+
+                currently_active_tracks.append(track)
+            else:
+                track.inactive += 1
+                inactive_tracks.tracks.append(track)
+
+        # add new potential agents as new track
+        if init_track_each_frame:
+            for u in unmatched_agents_current_frame:
+                init_track = Track(idx=current_track_local, frames=[frame_numbers[b_idx]],
+                                   locations=[current_frame_locations[u].tolist()])
+
+                currently_active_tracks.append(init_track)
+                track_ids_used.append(current_track_local)
+                current_track_local += 1
+
+        # update active tracks
+        active_tracks.tracks = copy.deepcopy(currently_active_tracks)
+
+    return current_track_local, current_track_selective_local
+
+
 def viz_tracks(active_tracks, first_frame, show=True):
-    active_tracks_to_vis = np.stack([t.locations for t in active_tracks.tracks])
+    # active_tracks_to_vis = np.stack([t.locations for t in active_tracks.tracks])
+    active_tracks_to_vis = [t.locations for t in active_tracks.tracks]
     fig, ax = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
     ax.imshow(first_frame.squeeze().permute(1, 2, 0))
     for a_t in active_tracks_to_vis:
+        a_t = np.stack(a_t)
         add_features_to_axis(ax=ax, features=a_t, marker_size=1, marker_color='g')
         # add_line_to_axis(ax=ax, features=a_t)
     plt.tight_layout()
@@ -361,7 +434,10 @@ def viz_tracks(active_tracks, first_frame, show=True):
 
 @hydra.main(config_path="config", config_name="config")
 def extract_trajectories(cfg):
-    offline = False
+    init_track_each_frame = True
+
+    do_selective_track_association = False
+    offline = True
 
     logger.info(f'Extract Trajectories...')
     logger.info(f'Setting up DataLoader and Model...')
@@ -376,7 +452,7 @@ def extract_trajectories(cfg):
     if cfg.single_video_mode.enabled:
         # config adapt
         cfg.single_video_mode.video_classes_to_use = ['DEATH_CIRCLE']
-        cfg.single_video_mode.video_numbers_to_use = [[0]]
+        cfg.single_video_mode.video_numbers_to_use = [[4]]
         cfg.desired_pixel_to_meter_ratio_rgb = 0.07
         cfg.desired_pixel_to_meter_ratio = 0.07
 
@@ -430,11 +506,17 @@ def extract_trajectories(cfg):
     # training + logic
     track_ids_used = []
     current_track = 0
+    
+    track_ids_used_selective = []
+    current_track_selective = 0
+
+    active_tracks_selective = Tracks.init_with_empty_tracks()
+    inactive_tracks_selective = Tracks.init_with_empty_tracks()
 
     active_tracks = Tracks.init_with_empty_tracks()
     inactive_tracks = Tracks.init_with_empty_tracks()
 
-    first_frame = None
+    # first_frame = None
     train_loss = []
     pred_t_idx = 0
     for t_idx, data in enumerate(tqdm(train_loader)):
@@ -478,7 +560,7 @@ def extract_trajectories(cfg):
 
         if t_idx == 0:
             # store first frame to viz
-            first_frame = interpolate(frames[0, None, ...], size=meta[0]['original_shape'])
+            # first_frame = interpolate(frames[0, None, ...], size=meta[0]['original_shape'])
 
             # init tracks
             for agent_pred_loc in pred_object_locations_scaled[0]:
@@ -488,21 +570,56 @@ def extract_trajectories(cfg):
                 active_tracks.tracks.append(track)
                 track_ids_used.append(current_track)
                 current_track += 1
+                
+                if do_selective_track_association:
+                    active_tracks_selective.tracks.append(
+                        Track(idx=current_track_selective, frames=[frame_numbers[0]], locations=[agent_pred_loc]))
+                    track_ids_used_selective.append(current_track_selective)
+                    current_track_selective += 1
 
-            construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled,
-                             batch_start_idx=1)
+            current_track, current_track_selective = construct_tracks(
+                active_tracks=active_tracks, frame_numbers=frame_numbers, inactive_tracks=inactive_tracks,
+                pred_object_locations_scaled=pred_object_locations_scaled,
+                active_tracks_selective=active_tracks_selective, inactive_tracks_selective=inactive_tracks_selective,
+                do_selective_track_association=do_selective_track_association, track_ids_used=track_ids_used,
+                current_track=current_track, track_ids_used_selective=track_ids_used_selective, 
+                current_track_selective=current_track_selective, init_track_each_frame=init_track_each_frame,
+                batch_start_idx=1)
         else:
-            construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled)
+            current_track, current_track_selective = construct_tracks(
+                active_tracks=active_tracks, frame_numbers=frame_numbers, inactive_tracks=inactive_tracks,
+                pred_object_locations_scaled=pred_object_locations_scaled,
+                active_tracks_selective=active_tracks_selective, inactive_tracks_selective=inactive_tracks_selective,
+                do_selective_track_association=do_selective_track_association, track_ids_used=track_ids_used,
+                current_track=current_track, track_ids_used_selective=track_ids_used_selective, 
+                current_track_selective=current_track_selective, init_track_each_frame=init_track_each_frame,
+                batch_start_idx=0)
 
-        viz_tracks(active_tracks, first_frame, show=False)
+        viz_tracks(active_tracks, interpolate(frames[0, None, ...], size=meta[0]['original_shape']), show=True)
+
+        if do_selective_track_association:
+            viz_tracks(active_tracks_selective,
+                       interpolate(frames[0, None, ...], size=meta[0]['original_shape']), show=True)
 
         pred_t_idx += cfg.interplay_v0.batch_size
     # save extracted trajectories
-    save_dict = {
-        'active': active_tracks,
-        'inactive': inactive_tracks,
-    }
-    filename = 'extracted_trajectories.pt'
+    if do_selective_track_association:
+        save_dict = {
+            'track_ids_used': track_ids_used,
+            'active': active_tracks,
+            'inactive': inactive_tracks,
+            'track_ids_used_selective': track_ids_used_selective,
+            'active_selective': active_tracks_selective,
+            'inactive_selective': inactive_tracks_selective,
+        }
+        filename = 'extracted_trajectories_with_selective.pt'
+    else:
+        save_dict = {
+            'track_ids_used': track_ids_used,
+            'active': active_tracks,
+            'inactive': inactive_tracks,
+        }
+        filename = 'extracted_trajectories.pt'
     save_path = os.path.join(os.getcwd(),
                              f'ExtractedTrajectories'
                              f'/{getattr(SDDVideoClasses, cfg.single_video_mode.video_classes_to_use[0]).name}'
