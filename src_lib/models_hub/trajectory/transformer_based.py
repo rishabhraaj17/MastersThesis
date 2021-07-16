@@ -135,23 +135,4 @@ if __name__ == '__main__':
     }
     m = TrajectoryTransformer(conf, None, None)
     o = m._one_step(inp)
-
-    # d_inp = torch.randn((1, 2, 64))
-    # d_o = d_inp.clone()
-    # for i in range(12):
-    #     d_o = d_m(d_o, o)
-    #
-    #     # variant 1 - simple autoregressive but one ts only
-    #     # d_inp = d_o - no need self assigned
-    #
-    #     # variant 2 - take the inp always and take last n-1 output and feed it back
-    #     # d_o = torch.cat((d_inp, d_o))
-
-    # variant - 1
-    # loss = pairwise_distance(torch.randn(1, 2, 64).view(2, -1), d_o.view(2, -1)).mean()
-
-    # variant - 2
-    # loss = pairwise_distance(torch.randn(12, 2, 64).view(2, -1), d_o[1:, ...].view(2, -1)).mean()
-
-    # loss.backward()
     print()
