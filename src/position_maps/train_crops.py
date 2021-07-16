@@ -17,6 +17,7 @@ from tqdm import tqdm
 
 from baselinev2.exceptions import TimeoutException
 from baselinev2.improve_metrics.crop_utils import sample_random_crops, replace_overlapping_boxes, REPLACEMENT_TIMEOUT
+from baselinev2.improve_metrics.model import plot_predictions
 from baselinev2.plot_utils import add_box_to_axes
 from baselinev2.utils import get_bbox_center
 from log import get_logger
@@ -99,6 +100,47 @@ def train_crop_classifier(cfg):
                       deterministic=True, gradient_clip_val=2.0,
                       accumulate_grad_batches=1)
     trainer.fit(model)
+
+
+@hydra.main(config_path="config", config_name="config")
+def eval_crop_classifier(cfg):
+    path = ['death_circle_crops0_1.pt', 'death_circle_crops_2_3_4.pt']
+    path = [os.path.join(os.getcwd(), p) for p in path]
+
+    val_ratio = 0.2
+
+    dataset = CropsTensorDataset(path=path)
+    val_len = int(len(dataset) * val_ratio)
+    train_dataset, val_dataset = random_split(
+        dataset, [len(dataset) - val_len, val_len], generator=torch.Generator().manual_seed(42))
+
+    val_loader = DataLoader(
+        val_dataset, batch_size=cfg.crop_classifier.batch_size * 2, shuffle=cfg.crop_classifier.shuffle,
+        num_workers=cfg.crop_classifier.num_workers * 0, collate_fn=None,
+        pin_memory=cfg.crop_classifier.pin_memory, drop_last=cfg.interplay_v0.drop_last)
+
+    model = CropClassifier(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset, desired_output_shape=None,
+                           loss_function=nn.BCEWithLogitsLoss())
+    model.load_state_dict(
+        torch.load('lightning_logs/version_513924/checkpoints/epoch=27-step=21531.ckpt')['state_dict'])
+    model.cuda()
+
+    val_loss, accuracies = [], []
+    for b_idx, data in enumerate(tqdm(val_loader)):
+        crops, labels = data
+        crops, labels = crops.view(-1, *crops.shape[2:]).cuda(), labels.view(-1, 1).cuda()
+        out = model(crops)
+
+        loss = model.calculate_loss(out, labels)
+        val_loss.append(loss.item())
+
+        acc = out.sigmoid().round().eq(labels).float().mean()
+        accuracies.append(acc.item())
+
+        if acc.item() < 0.96:
+            plot_predictions(labels, crops, out.sigmoid().round(), b_idx)
+
+    logger.info(f"Test Loss: {np.array(val_loss).mean()} | Accuracy: {np.array(accuracies).mean()}")
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -363,5 +405,6 @@ def viz_crops(crops_filtered, show=True):
 
 
 if __name__ == '__main__':
-    train_crop_classifier()
+    # train_crop_classifier()
+    eval_crop_classifier()
     # generate_crops_v0()

@@ -616,7 +616,10 @@ def plot_predictions(labels, patches, pred_labels, batch_idx, save_path=None, ad
     for i in range(8):
         for j in range(8):
             ax[i, j].axis('off')
-            ax[i, j].set_title(f'{labels[k].int().item()} | {pred_labels[k].int().item()}')
+            if labels[k].int().item() == pred_labels[k].int().item():
+                ax[i, j].set_title(f'{labels[k].int().item()} | {pred_labels[k].int().item()}')
+            else:
+                ax[i, j].set_title(f'{labels[k].int().item()} | {pred_labels[k].int().item()}', color='r')
             ax[i, j].imshow(patches[k].permute(1, 2, 0).cpu())
 
             k += 1
