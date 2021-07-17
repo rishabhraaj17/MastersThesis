@@ -190,6 +190,9 @@ class TransformerMotionDiscriminator(nn.Module):
             num_layers=net_params.num_layers,
             norm=nn.LayerNorm(net_params.d_model) if net_params.norm is not None else None
         )
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, net_params.d_model))
+        self.positional_encoding = PositionalEncoding(embed_dim=net_params.d_model, seq_len=net_params.seq_len + 1)
+        # +1 for cls token
 
         self.classifier = nn.Sequential(
             nn.Linear(in_features=self.config.trajectory_based.transformer.decoder.d_model,
@@ -202,9 +205,22 @@ class TransformerMotionDiscriminator(nn.Module):
         enc_out = self.motion_encoder(x)
 
         gt_x = self.embedding(gt_x)
+        
+        # add cls token to act as classifier head
+        cls_tokens = self.cls_token.expand(-1, gt_x.shape[1], -1)
+        gt_x = torch.cat((cls_tokens, gt_x), dim=0)
+
+        # add positional encoding
+        # (S, B, E) -> (B, S, E)
+        gt_x = gt_x.permute(1, 0, 2)
+        gt_x = self.positional_encoding(gt_x)
+        # (B, S, E) -> (S, B, E)
+        gt_x = gt_x.permute(1, 0, 2)
+        
         dec_out = self.motion_decoder(gt_x, enc_out)
 
-        out = self.classifier(dec_out.mean(0))  # mean over all time-steps - can take 1st or last ts as well?
+        # out = self.classifier(dec_out.mean(0))  # mean over all time-steps - can take 1st or last ts as well?
+        out = self.classifier(dec_out[0, ...])  # mean over all time-steps - can take 1st or last ts as well?
         return out
 
 
