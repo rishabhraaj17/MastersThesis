@@ -6,7 +6,7 @@ from pytorchvideo.layers import PositionalEncoding
 from torch import nn
 from torch.utils.data import Dataset
 
-from src_lib.models_hub import Base
+from src_lib.models_hub import Base, BaseGAN
 
 
 class TransformerMotionEncoder(nn.Module):
@@ -50,7 +50,7 @@ class TransformerMotionEncoder(nn.Module):
 
 
 class TransformerMotionDecoder(nn.Module):
-    def __init__(self, config: DictConfig, return_raw_logits=False):
+    def __init__(self, config: DictConfig):
         super(TransformerMotionDecoder, self).__init__()
 
         self.config = config
@@ -81,8 +81,6 @@ class TransformerMotionDecoder(nn.Module):
         )
         self.positional_encoding = PositionalEncoding(embed_dim=net_params.d_model, seq_len=self.seq_len)
 
-        self.return_raw_logits = return_raw_logits
-
     def forward(self, x, encoder_out):
         in_xy, in_dxdy = x['in_xy'], x['in_dxdy']
 
@@ -103,9 +101,6 @@ class TransformerMotionDecoder(nn.Module):
             d_o = self.decoder(d_o, encoder_out)
             # for one ts autoregressive comment line below
             d_o = torch.cat((last_obs_vel, d_o))
-
-        if self.return_raw_logits:
-            return d_o[1:, ...]
 
         pred_dxdy = self.projector(d_o[1:, ...])
         out_xy = []
@@ -160,11 +155,13 @@ class TransformerMotionGenerator(nn.Module):
         self.noise_embedding = nn.Sequential(
             nn.Linear(in_features=net_params.d_model * 2, out_features=net_params.d_model)
         )
+        self.motion_decoder = TransformerMotionDecoder(config=self.config)
 
     def forward(self, x):
         out = self.motion_encoder(x)
         out = torch.cat((out, torch.randn_like(out)), dim=-1)
         out = self.noise_embedding(out)
+        out = self.motion_decoder(x, out)
         return out
 
 
@@ -174,7 +171,7 @@ class TransformerMotionDiscriminator(nn.Module):
         self.config = config
 
         self.motion_encoder = TransformerMotionEncoder(self.config)
-        self.motion_decoder = TransformerMotionDecoder(self.config, return_raw_logits=True)
+        self.motion_decoder = TransformerMotionDecoder(self.config)
 
         self.classifier = nn.Sequential(
             nn.Linear(in_features=self.config.trajectory_based.transformer.decoder.d_model,
@@ -190,15 +187,100 @@ class TransformerMotionDiscriminator(nn.Module):
         return out
 
 
+class TrajectoryGANTransformer(BaseGAN):
+    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                 additional_loss_functions: List[nn.Module] = None,
+                 desc_loss_function: nn.Module = nn.BCEWithLogitsLoss(),
+                 collate_fn: Optional[Callable] = None):
+        super(TrajectoryGANTransformer, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
+        )
+        self.config = config
+        self.desc_loss_function = desc_loss_function
+
+        self.net_params = self.config.trajectory_based.transformer
+
+        self.generator = TransformerMotionGenerator(self.config)
+        self.discriminator = TransformerMotionDiscriminator(self.config)
+
+    def forward(self, x):
+        return self.generator(x)
+
+    def configure_optimizers(self):
+        opt_disc = torch.optim.Adam(self.discriminator.parameters(), lr=self.net_params.discriminator.lr,
+                                    weight_decay=self.net_params.discriminator.weight_decay,
+                                    amsgrad=self.net_params.discriminator.weight_decay)
+        opt_gen = torch.optim.Adam(self.generator.parameters(), lr=self.net_params.generator.lr,
+                                   weight_decay=self.net_params.generator.weight_decay,
+                                   amsgrad=self.net_params.generator.weight_decay)
+        return [opt_disc, opt_gen], []
+
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        # Train discriminator
+        result = None
+        if optimizer_idx == 0:
+            result = self._disc_step(batch)
+
+        # Train generator
+        if optimizer_idx == 1:
+            result = self._gen_step(batch)
+
+        return result
+
+    def _disc_step(self, x):
+        disc_loss = self._get_disc_loss(x)
+        self.log("loss/disc", disc_loss, on_epoch=True)
+        return disc_loss
+
+    def _gen_step(self, x):
+        gen_loss = self._get_gen_loss(x)
+        self.log("loss/gen", gen_loss, on_epoch=True)
+        return gen_loss
+
+    def _get_disc_loss(self, x):
+        # Train with real
+        real_pred = self.discriminator(x)
+        real_gt = torch.ones_like(real_pred)
+        real_loss = self.desc_loss_function(real_pred, real_gt)
+
+        # Train with fake
+        with torch.no_grad():
+            fake_pred = self.generator(x)
+
+        fake_pred = [self.discriminator(f) for f in fake_pred]
+        fake_gt = torch.ones_like(fake_pred[0])
+        fake_loss = [self.discriminator_criterion(f, fake_gt) for f in fake_pred]
+        fake_loss = self.loss_reducer(torch.stack(fake_loss))
+
+        disc_loss = real_loss + fake_loss
+
+        return disc_loss
+
+    def _get_gen_loss(self, x):
+        out = self.generator(x)
+
+        target = x['gt_xy']
+        pred = out['out_xy']
+        loss = self.calculate_loss(pred, target)
+
+        return loss
+
+    @staticmethod
+    def calculate_loss(pred, target):
+        return torch.linalg.norm((pred - target), ord=2, dim=0).mean(dim=0).mean()
+
+
 if __name__ == '__main__':
-    # todo: add Positional Encoding
     conf = OmegaConf.load('../../../src/position_maps/config/model/model.yaml')
     inp = {
         'in_dxdy': torch.randn((7, 2, 2)),
         'in_xy': torch.randn((8, 2, 2)),
         'gt_xy': torch.randn((12, 2, 2))
     }
-    m = TransformerMotionDiscriminator(conf)
+    m = TrajectoryGANTransformer(conf, None, None)
     o = m(inp)
     # m = TrajectoryTransformer(conf, None, None)
     # o = m._one_step(inp)
