@@ -170,8 +170,26 @@ class TransformerMotionDiscriminator(nn.Module):
         super(TransformerMotionDiscriminator, self).__init__()
         self.config = config
 
+        net_params = self.config.trajectory_based.transformer.discriminator
+
         self.motion_encoder = TransformerMotionEncoder(self.config)
-        self.motion_decoder = TransformerMotionDecoder(self.config)
+        
+        self.embedding = nn.Sequential(
+            nn.Linear(in_features=net_params.in_features, out_features=net_params.d_model // 2),
+            nn.ReLU(),
+            nn.Linear(in_features=net_params.d_model // 2, out_features=net_params.d_model)
+        )
+        self.motion_decoder = nn.TransformerDecoder(
+            decoder_layer=nn.TransformerDecoderLayer(
+                d_model=net_params.d_model,
+                nhead=net_params.nhead,
+                dim_feedforward=net_params.dim_feedforward,
+                dropout=net_params.dropout,
+                activation=net_params.activation
+            ),
+            num_layers=net_params.num_layers,
+            norm=nn.LayerNorm(net_params.d_model) if net_params.norm is not None else None
+        )
 
         self.classifier = nn.Sequential(
             nn.Linear(in_features=self.config.trajectory_based.transformer.decoder.d_model,
@@ -180,9 +198,12 @@ class TransformerMotionDiscriminator(nn.Module):
             nn.Linear(in_features=self.config.trajectory_based.transformer.decoder.d_model // 2,
                       out_features=1))
 
-    def forward(self, x):
+    def forward(self, x, gt_x):
         enc_out = self.motion_encoder(x)
-        dec_out = self.motion_decoder(x, enc_out)
+
+        gt_x = self.embedding(gt_x)
+        dec_out = self.motion_decoder(gt_x, enc_out)
+
         out = self.classifier(dec_out.mean(0))  # mean over all time-steps - can take 1st or last ts as well?
         return out
 
@@ -242,7 +263,7 @@ class TrajectoryGANTransformer(BaseGAN):
 
     def _get_disc_loss(self, x):
         # Train with real
-        real_pred = self.discriminator(x)
+        real_pred = self.discriminator(x, x['gt_dxdy'])
         real_gt = torch.ones_like(real_pred)
         real_loss = self.desc_loss_function(real_pred, real_gt)
 
@@ -250,10 +271,9 @@ class TrajectoryGANTransformer(BaseGAN):
         with torch.no_grad():
             fake_pred = self.generator(x)
 
-        fake_pred = [self.discriminator(f) for f in fake_pred]
-        fake_gt = torch.ones_like(fake_pred[0])
-        fake_loss = [self.discriminator_criterion(f, fake_gt) for f in fake_pred]
-        fake_loss = self.loss_reducer(torch.stack(fake_loss))
+        fake_pred = self.discriminator(x, fake_pred['out_dxdy'])
+        fake_gt = torch.zeros_like(fake_pred)
+        fake_loss = self.desc_loss_function(fake_pred, fake_gt)
 
         disc_loss = real_loss + fake_loss
 
@@ -278,10 +298,11 @@ if __name__ == '__main__':
     inp = {
         'in_dxdy': torch.randn((7, 2, 2)),
         'in_xy': torch.randn((8, 2, 2)),
-        'gt_xy': torch.randn((12, 2, 2))
+        'gt_xy': torch.randn((12, 2, 2)),
+        'gt_dxdy': torch.randn((12, 2, 2))
     }
     m = TrajectoryGANTransformer(conf, None, None)
-    o = m(inp)
+    o = m._get_disc_loss(inp)
     # m = TrajectoryTransformer(conf, None, None)
     # o = m._one_step(inp)
     print()
