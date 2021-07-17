@@ -558,3 +558,26 @@ trajectory_based:
 
       num_layers: 6
       norm: null  # 'layer_norm'
+
+    generator:
+      lr: 1e-3
+      weight_decay: 5e10
+      amsgrad: False
+
+    discriminator:
+      lr: 1e-3
+      weight_decay: 5e10
+      amsgrad: False
+
+      in_features: 2
+      out_features: 2
+      seq_len: 12
+
+      d_model: 64
+      nhead: 8
+      dim_feedforward: 512  # 2048 for 512 d_model
+      dropout: 0.1
+      activation: 'relu'
+
+      num_layers: 6
+      norm: null  # 'layer_norm'
