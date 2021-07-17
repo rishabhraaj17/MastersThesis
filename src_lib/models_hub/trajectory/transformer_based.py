@@ -2,6 +2,7 @@ from typing import Callable, List, Optional, Tuple
 
 import torch
 from omegaconf import DictConfig, OmegaConf
+from pytorchvideo.layers import PositionalEncoding
 from torch import nn
 from torch.utils.data import Dataset
 
@@ -31,10 +32,19 @@ class TransformerMotionEncoder(nn.Module):
             num_layers=net_params.num_layers,
             norm=nn.LayerNorm(net_params.d_model) if net_params.norm is not None else None
         )
+        self.positional_encoding = PositionalEncoding(embed_dim=net_params.d_model, seq_len=net_params.seq_len)
 
     def forward(self, x):
         in_xy, in_dxdy = x['in_xy'], x['in_dxdy']
         out = self.embedding(in_dxdy)
+
+        # add positional encoding
+        # (S, B, E) -> (B, S, E)
+        out = out.permute(1, 0, 2)
+        out = self.positional_encoding(out)
+        # (B, S, E) -> (S, B, E)
+        out = out.permute(1, 0, 2)
+
         out = self.encoder(out)
         return out
 
@@ -69,6 +79,8 @@ class TransformerMotionDecoder(nn.Module):
             nn.ReLU(),
             nn.Linear(in_features=net_params.d_model // 2, out_features=net_params.out_features)
         )
+        self.positional_encoding = PositionalEncoding(embed_dim=net_params.d_model, seq_len=self.seq_len)
+
         self.return_raw_logits = return_raw_logits
 
     def forward(self, x, encoder_out):
@@ -80,6 +92,14 @@ class TransformerMotionDecoder(nn.Module):
         d_o = last_obs_vel.clone()
 
         for _ in range(self.seq_len):
+
+            # add positional encoding
+            # (S, B, E) -> (B, S, E)
+            d_o = d_o.permute(1, 0, 2)
+            d_o = self.positional_encoding(d_o)
+            # (B, S, E) -> (S, B, E)
+            d_o = d_o.permute(1, 0, 2)
+
             d_o = self.decoder(d_o, encoder_out)
             # for one ts autoregressive comment line below
             d_o = torch.cat((last_obs_vel, d_o))
@@ -178,7 +198,7 @@ if __name__ == '__main__':
         'in_xy': torch.randn((8, 2, 2)),
         'gt_xy': torch.randn((12, 2, 2))
     }
-    m = TransformerMotionGenerator(conf)
+    m = TransformerMotionDiscriminator(conf)
     o = m(inp)
     # m = TrajectoryTransformer(conf, None, None)
     # o = m._one_step(inp)

@@ -72,6 +72,7 @@ class CropsTensorDataset(Dataset):
 
 @hydra.main(config_path="config", config_name="config")
 def train_crop_classifier(cfg):
+    # todo: train with augmentations
     # path = 'death_circle_crops0_1.pt'
     # path = os.path.join(os.getcwd(), path)
     

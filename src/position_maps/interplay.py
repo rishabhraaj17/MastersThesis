@@ -436,8 +436,8 @@ def viz_tracks(active_tracks, first_frame, show=True):
 def extract_trajectories(cfg):
     init_track_each_frame = True
 
-    do_selective_track_association = False
-    offline = True
+    do_selective_track_association = False  # we don't need it
+    offline = False
 
     logger.info(f'Extract Trajectories...')
     logger.info(f'Setting up DataLoader and Model...')
@@ -452,7 +452,7 @@ def extract_trajectories(cfg):
     if cfg.single_video_mode.enabled:
         # config adapt
         cfg.single_video_mode.video_classes_to_use = ['DEATH_CIRCLE']
-        cfg.single_video_mode.video_numbers_to_use = [[4]]
+        cfg.single_video_mode.video_numbers_to_use = [[1]]
         cfg.desired_pixel_to_meter_ratio_rgb = 0.07
         cfg.desired_pixel_to_meter_ratio = 0.07
 
@@ -595,11 +595,11 @@ def extract_trajectories(cfg):
                 current_track_selective=current_track_selective, init_track_each_frame=init_track_each_frame,
                 batch_start_idx=0)
 
-        viz_tracks(active_tracks, interpolate(frames[0, None, ...], size=meta[0]['original_shape']), show=True)
+        viz_tracks(active_tracks, interpolate(frames[0, None, ...], size=meta[0]['original_shape']), show=False)
 
         if do_selective_track_association:
             viz_tracks(active_tracks_selective,
-                       interpolate(frames[0, None, ...], size=meta[0]['original_shape']), show=True)
+                       interpolate(frames[0, None, ...], size=meta[0]['original_shape']), show=False)
 
         pred_t_idx += cfg.interplay_v0.batch_size
     # save extracted trajectories
