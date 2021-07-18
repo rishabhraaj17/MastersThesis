@@ -17,6 +17,7 @@ from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn.functional import interpolate
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Subset, ConcatDataset
+from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from average_image.utils import SDDMeta
@@ -417,7 +418,7 @@ def setup_single_video_dataset(cfg, use_common_transforms=True, without_split=Fa
 
 def check_dataset_sanity(dataset):
     loader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=heat_map_collate_fn)
-    for data in loader:
+    for data in tqdm(loader):
         frames, heat_masks, _, _, _, meta = data
         meta = meta[0]
         plot_samples(img=frames.squeeze().permute(1, 2, 0), mask=heat_masks.squeeze(), boxes=meta['boxes'],
@@ -1594,7 +1595,7 @@ if __name__ == '__main__':
 
         # selected_patch_overfit()
         # patch_based_overfit()
-        overfit()
+        # overfit()
         # train()
-        # train_v1()
+        train_v1()
         # train_temporal_2d_v1()

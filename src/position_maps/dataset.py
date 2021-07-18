@@ -210,7 +210,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
         if not use_generated:
             dff = dff.drop(dff.columns[[0]], axis=1)
         return dff
-    
+
     @staticmethod
     def _read_annotation_file_and_filter(path, original_shape, use_generated=False):
         dff = pd.read_csv(path)
@@ -243,7 +243,8 @@ class SDDFrameAndAnnotationDataset(Dataset):
         item = int(math.floor(item * (float(self.video_clips.video_fps[video_idx]) / fps)))
         # item = max(0, (item - 1) + (item * (int(round(self.video_clips.video_fps[video_idx]) // fps) - 1)))
 
-        bbox_centers, boxes, track_idx, class_labels = self.get_annotation_for_frame(item, video_idx, original_shape)
+        bbox_centers, boxes, track_idx, class_labels = self.get_annotation_for_frame(item, video_idx, original_shape,
+                                                                                     allow_zero_box_coordinates=False)
 
         while bbox_centers.size == 0 and boxes.size == 0:
             random_frame_num = np.random.choice(len(self), 1, replace=False).item()
@@ -255,8 +256,10 @@ class SDDFrameAndAnnotationDataset(Dataset):
             item = int(math.floor(item * (float(self.video_clips.video_fps[video_idx]) / fps)))
             # item = max(0, (item - 1) + (item * (int(round(self.video_clips.video_fps[video_idx]) // fps) - 1)))
 
-            bbox_centers, boxes, track_idx, class_labels = self.get_annotation_for_frame(item, video_idx,
-                                                                                         original_shape)
+            bbox_centers, boxes, track_idx, class_labels = self.get_annotation_for_frame(
+                item, video_idx,
+                original_shape,
+                allow_zero_box_coordinates=False)
 
         video = video.float() / 255.0
         if self.transform is not None:
@@ -566,7 +569,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
         return torch.zeros_like(heat_mask), torch.zeros_like(heat_mask), heat_mask, \
                meta, torch.zeros_like(heat_mask), video
 
-    def get_annotation_for_frame(self, item, video_idx, original_shape):
+    def get_annotation_for_frame(self, item, video_idx, original_shape, allow_zero_box_coordinates=True):
         h, w = original_shape
         df = self.annotations_df[video_idx]
         frame_annotation = self.get_generated_frame_annotations(df, item)
@@ -580,8 +583,12 @@ class SDDFrameAndAnnotationDataset(Dataset):
         track_idx = frame_annotation[:, 0].astype(int)
         bbox_centers = frame_annotation[:, 7:9].astype(int)
 
-        inside_boxes_idx = [b for b, box in enumerate(boxes)
-                            if (box[0] >= 0 and box[2] < w) and (box[1] >= 0 and box[3] < h)]
+        if allow_zero_box_coordinates:
+            inside_boxes_idx = [b for b, box in enumerate(boxes)
+                                if (box[0] >= 0 and box[2] < w) and (box[1] >= 0 and box[3] < h)]
+        else:
+            inside_boxes_idx = [b for b, box in enumerate(boxes)
+                                if (box[0] > 0 and box[2] < w) and (box[1] > 0 and box[3] < h)]
 
         boxes = boxes[inside_boxes_idx]
         track_idx = track_idx[inside_boxes_idx]
