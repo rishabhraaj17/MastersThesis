@@ -10,3 +10,5 @@ from .topdownpose import *
 from .trans_unet import *
 from .unets import *
 from .vis_trans import *
+from .trajectory.rnn_based import *
+from .trajectory.transformer_based import *
