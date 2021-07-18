@@ -452,7 +452,7 @@ def extract_trajectories(cfg):
     if cfg.single_video_mode.enabled:
         # config adapt
         cfg.single_video_mode.video_classes_to_use = ['DEATH_CIRCLE']
-        cfg.single_video_mode.video_numbers_to_use = [[0]]
+        cfg.single_video_mode.video_numbers_to_use = [[4]]
         cfg.desired_pixel_to_meter_ratio_rgb = 0.07
         cfg.desired_pixel_to_meter_ratio = 0.07
 
@@ -812,4 +812,5 @@ def extract_trajectories_resumable(cfg):
 
 if __name__ == '__main__':
     # interplay_v0()
-    extract_trajectories_resumable()
+    extract_trajectories()
+    # extract_trajectories_resumable()

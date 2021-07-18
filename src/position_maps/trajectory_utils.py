@@ -18,7 +18,7 @@ from src_lib.datasets.trajectory_stgcnn import STGCNNTrajectoryDataset, seq_coll
     seq_collate_with_graphs, seq_collate_with_graphs_dict
 
 VIDEO_CLASS = SDDVideoClasses.DEATH_CIRCLE
-VIDEO_NUMBER = 2
+VIDEO_NUMBER = 4
 
 FILENAME = 'extracted_trajectories.pt'
 BASE_PATH = os.path.join(os.getcwd(), f'logs/ExtractedTrajectories/{VIDEO_CLASS.name}/{VIDEO_NUMBER}/')
@@ -33,9 +33,13 @@ def get_total_tracks():
     return total_tracks
 
 
-def split_tracks_into_lists(min_track_length, total_tracks, duplicate_frames_to_filter=(0,)):
+def split_tracks_into_lists(min_track_length, total_tracks, duplicate_frames_to_filter=(0,),
+                            filter_nth_frame_from_middle=None):
     for d_frame in duplicate_frames_to_filter:
         total_tracks = filter_out_nth_frame(total_tracks, n=d_frame)
+
+    # if filter_nth_frame_from_middle is not None:
+    #     total_tracks = filter_out_nth_frame_from_middle(total_tracks, n=filter_nth_frame_from_middle)
 
     frame_id, track_id, x, y = [], [], [], []
     for track in total_tracks:
@@ -52,6 +56,29 @@ def split_tracks_into_lists(min_track_length, total_tracks, duplicate_frames_to_
 
 
 def filter_out_nth_frame(total_tracks, n=0):
+    # filter out extra nth frame
+    tracks_not_starting_on_frame_n, tracks_starting_on_frame_n = [], []
+    for track in total_tracks:
+        # if n in track.frames:
+        if n == track.frames[0]:
+            tracks_starting_on_frame_n.append(track)
+        else:
+            tracks_not_starting_on_frame_n.append(track)
+    tracks_starting_on_frame_n_filtered = []
+    for t in tracks_starting_on_frame_n:
+        track_temp = Track(
+            idx=t.idx,
+            frames=t.frames[1:],
+            locations=t.locations[1:],
+            inactive=t.inactive
+        )
+        tracks_starting_on_frame_n_filtered.append(track_temp)
+    total_tracks = tracks_starting_on_frame_n_filtered + tracks_not_starting_on_frame_n
+    return total_tracks
+
+
+# not of use
+def filter_out_nth_frame_from_middle(total_tracks, n):
     # filter out extra nth frame
     tracks_not_starting_on_frame_n, tracks_starting_on_frame_n = [], []
     for track in total_tracks:
@@ -85,12 +112,13 @@ def get_dataframe_from_lists(frame_id, track_id, x, y):
     return df
 
 
-def dump_tracks_to_file(min_track_length: int = 20, duplicate_frames_to_filter=(0,)):
+def dump_tracks_to_file(min_track_length: int = 20, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None):
     total_tracks: Sequence[Track] = get_total_tracks()
 
     # lists for frame_id, track_id, x, y
     frame_id, track_id, x, y = split_tracks_into_lists(min_track_length, total_tracks,
-                                                       duplicate_frames_to_filter=duplicate_frames_to_filter)
+                                                       duplicate_frames_to_filter=duplicate_frames_to_filter,
+                                                       filter_nth_frame_from_middle=filter_nth_frame_from_middle)
 
     df = get_dataframe_from_lists(frame_id, track_id, x, y)
 
@@ -237,4 +265,4 @@ if __name__ == '__main__':
     for data in tqdm(loader):
         in_frames, gt_frames = data['in_frames'], data['gt_frames']
 
-    # dump_tracks_to_file(min_track_length=0)
+    dump_tracks_to_file(min_track_length=0, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None)
