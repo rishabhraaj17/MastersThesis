@@ -366,3 +366,15 @@ def setup_multiple_frame_only_datasets_core(
                     frames_per_clip=cfg.video_based.frames_per_clip if cfg.video_based.enabled else 1
                 ))
     return ConcatDataset(datasets)
+
+
+def frames_only_collate_fn(batch):
+    rgb_img_list, meta_list = [], []
+    for batch_item in batch:
+        rgb, meta = batch_item
+        rgb_img_list.append(rgb)
+        meta_list.append(meta)
+
+    rgb_img_list = torch.cat(rgb_img_list)
+
+    return rgb_img_list, meta_list

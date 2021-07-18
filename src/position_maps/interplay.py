@@ -20,7 +20,7 @@ from average_image.constants import SDDVideoClasses
 from baselinev2.plot_utils import add_features_to_axis
 from log import get_logger
 from models import TrajectoryModel
-from interplay_utils import setup_multiple_frame_only_datasets_core
+from interplay_utils import setup_multiple_frame_only_datasets_core, frames_only_collate_fn
 from location_utils import locations_from_heatmaps, get_adjusted_object_locations, \
     prune_locations_proximity_based
 from train import setup_single_video_dataset, setup_multiple_datasets, build_model, build_loss
@@ -474,6 +474,7 @@ def extract_trajectories(cfg):
         cfg.desired_pixel_to_meter_ratio = 0.07
 
         train_dataset = setup_frame_only_dataset(cfg)
+        val_dataset = None
 
         # train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg,
         #                                                                           use_common_transforms=False,
@@ -521,7 +522,7 @@ def extract_trajectories(cfg):
         frames_sequence = position_model['frames_sequence']
 
     train_loader = DataLoader(train_dataset, batch_size=cfg.interplay_v0.batch_size, shuffle=cfg.interplay_v0.shuffle,
-                              num_workers=cfg.interplay_v0.num_workers, collate_fn=heat_map_collate_fn,
+                              num_workers=cfg.interplay_v0.num_workers, collate_fn=frames_only_collate_fn,
                               pin_memory=cfg.interplay_v0.pin_memory, drop_last=cfg.interplay_v0.drop_last)
 
     # training + logic
@@ -541,11 +542,11 @@ def extract_trajectories(cfg):
     train_loss = []
     pred_t_idx = 0
     for t_idx, data in enumerate(tqdm(train_loader)):
-        frames, heat_masks, _, _, _, meta = data
+        frames, meta = data
 
         padder = ImagePadder(frames.shape[-2:], factor=cfg.preproccesing.pad_factor)
-        frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
-        frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+        frames = padder.pad(frames)[0]
+        frames = frames.to(cfg.device)
 
         if not offline:
             with torch.no_grad():
@@ -558,7 +559,6 @@ def extract_trajectories(cfg):
             ]
             frames_seq_stored = frames_sequence[pred_t_idx: pred_t_idx + cfg.interplay_v0.batch_size]
 
-        noisy_gt_agents_count = [m['bbox_centers'].shape[0] for m in meta]
         frame_numbers = [m['item'] for m in meta]
 
         pred_object_locations = locations_from_heatmaps(
@@ -647,7 +647,7 @@ def extract_trajectories(cfg):
                              f'/{cfg.single_video_mode.video_numbers_to_use[0][0]}/')
     Path(save_path).mkdir(parents=True, exist_ok=True)
     torch.save(save_dict, save_path + filename)
-    logger.info(f"Saved Predictions at {save_path}{filename}")
+    logger.info(f"Saved trajectories at {save_path}{filename}")
 
 
 @hydra.main(config_path="config", config_name="config")

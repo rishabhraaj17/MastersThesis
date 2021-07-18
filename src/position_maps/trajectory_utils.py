@@ -8,7 +8,7 @@ from typing import Sequence
 import pandas as pd
 import torch
 from omegaconf import OmegaConf
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Subset, ConcatDataset
 from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
@@ -255,8 +255,10 @@ def get_multiple_datasets(cfg, split_dataset=True):
                 train_datasets.append(dset)
 
     if split_dataset:
-        return ConcatenateDataset(train_datasets)
-    return ConcatenateDataset(train_datasets), ConcatenateDataset(val_datasets)
+        # return ConcatenateDataset(train_datasets), ConcatenateDataset(val_datasets)
+        return ConcatDataset(train_datasets), ConcatDataset(val_datasets)
+    # return ConcatenateDataset(train_datasets)
+    return ConcatDataset(train_datasets)
 
 
 if __name__ == '__main__':
