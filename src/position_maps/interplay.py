@@ -350,7 +350,7 @@ def construct_tracks_v0(active_tracks, frame_numbers, inactive_tracks, pred_obje
 # active_tracks_selective -> all tracks - add only tracks that makes sense each frame
 def construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_locations_scaled,
                      active_tracks_selective, inactive_tracks_selective, do_selective_track_association,
-                     track_ids_used, current_track, track_ids_used_selective, current_track_selective, 
+                     track_ids_used, current_track, track_ids_used_selective, current_track_selective,
                      init_track_each_frame=True, batch_start_idx=0):
     current_track_local = current_track
     current_track_selective_local = current_track_selective
@@ -458,7 +458,7 @@ def extract_trajectories(cfg):
 
         train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg,
                                                                                   use_common_transforms=False,
-                                                                                  without_split=False)
+                                                                                  without_split=True)
     else:
         train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
 
@@ -508,7 +508,7 @@ def extract_trajectories(cfg):
     # training + logic
     track_ids_used = []
     current_track = 0
-    
+
     track_ids_used_selective = []
     current_track_selective = 0
 
@@ -572,7 +572,7 @@ def extract_trajectories(cfg):
                 active_tracks.tracks.append(track)
                 track_ids_used.append(current_track)
                 current_track += 1
-                
+
                 if do_selective_track_association:
                     active_tracks_selective.tracks.append(
                         Track(idx=current_track_selective, frames=[frame_numbers[0]], locations=[agent_pred_loc]))
@@ -584,7 +584,7 @@ def extract_trajectories(cfg):
                 pred_object_locations_scaled=pred_object_locations_scaled,
                 active_tracks_selective=active_tracks_selective, inactive_tracks_selective=inactive_tracks_selective,
                 do_selective_track_association=do_selective_track_association, track_ids_used=track_ids_used,
-                current_track=current_track, track_ids_used_selective=track_ids_used_selective, 
+                current_track=current_track, track_ids_used_selective=track_ids_used_selective,
                 current_track_selective=current_track_selective, init_track_each_frame=init_track_each_frame,
                 batch_start_idx=1)
         else:
@@ -593,7 +593,7 @@ def extract_trajectories(cfg):
                 pred_object_locations_scaled=pred_object_locations_scaled,
                 active_tracks_selective=active_tracks_selective, inactive_tracks_selective=inactive_tracks_selective,
                 do_selective_track_association=do_selective_track_association, track_ids_used=track_ids_used,
-                current_track=current_track, track_ids_used_selective=track_ids_used_selective, 
+                current_track=current_track, track_ids_used_selective=track_ids_used_selective,
                 current_track_selective=current_track_selective, init_track_each_frame=init_track_each_frame,
                 batch_start_idx=0)
 
@@ -631,6 +631,185 @@ def extract_trajectories(cfg):
     logger.info(f"Saved Predictions at {save_path}{filename}")
 
 
+@hydra.main(config_path="config", config_name="config")
+def extract_trajectories_resumable(cfg):
+    init_track_each_frame = True
+
+    do_selective_track_association = False  # we don't need it
+    offline = False
+
+    logger.info(f'Resuming Extract Trajectories...')
+    logger.info(f'Setting up DataLoader and Model...')
+
+    # adjust config here
+    cfg.device = 'cpu'  # 'cuda:0'
+    cfg.single_video_mode.enabled = True  # for now we work on single video
+    cfg.preproccesing.pad_factor = 8
+    cfg.frame_rate = 30.
+    cfg.video_based.enabled = False
+
+    if cfg.single_video_mode.enabled:
+        # config adapt
+        cfg.single_video_mode.video_classes_to_use = ['DEATH_CIRCLE']
+        cfg.single_video_mode.video_numbers_to_use = [[1]]
+        cfg.desired_pixel_to_meter_ratio_rgb = 0.07
+        cfg.desired_pixel_to_meter_ratio = 0.07
+
+        train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg,
+                                                                                  use_common_transforms=False,
+                                                                                  without_split=False)
+    else:
+        train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
+
+    if not offline:
+        # loss config params are ok!
+        loss_fn, gaussian_loss_fn = build_loss(cfg)
+
+        # position map model config
+        cfg.model = 'DeepLabV3Plus'
+        position_model = build_model(cfg, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_fn,
+                                     additional_loss_functions=gaussian_loss_fn, collate_fn=heat_map_collate_fn,
+                                     desired_output_shape=target_max_shape)
+
+        if cfg.interplay_v0.use_pretrained.enabled:
+            checkpoint_path = f'{cfg.interplay_v0.use_pretrained.checkpoint.root}' \
+                              f'{cfg.interplay_v0.use_pretrained.checkpoint.path}' \
+                              f'{cfg.interplay_v0.use_pretrained.checkpoint.version}/checkpoints/'
+            checkpoint_files = os.listdir(checkpoint_path)
+
+            epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
+            epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
+            checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
+
+            checkpoint_file = checkpoint_path + checkpoint_files[-cfg.interplay_v0.use_pretrained.checkpoint.top_k]
+
+            logger.info(f'Loading weights from: {checkpoint_file}')
+            load_dict = torch.load(checkpoint_file, map_location=cfg.device)
+
+            position_model.load_state_dict(load_dict['state_dict'], strict=False)
+
+        position_model.to(cfg.device)
+        position_model.eval()
+    else:
+        load_path = os.path.join(os.getcwd(),
+                                 f'HeatMapPredictions'
+                                 f'/{getattr(SDDVideoClasses, cfg.single_video_mode.video_classes_to_use[0]).name}'
+                                 f'/{cfg.single_video_mode.video_numbers_to_use[0][0]}/predictions.pt')
+        position_model = torch.load(load_path)  # mock the model
+        out_head_0, out_head_1, out_head_2 = \
+            position_model['out_head_0'], position_model['out_head_1'], position_model['out_head_2']
+        frames_sequence = position_model['frames_sequence']
+
+    train_loader = DataLoader(val_dataset, batch_size=cfg.interplay_v0.batch_size, shuffle=cfg.interplay_v0.shuffle,
+                              num_workers=cfg.interplay_v0.num_workers, collate_fn=heat_map_collate_fn,
+                              pin_memory=cfg.interplay_v0.pin_memory, drop_last=cfg.interplay_v0.drop_last)
+
+    # training + logic
+    track_ids_used_selective = []
+    current_track_selective = 0
+
+    active_tracks_selective = Tracks.init_with_empty_tracks()
+    inactive_tracks_selective = Tracks.init_with_empty_tracks()
+
+    load_pth = os.path.join(os.getcwd(),
+                            f'ExtractedTrajectories'
+                            f'/{getattr(SDDVideoClasses, cfg.single_video_mode.video_classes_to_use[0]).name}'
+                            f'/{cfg.single_video_mode.video_numbers_to_use[0][0]}/extracted_trajectories.pt')
+    loaded_tracks = torch.load(load_pth)
+
+    track_ids_used = loaded_tracks['track_ids_used']
+    logger.info(f'Resuming Extract Trajectories from {track_ids_used[-1]}')
+
+    current_track = track_ids_used[-1] + 1
+
+    active_tracks = loaded_tracks['active']
+    inactive_tracks = loaded_tracks['inactive']
+
+    # first_frame = None
+    train_loss = []
+    pred_t_idx = 0
+    for t_idx, data in enumerate(tqdm(train_loader)):
+        frames, heat_masks, _, _, _, meta = data
+
+        padder = ImagePadder(frames.shape[-2:], factor=cfg.preproccesing.pad_factor)
+        frames, heat_masks = padder.pad(frames)[0], padder.pad(heat_masks)[0]
+        frames, heat_masks = frames.to(cfg.device), heat_masks.to(cfg.device)
+
+        if not offline:
+            with torch.no_grad():
+                pred_position_maps = position_model(frames)
+        else:
+            pred_position_maps = [
+                out_head_0[pred_t_idx: pred_t_idx + cfg.interplay_v0.batch_size, ...],
+                out_head_1[pred_t_idx: pred_t_idx + cfg.interplay_v0.batch_size, ...],
+                out_head_2[pred_t_idx: pred_t_idx + cfg.interplay_v0.batch_size, ...],
+            ]
+            frames_seq_stored = frames_sequence[pred_t_idx: pred_t_idx + cfg.interplay_v0.batch_size]
+
+        noisy_gt_agents_count = [m['bbox_centers'].shape[0] for m in meta]
+        frame_numbers = [m['item'] for m in meta]
+
+        pred_object_locations = locations_from_heatmaps(
+            frames, cfg.interplay_v0.objectness.kernel,
+            cfg.interplay_v0.objectness.loc_cutoff,
+            cfg.interplay_v0.objectness.marker_size, pred_position_maps,
+            vis_on=False)
+
+        # filter out overlapping locations
+        selected_locations_pre_pruning = pred_object_locations[cfg.interplay_v0.objectness.index_select]
+        selected_locations = []
+        for s_loc in selected_locations_pre_pruning:
+            pruned_locations, pruned_locations_idx = prune_locations_proximity_based(
+                s_loc.numpy(), cfg.eval.objectness.prune_radius)
+            selected_locations.append(torch.from_numpy(pruned_locations))
+
+        selected_head = pred_position_maps[cfg.interplay_v0.objectness.index_select]
+        pred_object_locations_scaled, heat_maps_gt_scaled = get_adjusted_object_locations(
+            selected_locations, selected_head, meta)
+
+        current_track, current_track_selective = construct_tracks(
+                active_tracks=active_tracks, frame_numbers=frame_numbers, inactive_tracks=inactive_tracks,
+                pred_object_locations_scaled=pred_object_locations_scaled,
+                active_tracks_selective=active_tracks_selective, inactive_tracks_selective=inactive_tracks_selective,
+                do_selective_track_association=do_selective_track_association, track_ids_used=track_ids_used,
+                current_track=current_track, track_ids_used_selective=track_ids_used_selective,
+                current_track_selective=current_track_selective, init_track_each_frame=init_track_each_frame,
+                batch_start_idx=0)
+
+        viz_tracks(active_tracks, interpolate(frames[0, None, ...], size=meta[0]['original_shape']), show=False)
+
+        if do_selective_track_association:
+            viz_tracks(active_tracks_selective,
+                       interpolate(frames[0, None, ...], size=meta[0]['original_shape']), show=False)
+
+        pred_t_idx += cfg.interplay_v0.batch_size
+    # save extracted trajectories
+    if do_selective_track_association:
+        save_dict = {
+            'track_ids_used': track_ids_used,
+            'active': active_tracks,
+            'inactive': inactive_tracks,
+            'track_ids_used_selective': track_ids_used_selective,
+            'active_selective': active_tracks_selective,
+            'inactive_selective': inactive_tracks_selective,
+        }
+        filename = 'extracted_trajectories_with_selective_val_extended.pt'
+    else:
+        save_dict = {
+            'track_ids_used': track_ids_used,
+            'active': active_tracks,
+            'inactive': inactive_tracks,
+        }
+        filename = 'extracted_trajectories_val_extended.pt'
+    save_path = os.path.join(os.getcwd(),
+                             f'ExtractedTrajectories'
+                             f'/{getattr(SDDVideoClasses, cfg.single_video_mode.video_classes_to_use[0]).name}'
+                             f'/{cfg.single_video_mode.video_numbers_to_use[0][0]}/')
+    Path(save_path).mkdir(parents=True, exist_ok=True)
+    torch.save(save_dict, save_path + filename)
+    logger.info(f"Saved Predictions at {save_path}{filename}")
+
+
 if __name__ == '__main__':
     # interplay_v0()
-    extract_trajectories()
+    extract_trajectories_resumable()
