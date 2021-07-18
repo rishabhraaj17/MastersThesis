@@ -24,6 +24,37 @@ mode: 'min'
 # TP module
 # scheduler
 tp_module:
+  datasets:
+    root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/Trajectories/'
+    filename: 'trajectories.pt'
+
+    val_ratio: 0.2
+
+    # we split same dataset into train & val (in time)
+    video_classes: [ DEATH_CIRCLE ]
+    video_numbers: [ [ 4 ] ]
+
+    # not in use right now
+    train:
+      video_classes: [ DEATH_CIRCLE ]
+      video_numbers: [ [ 2, 4 ] ]
+    val:
+      video_classes: [ DEATH_CIRCLE ]
+      video_numbers: [ [ 2, 4 ] ]
+
+    obs_len: 8
+    pred_len: 12
+    skip: 4
+    delim: 'space'
+    construct_graph: False
+
+  loader:
+    batch_size: 4
+    shuffle: True
+    pin_memory: True
+    drop_last: False
+    num_workers: 0
+
   scheduler:
     patience: 5
     verbose: True
