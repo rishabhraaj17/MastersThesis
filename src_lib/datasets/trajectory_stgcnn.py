@@ -111,6 +111,7 @@ class STGCNNTrajectoryDataset(Dataset):
         seq_list_rel = []
         loss_mask_list = []
         non_linear_ped = []
+        frames_list = []
         for path in all_files:
             data = read_file(path, delim)
             frames = np.unique(data[:, 0]).tolist()
@@ -130,6 +131,7 @@ class STGCNNTrajectoryDataset(Dataset):
                 curr_seq = np.zeros((len(peds_in_curr_seq), 2, self.seq_len))
                 curr_loss_mask = np.zeros((len(peds_in_curr_seq),
                                            self.seq_len))
+                curr_frames = np.zeros((len(peds_in_curr_seq), 1, self.seq_len))
                 num_peds_considered = 0
                 _non_linear_ped = []
                 for _, ped_id in enumerate(peds_in_curr_seq):
@@ -140,6 +142,8 @@ class STGCNNTrajectoryDataset(Dataset):
                     pad_end = frames.index(curr_ped_seq[-1, 0]) - idx + 1
                     if pad_end - pad_front != self.seq_len:
                         continue
+
+                    curr_ped_frames = np.transpose(curr_ped_seq[:, 1])
                     curr_ped_seq = np.transpose(curr_ped_seq[:, 2:])
                     curr_ped_seq = curr_ped_seq
                     # Make coordinates relative
@@ -149,6 +153,7 @@ class STGCNNTrajectoryDataset(Dataset):
                     _idx = num_peds_considered
                     curr_seq[_idx, :, pad_front:pad_end] = curr_ped_seq
                     curr_seq_rel[_idx, :, pad_front:pad_end] = rel_curr_ped_seq
+                    curr_frames[_idx, :, pad_front:pad_end] = curr_ped_frames
                     # Linear vs Non-Linear Trajectory
                     _non_linear_ped.append(
                         poly_fit(curr_ped_seq, pred_len, threshold))
@@ -161,12 +166,14 @@ class STGCNNTrajectoryDataset(Dataset):
                     loss_mask_list.append(curr_loss_mask[:num_peds_considered])
                     seq_list.append(curr_seq[:num_peds_considered])
                     seq_list_rel.append(curr_seq_rel[:num_peds_considered])
+                    frames_list.append(curr_frames[:num_peds_considered])
 
         self.num_seq = len(seq_list)
         seq_list = np.concatenate(seq_list, axis=0)
         seq_list_rel = np.concatenate(seq_list_rel, axis=0)
         loss_mask_list = np.concatenate(loss_mask_list, axis=0)
         non_linear_ped = np.asarray(non_linear_ped)
+        frames_list = np.concatenate(frames_list, axis=0)
 
         # Convert numpy -> Torch Tensor
         self.obs_traj = torch.from_numpy(
@@ -179,6 +186,11 @@ class STGCNNTrajectoryDataset(Dataset):
             seq_list_rel[:, :, self.obs_len:]).type(torch.float)
         self.loss_mask = torch.from_numpy(loss_mask_list).type(torch.float)
         self.non_linear_ped = torch.from_numpy(non_linear_ped).type(torch.float)
+        self.obs_frames = torch.from_numpy(
+            frames_list[:, :, :self.obs_len]).type(torch.float)
+        self.pred_frames = torch.from_numpy(
+            frames_list[:, :, self.obs_len:]).type(torch.float)
+
         cum_start_idx = [0] + np.cumsum(num_peds_in_seq).tolist()
         self.seq_start_end = [
             (start, end)
@@ -215,6 +227,7 @@ class STGCNNTrajectoryDataset(Dataset):
             out = [
                 self.obs_traj[start:end, :], self.pred_traj[start:end, :],
                 self.obs_traj_rel[start:end, :], self.pred_traj_rel[start:end, :],
+                self.obs_frames[start:end, :], self.pred_frames[start:end, :],
                 self.non_linear_ped[start:end], self.loss_mask[start:end, :],
                 self.v_obs[index], self.A_obs[index],
                 self.v_pred[index], self.A_pred[index]
@@ -223,6 +236,7 @@ class STGCNNTrajectoryDataset(Dataset):
             out = [
                 self.obs_traj[start:end, :], self.pred_traj[start:end, :],
                 self.obs_traj_rel[start:end, :], self.pred_traj_rel[start:end, :],
+                self.obs_frames[start:end, :], self.pred_frames[start:end, :],
                 self.non_linear_ped[start:end], self.loss_mask[start:end, :],
             ]
         return out
