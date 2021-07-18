@@ -1,9 +1,13 @@
 import os
+import subprocess
+import time
+from contextlib import contextmanager
 from typing import Sequence
 
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
 from interplay import Track, Tracks
@@ -91,10 +95,101 @@ def dump_tracks_to_file(min_track_length: int = 20):
     print(f"Dumping Trajectories to {TRAJECTORIES_LOAD_PATH}trajectories.txt")
 
 
+def relative_to_abs(rel_traj, start_pos):
+    """
+    Inputs:
+    - rel_traj: pytorch tensor of shape (seq_len, batch, 2)
+    - start_pos: pytorch tensor of shape (batch, 2)
+    Outputs:
+    - abs_traj: pytorch tensor of shape (seq_len, batch, 2)
+    """
+    # batch, seq_len, 2
+    rel_traj = rel_traj.permute(1, 0, 2)
+    displacement = torch.cumsum(rel_traj, dim=1)
+    start_pos = torch.unsqueeze(start_pos, dim=1)
+    abs_traj = displacement + start_pos
+    return abs_traj.permute(1, 0, 2)
+
+
+@contextmanager
+def timeit(msg, should_time=True):
+    if should_time:
+        torch.cuda.synchronize()
+        t0 = time.time()
+    yield
+    if should_time:
+        torch.cuda.synchronize()
+        t1 = time.time()
+        duration = (t1 - t0) * 1000.0
+        print('%s: %.2f ms' % (msg, duration))
+
+
+def get_gpu_memory():
+    torch.cuda.synchronize()
+    opts = [
+        'nvidia-smi', '-q', '--gpu=' + str(1), '|', 'grep', '"Used GPU Memory"'
+    ]
+    cmd = str.join(' ', opts)
+    ps = subprocess.Popen(
+        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    output = ps.communicate()[0].decode('utf-8')
+    output = output.split("\n")[0].split(":")
+    consumed_mem = int(output[1].strip().split(" ")[0])
+    return consumed_mem
+
+
+def displacement_error(pred_traj, pred_traj_gt, consider_ped=None, mode='sum'):
+    """
+    Input:
+    - pred_traj: Tensor of shape (seq_len, batch, 2). Predicted trajectory.
+    - pred_traj_gt: Tensor of shape (seq_len, batch, 2). Ground truth
+    predictions.
+    - consider_ped: Tensor of shape (batch)
+    - mode: Can be one of sum, raw
+    Output:
+    - loss: gives the eculidian displacement error
+    """
+    seq_len, _, _ = pred_traj.size()
+    loss = pred_traj_gt.permute(1, 0, 2) - pred_traj.permute(1, 0, 2)
+    loss = loss**2
+    if consider_ped is not None:
+        loss = torch.sqrt(loss.sum(dim=2)).sum(dim=1) * consider_ped
+    else:
+        loss = torch.sqrt(loss.sum(dim=2)).sum(dim=1)
+    if mode == 'sum':
+        return torch.sum(loss)
+    elif mode == 'raw':
+        return loss
+
+
+def final_displacement_error(
+    pred_pos, pred_pos_gt, consider_ped=None, mode='sum'
+):
+    """
+    Input:
+    - pred_pos: Tensor of shape (batch, 2). Predicted last pos.
+    - pred_pos_gt: Tensor of shape (seq_len, batch, 2). Groud truth
+    last pos
+    - consider_ped: Tensor of shape (batch)
+    Output:
+    - loss: gives the eculidian displacement error
+    """
+    loss = pred_pos_gt - pred_pos
+    loss = loss**2
+    if consider_ped is not None:
+        loss = torch.sqrt(loss.sum(dim=1)) * consider_ped
+    else:
+        loss = torch.sqrt(loss.sum(dim=1))
+    if mode == 'raw':
+        return loss
+    else:
+        return torch.sum(loss)
+
+
 if __name__ == '__main__':
     dataset = STGCNNTrajectoryDataset(TRAJECTORIES_LOAD_PATH, obs_len=8, pred_len=12, skip=1, delim='space',
-                                      video_class=VIDEO_CLASS, video_number=VIDEO_NUMBER, construct_graph=True)
-    loader = DataLoader(dataset, batch_size=4, collate_fn=seq_collate_with_graphs_dict)
-    for data in loader:
-        print()
+                                      video_class=VIDEO_CLASS, video_number=VIDEO_NUMBER, construct_graph=False)
+    loader = DataLoader(dataset, batch_size=4, collate_fn=seq_collate_dict)
+    for data in tqdm(loader):
+        in_frames, gt_frames = data['in_frames'], data['gt_frames']
     # dump_tracks_to_file(min_track_length=0)
