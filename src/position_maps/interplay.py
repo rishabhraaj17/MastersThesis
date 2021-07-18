@@ -452,11 +452,13 @@ def extract_trajectories(cfg):
     if cfg.single_video_mode.enabled:
         # config adapt
         cfg.single_video_mode.video_classes_to_use = ['DEATH_CIRCLE']
-        cfg.single_video_mode.video_numbers_to_use = [[1]]
+        cfg.single_video_mode.video_numbers_to_use = [[0]]
         cfg.desired_pixel_to_meter_ratio_rgb = 0.07
         cfg.desired_pixel_to_meter_ratio = 0.07
 
-        train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg, use_common_transforms=False)
+        train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg,
+                                                                                  use_common_transforms=False,
+                                                                                  without_split=False)
     else:
         train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
 
