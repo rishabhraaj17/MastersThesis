@@ -20,10 +20,11 @@ from average_image.constants import SDDVideoClasses
 from baselinev2.plot_utils import add_features_to_axis
 from log import get_logger
 from models import TrajectoryModel
-from src.position_maps.location_utils import locations_from_heatmaps, get_adjusted_object_locations, \
+from interplay_utils import setup_multiple_frame_only_datasets_core
+from location_utils import locations_from_heatmaps, get_adjusted_object_locations, \
     prune_locations_proximity_based
 from train import setup_single_video_dataset, setup_multiple_datasets, build_model, build_loss
-from utils import heat_map_collate_fn, ImagePadder
+from utils import heat_map_collate_fn, ImagePadder, get_scaled_shapes_with_pad_values
 
 warnings.filterwarnings("ignore")
 
@@ -432,6 +433,22 @@ def viz_tracks(active_tracks, first_frame, show=True):
         plt.close()
 
 
+def setup_frame_only_dataset(cfg):
+    df, rgb_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=cfg.single_video_mode.video_classes_to_use,
+        video_numbers=cfg.single_video_mode.video_numbers_to_use,
+        desired_ratio=cfg.desired_pixel_to_meter_ratio_rgb)
+    df_target, target_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=cfg.single_video_mode.video_classes_to_use,
+        video_numbers=cfg.single_video_mode.video_numbers_to_use,
+        desired_ratio=cfg.desired_pixel_to_meter_ratio)
+    train_dataset = setup_multiple_frame_only_datasets_core(
+        cfg=cfg, video_classes_to_use=cfg.single_video_mode.video_classes_to_use,
+        video_numbers_to_use=cfg.single_video_mode.video_numbers_to_use,
+        num_videos=-1, multiple_videos=False, df=df, df_target=df_target, use_common_transforms=False)
+    return train_dataset
+
+
 @hydra.main(config_path="config", config_name="config")
 def extract_trajectories(cfg):
     init_track_each_frame = True
@@ -456,9 +473,11 @@ def extract_trajectories(cfg):
         cfg.desired_pixel_to_meter_ratio_rgb = 0.07
         cfg.desired_pixel_to_meter_ratio = 0.07
 
-        train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg,
-                                                                                  use_common_transforms=False,
-                                                                                  without_split=True)
+        train_dataset = setup_frame_only_dataset(cfg)
+
+        # train_dataset, val_dataset, target_max_shape = setup_single_video_dataset(cfg,
+        #                                                                           use_common_transforms=False,
+        #                                                                           without_split=True)
     else:
         train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
 
@@ -470,7 +489,7 @@ def extract_trajectories(cfg):
         cfg.model = 'DeepLabV3Plus'
         position_model = build_model(cfg, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=loss_fn,
                                      additional_loss_functions=gaussian_loss_fn, collate_fn=heat_map_collate_fn,
-                                     desired_output_shape=target_max_shape)
+                                     desired_output_shape=None)
 
         if cfg.interplay_v0.use_pretrained.enabled:
             checkpoint_path = f'{cfg.interplay_v0.use_pretrained.checkpoint.root}' \
@@ -768,13 +787,13 @@ def extract_trajectories_resumable(cfg):
             selected_locations, selected_head, meta)
 
         current_track, current_track_selective = construct_tracks(
-                active_tracks=active_tracks, frame_numbers=frame_numbers, inactive_tracks=inactive_tracks,
-                pred_object_locations_scaled=pred_object_locations_scaled,
-                active_tracks_selective=active_tracks_selective, inactive_tracks_selective=inactive_tracks_selective,
-                do_selective_track_association=do_selective_track_association, track_ids_used=track_ids_used,
-                current_track=current_track, track_ids_used_selective=track_ids_used_selective,
-                current_track_selective=current_track_selective, init_track_each_frame=init_track_each_frame,
-                batch_start_idx=0)
+            active_tracks=active_tracks, frame_numbers=frame_numbers, inactive_tracks=inactive_tracks,
+            pred_object_locations_scaled=pred_object_locations_scaled,
+            active_tracks_selective=active_tracks_selective, inactive_tracks_selective=inactive_tracks_selective,
+            do_selective_track_association=do_selective_track_association, track_ids_used=track_ids_used,
+            current_track=current_track, track_ids_used_selective=track_ids_used_selective,
+            current_track_selective=current_track_selective, init_track_each_frame=init_track_each_frame,
+            batch_start_idx=0)
 
         viz_tracks(active_tracks, interpolate(frames[0, None, ...], size=meta[0]['original_shape']), show=False)
 
