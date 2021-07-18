@@ -33,8 +33,9 @@ def get_total_tracks():
     return total_tracks
 
 
-def split_tracks_into_lists(min_track_length, total_tracks):
-    total_tracks = filter_out_0th_frame(total_tracks)
+def split_tracks_into_lists(min_track_length, total_tracks, duplicate_frames_to_filter=(0,)):
+    for d_frame in duplicate_frames_to_filter:
+        total_tracks = filter_out_nth_frame(total_tracks, n=d_frame)
 
     frame_id, track_id, x, y = [], [], [], []
     for track in total_tracks:
@@ -50,24 +51,24 @@ def split_tracks_into_lists(min_track_length, total_tracks):
     return frame_id, track_id, x, y
 
 
-def filter_out_0th_frame(total_tracks):
-    # filter out extra 0th frame
-    tracks_not_starting_on_frame0, tracks_starting_on_frame0 = [], []
+def filter_out_nth_frame(total_tracks, n=0):
+    # filter out extra nth frame
+    tracks_not_starting_on_frame_n, tracks_starting_on_frame_n = [], []
     for track in total_tracks:
-        if 0 in track.frames:
-            tracks_starting_on_frame0.append(track)
+        if n in track.frames:
+            tracks_starting_on_frame_n.append(track)
         else:
-            tracks_not_starting_on_frame0.append(track)
-    tracks_starting_on_frame0_filtered = []
-    for t in tracks_starting_on_frame0:
+            tracks_not_starting_on_frame_n.append(track)
+    tracks_starting_on_frame_n_filtered = []
+    for t in tracks_starting_on_frame_n:
         track_temp = Track(
             idx=t.idx,
             frames=t.frames[1:],
             locations=t.locations[1:],
             inactive=t.inactive
         )
-        tracks_starting_on_frame0_filtered.append(track_temp)
-    total_tracks = tracks_starting_on_frame0_filtered + tracks_not_starting_on_frame0
+        tracks_starting_on_frame_n_filtered.append(track_temp)
+    total_tracks = tracks_starting_on_frame_n_filtered + tracks_not_starting_on_frame_n
     return total_tracks
 
 
@@ -84,11 +85,12 @@ def get_dataframe_from_lists(frame_id, track_id, x, y):
     return df
 
 
-def dump_tracks_to_file(min_track_length: int = 20):
+def dump_tracks_to_file(min_track_length: int = 20, duplicate_frames_to_filter=(0,)):
     total_tracks: Sequence[Track] = get_total_tracks()
 
     # lists for frame_id, track_id, x, y
-    frame_id, track_id, x, y = split_tracks_into_lists(min_track_length, total_tracks)
+    frame_id, track_id, x, y = split_tracks_into_lists(min_track_length, total_tracks,
+                                                       duplicate_frames_to_filter=duplicate_frames_to_filter)
 
     df = get_dataframe_from_lists(frame_id, track_id, x, y)
 
