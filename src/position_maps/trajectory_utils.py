@@ -7,7 +7,8 @@ from torch.utils.data import DataLoader
 
 from average_image.constants import SDDVideoClasses
 from interplay import Track, Tracks
-from src_lib.datasets.trajectory_stgcnn import STGCNNTrajectoryDataset
+from src_lib.datasets.trajectory_stgcnn import STGCNNTrajectoryDataset, seq_collate, seq_collate_dict, \
+    seq_collate_with_graphs, seq_collate_with_graphs_dict
 
 VIDEO_CLASS = SDDVideoClasses.DEATH_CIRCLE
 VIDEO_NUMBER = 4
@@ -91,8 +92,9 @@ def dump_tracks_to_file(min_track_length: int = 20):
 
 
 if __name__ == '__main__':
-    dataset = STGCNNTrajectoryDataset(TRAJECTORIES_LOAD_PATH, obs_len=8, pred_len=12, skip=1, delim='space')
-    loader = DataLoader(dataset, batch_size=1)
+    dataset = STGCNNTrajectoryDataset(TRAJECTORIES_LOAD_PATH, obs_len=8, pred_len=12, skip=1, delim='space',
+                                      video_class=VIDEO_CLASS, video_number=VIDEO_NUMBER, construct_graph=True)
+    loader = DataLoader(dataset, batch_size=4, collate_fn=seq_collate_with_graphs_dict)
     for data in loader:
         print()
     # dump_tracks_to_file(min_track_length=0)

@@ -37,6 +37,66 @@ def seq_collate(data):
 
     return tuple(out)
 
+
+def seq_collate_dict(data):
+    obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, obs_frames, \
+    pred_frames, non_linear_ped, loss_mask, seq_start_end = seq_collate(data)
+
+    return {
+        'in_xy': obs_traj, 'in_dxdy': obs_traj_rel[1:, ...],
+        'gt_xy': pred_traj, 'gt_dxdy': pred_traj_rel,
+        'in_frames': obs_frames, 'gt_frames': pred_frames,
+        'non_linear_ped': non_linear_ped, 'loss_mask': loss_mask,
+        'seq_start_end': seq_start_end
+    }
+
+
+def seq_collate_with_graphs(data):
+    (obs_seq_list, pred_seq_list, obs_seq_rel_list, pred_seq_rel_list,
+     obs_frames_list, pred_frames_list, non_linear_ped_list, loss_mask_list,
+     v_obs_list, A_obs_list, v_pred_list, A_pred_list) = zip(*data)
+
+    _len = [len(seq) for seq in obs_seq_list]
+    cum_start_idx = [0] + np.cumsum(_len).tolist()
+    seq_start_end = [[start, end]
+                     for start, end in zip(cum_start_idx, cum_start_idx[1:])]
+
+    # Data format: batch, input_size, seq_len
+    # Network default input format: seq_len, batch, input_size
+    obs_traj = torch.cat(obs_seq_list, dim=0).permute(2, 0, 1)
+    pred_traj = torch.cat(pred_seq_list, dim=0).permute(2, 0, 1)
+    obs_traj_rel = torch.cat(obs_seq_rel_list, dim=0).permute(2, 0, 1)
+    pred_traj_rel = torch.cat(pred_seq_rel_list, dim=0).permute(2, 0, 1)
+    obs_frames = torch.cat(obs_frames_list, dim=0).permute(2, 0, 1)
+    pred_frames = torch.cat(pred_frames_list, dim=0).permute(2, 0, 1)
+    non_linear_ped = torch.cat(non_linear_ped_list)
+    loss_mask = torch.cat(loss_mask_list, dim=0)
+
+    seq_start_end = torch.LongTensor(seq_start_end)
+    out = [
+        obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, obs_frames, pred_frames, non_linear_ped,
+        loss_mask, v_obs_list, A_obs_list, v_pred_list, A_pred_list, seq_start_end
+    ]
+
+    return tuple(out)
+
+
+def seq_collate_with_graphs_dict(data):
+    obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, obs_frames, \
+    pred_frames, non_linear_ped, loss_mask, v_obs_list, A_obs_list, \
+    v_pred_list, A_pred_list, seq_start_end = seq_collate_with_graphs(data)
+
+    return {
+        'in_xy': obs_traj, 'in_dxdy': obs_traj_rel[1:, ...],
+        'gt_xy': pred_traj, 'gt_dxdy': pred_traj_rel,
+        'in_frames': obs_frames, 'gt_frames': pred_frames,
+        'non_linear_ped': non_linear_ped, 'loss_mask': loss_mask,
+        'v_obs': v_obs_list, 'A_obs': A_obs_list,
+        'v_pred': v_pred_list, 'A_pred': A_pred_list,
+        'seq_start_end': seq_start_end
+    }
+
+
 def anorm(p1, p2):
     norm = math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
     if norm == 0:
@@ -106,7 +166,8 @@ class STGCNNTrajectoryDataset(Dataset):
 
     def __init__(
             self, data_dir, obs_len=8, pred_len=8, skip=1, threshold=0.002,
-            min_ped=1, delim='\t', norm_lap_matr=True, construct_graph=False):
+            min_ped=1, delim='\t', norm_lap_matr=True, construct_graph=False,
+            video_class=None, video_number=None):
         """
         Args:
         - data_dir: Directory containing dataset files in the format
@@ -130,6 +191,8 @@ class STGCNNTrajectoryDataset(Dataset):
         self.delim = delim
         self.norm_lap_matr = norm_lap_matr
         self.construct_graph = construct_graph
+        self.video_class = video_class
+        self.video_number = video_number
 
         all_files = os.listdir(self.data_dir)
         all_files = [os.path.join(self.data_dir, _path) for _path in all_files]
@@ -239,7 +302,8 @@ class STGCNNTrajectoryDataset(Dataset):
                 v_, a_ = seq_to_graph(self.obs_traj[start:end, :], self.obs_traj_rel[start:end, :], self.norm_lap_matr)
                 self.v_obs.append(v_.clone())
                 self.A_obs.append(a_.clone())
-                v_, a_ = seq_to_graph(self.pred_traj[start:end, :], self.pred_traj_rel[start:end, :], self.norm_lap_matr)
+                v_, a_ = seq_to_graph(self.pred_traj[start:end, :], self.pred_traj_rel[start:end, :],
+                                      self.norm_lap_matr)
                 self.v_pred.append(v_.clone())
                 self.A_pred.append(a_.clone())
             pbar.close()
