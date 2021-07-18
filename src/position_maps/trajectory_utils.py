@@ -2,20 +2,23 @@ import os
 import subprocess
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Sequence
 
 import pandas as pd
 import torch
-from torch.utils.data import DataLoader
+from omegaconf import OmegaConf
+from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
+from baselinev2.nn.dataset import ConcatenateDataset
 from interplay import Track, Tracks
 from src_lib.datasets.trajectory_stgcnn import STGCNNTrajectoryDataset, seq_collate, seq_collate_dict, \
     seq_collate_with_graphs, seq_collate_with_graphs_dict
 
 VIDEO_CLASS = SDDVideoClasses.DEATH_CIRCLE
-VIDEO_NUMBER = 4
+VIDEO_NUMBER = 2
 
 FILENAME = 'extracted_trajectories.pt'
 BASE_PATH = os.path.join(os.getcwd(), f'logs/ExtractedTrajectories/{VIDEO_CLASS.name}/{VIDEO_NUMBER}/')
@@ -89,6 +92,7 @@ def dump_tracks_to_file(min_track_length: int = 20):
 
     df = get_dataframe_from_lists(frame_id, track_id, x, y)
 
+    Path(TRAJECTORIES_LOAD_PATH).mkdir(parents=True, exist_ok=True)
     with open(f"{TRAJECTORIES_LOAD_PATH}trajectories.txt", 'a') as f:
         df_to_dump = df.to_string(header=False, index=False)
         f.write(df_to_dump)
@@ -151,7 +155,7 @@ def displacement_error(pred_traj, pred_traj_gt, consider_ped=None, mode='sum'):
     """
     seq_len, _, _ = pred_traj.size()
     loss = pred_traj_gt.permute(1, 0, 2) - pred_traj.permute(1, 0, 2)
-    loss = loss**2
+    loss = loss ** 2
     if consider_ped is not None:
         loss = torch.sqrt(loss.sum(dim=2)).sum(dim=1) * consider_ped
     else:
@@ -163,7 +167,7 @@ def displacement_error(pred_traj, pred_traj_gt, consider_ped=None, mode='sum'):
 
 
 def final_displacement_error(
-    pred_pos, pred_pos_gt, consider_ped=None, mode='sum'
+        pred_pos, pred_pos_gt, consider_ped=None, mode='sum'
 ):
     """
     Input:
@@ -175,7 +179,7 @@ def final_displacement_error(
     - loss: gives the eculidian displacement error
     """
     loss = pred_pos_gt - pred_pos
-    loss = loss**2
+    loss = loss ** 2
     if consider_ped is not None:
         loss = torch.sqrt(loss.sum(dim=1)) * consider_ped
     else:
@@ -186,10 +190,49 @@ def final_displacement_error(
         return torch.sum(loss)
 
 
+def get_single_dataset(cfg, video_class, v_num, split_dataset):
+    load_path = f"{cfg.root}{video_class}/{v_num}/"
+    dataset = STGCNNTrajectoryDataset(
+        load_path, obs_len=cfg.obs_len, pred_len=cfg.pred_len, skip=cfg.skip,
+        delim=cfg.delim, video_class=video_class, video_number=v_num, construct_graph=cfg.construct_graph)
+
+    if not split_dataset:
+        return dataset
+
+    val_dataset_len = round(len(dataset) * cfg.val_ratio)
+    train_indices = torch.arange(start=0, end=len(dataset) - val_dataset_len)
+    val_indices = torch.arange(start=len(dataset) - val_dataset_len, end=len(dataset))
+
+    train_dataset = Subset(dataset, train_indices)
+    val_dataset = Subset(dataset, val_indices)
+    return train_dataset, val_dataset
+
+
+def get_multiple_datasets(cfg, split_dataset=True):
+    conf = cfg.tp_module.datasets
+    video_classes = conf.video_classes
+    video_numbers = conf.video_numbers
+
+    train_datasets, val_datasets = [], []
+    for v_idx, video_class in enumerate(video_classes):
+        for v_num in video_numbers[v_idx]:
+            if split_dataset:
+                t_dset, v_dset = get_single_dataset(conf, video_class, v_num, split_dataset)
+                train_datasets.append(t_dset)
+                val_datasets.append(v_dset)
+            else:
+                dset = get_single_dataset(cfg, video_class, v_num, split_dataset)
+                train_datasets.append(dset)
+
+    if split_dataset:
+        return ConcatenateDataset(train_datasets)
+    return ConcatenateDataset(train_datasets), ConcatenateDataset(val_datasets)
+
+
 if __name__ == '__main__':
-    dataset = STGCNNTrajectoryDataset(TRAJECTORIES_LOAD_PATH, obs_len=8, pred_len=12, skip=1, delim='space',
-                                      video_class=VIDEO_CLASS, video_number=VIDEO_NUMBER, construct_graph=False)
-    loader = DataLoader(dataset, batch_size=4, collate_fn=seq_collate_dict)
+    train_d, val_d = get_multiple_datasets(OmegaConf.load('config/training/training.yaml'))
+    loader = DataLoader(train_d, batch_size=4, collate_fn=seq_collate_dict)
     for data in tqdm(loader):
         in_frames, gt_frames = data['in_frames'], data['gt_frames']
+
     # dump_tracks_to_file(min_track_length=0)
