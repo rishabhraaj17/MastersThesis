@@ -265,20 +265,76 @@ def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True):
 
 
 def plot_trajectory_with_initial_and_last_frame(frame, last_frame, trajectory, frame_number, track_id,
-                                                epoch='', additional_text='', return_figure_only=False, save_path=None):
+                                                epoch='', additional_text='', return_figure_only=False, save_path=None,
+                                                use_lines=False):
     fig, ax = plt.subplots(1, 3, sharex='all', sharey='all', figsize=(18, 10))
     img_axis, last_image_axis, trajectory_axis = ax
 
     img_axis.imshow(frame)
     last_image_axis.imshow(last_frame)
 
-    add_line_to_axis(ax=img_axis, features=trajectory)
-    add_line_to_axis(ax=last_image_axis, features=trajectory)
-    add_line_to_axis(ax=trajectory_axis, features=trajectory)
+    if use_lines:
+        add_line_to_axis(ax=img_axis, features=trajectory)
+        add_line_to_axis(ax=last_image_axis, features=trajectory)
+        add_line_to_axis(ax=trajectory_axis, features=trajectory)
+    else:
+        add_features_to_axis(ax=img_axis, features=trajectory)
+        add_features_to_axis(ax=last_image_axis, features=trajectory)
+        add_features_to_axis(ax=trajectory_axis, features=trajectory)
 
     img_axis.set_title('Trajectory on initial frame')
     last_image_axis.set_title('Trajectory on last frame')
     trajectory_axis.set_title('Trajectories')
+
+    fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}\n{additional_text}')
+
+    legends_dict = {'b': 'Observed - [0 - 7]', 'r': 'True - [8 - 19]', 'g': 'Predicted - [8 - 19]'}
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
+    plt.tight_layout()
+
+    if return_figure_only:
+        plt.close()
+        return fig
+
+    if save_path is not None:
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path + f"frame_{epoch}_{frame_number}_track_{track_id}.png")
+        plt.close()
+    else:
+        plt.show()
+
+    return fig
+
+
+def plot_trajectory_with_one_frame(frame, last_frame, trajectory, frame_number, track_id,
+                                   epoch='', additional_text='', return_figure_only=False, save_path=None,
+                                   use_lines=False):
+    if last_frame is not None:
+        fig, ax = plt.subplots(1, 2, sharex='all', sharey='all', figsize=(16, 10))
+        img_axis, last_image_axis = ax
+
+        last_image_axis.imshow(last_frame)
+        last_image_axis.set_title('Trajectory on last frame')
+
+        if use_lines:
+            add_line_to_axis(ax=last_image_axis, features=trajectory)
+        else:
+            add_features_to_axis(ax=last_image_axis, features=trajectory)
+    else:
+        fig, ax = plt.subplots(1, 1, sharex='all', sharey='all', figsize=(8, 10))
+        img_axis = ax
+
+    img_axis.imshow(frame)
+
+    if use_lines:
+        add_line_to_axis(ax=img_axis, features=trajectory)
+    else:
+        add_features_to_axis(ax=img_axis, features=trajectory)
+
+    img_axis.set_title('Trajectory on initial frame')
 
     fig.suptitle(f'Frame: {frame_number} | Track Id: {track_id}\n{additional_text}')
 
@@ -311,11 +367,11 @@ def viz_raw_tracks():
         first_frame = tr.frames[0]
         last_frame = tr.frames[-1]
 
-        plot_trajectory_with_initial_and_last_frame(
+        plot_trajectory_with_one_frame(
             extract_frame_from_video(video_path, first_frame),
-            extract_frame_from_video(video_path, last_frame),
+            None,  # extract_frame_from_video(video_path, last_frame),
             np.stack(tr.locations),
-            frame_number=f"{first_frame}-{last_frame}", track_id=tr.idx)
+            frame_number=f"{first_frame}-{last_frame}", track_id=tr.idx, use_lines=False)
         print()
 
 
