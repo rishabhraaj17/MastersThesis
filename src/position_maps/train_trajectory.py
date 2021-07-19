@@ -83,6 +83,7 @@ def evaluate(cfg):
         dataset_idx = batch['dataset_idx'].item()
         seq_start_end = batch['seq_start_end']
         frame_nums = batch['in_frames']
+        track_lists = batch['in_tracks']
 
         random_trajectory_idx = np.random.choice(frame_nums.shape[1], 1, replace=False).item()
 
@@ -91,6 +92,7 @@ def evaluate(cfg):
         pred_trajectory = out['out_xy'][:, random_trajectory_idx, ...]
 
         frame_num = int(frame_nums[:, random_trajectory_idx, ...][0].item())
+        track_num = int(track_lists[:, random_trajectory_idx, ...][0].item())
 
         current_dataset = loader.dataset.datasets[dataset_idx].dataset
 
@@ -98,8 +100,9 @@ def evaluate(cfg):
                      f"/video{current_dataset.video_number}/video.mov"
         frame = extract_frame_from_video(video_path, frame_num)
 
-        plot_trajectory_alongside_frame(frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_num, track_id=0,
-                                        additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
+        plot_trajectory_alongside_frame(
+            frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_num, track_id=track_num,
+            additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
 
 
 if __name__ == '__main__':
