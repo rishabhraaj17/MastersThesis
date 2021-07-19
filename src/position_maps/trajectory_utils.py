@@ -18,7 +18,7 @@ from src_lib.datasets.trajectory_stgcnn import STGCNNTrajectoryDataset, seq_coll
     seq_collate_with_graphs, seq_collate_with_graphs_dict
 
 VIDEO_CLASS = SDDVideoClasses.DEATH_CIRCLE
-VIDEO_NUMBER = 4
+VIDEO_NUMBER = 2
 
 FILENAME = 'extracted_trajectories.pt'
 BASE_PATH = os.path.join(os.getcwd(), f'logs/ExtractedTrajectories/{VIDEO_CLASS.name}/{VIDEO_NUMBER}/')
@@ -263,8 +263,8 @@ def get_multiple_datasets(cfg, split_dataset=True):
 
 if __name__ == '__main__':
     train_d, val_d = get_multiple_datasets(OmegaConf.load('config/training/training.yaml'))
-    loader = DataLoader(train_d, batch_size=4, collate_fn=seq_collate_dict)
+    loader = DataLoader(val_d, batch_size=4, collate_fn=seq_collate_dict)
     for data in tqdm(loader):
         in_frames, gt_frames = data['in_frames'], data['gt_frames']
 
-    dump_tracks_to_file(min_track_length=0, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None)
+    # dump_tracks_to_file(min_track_length=0, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None)
