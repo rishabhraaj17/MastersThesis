@@ -100,16 +100,19 @@ def seq_collate_with_graphs_dict(data):
 def seq_collate_with_dataset_idx(data):
     obs_seq_list, pred_seq_list, obs_seq_rel_list, pred_seq_rel_list = [], [], [], []
     obs_frames_list, pred_frames_list, non_linear_ped_list, loss_mask_list = [], [], [], []
+    obs_tracks_list, pred_tracks_list = [], []
     dataset_idx = []
     for d in data:
         (obs_seq, pred_seq, obs_seq_rel, pred_seq_rel,
-         obs_frames, pred_frames, non_linear_ped, loss_mask), d_idx = d[0], d[1]
+         obs_frames, pred_frames, obs_tracks, pred_tracks, non_linear_ped, loss_mask), d_idx = d[0], d[1]
         obs_seq_list.append(obs_seq)
         pred_seq_list.append(pred_seq)
         obs_seq_rel_list.append(obs_seq_rel)
         pred_seq_rel_list.append(pred_seq_rel)
         obs_frames_list.append(obs_frames)
         pred_frames_list.append(pred_frames)
+        obs_tracks_list.append(obs_tracks)
+        pred_tracks_list.append(pred_tracks)
         non_linear_ped_list.append(non_linear_ped)
         loss_mask_list.append(loss_mask)
         dataset_idx.append(d_idx)
@@ -127,13 +130,15 @@ def seq_collate_with_dataset_idx(data):
     pred_traj_rel = torch.cat(pred_seq_rel_list, dim=0).permute(2, 0, 1)
     obs_frames = torch.cat(obs_frames_list, dim=0).permute(2, 0, 1)
     pred_frames = torch.cat(pred_frames_list, dim=0).permute(2, 0, 1)
+    obs_tracks = torch.cat(obs_tracks_list, dim=0).permute(2, 0, 1)
+    pred_tracks = torch.cat(pred_tracks_list, dim=0).permute(2, 0, 1)
     non_linear_ped = torch.cat(non_linear_ped_list)
     loss_mask = torch.cat(loss_mask_list, dim=0)
     seq_start_end = torch.LongTensor(seq_start_end)
     dataset_idx = torch.LongTensor(dataset_idx)
     out = [
-        obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, obs_frames, pred_frames, non_linear_ped,
-        loss_mask, seq_start_end, dataset_idx
+        obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, obs_frames, pred_frames, obs_tracks, pred_tracks,
+        non_linear_ped, loss_mask, seq_start_end, dataset_idx
     ]
 
     return tuple(out)
@@ -141,12 +146,14 @@ def seq_collate_with_dataset_idx(data):
 
 def seq_collate_with_dataset_idx_dict(data):
     obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, obs_frames, \
-    pred_frames, non_linear_ped, loss_mask, seq_start_end, dataset_idx = seq_collate_with_dataset_idx(data)
+    pred_frames, obs_tracks, pred_tracks, non_linear_ped, loss_mask, \
+    seq_start_end, dataset_idx = seq_collate_with_dataset_idx(data)
 
     return {
         'in_xy': obs_traj, 'in_dxdy': obs_traj_rel[1:, ...],
         'gt_xy': pred_traj, 'gt_dxdy': pred_traj_rel,
         'in_frames': obs_frames, 'gt_frames': pred_frames,
+        'in_tracks': obs_tracks, 'gt_tracks': pred_tracks,
         'non_linear_ped': non_linear_ped, 'loss_mask': loss_mask,
         'seq_start_end': seq_start_end, 'dataset_idx': dataset_idx
     }
@@ -257,6 +264,7 @@ class STGCNNTrajectoryDataset(Dataset):
         loss_mask_list = []
         non_linear_ped = []
         frames_list = []
+        tracks_list = []
         for path in all_files:
             data = read_file(path, delim)
             frames = np.unique(data[:, 0]).tolist()
@@ -277,6 +285,7 @@ class STGCNNTrajectoryDataset(Dataset):
                 curr_loss_mask = np.zeros((len(peds_in_curr_seq),
                                            self.seq_len))
                 curr_frames = np.zeros((len(peds_in_curr_seq), 1, self.seq_len))
+                curr_tracks = np.zeros((len(peds_in_curr_seq), 1, self.seq_len))
                 num_peds_considered = 0
                 _non_linear_ped = []
                 for _, ped_id in enumerate(peds_in_curr_seq):
@@ -289,6 +298,7 @@ class STGCNNTrajectoryDataset(Dataset):
                         continue
 
                     curr_ped_frames = np.transpose(curr_ped_seq[:, 0])
+                    curr_ped_tracks = np.transpose(curr_ped_seq[:, 1])
                     curr_ped_seq = np.transpose(curr_ped_seq[:, 2:])
                     curr_ped_seq = curr_ped_seq
                     # Make coordinates relative
@@ -299,6 +309,7 @@ class STGCNNTrajectoryDataset(Dataset):
                     curr_seq[_idx, :, pad_front:pad_end] = curr_ped_seq
                     curr_seq_rel[_idx, :, pad_front:pad_end] = rel_curr_ped_seq
                     curr_frames[_idx, :, pad_front:pad_end] = curr_ped_frames
+                    curr_tracks[_idx, :, pad_front:pad_end] = curr_ped_tracks
                     # Linear vs Non-Linear Trajectory
                     _non_linear_ped.append(
                         poly_fit(curr_ped_seq, pred_len, threshold))
@@ -312,6 +323,7 @@ class STGCNNTrajectoryDataset(Dataset):
                     seq_list.append(curr_seq[:num_peds_considered])
                     seq_list_rel.append(curr_seq_rel[:num_peds_considered])
                     frames_list.append(curr_frames[:num_peds_considered])
+                    tracks_list.append(curr_tracks[:num_peds_considered])
 
         self.num_seq = len(seq_list)
         seq_list = np.concatenate(seq_list, axis=0)
@@ -319,6 +331,7 @@ class STGCNNTrajectoryDataset(Dataset):
         loss_mask_list = np.concatenate(loss_mask_list, axis=0)
         non_linear_ped = np.asarray(non_linear_ped)
         frames_list = np.concatenate(frames_list, axis=0)
+        tracks_list = np.concatenate(tracks_list, axis=0)
 
         # Convert numpy -> Torch Tensor
         self.obs_traj = torch.from_numpy(
@@ -335,6 +348,10 @@ class STGCNNTrajectoryDataset(Dataset):
             frames_list[:, :, :self.obs_len]).type(torch.float)
         self.pred_frames = torch.from_numpy(
             frames_list[:, :, self.obs_len:]).type(torch.float)
+        self.obs_tracks = torch.from_numpy(
+            tracks_list[:, :, :self.obs_len]).type(torch.float)
+        self.pred_tracks = torch.from_numpy(
+            tracks_list[:, :, self.obs_len:]).type(torch.float)
 
         cum_start_idx = [0] + np.cumsum(num_peds_in_seq).tolist()
         self.seq_start_end = [
@@ -374,6 +391,7 @@ class STGCNNTrajectoryDataset(Dataset):
                 self.obs_traj[start:end, :], self.pred_traj[start:end, :],
                 self.obs_traj_rel[start:end, :], self.pred_traj_rel[start:end, :],
                 self.obs_frames[start:end, :], self.pred_frames[start:end, :],
+                self.obs_tracks[start:end, :], self.pred_tracks[start:end, :],
                 self.non_linear_ped[start:end], self.loss_mask[start:end, :],
                 self.v_obs[index], self.A_obs[index],
                 self.v_pred[index], self.A_pred[index]
@@ -383,6 +401,7 @@ class STGCNNTrajectoryDataset(Dataset):
                 self.obs_traj[start:end, :], self.pred_traj[start:end, :],
                 self.obs_traj_rel[start:end, :], self.pred_traj_rel[start:end, :],
                 self.obs_frames[start:end, :], self.pred_frames[start:end, :],
+                self.obs_tracks[start:end, :], self.pred_tracks[start:end, :],
                 self.non_linear_ped[start:end], self.loss_mask[start:end, :],
             ]
         return out
