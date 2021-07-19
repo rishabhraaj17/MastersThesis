@@ -171,12 +171,12 @@ deep_lab_v3_plus:
   use_fcrn_up_project: False
   align_corners: True
   use_correctors: False
-  with_aux_head: False
+  with_aux_head: True
   pretrained: 'open-mmlab://resnet50_v1c' # or url
 
   small:
     pretrained: 'open-mmlab://resnet18_v1c' # or url
-    with_aux_head: True
+    with_aux_head: False
     align_corners: True
     aspp_head: False  # if false then DepthwiseSeparableASPPHead
     with_deconv_head: True
@@ -536,13 +536,13 @@ trajectory_based:
       in_features: 2
       seq_len: 7
 
-      d_model: 64
-      nhead: 8
-      dim_feedforward: 512  # 2048 for 512 d_model
+      d_model: 32 # 64
+      nhead: 4 # 8
+      dim_feedforward: 128 # 64 # 512  # 2048 for 512 d_model
       dropout: 0.1
       activation: 'relu'
 
-      num_layers: 6
+      num_layers: 4 # 6
       norm: null  # 'layer_norm'
 
     decoder:
@@ -550,13 +550,13 @@ trajectory_based:
       out_features: 2
       seq_len: 12
 
-      d_model: 64
-      nhead: 8
-      dim_feedforward: 512  # 2048 for 512 d_model
+      d_model: 32 # 64
+      nhead: 4 # 6
+      dim_feedforward: 128 # 64 # 512  # 2048 for 512 d_model
       dropout: 0.1
       activation: 'relu'
 
-      num_layers: 6
+      num_layers: 4 # 6
       norm: null  # 'layer_norm'
 
     generator:

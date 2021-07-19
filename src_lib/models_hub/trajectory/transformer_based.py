@@ -1,11 +1,13 @@
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Union
 
 import torch
 from omegaconf import DictConfig, OmegaConf
 from pytorchvideo.layers import PositionalEncoding
 from torch import nn
-from torch.utils.data import Dataset
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import Dataset, DataLoader
 
+from baselinev2.stochastic.losses import cal_ade, cal_fde
 from src_lib.models_hub import Base, BaseGAN
 
 
@@ -139,10 +141,63 @@ class TrajectoryTransformer(Base):
         pred = out['out_xy']
 
         loss = self.calculate_loss(pred, target)
-        return loss
+        ade, fde = self.calculate_metrics(pred, target, self.config.tp_module.metrics.mode)
+        return loss, ade, fde
+
+    @staticmethod
+    def calculate_metrics(pred, target, mode='sum'):
+        ade = cal_ade(target, pred, mode=mode)
+        fde = cal_fde(target, pred, mode=mode)
+        return ade, fde
 
     def calculate_loss(self, pred, target):
         return torch.linalg.norm((pred - target), ord=2, dim=0).mean(dim=0).mean()
+
+    def training_step(self, batch, batch_idx):
+        loss, ade, fde = self._one_step(batch)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/ade', ade, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/fde', fde, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss, ade, fde = self._one_step(batch)
+        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/ade', ade, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/fde', fde, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return loss
+
+    def train_dataloader(self) -> DataLoader:
+        return DataLoader(
+            dataset=self.train_dataset, batch_size=self.config.tp_module.loader.batch_size,
+            shuffle=self.config.tp_module.loader.shuffle, num_workers=self.config.tp_module.loader.num_workers,
+            collate_fn=self.collate_fn, pin_memory=self.config.tp_module.loader.pin_memory,
+            drop_last=self.config.tp_module.loader.drop_last)
+
+    def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
+        return DataLoader(
+            dataset=self.val_dataset,
+            batch_size=self.config.tp_module.loader.batch_size * self.config.tp_module.loader.val_batch_size_factor,
+            shuffle=False, num_workers=self.config.tp_module.loader.num_workers,
+            collate_fn=self.collate_fn, pin_memory=self.config.tp_module.loader.pin_memory,
+            drop_last=self.config.tp_module.loader.drop_last)
+
+    def configure_optimizers(self):
+        opt = torch.optim.Adam(self.parameters(), lr=self.config.tp_module.optimizer.lr,
+                               weight_decay=self.config.tp_module.optimizer.weight_decay,
+                               amsgrad=self.config.tp_module.optimizer.amsgrad)
+        schedulers = [
+            {
+                'scheduler': ReduceLROnPlateau(opt,
+                                               patience=self.config.tp_module.scheduler.patience,
+                                               verbose=self.config.tp_module.scheduler.verbose,
+                                               factor=self.config.tp_module.scheduler.factor,
+                                               min_lr=self.config.tp_module.scheduler.min_lr),
+                'monitor': self.config.tp_module.scheduler.monitor,
+                'interval': self.config.tp_module.scheduler.interval,
+                'frequency': self.config.tp_module.scheduler.frequency
+            }]
+        return [opt], schedulers
 
 
 class TransformerMotionGenerator(nn.Module):

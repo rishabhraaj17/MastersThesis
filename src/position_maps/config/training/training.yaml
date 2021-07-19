@@ -24,6 +24,7 @@ mode: 'min'
 # TP module
 # scheduler
 tp_module:
+  model: 'TrajectoryTransformer'  # 'RNNBaseline'  # 'TrajectoryTransformer'
   datasets:
     root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/Trajectories/'
     filename: 'trajectories.pt'
@@ -32,7 +33,7 @@ tp_module:
 
     # we split same dataset into train & val (in time)
     video_classes: [ DEATH_CIRCLE ]
-    video_numbers: [ [ 4 ] ]
+    video_numbers: [ [ 2, 4 ] ]
 
     # not in use right now
     train:
@@ -54,9 +55,10 @@ tp_module:
     pin_memory: True
     drop_last: False
     num_workers: 0
+    val_batch_size_factor: 2
 
   scheduler:
-    patience: 5
+    patience: 20
     verbose: True
     factor: 0.1
     min_lr: 1e-10
@@ -68,9 +70,25 @@ tp_module:
 
   # Adam
   optimizer:
-    lr: 2e-3
+    lr: 1e-4
     weight_decay: 0
     amsgrad: False
+
+  metrics:
+    mode: 'average'
+
+  trainer:
+    max_epochs: 400
+    gpus: 1
+    fast_dev_run: False
+    num_checkpoints_to_save: 3
+    deterministic: True
+    accelerator: null #'ddp_cpu' # null  # 'ddp', 'ddp_cpu'
+    replace_sampler_ddp: False
+    num_nodes: 1
+    find_unused_parameters: True
+    gradient_clip_val: 2.0
+    accumulate_grad_batches: 1
 
 # loaders
 batch_size: 2

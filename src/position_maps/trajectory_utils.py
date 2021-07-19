@@ -265,5 +265,6 @@ if __name__ == '__main__':
     loader = DataLoader(val_d, batch_size=4, collate_fn=seq_collate_with_dataset_idx_dict)
     for data in tqdm(loader):
         in_frames, gt_frames = data['in_frames'], data['gt_frames']
+        print(in_frames[:, 0, ...])
 
     # dump_tracks_to_file(min_track_length=0, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None)

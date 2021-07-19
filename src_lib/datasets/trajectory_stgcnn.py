@@ -288,7 +288,7 @@ class STGCNNTrajectoryDataset(Dataset):
                     if pad_end - pad_front != self.seq_len:
                         continue
 
-                    curr_ped_frames = np.transpose(curr_ped_seq[:, 1])
+                    curr_ped_frames = np.transpose(curr_ped_seq[:, 0])
                     curr_ped_seq = np.transpose(curr_ped_seq[:, 2:])
                     curr_ped_seq = curr_ped_seq
                     # Make coordinates relative
