@@ -6,6 +6,7 @@ import albumentations as A
 import pandas as pd
 import torch
 import torchvision
+from matplotlib import colors
 from omegaconf import ListConfig, DictConfig
 from torch.nn.functional import pad
 from torch.utils.data import Dataset, ConcatDataset
@@ -378,3 +379,13 @@ def frames_only_collate_fn(batch):
     rgb_img_list = torch.cat(rgb_img_list)
 
     return rgb_img_list, meta_list
+
+
+def get_all_matplotlib_colors():
+    clrs = dict(colors.BASE_COLORS, **colors.CSS4_COLORS)
+
+    # Sort colors by hue, saturation, value and name.
+    by_hsv = sorted((tuple(colors.rgb_to_hsv(colors.to_rgba(color)[:3])), name)
+                    for name, color in clrs.items())
+    sorted_names = [name for hsv, name in by_hsv]
+    return sorted_names

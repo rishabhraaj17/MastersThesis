@@ -17,10 +17,10 @@ from torch.utils.data import Subset, DataLoader
 from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
-from baselinev2.plot_utils import add_features_to_axis
+from baselinev2.plot_utils import add_features_to_axis, add_line_to_axis
 from log import get_logger
 from models import TrajectoryModel
-from interplay_utils import setup_multiple_frame_only_datasets_core, frames_only_collate_fn
+from interplay_utils import setup_multiple_frame_only_datasets_core, frames_only_collate_fn, get_all_matplotlib_colors
 from location_utils import locations_from_heatmaps, get_adjusted_object_locations, \
     prune_locations_proximity_based
 from train import setup_single_video_dataset, setup_multiple_datasets, build_model, build_loss
@@ -417,15 +417,17 @@ def construct_tracks(active_tracks, frame_numbers, inactive_tracks, pred_object_
     return current_track_local, current_track_selective_local
 
 
-def viz_tracks(active_tracks, first_frame, show=True):
+def viz_tracks(active_tracks, first_frame, show=True, use_lines=False):
     # active_tracks_to_vis = np.stack([t.locations for t in active_tracks.tracks])
     active_tracks_to_vis = [t.locations for t in active_tracks.tracks]
     fig, ax = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
     ax.imshow(first_frame.squeeze().permute(1, 2, 0))
     for a_t in active_tracks_to_vis:
         a_t = np.stack(a_t)
-        add_features_to_axis(ax=ax, features=a_t, marker_size=1, marker_color='g')
-        # add_line_to_axis(ax=ax, features=a_t)
+        if use_lines:
+            add_line_to_axis(ax=ax, features=a_t, marker_size=1, marker_color='g')
+        else:
+            add_features_to_axis(ax=ax, features=a_t, marker_size=1, marker_color='g')
     plt.tight_layout()
     if show:
         plt.show()
@@ -521,9 +523,9 @@ def extract_trajectories(cfg):
             position_model['out_head_0'], position_model['out_head_1'], position_model['out_head_2']
         frames_sequence = position_model['frames_sequence']
 
-    train_loader = DataLoader(train_dataset, batch_size=cfg.interplay_v0.batch_size, shuffle=cfg.interplay_v0.shuffle,
+    train_loader = DataLoader(train_dataset, batch_size=cfg.interplay_v0.batch_size, shuffle=False,
                               num_workers=cfg.interplay_v0.num_workers, collate_fn=frames_only_collate_fn,
-                              pin_memory=cfg.interplay_v0.pin_memory, drop_last=cfg.interplay_v0.drop_last)
+                              pin_memory=False, drop_last=cfg.interplay_v0.drop_last)
 
     # training + logic
     track_ids_used = []
@@ -616,7 +618,8 @@ def extract_trajectories(cfg):
                 current_track_selective=current_track_selective, init_track_each_frame=init_track_each_frame,
                 batch_start_idx=0)
 
-        viz_tracks(active_tracks, interpolate(frames[0, None, ...], size=meta[0]['original_shape']), show=False)
+        viz_tracks(active_tracks, interpolate(frames[0, None, ...], size=meta[0]['original_shape']), show=False,
+                   use_lines=True)
 
         if do_selective_track_association:
             viz_tracks(active_tracks_selective,
