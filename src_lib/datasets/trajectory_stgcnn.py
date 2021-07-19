@@ -97,6 +97,61 @@ def seq_collate_with_graphs_dict(data):
     }
 
 
+def seq_collate_with_dataset_idx(data):
+    obs_seq_list, pred_seq_list, obs_seq_rel_list, pred_seq_rel_list = [], [], [], []
+    obs_frames_list, pred_frames_list, non_linear_ped_list, loss_mask_list = [], [], [], []
+    dataset_idx = []
+    for d in data:
+        (obs_seq, pred_seq, obs_seq_rel, pred_seq_rel,
+         obs_frames, pred_frames, non_linear_ped, loss_mask), d_idx = d[0], d[1]
+        obs_seq_list.append(obs_seq)
+        pred_seq_list.append(pred_seq)
+        obs_seq_rel_list.append(obs_seq_rel)
+        pred_seq_rel_list.append(pred_seq_rel)
+        obs_frames_list.append(obs_frames)
+        pred_frames_list.append(pred_frames)
+        non_linear_ped_list.append(non_linear_ped)
+        loss_mask_list.append(loss_mask)
+        dataset_idx.append(d_idx)
+
+    _len = [len(seq) for seq in obs_seq_list]
+    cum_start_idx = [0] + np.cumsum(_len).tolist()
+    seq_start_end = [[start, end]
+                     for start, end in zip(cum_start_idx, cum_start_idx[1:])]
+
+    # Data format: batch, input_size, seq_len
+    # Network default input format: seq_len, batch, input_size
+    obs_traj = torch.cat(obs_seq_list, dim=0).permute(2, 0, 1)
+    pred_traj = torch.cat(pred_seq_list, dim=0).permute(2, 0, 1)
+    obs_traj_rel = torch.cat(obs_seq_rel_list, dim=0).permute(2, 0, 1)
+    pred_traj_rel = torch.cat(pred_seq_rel_list, dim=0).permute(2, 0, 1)
+    obs_frames = torch.cat(obs_frames_list, dim=0).permute(2, 0, 1)
+    pred_frames = torch.cat(pred_frames_list, dim=0).permute(2, 0, 1)
+    non_linear_ped = torch.cat(non_linear_ped_list)
+    loss_mask = torch.cat(loss_mask_list, dim=0)
+    seq_start_end = torch.LongTensor(seq_start_end)
+    dataset_idx = torch.LongTensor(dataset_idx)
+    out = [
+        obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, obs_frames, pred_frames, non_linear_ped,
+        loss_mask, seq_start_end, dataset_idx
+    ]
+
+    return tuple(out)
+
+
+def seq_collate_with_dataset_idx_dict(data):
+    obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, obs_frames, \
+    pred_frames, non_linear_ped, loss_mask, seq_start_end, dataset_idx = seq_collate_with_dataset_idx(data)
+
+    return {
+        'in_xy': obs_traj, 'in_dxdy': obs_traj_rel[1:, ...],
+        'gt_xy': pred_traj, 'gt_dxdy': pred_traj_rel,
+        'in_frames': obs_frames, 'gt_frames': pred_frames,
+        'non_linear_ped': non_linear_ped, 'loss_mask': loss_mask,
+        'seq_start_end': seq_start_end, 'dataset_idx': dataset_idx
+    }
+
+
 def anorm(p1, p2):
     norm = math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
     if norm == 0:

@@ -15,7 +15,7 @@ from average_image.constants import SDDVideoClasses
 from baselinev2.nn.dataset import ConcatenateDataset
 from interplay import Track, Tracks
 from src_lib.datasets.trajectory_stgcnn import STGCNNTrajectoryDataset, seq_collate, seq_collate_dict, \
-    seq_collate_with_graphs, seq_collate_with_graphs_dict
+    seq_collate_with_graphs, seq_collate_with_graphs_dict, seq_collate_with_dataset_idx_dict
 
 VIDEO_CLASS = SDDVideoClasses.DEATH_CIRCLE
 VIDEO_NUMBER = 2
@@ -238,7 +238,7 @@ def get_single_dataset(cfg, video_class, v_num, split_dataset):
     return train_dataset, val_dataset
 
 
-def get_multiple_datasets(cfg, split_dataset=True):
+def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True):
     conf = cfg.tp_module.datasets
     video_classes = conf.video_classes
     video_numbers = conf.video_numbers
@@ -255,15 +255,14 @@ def get_multiple_datasets(cfg, split_dataset=True):
                 train_datasets.append(dset)
 
     if split_dataset:
-        # return ConcatenateDataset(train_datasets), ConcatenateDataset(val_datasets)
-        return ConcatDataset(train_datasets), ConcatDataset(val_datasets)
-    # return ConcatenateDataset(train_datasets)
-    return ConcatDataset(train_datasets)
+        return (ConcatenateDataset(train_datasets), ConcatenateDataset(val_datasets)) \
+            if with_dataset_idx else (ConcatDataset(train_datasets), ConcatDataset(val_datasets))
+    return ConcatenateDataset(train_datasets) if with_dataset_idx else ConcatDataset(train_datasets)
 
 
 if __name__ == '__main__':
     train_d, val_d = get_multiple_datasets(OmegaConf.load('config/training/training.yaml'))
-    loader = DataLoader(val_d, batch_size=4, collate_fn=seq_collate_dict)
+    loader = DataLoader(val_d, batch_size=4, collate_fn=seq_collate_with_dataset_idx_dict)
     for data in tqdm(loader):
         in_frames, gt_frames = data['in_frames'], data['gt_frames']
 
