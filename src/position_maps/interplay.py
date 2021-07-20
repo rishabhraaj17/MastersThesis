@@ -837,14 +837,15 @@ def extract_trajectories_resumable(cfg):
 
 def construct_tracks_from_locations(
         active_tracks, frame_number, inactive_tracks, current_frame_locations,
-        track_ids_used, current_track, init_track_each_frame=True):
+        track_ids_used, current_track, init_track_each_frame=True, max_distance=float('inf')):
     current_track_local = current_track
 
     # get last frame locations
     last_frame_locations = np.stack([t.locations[-1] for t in active_tracks.tracks])
 
     # try setting max dist to a reasonable number so that matches are reasonable within a distance
-    distance_matrix = mm.distances.norm2squared_matrix(last_frame_locations, current_frame_locations)
+    distance_matrix = mm.distances.norm2squared_matrix(
+        last_frame_locations, current_frame_locations, max_d2=max_distance)
 
     agent_associations = mm.lap.lsa_solve_scipy(distance_matrix)
     match_rows, match_cols = agent_associations
@@ -893,7 +894,7 @@ def construct_tracks_from_locations(
 
 
 def extract_trajectories_from_locations_core(cfg, enable_forward_pass, out_head, init_track_each_frame,
-                                             location_version_to_use='pruned_scaled'):
+                                             location_version_to_use='pruned_scaled', max_distance=float('inf')):
     if cfg.single_video_mode.enabled:
         train_dataset = setup_frame_only_dataset(cfg)
         val_dataset = None
@@ -975,7 +976,8 @@ def extract_trajectories_from_locations_core(cfg, enable_forward_pass, out_head,
                 active_tracks=active_tracks, frame_number=location.frame_number, inactive_tracks=inactive_tracks,
                 current_frame_locations=locations_to_use,
                 track_ids_used=track_ids_used,
-                current_track=current_track, init_track_each_frame=init_track_each_frame)
+                current_track=current_track, init_track_each_frame=init_track_each_frame,
+                max_distance=max_distance)
 
         viz_tracks(active_tracks, interpolate(frames[0, None, ...], size=meta[0]['original_shape']), show=True,
                    use_lines=False)
@@ -984,7 +986,7 @@ def extract_trajectories_from_locations_core(cfg, enable_forward_pass, out_head,
 
 def extract_trajectories_from_locations_core_minimal(
         locations, init_track_each_frame, video_path,
-        location_version_to_use='pruned_scaled'):
+        location_version_to_use='pruned_scaled', max_distance=float('inf')):
     track_ids_used = []
     current_track = 0
 
@@ -1015,7 +1017,8 @@ def extract_trajectories_from_locations_core_minimal(
                 active_tracks=active_tracks, frame_number=location.frame_number, inactive_tracks=inactive_tracks,
                 current_frame_locations=locations_to_use,
                 track_ids_used=track_ids_used,
-                current_track=current_track, init_track_each_frame=init_track_each_frame)
+                current_track=current_track, init_track_each_frame=init_track_each_frame,
+                max_distance=max_distance)
 
         viz_tracks(active_tracks, extract_frame_from_video(video_path, location.frame_number), show=True,
                    use_lines=False)
@@ -1028,12 +1031,12 @@ def extract_trajectories_from_locations(cfg):
 
     location_version_to_use = 'pruned_scaled'
     head_to_use = 0
+    max_matching_euclidean_distance = 20.
 
     init_track_each_frame = True
     enable_forward_pass = False
 
     logger.info(f'Extract trajectories from locations...')
-    logger.info(f'Setting up DataLoader and Model...')
 
     # adjust config here
     cfg.device = 'cpu'  # 'cuda:0'
@@ -1071,11 +1074,12 @@ def extract_trajectories_from_locations(cfg):
         active_tracks, inactive_tracks, track_ids_used = extract_trajectories_from_locations_core_minimal(
             locations=out_head, init_track_each_frame=init_track_each_frame,
             video_path=video_path,
-            location_version_to_use=location_version_to_use)
+            location_version_to_use=location_version_to_use, max_distance=max_matching_euclidean_distance)
     else:
+        logger.info(f'Setting up DataLoader and Model...')
         active_tracks, inactive_tracks, track_ids_used = extract_trajectories_from_locations_core(
             cfg, enable_forward_pass, out_head=out_head, init_track_each_frame=init_track_each_frame,
-            location_version_to_use=location_version_to_use)
+            location_version_to_use=location_version_to_use, max_distance=max_matching_euclidean_distance)
 
     # save extracted trajectories
     save_dict = {
