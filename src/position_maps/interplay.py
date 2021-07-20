@@ -16,6 +16,7 @@ from torch.utils.data import Subset, DataLoader
 from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
+from baselinev2.exceptions import TimeoutException
 from baselinev2.plot_utils import add_features_to_axis, add_line_to_axis
 from interplay_utils import setup_multiple_frame_only_datasets_core, frames_only_collate_fn, Track, Tracks
 from location_utils import locations_from_heatmaps, get_adjusted_object_locations, \
@@ -974,9 +975,12 @@ def extract_trajectories_from_locations_core_minimal(
             locations_to_use = location.scaled_locations
         elif location_version_to_use == 'runtime_pruned_scaled':
             # filter out overlapping locations
-            pruned_locations, pruned_locations_idx = prune_locations_proximity_based(
-                    location.locations, prune_radius)
-            pruned_locations = torch.from_numpy(pruned_locations)
+            try:
+                pruned_locations, pruned_locations_idx = prune_locations_proximity_based(
+                        location.locations, prune_radius)
+                pruned_locations = torch.from_numpy(pruned_locations)
+            except TimeoutException:
+                pruned_locations = torch.from_numpy(location.locations)
 
             fake_padded_heatmaps = torch.zeros(size=(1, 1, padded_shape[0], padded_shape[1]))
             pred_object_locations_scaled, _ = get_adjusted_object_locations(
@@ -1029,9 +1033,9 @@ def extract_trajectories_from_locations(cfg):
     location_version_to_use = 'runtime_pruned_scaled'  # 'pruned_scaled'
     head_to_use = 0
     # 50 - as small we go more trajectories but shorter trajectories
-    max_matching_euclidean_distance = 200.  # 1000 ~ 500. > 200. looks good
+    max_matching_euclidean_distance = 500.  # 1000 ~ 500. > 200. looks good
 
-    prune_radius = 30
+    prune_radius = 50  # dc3
 
     init_track_each_frame = True
     enable_forward_pass = False
