@@ -17,7 +17,7 @@ from average_image.constants import SDDVideoClasses
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.dataset import ConcatenateDataset
 from baselinev2.plot_utils import add_line_to_axis, add_features_to_axis
-from interplay import Track, Tracks
+from src.position_maps.interplay_utils import Track, Tracks
 from src_lib.datasets.trajectory_stgcnn import STGCNNTrajectoryDataset, seq_collate, seq_collate_dict, \
     seq_collate_with_graphs, seq_collate_with_graphs_dict, seq_collate_with_dataset_idx_dict
 
@@ -372,6 +372,22 @@ def viz_raw_tracks():
             None,  # extract_frame_from_video(video_path, last_frame),
             np.stack(tr.locations),
             frame_number=f"{first_frame}-{last_frame}", track_id=tr.idx, use_lines=False)
+        print()
+
+
+def viz_raw_tracks_from_active_inactive(active_tracks, inactive_tracks, video_class, video_number, use_lines=False):
+    root = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
+    video_path = f"{root}videos/{video_class}/video{video_number}/video.mov"
+    total_tracks = active_tracks.tracks + inactive_tracks.tracks
+    for tr in total_tracks:
+        first_frame = tr.frames[0]
+        last_frame = tr.frames[-1]
+
+        plot_trajectory_with_one_frame(
+            extract_frame_from_video(video_path, first_frame),
+            None,  # extract_frame_from_video(video_path, last_frame),
+            np.stack(tr.locations),
+            frame_number=f"{first_frame}-{last_frame}", track_id=tr.idx, use_lines=use_lines)
         print()
 
 

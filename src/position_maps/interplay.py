@@ -2,7 +2,6 @@ import copy
 import os
 import warnings
 from pathlib import Path
-from typing import List
 
 import hydra
 import motmetrics as mm
@@ -17,13 +16,13 @@ from torch.utils.data import Subset, DataLoader
 from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
-from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import add_features_to_axis, add_line_to_axis
-from interplay_utils import setup_multiple_frame_only_datasets_core, frames_only_collate_fn
+from interplay_utils import setup_multiple_frame_only_datasets_core, frames_only_collate_fn, Track, Tracks
 from location_utils import locations_from_heatmaps, get_adjusted_object_locations, \
     prune_locations_proximity_based, ExtractedLocations, Locations, Location
 from log import get_logger
 from models import TrajectoryModel
+from trajectory_utils import viz_raw_tracks_from_active_inactive
 from train import setup_single_video_dataset, setup_multiple_datasets, build_model, build_loss
 from utils import heat_map_collate_fn, ImagePadder, get_scaled_shapes_with_pad_values
 
@@ -31,33 +30,6 @@ warnings.filterwarnings("ignore")
 
 seed_everything(42)
 logger = get_logger(__name__)
-
-
-class Track(object):
-    def __init__(self, idx: int, frames: List[int], locations: List, inactive: int = 0):
-        super(Track, self).__init__()
-        self.idx = idx
-        self.frames = frames
-        self.locations = locations
-        self.inactive = inactive
-
-    def __eq__(self, other):
-        return self.idx == other.idx
-
-    def __repr__(self):
-        return f"Track ID: {self.idx}" \
-               f"\n{'Active' if self.inactive == 0 else ('Inactive since' + str(self.inactive) + 'frames')}" \
-               f"\nFrames: {self.frames}" \
-               f"\nTrack Positions: {self.locations}"
-
-
-class Tracks(object):
-    def __init__(self, tracks: List[Track]):
-        self.tracks = tracks
-
-    @classmethod
-    def init_with_empty_tracks(cls):
-        return Tracks([])
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -1020,8 +992,10 @@ def extract_trajectories_from_locations_core_minimal(
                 current_track=current_track, init_track_each_frame=init_track_each_frame,
                 max_distance=max_distance)
 
-        viz_tracks(active_tracks, extract_frame_from_video(video_path, location.frame_number), show=True,
-                   use_lines=False)
+        # viz_tracks(active_tracks, extract_frame_from_video(video_path, location.frame_number), show=True,
+        #            use_lines=False)
+        if t_idx == 100:
+            viz_raw_tracks_from_active_inactive(active_tracks, inactive_tracks, 'deathCircle', 2)
     return active_tracks, inactive_tracks, track_ids_used
 
 
@@ -1031,7 +1005,7 @@ def extract_trajectories_from_locations(cfg):
 
     location_version_to_use = 'pruned_scaled'
     head_to_use = 0
-    max_matching_euclidean_distance = 20.
+    max_matching_euclidean_distance = 50.
 
     init_track_each_frame = True
     enable_forward_pass = False

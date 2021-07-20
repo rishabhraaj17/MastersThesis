@@ -1,6 +1,6 @@
 import math
 import os
-from typing import Optional, Callable, Tuple, Sequence
+from typing import Optional, Callable, Tuple, Sequence, List
 
 import albumentations as A
 import pandas as pd
@@ -389,3 +389,30 @@ def get_all_matplotlib_colors():
                     for name, color in clrs.items())
     sorted_names = [name for hsv, name in by_hsv]
     return sorted_names
+
+
+class Track(object):
+    def __init__(self, idx: int, frames: List[int], locations: List, inactive: int = 0):
+        super(Track, self).__init__()
+        self.idx = idx
+        self.frames = frames
+        self.locations = locations
+        self.inactive = inactive
+
+    def __eq__(self, other):
+        return self.idx == other.idx
+
+    def __repr__(self):
+        return f"Track ID: {self.idx}" \
+               f"\n{'Active' if self.inactive == 0 else ('Inactive since' + str(self.inactive) + 'frames')}" \
+               f"\nFrames: {self.frames}" \
+               f"\nTrack Positions: {self.locations}\n\n"
+
+
+class Tracks(object):
+    def __init__(self, tracks: List[Track]):
+        self.tracks = tracks
+
+    @classmethod
+    def init_with_empty_tracks(cls):
+        return Tracks([])
