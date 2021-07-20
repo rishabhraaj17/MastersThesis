@@ -16,8 +16,8 @@ eval:
 
   # dataset
   root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
-  video_class: DEATH_CIRCLE
-  video_meta_class: DEATH_CIRCLE
+  video_class: GATES
+  video_meta_class: GATES
   desired_pixel_to_meter_ratio: 0.07
   desired_pixel_to_meter_ratio_rgb: 0.07 # 0.07 # 0.25 # 0.05
   downscale_only_target_maps: False
@@ -26,13 +26,13 @@ eval:
   frame_rate: 30.  # 30.
 
   video_based:
-    enabled: False
-    frames_per_clip: 5  # for video based
+    enabled: True  # True
+    frames_per_clip: 4  # for video based
     gt_idx: -1
 
   test:
     num_videos: -1
-    video_number_to_use: 4
+    video_number_to_use: 3
     #    video_classes_to_use: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
     #    video_numbers_to_use: [ [ 6 ], [ 3 ], [ 3 ], [ 7 ], [ 9, 14 ], [ 0 ], [ 6 ], [ 0 ] ]
     video_classes_to_use: [ DEATH_CIRCLE ]  # [ GATES, DEATH_CIRCLE, LITTLE ]
@@ -66,7 +66,7 @@ eval:
       alpha: 0.85
       gamma: 4.0
 
-  model: 'DeepLabV3Plus'  # DeepLabV3PlusTemporal2D
+  model: 'DeepLabV3PlusTemporal2D'  # DeepLabV3PlusTemporal2D, DeepLabV3Plus
 
   preproccesing:
     pad_factor: 8
@@ -120,5 +120,5 @@ eval:
   checkpoint:
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
     path: "lightning_logs/version_"
-    version: 509506  # 509506 # 497829 # 492265 #424798 # 437363  # 424798 # 509506 (best-dpv3-r50)
+    version: 513923  # 509506 # 497829 # 492265 #424798 # 437363  # 424798 # 509506 (best-dlv3-r50) # 513512 (T2D-best-dlv3) # 511123 (LITTLE - good) # 511116 (DC-3-good)
     top_k: 1
