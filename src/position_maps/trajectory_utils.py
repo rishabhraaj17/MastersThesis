@@ -23,7 +23,7 @@ from src_lib.datasets.trajectory_stgcnn import STGCNNTrajectoryDataset, seq_coll
     seq_collate_with_graphs, seq_collate_with_graphs_dict, seq_collate_with_dataset_idx_dict
 
 VIDEO_CLASS = SDDVideoClasses.DEATH_CIRCLE
-VIDEO_NUMBER = 2
+VIDEO_NUMBER = 3
 
 FILENAME = 'extracted_trajectories.pt'
 BASE_PATH = os.path.join(os.getcwd(), f'logs/ExtractedTrajectories/{VIDEO_CLASS.name}/{VIDEO_NUMBER}/')
@@ -43,11 +43,12 @@ def split_tracks_into_lists(min_track_length, total_tracks, duplicate_frames_to_
     for d_frame in duplicate_frames_to_filter:
         total_tracks = filter_out_nth_frame(total_tracks, n=d_frame)
 
-    # if filter_nth_frame_from_middle is not None:
-    #     total_tracks = filter_out_nth_frame_from_middle(total_tracks, n=filter_nth_frame_from_middle)
+    if filter_nth_frame_from_middle is not None:
+        for f in filter_nth_frame_from_middle:
+            total_tracks = filter_out_nth_frame_from_middle(total_tracks, n=f)
 
     frame_id, track_id, x, y = [], [], [], []
-    for track in total_tracks:
+    for track in tqdm(total_tracks):
         if len(track.frames) < min_track_length:
             continue
         for f_id, loc in zip(track.frames, track.locations):
@@ -85,22 +86,23 @@ def filter_out_nth_frame(total_tracks, n=0):
 # not of use
 def filter_out_nth_frame_from_middle(total_tracks, n):
     # filter out extra nth frame
-    tracks_not_starting_on_frame_n, tracks_starting_on_frame_n = [], []
+    tracks_not_having_frame_n, tracks_having_frame_n = [], []
     for track in total_tracks:
         if n in track.frames:
-            tracks_starting_on_frame_n.append(track)
+            tracks_having_frame_n.append(track)
         else:
-            tracks_not_starting_on_frame_n.append(track)
-    tracks_starting_on_frame_n_filtered = []
-    for t in tracks_starting_on_frame_n:
+            tracks_not_having_frame_n.append(track)
+    tracks_having_frame_n_filtered = []
+    for t in tracks_having_frame_n:
+        offending_idx = t.frames.index(n)
         track_temp = Track(
             idx=t.idx,
-            frames=t.frames[1:],
-            locations=t.locations[1:],
+            frames=t.frames[:offending_idx] + t.frames[offending_idx+1:],
+            locations=t.locations[:offending_idx] + t.locations[offending_idx+1:],
             inactive=t.inactive
         )
-        tracks_starting_on_frame_n_filtered.append(track_temp)
-    total_tracks = tracks_starting_on_frame_n_filtered + tracks_not_starting_on_frame_n
+        tracks_having_frame_n_filtered.append(track_temp)
+    total_tracks = tracks_having_frame_n_filtered + tracks_not_having_frame_n
     return total_tracks
 
 
@@ -118,6 +120,7 @@ def get_dataframe_from_lists(frame_id, track_id, x, y):
 
 
 def dump_tracks_to_file(min_track_length: int = 20, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None):
+    print(f"Brewing Trajectory file for {VIDEO_CLASS} - {VIDEO_NUMBER}")
     total_tracks: Sequence[Track] = get_total_tracks()
 
     # lists for frame_id, track_id, x, y
@@ -128,7 +131,7 @@ def dump_tracks_to_file(min_track_length: int = 20, duplicate_frames_to_filter=(
     df = get_dataframe_from_lists(frame_id, track_id, x, y)
 
     Path(TRAJECTORIES_LOAD_PATH).mkdir(parents=True, exist_ok=True)
-    with open(f"{TRAJECTORIES_LOAD_PATH}trajectories.txt", 'a') as f:
+    with open(f"{TRAJECTORIES_LOAD_PATH}trajectories.txt", 'w') as f:
         df_to_dump = df.to_string(header=False, index=False)
         f.write(df_to_dump)
     print(f"Dumping Trajectories to {TRAJECTORIES_LOAD_PATH}trajectories.txt")
@@ -442,6 +445,10 @@ def viz_dataset_trajectories():
 
 
 if __name__ == '__main__':
-    viz_dataset_trajectories()
+    # viz_dataset_trajectories()
     # viz_raw_tracks()
-    # dump_tracks_to_file(min_track_length=0, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None)
+
+    frame_count = 14063
+    step = 999
+    filter_middle = [i for i in range(0, frame_count, step)]
+    dump_tracks_to_file(min_track_length=0, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None)
