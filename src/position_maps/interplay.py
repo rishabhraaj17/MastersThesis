@@ -957,7 +957,7 @@ def extract_trajectories_from_locations_core(cfg, enable_forward_pass, out_head,
 
 
 def extract_trajectories_from_locations_core_minimal(
-        locations, init_track_each_frame, video_path,
+        locations, init_track_each_frame, video_path, prune_radius, padded_shape, original_shape,
         location_version_to_use='pruned_scaled', max_distance=float('inf')):
     track_ids_used = []
     current_track = 0
@@ -972,6 +972,17 @@ def extract_trajectories_from_locations_core_minimal(
             locations_to_use = location.pruned_locations
         elif location_version_to_use == 'pruned_scaled':
             locations_to_use = location.scaled_locations
+        elif location_version_to_use == 'runtime_pruned_scaled':
+            # filter out overlapping locations
+            pruned_locations, pruned_locations_idx = prune_locations_proximity_based(
+                    location.locations, prune_radius)
+            pruned_locations = torch.from_numpy(pruned_locations)
+
+            fake_padded_heatmaps = torch.zeros(size=(1, 1, padded_shape[0], padded_shape[1]))
+            pred_object_locations_scaled, _ = get_adjusted_object_locations(
+                [pruned_locations], fake_padded_heatmaps, [{'original_shape': original_shape}])
+            locations_to_use = np.stack(pred_object_locations_scaled).squeeze() \
+                if len(pred_object_locations_scaled) != 0 else np.zeros((0, 2))
         else:
             raise NotImplementedError
 
@@ -1015,10 +1026,12 @@ def init_tracks_from_empty(active_tracks, current_track, location, locations_to_
 def extract_trajectories_from_locations(cfg):
     use_minimal_version = True
 
-    location_version_to_use = 'pruned_scaled'
+    location_version_to_use = 'runtime_pruned_scaled'  # 'pruned_scaled'
     head_to_use = 0
     # 50 - as small we go more trajectories but shorter trajectories
-    max_matching_euclidean_distance = 700.  # 1000 ~ 500. > 200. looks good
+    max_matching_euclidean_distance = 200.  # 1000 ~ 500. > 200. looks good
+
+    prune_radius = 30
 
     init_track_each_frame = True
     enable_forward_pass = False
@@ -1060,7 +1073,8 @@ def extract_trajectories_from_locations(cfg):
                      f"video{cfg.single_video_mode.video_numbers_to_use[0][0]}/video.mov"
         active_tracks, inactive_tracks, track_ids_used = extract_trajectories_from_locations_core_minimal(
             locations=out_head, init_track_each_frame=init_track_each_frame,
-            video_path=video_path,
+            video_path=video_path, prune_radius=prune_radius, padded_shape=extracted_locations.padded_shape,
+            original_shape=extracted_locations.scaled_shape,
             location_version_to_use=location_version_to_use, max_distance=max_matching_euclidean_distance)
     else:
         logger.info(f'Setting up DataLoader and Model...')
