@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
 from baselinev2.nn.dataset import ConcatenateDataset
-from trajectory_stgcnn import TrajectoryDatasetFromFile
+from src_lib.datasets.trajectory_stgcnn import TrajectoryDatasetFromFile
 
 pd.options.mode.chained_assignment = None  # default='warn'
 

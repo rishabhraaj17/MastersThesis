@@ -16,8 +16,9 @@ from tqdm import tqdm
 from average_image.constants import SDDVideoClasses
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.dataset import ConcatenateDataset
-from baselinev2.plot_utils import add_line_to_axis, add_features_to_axis
+from baselinev2.plot_utils import add_line_to_axis, add_features_to_axis, plot_trajectory_alongside_frame
 from src.position_maps.interplay_utils import Track, Tracks
+from src_lib.datasets.opentraj_based import get_multiple_gt_dataset
 from src_lib.datasets.trajectory_stgcnn import STGCNNTrajectoryDataset, seq_collate, seq_collate_dict, \
     seq_collate_with_graphs, seq_collate_with_graphs_dict, seq_collate_with_dataset_idx_dict
 
@@ -402,15 +403,45 @@ def viz_raw_tracks_from_active_inactive(active_tracks, inactive_tracks, video_cl
             np.stack(tr.locations),
             frame_number=f"{first_frame}-{last_frame}", track_id=tr.idx, use_lines=use_lines,
             plot_first_and_last=plot_first_and_last, marker_size=marker_size)
+        
+        
+def viz_dataset_trajectories():
+    cfg = OmegaConf.load('config/training/training.yaml')
+
+    if cfg.tp_module.datasets.use_generated:
+        train_dataset, val_dataset = get_multiple_datasets(cfg=cfg, split_dataset=True, with_dataset_idx=True)
+    else:
+        train_dataset, val_dataset = get_multiple_gt_dataset(cfg=cfg, split_dataset=True, with_dataset_idx=True)
+
+    loader = DataLoader(train_dataset, batch_size=1, collate_fn=seq_collate_with_dataset_idx_dict)
+    for batch in tqdm(loader):
+        target = pred = batch['gt_xy']
+
+        dataset_idx = batch['dataset_idx'].item()
+        seq_start_end = batch['seq_start_end']
+        frame_nums = batch['in_frames']
+        track_lists = batch['in_tracks']
+
+        random_trajectory_idx = np.random.choice(frame_nums.shape[1], 1, replace=False).item()
+
+        obs_trajectory = batch['in_xy'][:, random_trajectory_idx, ...]
+        gt_trajectory = target[:, random_trajectory_idx, ...]
+        pred_trajectory = pred[:, random_trajectory_idx, ...]
+
+        frame_num = int(frame_nums[:, random_trajectory_idx, ...][0].item())
+        track_num = int(track_lists[:, random_trajectory_idx, ...][0].item())
+
+        current_dataset = loader.dataset.datasets[dataset_idx].dataset
+
+        video_path = f"{cfg.root}videos/{getattr(SDDVideoClasses, current_dataset.video_class).value}" \
+                     f"/video{current_dataset.video_number}/video.mov"
+        frame = extract_frame_from_video(video_path, frame_num)
+
+        plot_trajectory_alongside_frame(
+            frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_num, track_id=track_num)
 
 
 if __name__ == '__main__':
-    viz_raw_tracks()
-
-    # train_d, val_d = get_multiple_datasets(OmegaConf.load('config/training/training.yaml'))
-    # loader = DataLoader(val_d, batch_size=4, collate_fn=seq_collate_with_dataset_idx_dict)
-    # for data in tqdm(loader):
-    #     in_frames, gt_frames = data['in_frames'], data['gt_frames']
-    #     print(in_frames[:, 0, ...])
-
+    viz_dataset_trajectories()
+    # viz_raw_tracks()
     # dump_tracks_to_file(min_track_length=0, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None)

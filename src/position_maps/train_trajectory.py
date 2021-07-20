@@ -14,6 +14,7 @@ from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import plot_trajectory_alongside_frame
 from log import get_logger
 from src.position_maps.trajectory_utils import get_multiple_datasets
+from src_lib.datasets.opentraj_based import get_multiple_gt_dataset
 from src_lib.datasets.trajectory_stgcnn import seq_collate_with_dataset_idx_dict
 
 warnings.filterwarnings("ignore")
@@ -25,7 +26,11 @@ logger = get_logger(__name__)
 @hydra.main(config_path="config", config_name="config")
 def train_lightning(cfg):
     logger.info(f"Setting up dataset and model")
-    train_dataset, val_dataset = get_multiple_datasets(cfg=cfg, split_dataset=True, with_dataset_idx=True)
+    if cfg.tp_module.datasets.use_generated:
+        train_dataset, val_dataset = get_multiple_datasets(cfg=cfg, split_dataset=True, with_dataset_idx=True)
+    else:
+        train_dataset, val_dataset = get_multiple_gt_dataset(cfg=cfg, split_dataset=True, with_dataset_idx=True)
+
     model = getattr(hub, cfg.tp_module.model)(
         config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
         desired_output_shape=None, loss_function=None,
@@ -53,7 +58,10 @@ def train_lightning(cfg):
 @hydra.main(config_path="config", config_name="config")
 def evaluate(cfg):
     logger.info(f"Setting up dataset and model")
-    train_dataset, val_dataset = get_multiple_datasets(cfg=cfg, split_dataset=True, with_dataset_idx=True)
+    if cfg.tp_module.datasets.use_generated:
+        train_dataset, val_dataset = get_multiple_datasets(cfg=cfg, split_dataset=True, with_dataset_idx=True)
+    else:
+        train_dataset, val_dataset = get_multiple_gt_dataset(cfg=cfg, split_dataset=True, with_dataset_idx=True)
     model = getattr(hub, cfg.tp_module.model)(
         config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
         desired_output_shape=None, loss_function=None,
@@ -106,5 +114,5 @@ def evaluate(cfg):
 
 
 if __name__ == '__main__':
-    evaluate()
-    # train_lightning()
+    # evaluate()
+    train_lightning()

@@ -880,6 +880,7 @@ def plot_trajectory_alongside_frame(frame, obs_trajectory, gt_trajectory, pred_t
 
     legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
     fig.legend(handles=legend_patches, loc=2)
+    plt.tight_layout()
 
     if return_figure_only:
         plt.close()
