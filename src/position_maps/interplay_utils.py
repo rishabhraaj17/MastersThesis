@@ -408,6 +408,9 @@ class Track(object):
                f"\nFrames: {self.frames}" \
                f"\nTrack Positions: {self.locations}\n\n"
 
+    def __lt__(self, other):
+        return len(self.frames) < len(other.frames)
+
 
 class Tracks(object):
     def __init__(self, tracks: List[Track]):

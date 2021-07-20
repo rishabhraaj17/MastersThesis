@@ -994,8 +994,8 @@ def extract_trajectories_from_locations_core_minimal(
 
         # viz_tracks(active_tracks, extract_frame_from_video(video_path, location.frame_number), show=True,
         #            use_lines=False)
-        if t_idx == 100:
-            viz_raw_tracks_from_active_inactive(active_tracks, inactive_tracks, 'deathCircle', 2)
+    viz_raw_tracks_from_active_inactive(active_tracks, inactive_tracks, 'deathCircle', 2, use_lines=True,
+                                        marker_size=2, plot_with_last_frame=True)
     return active_tracks, inactive_tracks, track_ids_used
 
 
@@ -1005,7 +1005,7 @@ def extract_trajectories_from_locations(cfg):
 
     location_version_to_use = 'pruned_scaled'
     head_to_use = 0
-    max_matching_euclidean_distance = 50.
+    max_matching_euclidean_distance = 200.  # 200. looks good
 
     init_track_each_frame = True
     enable_forward_pass = False

@@ -311,7 +311,7 @@ def plot_trajectory_with_initial_and_last_frame(frame, last_frame, trajectory, f
 
 def plot_trajectory_with_one_frame(frame, last_frame, trajectory, frame_number, track_id,
                                    epoch='', additional_text='', return_figure_only=False, save_path=None,
-                                   use_lines=False):
+                                   use_lines=False, plot_first_and_last=True, marker_size=8):
     if last_frame is not None:
         fig, ax = plt.subplots(1, 2, sharex='all', sharey='all', figsize=(16, 10))
         img_axis, last_image_axis = ax
@@ -320,9 +320,15 @@ def plot_trajectory_with_one_frame(frame, last_frame, trajectory, frame_number, 
         last_image_axis.set_title('Trajectory on last frame')
 
         if use_lines:
-            add_line_to_axis(ax=last_image_axis, features=trajectory)
+            add_line_to_axis(ax=last_image_axis, features=trajectory, marker_size=marker_size)
         else:
-            add_features_to_axis(ax=last_image_axis, features=trajectory)
+            add_features_to_axis(ax=last_image_axis, features=trajectory, marker_size=marker_size)
+
+        if plot_first_and_last:
+            add_features_to_axis(last_image_axis, np.stack([trajectory[0]]),
+                                 marker_color='aqua', marker_size=marker_size + 1)
+            add_features_to_axis(last_image_axis, np.stack([trajectory[-1]]),
+                                 marker_color='r', marker_size=marker_size + 1)
     else:
         fig, ax = plt.subplots(1, 1, sharex='all', sharey='all', figsize=(8, 10))
         img_axis = ax
@@ -330,9 +336,13 @@ def plot_trajectory_with_one_frame(frame, last_frame, trajectory, frame_number, 
     img_axis.imshow(frame)
 
     if use_lines:
-        add_line_to_axis(ax=img_axis, features=trajectory)
+        add_line_to_axis(ax=img_axis, features=trajectory, marker_size=marker_size)
     else:
-        add_features_to_axis(ax=img_axis, features=trajectory)
+        add_features_to_axis(ax=img_axis, features=trajectory, marker_size=marker_size)
+
+    if plot_first_and_last:
+        add_features_to_axis(img_axis, np.stack([trajectory[0]]), marker_color='aqua', marker_size=marker_size+1)
+        add_features_to_axis(img_axis, np.stack([trajectory[-1]]), marker_color='r', marker_size=marker_size+1)
 
     img_axis.set_title('Trajectory on initial frame')
 
@@ -375,20 +385,23 @@ def viz_raw_tracks():
         print()
 
 
-def viz_raw_tracks_from_active_inactive(active_tracks, inactive_tracks, video_class, video_number, use_lines=False):
+def viz_raw_tracks_from_active_inactive(active_tracks, inactive_tracks, video_class, video_number, use_lines=False,
+                                        plot_first_and_last=True, marker_size=8, plot_with_last_frame=False):
     root = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
     video_path = f"{root}videos/{video_class}/video{video_number}/video.mov"
     total_tracks = active_tracks.tracks + inactive_tracks.tracks
-    for tr in total_tracks:
+    total_tracks = sorted(total_tracks, reverse=True)
+    # sort total tracks by length
+    for tr in tqdm(total_tracks):
         first_frame = tr.frames[0]
         last_frame = tr.frames[-1]
 
         plot_trajectory_with_one_frame(
             extract_frame_from_video(video_path, first_frame),
-            None,  # extract_frame_from_video(video_path, last_frame),
+            extract_frame_from_video(video_path, last_frame) if plot_with_last_frame else None,
             np.stack(tr.locations),
-            frame_number=f"{first_frame}-{last_frame}", track_id=tr.idx, use_lines=use_lines)
-        print()
+            frame_number=f"{first_frame}-{last_frame}", track_id=tr.idx, use_lines=use_lines,
+            plot_first_and_last=plot_first_and_last, marker_size=marker_size)
 
 
 if __name__ == '__main__':
