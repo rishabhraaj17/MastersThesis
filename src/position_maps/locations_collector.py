@@ -198,15 +198,15 @@ def extract_locations(cfg):
             for s_loc, m, head_pred in zip(head_loc, meta, selected_head_predictions):
                 frame_num = m['item']
                 pruned_locations, pruned_locations_idx = prune_locations_proximity_based(
-                    s_loc.numpy(), cfg.eval.objectness.prune_radius)
+                    s_loc.cpu().numpy(), cfg.eval.objectness.prune_radius)
                 pruned_locations = torch.from_numpy(pruned_locations)
                 selected_locations.append(pruned_locations)
 
                 pred_object_locations_scaled, heat_maps_gt_scaled = get_adjusted_object_locations(
-                    [pruned_locations], head_pred.unsqueeze(0), [m])
+                    [pruned_locations.cpu()], head_pred.unsqueeze(0).cpu(), [m])
 
-                loc_obj.append(Location(frame_number=frame_num, locations=s_loc.numpy(),
-                                        pruned_locations=pruned_locations.numpy(),
+                loc_obj.append(Location(frame_number=frame_num, locations=s_loc.cpu().numpy(),
+                                        pruned_locations=pruned_locations.cpu().numpy(),
                                         scaled_locations=np.stack(pred_object_locations_scaled).squeeze()))
 
             if h_idx == 0:
