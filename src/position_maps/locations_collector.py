@@ -1,7 +1,6 @@
 import os
 import warnings
 from pathlib import Path
-from typing import List, Tuple, Optional
 
 import hydra
 import numpy as np
@@ -18,6 +17,7 @@ from interplay import setup_frame_only_dataset
 from interplay_utils import frames_only_collate_fn
 from location_utils import locations_from_heatmaps, prune_locations_proximity_based, \
     get_adjusted_object_locations
+from location_utils import Location, Locations, ExtractedLocations
 from utils import heat_map_collate_fn, ImagePadder
 from train import build_model
 
@@ -25,43 +25,6 @@ warnings.filterwarnings("ignore")
 
 seed_everything(42)
 logger = get_logger(__name__)
-
-
-class Location(object):
-    def __init__(self, frame_number: int, locations: np.ndarray, pruned_locations: np.ndarray,
-                 scaled_locations: np.ndarray):
-        # pruned locations are scaled
-        self.frame_number = frame_number
-        self.locations = locations
-        self.scaled_locations = scaled_locations
-        self.pruned_locations = pruned_locations
-
-    def __repr__(self):
-        return f"Frame: {self.frame_number}"
-
-
-class Locations(object):
-    def __init__(self, locations: List[Location]):
-        self.locations = locations
-
-    def __repr__(self):
-        frames_yet = [loc.frame_number for loc in self.locations]
-        return f"Covered Frames{frames_yet}"
-
-
-class ExtractedLocations(object):
-    def __init__(self, video_class: SDDVideoClasses, video_numbers: int,
-                 shape: Tuple[int, int], scaled_shape: Tuple[int, int],
-                 padded_shape: Tuple[int, int],
-                 head0: Locations, head1: Locations, head2: Optional[Locations] = None):
-        self.video_class = video_class
-        self.video_numbers = video_numbers
-        self.head0 = head0
-        self.head1 = head1
-        self.head2 = head2
-        self.shape = shape
-        self.scaled_shape = scaled_shape
-        self.padded_shape = padded_shape
 
 
 def viz_pred(heat_map, frame, show=False):

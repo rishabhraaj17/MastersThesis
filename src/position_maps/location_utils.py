@@ -1,3 +1,5 @@
+from typing import List, Tuple, Optional
+
 import albumentations as A
 import numpy as np
 import timeout_decorator
@@ -7,6 +9,7 @@ from matplotlib import pyplot as plt
 from mmdet.models.utils.gaussian_target import get_local_maximum
 from torch.nn.functional import pad
 
+from average_image.constants import SDDVideoClasses
 from baseline.extracted_of_optimization import find_points_inside_circle, is_point_inside_circle
 from baselinev2.exceptions import TimeoutException
 
@@ -185,3 +188,40 @@ def is_cluster_center_in_the_radius_of_one_of_pruned_centers(cluster_center, pru
             return True
 
     return False
+
+
+class Location(object):
+    def __init__(self, frame_number: int, locations: np.ndarray, pruned_locations: np.ndarray,
+                 scaled_locations: np.ndarray):
+        # pruned locations are scaled
+        self.frame_number = frame_number
+        self.locations = locations
+        self.scaled_locations = scaled_locations
+        self.pruned_locations = pruned_locations
+
+    def __repr__(self):
+        return f"Frame: {self.frame_number}"
+
+
+class Locations(object):
+    def __init__(self, locations: List[Location]):
+        self.locations = locations
+
+    def __repr__(self):
+        frames_yet = [loc.frame_number for loc in self.locations]
+        return f"Covered Frames{frames_yet}"
+
+
+class ExtractedLocations(object):
+    def __init__(self, video_class: SDDVideoClasses, video_numbers: int,
+                 shape: Tuple[int, int], scaled_shape: Tuple[int, int],
+                 padded_shape: Tuple[int, int],
+                 head0: Locations, head1: Locations, head2: Optional[Locations] = None):
+        self.video_class = video_class
+        self.video_numbers = video_numbers
+        self.head0 = head0
+        self.head1 = head1
+        self.head2 = head2
+        self.shape = shape
+        self.scaled_shape = scaled_shape
+        self.padded_shape = padded_shape

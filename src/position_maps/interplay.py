@@ -18,11 +18,11 @@ from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
 from baselinev2.plot_utils import add_features_to_axis, add_line_to_axis
+from interplay_utils import setup_multiple_frame_only_datasets_core, frames_only_collate_fn
+from location_utils import locations_from_heatmaps, get_adjusted_object_locations, \
+    prune_locations_proximity_based, ExtractedLocations, Locations, Location
 from log import get_logger
 from models import TrajectoryModel
-from interplay_utils import setup_multiple_frame_only_datasets_core, frames_only_collate_fn, get_all_matplotlib_colors
-from location_utils import locations_from_heatmaps, get_adjusted_object_locations, \
-    prune_locations_proximity_based
 from train import setup_single_video_dataset, setup_multiple_datasets, build_model, build_loss
 from utils import heat_map_collate_fn, ImagePadder, get_scaled_shapes_with_pad_values
 
@@ -832,7 +832,197 @@ def extract_trajectories_resumable(cfg):
     logger.info(f"Saved Predictions at {save_path}{filename}")
 
 
+def construct_tracks_from_locations(
+        active_tracks, frame_number, inactive_tracks, current_frame_locations,
+        track_ids_used, current_track, init_track_each_frame=True):
+    current_track_local = current_track
+
+    # get last frame locations
+    last_frame_locations = np.stack([t.locations[-1] for t in active_tracks.tracks])
+
+    # try setting max dist to a reasonable number so that matches are reasonable within a distance
+    distance_matrix = mm.distances.norm2squared_matrix(last_frame_locations, current_frame_locations)
+
+    agent_associations = mm.lap.lsa_solve_scipy(distance_matrix)
+    match_rows, match_cols = agent_associations
+
+    # find agents in the current frame (potential new agents in the scene)
+    unmatched_agents_current_frame = np.setdiff1d(np.arange(current_frame_locations.shape[0]), match_cols)
+
+    # Hungarian
+    # match_rows, match_cols = linear_sum_assignment(distance_matrix)
+
+    rows_to_columns_association = {r: c for r, c in zip(match_rows, match_cols)}
+    # track_ids to associations
+    last_frame_track_id_to_association = {}
+    for m_r in match_rows:
+        last_frame_track_id_to_association[active_tracks.tracks[m_r].idx] = m_r
+
+    # filter active tracks and extend tracks
+    currently_active_tracks = []
+    for track in active_tracks.tracks:
+        if track.idx in last_frame_track_id_to_association.keys():
+            track.frames.append(frame_number)
+
+            loc_idx = rows_to_columns_association[last_frame_track_id_to_association[track.idx]]
+            loc = current_frame_locations[loc_idx]
+            track.locations.append(loc.tolist())
+
+            currently_active_tracks.append(track)
+        else:
+            track.inactive += 1
+            inactive_tracks.tracks.append(track)
+
+    # add new potential agents as new track
+    if init_track_each_frame:
+        for u in unmatched_agents_current_frame:
+            init_track = Track(idx=current_track_local, frames=[frame_number],
+                               locations=[current_frame_locations[u].tolist()])
+
+            currently_active_tracks.append(init_track)
+            track_ids_used.append(current_track_local)
+            current_track_local += 1
+
+    # update active tracks
+    active_tracks.tracks = copy.deepcopy(currently_active_tracks)
+
+    return current_track_local
+
+
+@hydra.main(config_path="config", config_name="config")
+def extract_trajectories_from_locations(cfg):
+    init_track_each_frame = True
+    enable_forward_pass = False
+
+    logger.info(f'Extract trajectories from locations...')
+    logger.info(f'Setting up DataLoader and Model...')
+
+    # adjust config here
+    cfg.device = 'cpu'  # 'cuda:0'
+    cfg.single_video_mode.enabled = True  # for now we work on single video
+    cfg.preproccesing.pad_factor = 8
+    cfg.frame_rate = 30.
+    cfg.video_based.enabled = False
+
+    if cfg.single_video_mode.enabled:
+        # config adapt
+        cfg.single_video_mode.video_classes_to_use = ['DEATH_CIRCLE']
+        cfg.single_video_mode.video_numbers_to_use = [[2]]
+        cfg.desired_pixel_to_meter_ratio_rgb = 0.07
+        cfg.desired_pixel_to_meter_ratio = 0.07
+
+        train_dataset = setup_frame_only_dataset(cfg)
+        val_dataset = None
+    else:
+        return NotImplemented
+        # train_dataset, val_dataset, target_max_shape = setup_multiple_datasets(cfg)
+
+    if enable_forward_pass:
+        # position map model config
+        cfg.model = 'DeepLabV3Plus'
+        position_model = build_model(cfg, train_dataset=train_dataset, val_dataset=val_dataset, loss_function=None,
+                                     additional_loss_functions=None, collate_fn=heat_map_collate_fn,
+                                     desired_output_shape=None)
+
+        if cfg.interplay_v0.use_pretrained.enabled:
+            checkpoint_path = f'{cfg.interplay_v0.use_pretrained.checkpoint.root}' \
+                              f'{cfg.interplay_v0.use_pretrained.checkpoint.path}' \
+                              f'{cfg.interplay_v0.use_pretrained.checkpoint.version}/checkpoints/'
+            checkpoint_files = os.listdir(checkpoint_path)
+
+            epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
+            epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
+            checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
+
+            checkpoint_file = checkpoint_path + checkpoint_files[-cfg.interplay_v0.use_pretrained.checkpoint.top_k]
+
+            logger.info(f'Loading weights from: {checkpoint_file}')
+            load_dict = torch.load(checkpoint_file, map_location=cfg.device)
+
+            position_model.load_state_dict(load_dict['state_dict'], strict=False)
+
+        position_model.to(cfg.device)
+        position_model.eval()
+
+    # load_locations
+    load_path = os.path.join(os.getcwd(),
+                             f'ExtractedLocations'
+                             f'/{getattr(SDDVideoClasses, cfg.single_video_mode.video_classes_to_use[0]).name}'
+                             f'/{cfg.single_video_mode.video_numbers_to_use[0][0]}/extracted_locations.pt')
+    extracted_locations: ExtractedLocations = torch.load(load_path)['locations']  # mock the model
+    out_head_0, out_head_1, out_head_2 = extracted_locations.head0, extracted_locations.head1, extracted_locations.head2
+    frames_sequence = [loc.frame_number for loc in out_head_0.locations]
+
+    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=False,
+                              num_workers=cfg.interplay_v0.num_workers, collate_fn=frames_only_collate_fn,
+                              pin_memory=False, drop_last=cfg.interplay_v0.drop_last)
+
+    locations = out_head_0
+
+    track_ids_used = []
+    current_track = 0
+
+    active_tracks = Tracks.init_with_empty_tracks()
+    inactive_tracks = Tracks.init_with_empty_tracks()
+
+    for t_idx, (data, location) in enumerate(
+            tqdm(zip(train_loader, locations.locations), total=len(locations.locations))):
+        frames, meta = data
+
+        padder = ImagePadder(frames.shape[-2:], factor=cfg.preproccesing.pad_factor)
+        frames = padder.pad(frames)[0]
+        frames = frames.to(cfg.device)
+
+        if enable_forward_pass:
+            with torch.no_grad():
+                pred_position_maps = position_model(frames)
+
+        frame_numbers = [m['item'] for m in meta]
+
+        pred_object_locations = location.locations
+
+        # filter out overlapping locations
+        selected_locations = location.pruned_locations
+
+        pred_object_locations_scaled = location.scaled_locations
+
+        if t_idx == 0:
+            # init tracks
+            for agent_pred_loc in pred_object_locations_scaled:
+                agent_pred_loc = list(agent_pred_loc)
+                track = Track(idx=current_track, frames=[location.frame_number], locations=[agent_pred_loc])
+
+                active_tracks.tracks.append(track)
+                track_ids_used.append(current_track)
+                current_track += 1
+        else:
+            current_track = construct_tracks_from_locations(
+                active_tracks=active_tracks, frame_number=location.frame_number, inactive_tracks=inactive_tracks,
+                current_frame_locations=pred_object_locations_scaled,
+                track_ids_used=track_ids_used,
+                current_track=current_track, init_track_each_frame=init_track_each_frame)
+
+        viz_tracks(active_tracks, interpolate(frames[0, None, ...], size=meta[0]['original_shape']), show=True,
+                   use_lines=False)
+
+    # save extracted trajectories
+    save_dict = {
+        'track_ids_used': track_ids_used,
+        'active': active_tracks,
+        'inactive': inactive_tracks,
+    }
+    filename = 'extracted_trajectories.pt'
+    save_path = os.path.join(os.getcwd(),
+                             f'ExtractedTrajectories'
+                             f'/{getattr(SDDVideoClasses, cfg.single_video_mode.video_classes_to_use[0]).name}'
+                             f'/{cfg.single_video_mode.video_numbers_to_use[0][0]}/')
+    Path(save_path).mkdir(parents=True, exist_ok=True)
+    torch.save(save_dict, save_path + filename)
+    logger.info(f"Saved trajectories at {save_path}{filename}")
+
+
 if __name__ == '__main__':
     # interplay_v0()
-    extract_trajectories()
+    # extract_trajectories()
+    extract_trajectories_from_locations()
     # extract_trajectories_resumable()
