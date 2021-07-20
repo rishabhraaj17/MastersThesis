@@ -977,26 +977,38 @@ def extract_trajectories_from_locations_core_minimal(
 
         if t_idx == 0:
             # init tracks
-            for agent_pred_loc in locations_to_use:
-                agent_pred_loc = list(agent_pred_loc)
-                track = Track(idx=current_track, frames=[location.frame_number], locations=[agent_pred_loc])
-
-                active_tracks.tracks.append(track)
-                track_ids_used.append(current_track)
-                current_track += 1
+            current_track = init_tracks_from_empty(active_tracks, current_track, location, locations_to_use,
+                                                   track_ids_used)
         else:
-            current_track = construct_tracks_from_locations(
-                active_tracks=active_tracks, frame_number=location.frame_number, inactive_tracks=inactive_tracks,
-                current_frame_locations=locations_to_use,
-                track_ids_used=track_ids_used,
-                current_track=current_track, init_track_each_frame=init_track_each_frame,
-                max_distance=max_distance)
+            if len(active_tracks.tracks) == 0 and len(locations_to_use) != 0:
+                current_track = init_tracks_from_empty(active_tracks, current_track, location, locations_to_use,
+                                                       track_ids_used)
+            elif len(active_tracks.tracks) == 0 and len(locations_to_use) == 0:
+                continue
+            else:
+                current_track = construct_tracks_from_locations(
+                    active_tracks=active_tracks, frame_number=location.frame_number, inactive_tracks=inactive_tracks,
+                    current_frame_locations=locations_to_use,
+                    track_ids_used=track_ids_used,
+                    current_track=current_track, init_track_each_frame=init_track_each_frame,
+                    max_distance=max_distance)
 
         # viz_tracks(active_tracks, extract_frame_from_video(video_path, location.frame_number), show=True,
         #            use_lines=False)
-    viz_raw_tracks_from_active_inactive(active_tracks, inactive_tracks, 'deathCircle', 2, use_lines=True,
+    viz_raw_tracks_from_active_inactive(active_tracks, inactive_tracks, 'deathCircle', 3, use_lines=True,
                                         marker_size=2, plot_with_last_frame=True)
     return active_tracks, inactive_tracks, track_ids_used
+
+
+def init_tracks_from_empty(active_tracks, current_track, location, locations_to_use, track_ids_used):
+    for agent_pred_loc in locations_to_use:
+        agent_pred_loc = list(agent_pred_loc)
+        track = Track(idx=current_track, frames=[location.frame_number], locations=[agent_pred_loc])
+
+        active_tracks.tracks.append(track)
+        track_ids_used.append(current_track)
+        current_track += 1
+    return current_track
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -1005,7 +1017,8 @@ def extract_trajectories_from_locations(cfg):
 
     location_version_to_use = 'pruned_scaled'
     head_to_use = 0
-    max_matching_euclidean_distance = 200.  # 200. looks good
+    # 50 - as small we go more trajectories but shorter trajectories
+    max_matching_euclidean_distance = 700.  # 1000 ~ 500. > 200. looks good
 
     init_track_each_frame = True
     enable_forward_pass = False
@@ -1020,7 +1033,7 @@ def extract_trajectories_from_locations(cfg):
     cfg.video_based.enabled = False
 
     cfg.single_video_mode.video_classes_to_use = ['DEATH_CIRCLE']
-    cfg.single_video_mode.video_numbers_to_use = [[2]]
+    cfg.single_video_mode.video_numbers_to_use = [[3]]
     cfg.desired_pixel_to_meter_ratio_rgb = 0.07
     cfg.desired_pixel_to_meter_ratio = 0.07
 
