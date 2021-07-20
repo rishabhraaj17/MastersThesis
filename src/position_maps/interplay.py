@@ -889,28 +889,9 @@ def construct_tracks_from_locations(
     return current_track_local
 
 
-@hydra.main(config_path="config", config_name="config")
-def extract_trajectories_from_locations(cfg):
-    init_track_each_frame = True
-    enable_forward_pass = False
-
-    logger.info(f'Extract trajectories from locations...')
-    logger.info(f'Setting up DataLoader and Model...')
-
-    # adjust config here
-    cfg.device = 'cpu'  # 'cuda:0'
-    cfg.single_video_mode.enabled = True  # for now we work on single video
-    cfg.preproccesing.pad_factor = 8
-    cfg.frame_rate = 30.
-    cfg.video_based.enabled = False
-
+def extract_trajectories_from_locations_core(cfg, enable_forward_pass, out_head, init_track_each_frame,
+                                             location_version_to_use='pruned_scaled'):
     if cfg.single_video_mode.enabled:
-        # config adapt
-        cfg.single_video_mode.video_classes_to_use = ['DEATH_CIRCLE']
-        cfg.single_video_mode.video_numbers_to_use = [[2]]
-        cfg.desired_pixel_to_meter_ratio_rgb = 0.07
-        cfg.desired_pixel_to_meter_ratio = 0.07
-
         train_dataset = setup_frame_only_dataset(cfg)
         val_dataset = None
     else:
@@ -944,20 +925,11 @@ def extract_trajectories_from_locations(cfg):
         position_model.to(cfg.device)
         position_model.eval()
 
-    # load_locations
-    load_path = os.path.join(os.getcwd(),
-                             f'ExtractedLocations'
-                             f'/{getattr(SDDVideoClasses, cfg.single_video_mode.video_classes_to_use[0]).name}'
-                             f'/{cfg.single_video_mode.video_numbers_to_use[0][0]}/extracted_locations.pt')
-    extracted_locations: ExtractedLocations = torch.load(load_path)['locations']  # mock the model
-    out_head_0, out_head_1, out_head_2 = extracted_locations.head0, extracted_locations.head1, extracted_locations.head2
-    frames_sequence = [loc.frame_number for loc in out_head_0.locations]
-
     train_loader = DataLoader(train_dataset, batch_size=1, shuffle=False,
                               num_workers=cfg.interplay_v0.num_workers, collate_fn=frames_only_collate_fn,
                               pin_memory=False, drop_last=cfg.interplay_v0.drop_last)
 
-    locations = out_head_0
+    locations = out_head
 
     track_ids_used = []
     current_track = 0
@@ -977,18 +949,18 @@ def extract_trajectories_from_locations(cfg):
             with torch.no_grad():
                 pred_position_maps = position_model(frames)
 
-        frame_numbers = [m['item'] for m in meta]
-
-        pred_object_locations = location.locations
-
-        # filter out overlapping locations
-        selected_locations = location.pruned_locations
-
-        pred_object_locations_scaled = location.scaled_locations
+        if location_version_to_use == 'default':
+            locations_to_use = location.locations
+        elif location_version_to_use == 'pruned':
+            locations_to_use = location.pruned_locations
+        elif location_version_to_use == 'pruned_scaled':
+            locations_to_use = location.scaled_locations
+        else:
+            raise NotImplementedError
 
         if t_idx == 0:
             # init tracks
-            for agent_pred_loc in pred_object_locations_scaled:
+            for agent_pred_loc in locations_to_use:
                 agent_pred_loc = list(agent_pred_loc)
                 track = Track(idx=current_track, frames=[location.frame_number], locations=[agent_pred_loc])
 
@@ -998,13 +970,64 @@ def extract_trajectories_from_locations(cfg):
         else:
             current_track = construct_tracks_from_locations(
                 active_tracks=active_tracks, frame_number=location.frame_number, inactive_tracks=inactive_tracks,
-                current_frame_locations=pred_object_locations_scaled,
+                current_frame_locations=locations_to_use,
                 track_ids_used=track_ids_used,
                 current_track=current_track, init_track_each_frame=init_track_each_frame)
 
         viz_tracks(active_tracks, interpolate(frames[0, None, ...], size=meta[0]['original_shape']), show=True,
                    use_lines=False)
+    return active_tracks, inactive_tracks, track_ids_used
 
+    
+@hydra.main(config_path="config", config_name="config")
+def extract_trajectories_from_locations(cfg):
+    use_minimal_version = False
+
+    location_version_to_use = 'pruned_scaled'
+    head_to_use = 0
+
+    init_track_each_frame = True
+    enable_forward_pass = False
+
+    logger.info(f'Extract trajectories from locations...')
+    logger.info(f'Setting up DataLoader and Model...')
+
+    # adjust config here
+    cfg.device = 'cpu'  # 'cuda:0'
+    cfg.single_video_mode.enabled = True  # for now we work on single video
+    cfg.preproccesing.pad_factor = 8
+    cfg.frame_rate = 30.
+    cfg.video_based.enabled = False
+
+    cfg.single_video_mode.video_classes_to_use = ['DEATH_CIRCLE']
+    cfg.single_video_mode.video_numbers_to_use = [[2]]
+    cfg.desired_pixel_to_meter_ratio_rgb = 0.07
+    cfg.desired_pixel_to_meter_ratio = 0.07
+    
+    # load_locations
+    load_path = os.path.join(os.getcwd(),
+                             f'ExtractedLocations'
+                             f'/{getattr(SDDVideoClasses, cfg.single_video_mode.video_classes_to_use[0]).name}'
+                             f'/{cfg.single_video_mode.video_numbers_to_use[0][0]}/extracted_locations.pt')
+    extracted_locations: ExtractedLocations = torch.load(load_path)['locations']  # mock the model
+    out_head_0, out_head_1, out_head_2 = extracted_locations.head0, extracted_locations.head1, extracted_locations.head2
+
+    if head_to_use == 0:
+        out_head = out_head_0
+    elif head_to_use == 1:
+        out_head = out_head_1
+    elif head_to_use == 2:
+        out_head = out_head_2
+    else:
+        raise NotImplementedError
+    
+    if use_minimal_version:
+        pass
+    else:
+        active_tracks, inactive_tracks, track_ids_used = extract_trajectories_from_locations_core(
+            cfg, enable_forward_pass, out_head=out_head, init_track_each_frame=init_track_each_frame,
+            location_version_to_use=location_version_to_use)
+    
     # save extracted trajectories
     save_dict = {
         'track_ids_used': track_ids_used,
