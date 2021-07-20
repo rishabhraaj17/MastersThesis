@@ -23,7 +23,7 @@ from src_lib.datasets.trajectory_stgcnn import STGCNNTrajectoryDataset, seq_coll
     seq_collate_with_graphs, seq_collate_with_graphs_dict, seq_collate_with_dataset_idx_dict
 
 VIDEO_CLASS = SDDVideoClasses.DEATH_CIRCLE
-VIDEO_NUMBER = 3
+VIDEO_NUMBER = 4
 
 FILENAME = 'extracted_trajectories.pt'
 BASE_PATH = os.path.join(os.getcwd(), f'logs/ExtractedTrajectories/{VIDEO_CLASS.name}/{VIDEO_NUMBER}/')
@@ -52,6 +52,10 @@ def split_tracks_into_lists(min_track_length, total_tracks, duplicate_frames_to_
         if len(track.frames) < min_track_length:
             continue
         for f_id, loc in zip(track.frames, track.locations):
+            if len(loc) == 0:
+                print(f'Had to skip empty track at frame {f_id}')
+                continue
+
             _x, _y = loc
 
             frame_id.append(f_id)
@@ -445,10 +449,10 @@ def viz_dataset_trajectories():
 
 
 if __name__ == '__main__':
-    # viz_dataset_trajectories()
+    viz_dataset_trajectories()
     # viz_raw_tracks()
 
-    frame_count = 14063
-    step = 999
-    filter_middle = [i for i in range(0, frame_count, step)]
-    dump_tracks_to_file(min_track_length=0, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None)
+    # frame_count = 12490
+    # step = 999
+    # filter_middle = [i for i in range(0, frame_count, step)]
+    # dump_tracks_to_file(min_track_length=0, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None)

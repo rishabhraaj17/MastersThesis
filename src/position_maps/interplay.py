@@ -1001,6 +1001,8 @@ def extract_trajectories_from_locations_core_minimal(
             elif len(active_tracks.tracks) == 0 and len(locations_to_use) == 0:
                 continue
             else:
+                if locations_to_use.ndim == 1:
+                    locations_to_use = locations_to_use[None, ...]
                 current_track = construct_tracks_from_locations(
                     active_tracks=active_tracks, frame_number=location.frame_number, inactive_tracks=inactive_tracks,
                     current_frame_locations=locations_to_use,
@@ -1030,10 +1032,10 @@ def init_tracks_from_empty(active_tracks, current_track, location, locations_to_
 def extract_trajectories_from_locations(cfg):
     use_minimal_version = True
 
-    location_version_to_use = 'pruned_scaled'  # 'pruned_scaled' 'runtime_pruned_scaled'
+    location_version_to_use = 'runtime_pruned_scaled'  # 'pruned_scaled' 'runtime_pruned_scaled'
     head_to_use = 0
     # 50 - as small we go more trajectories but shorter trajectories
-    max_matching_euclidean_distance = 700.  # 1000 ~ 500. > 200. looks good
+    max_matching_euclidean_distance = 500.  # 1000 ~ 500. > 200. looks good
 
     prune_radius = 40  # dc3
 
@@ -1050,7 +1052,7 @@ def extract_trajectories_from_locations(cfg):
     cfg.video_based.enabled = False
 
     cfg.single_video_mode.video_classes_to_use = ['DEATH_CIRCLE']
-    cfg.single_video_mode.video_numbers_to_use = [[2]]
+    cfg.single_video_mode.video_numbers_to_use = [[3]]
     cfg.desired_pixel_to_meter_ratio_rgb = 0.07
     cfg.desired_pixel_to_meter_ratio = 0.07
 

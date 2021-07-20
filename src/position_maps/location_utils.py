@@ -13,7 +13,7 @@ from average_image.constants import SDDVideoClasses
 from baseline.extracted_of_optimization import find_points_inside_circle, is_point_inside_circle
 from baselinev2.exceptions import TimeoutException
 
-TIMEOUT = 3  # seconds
+TIMEOUT = 10  # seconds
 
 
 def locations_from_heatmaps(frames, kernel, loc_cutoff, marker_size, out, vis_on=False, threshold=None):

@@ -48,7 +48,7 @@ tp_module:
 
     obs_len: 8
     pred_len: 12
-    skip: 1
+    skip: 12
     delim: 'space'
     construct_graph: False
 
