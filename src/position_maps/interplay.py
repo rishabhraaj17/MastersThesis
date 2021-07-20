@@ -17,6 +17,7 @@ from torch.utils.data import Subset, DataLoader
 from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
+from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import add_features_to_axis, add_line_to_axis
 from interplay_utils import setup_multiple_frame_only_datasets_core, frames_only_collate_fn
 from location_utils import locations_from_heatmaps, get_adjusted_object_locations, \
@@ -421,7 +422,9 @@ def viz_tracks(active_tracks, first_frame, show=True, use_lines=False):
     # active_tracks_to_vis = np.stack([t.locations for t in active_tracks.tracks])
     active_tracks_to_vis = [t.locations for t in active_tracks.tracks]
     fig, ax = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(12, 10))
-    ax.imshow(first_frame.squeeze().permute(1, 2, 0))
+    if isinstance(first_frame, torch.Tensor):
+        first_frame = first_frame.squeeze().permute(1, 2, 0)
+    ax.imshow(first_frame)
     for a_t in active_tracks_to_vis:
         a_t = np.stack(a_t)
         if use_lines:
@@ -978,10 +981,50 @@ def extract_trajectories_from_locations_core(cfg, enable_forward_pass, out_head,
                    use_lines=False)
     return active_tracks, inactive_tracks, track_ids_used
 
-    
+
+def extract_trajectories_from_locations_core_minimal(
+        locations, init_track_each_frame, video_path,
+        location_version_to_use='pruned_scaled'):
+    track_ids_used = []
+    current_track = 0
+
+    active_tracks = Tracks.init_with_empty_tracks()
+    inactive_tracks = Tracks.init_with_empty_tracks()
+
+    for t_idx, location in enumerate(tqdm(locations.locations)):
+        if location_version_to_use == 'default':
+            locations_to_use = location.locations
+        elif location_version_to_use == 'pruned':
+            locations_to_use = location.pruned_locations
+        elif location_version_to_use == 'pruned_scaled':
+            locations_to_use = location.scaled_locations
+        else:
+            raise NotImplementedError
+
+        if t_idx == 0:
+            # init tracks
+            for agent_pred_loc in locations_to_use:
+                agent_pred_loc = list(agent_pred_loc)
+                track = Track(idx=current_track, frames=[location.frame_number], locations=[agent_pred_loc])
+
+                active_tracks.tracks.append(track)
+                track_ids_used.append(current_track)
+                current_track += 1
+        else:
+            current_track = construct_tracks_from_locations(
+                active_tracks=active_tracks, frame_number=location.frame_number, inactive_tracks=inactive_tracks,
+                current_frame_locations=locations_to_use,
+                track_ids_used=track_ids_used,
+                current_track=current_track, init_track_each_frame=init_track_each_frame)
+
+        viz_tracks(active_tracks, extract_frame_from_video(video_path, location.frame_number), show=True,
+                   use_lines=False)
+    return active_tracks, inactive_tracks, track_ids_used
+
+
 @hydra.main(config_path="config", config_name="config")
 def extract_trajectories_from_locations(cfg):
-    use_minimal_version = False
+    use_minimal_version = True
 
     location_version_to_use = 'pruned_scaled'
     head_to_use = 0
@@ -1003,7 +1046,7 @@ def extract_trajectories_from_locations(cfg):
     cfg.single_video_mode.video_numbers_to_use = [[2]]
     cfg.desired_pixel_to_meter_ratio_rgb = 0.07
     cfg.desired_pixel_to_meter_ratio = 0.07
-    
+
     # load_locations
     load_path = os.path.join(os.getcwd(),
                              f'ExtractedLocations'
@@ -1020,14 +1063,20 @@ def extract_trajectories_from_locations(cfg):
         out_head = out_head_2
     else:
         raise NotImplementedError
-    
+
     if use_minimal_version:
-        pass
+        video_path = f"{cfg.root}videos/" \
+                     f"{getattr(SDDVideoClasses, cfg.single_video_mode.video_classes_to_use[0]).value}/" \
+                     f"video{cfg.single_video_mode.video_numbers_to_use[0][0]}/video.mov"
+        active_tracks, inactive_tracks, track_ids_used = extract_trajectories_from_locations_core_minimal(
+            locations=out_head, init_track_each_frame=init_track_each_frame,
+            video_path=video_path,
+            location_version_to_use=location_version_to_use)
     else:
         active_tracks, inactive_tracks, track_ids_used = extract_trajectories_from_locations_core(
             cfg, enable_forward_pass, out_head=out_head, init_track_each_frame=init_track_each_frame,
             location_version_to_use=location_version_to_use)
-    
+
     # save extracted trajectories
     save_dict = {
         'track_ids_used': track_ids_used,
