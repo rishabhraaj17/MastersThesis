@@ -168,9 +168,11 @@ def extract_locations(cfg):
                 pred_object_locations_scaled, heat_maps_gt_scaled = get_adjusted_object_locations(
                     [pruned_locations.cpu()], head_pred.unsqueeze(0).cpu(), [m])
 
+                scaled_locs = np.stack(pred_object_locations_scaled).squeeze() \
+                    if len(pred_object_locations_scaled) != 0 else np.zeros((0, 2))
                 loc_obj.append(Location(frame_number=frame_num, locations=s_loc.cpu().numpy(),
                                         pruned_locations=pruned_locations.cpu().numpy(),
-                                        scaled_locations=np.stack(pred_object_locations_scaled).squeeze()))
+                                        scaled_locations=scaled_locs))
 
             if h_idx == 0:
                 head0_locations.locations.extend(loc_obj)

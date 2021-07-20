@@ -175,7 +175,7 @@ def prune_locations_proximity_based(cluster_centers, radius):
                         rejected_cluster_centers.append(cluster_centers[center_inside_idx])
                         rejected_cluster_centers_idx.append(center_inside_idx)
 
-    pruned_cluster_centers = np.stack(pruned_cluster_centers)
+    pruned_cluster_centers = np.stack(pruned_cluster_centers) if len(pruned_cluster_centers) != 0 else np.zeros((0, 2))
     return pruned_cluster_centers, pruned_cluster_centers_idx
 
 
