@@ -26,8 +26,11 @@ mode: 'min'
 tp_module:
   model: 'TrajectoryTransformer'  # 'RNNBaseline'  # 'TrajectoryTransformer'
   datasets:
+    root_gt: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/OpenTraj/datasets/SDD/'
     root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/Trajectories/'
     filename: 'trajectories.pt'
+
+    use_generated: False
 
     val_ratio: 0.2
 

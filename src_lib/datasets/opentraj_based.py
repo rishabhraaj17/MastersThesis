@@ -2,14 +2,20 @@
 
 import glob
 import os
+import tempfile
 
 import numpy as np
 import pandas as pd
+import torch
 import yaml
+from omegaconf import OmegaConf
 from pykalman import KalmanFilter
+from torch.utils.data import ConcatDataset, Subset
 from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
+from baselinev2.nn.dataset import ConcatenateDataset
+from trajectory_stgcnn import TrajectoryDatasetFromFile
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
@@ -420,11 +426,52 @@ def load_sdd_dir(path: str, **kwargs):
     return traj_dataset
 
 
-if __name__ == '__main__':
-    video_class = SDDVideoClasses.DEATH_CIRCLE
-    video_number = 4
+def get_single_gt_dataset(cfg, video_class, video_number, split_dataset):
+    load_path = f"{cfg.root_gt}{getattr(SDDVideoClasses, video_class).value}/video{video_number}/annotations.txt"
+    open_traj_dataset = load_sdd(load_path)
+    data_df = open_traj_dataset.data[open_traj_dataset.critical_columns]
+    data_df = data_df.sort_values(by=['frame_id']).reset_index()
+    data_df: pd.DataFrame = data_df.drop(columns=['index'])
 
-    root_pth = '../../OpenTraj/datasets/SDD/'
-    pth = f"{root_pth}{video_class.value}/video{video_number}/annotations.txt"
-    dset = load_sdd_dir(root_pth)
+    temp_file = tempfile.NamedTemporaryFile(suffix='.txt')
+    data_df.to_csv(temp_file, header=False, index=False, sep=' ')
+    dataset = TrajectoryDatasetFromFile(
+        temp_file, obs_len=cfg.obs_len, pred_len=cfg.pred_len, skip=cfg.skip,
+        delim=cfg.delim, video_class=video_class, video_number=video_number, construct_graph=cfg.construct_graph)
+    if not split_dataset:
+        return dataset
+
+    val_dataset_len = round(len(dataset) * cfg.val_ratio)
+    train_indices = torch.arange(start=0, end=len(dataset) - val_dataset_len)
+    val_indices = torch.arange(start=len(dataset) - val_dataset_len, end=len(dataset))
+
+    train_dataset = Subset(dataset, train_indices)
+    val_dataset = Subset(dataset, val_indices)
+    return train_dataset, val_dataset
+
+
+def get_multiple_gt_dataset(cfg, split_dataset=True, with_dataset_idx=True):
+    conf = cfg.tp_module.datasets
+    video_classes = conf.video_classes
+    video_numbers = conf.video_numbers
+
+    train_datasets, val_datasets = [], []
+    for v_idx, video_class in enumerate(video_classes):
+        for v_num in video_numbers[v_idx]:
+            if split_dataset:
+                t_dset, v_dset = get_single_gt_dataset(conf, video_class, v_num, split_dataset)
+                train_datasets.append(t_dset)
+                val_datasets.append(v_dset)
+            else:
+                dset = get_single_gt_dataset(cfg, video_class, v_num, split_dataset)
+                train_datasets.append(dset)
+
+    if split_dataset:
+        return (ConcatenateDataset(train_datasets), ConcatenateDataset(val_datasets)) \
+            if with_dataset_idx else (ConcatDataset(train_datasets), ConcatDataset(val_datasets))
+    return ConcatenateDataset(train_datasets) if with_dataset_idx else ConcatDataset(train_datasets)
+
+
+if __name__ == '__main__':
+    out = get_multiple_gt_dataset(OmegaConf.load('../../src/position_maps/config/training/training.yaml'))
     print()
