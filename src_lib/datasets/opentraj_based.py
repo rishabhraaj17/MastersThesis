@@ -456,7 +456,7 @@ def get_multiple_gt_dataset(cfg, split_dataset=True, with_dataset_idx=True):
     video_numbers = conf.video_numbers
 
     train_datasets, val_datasets = [], []
-    for v_idx, video_class in enumerate(video_classes):
+    for v_idx, video_class in enumerate(tqdm(video_classes)):
         for v_num in video_numbers[v_idx]:
             if split_dataset:
                 t_dset, v_dset = get_single_gt_dataset(conf, video_class, v_num, split_dataset)
