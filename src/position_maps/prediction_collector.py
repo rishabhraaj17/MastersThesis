@@ -756,7 +756,7 @@ def visualize_from_locations_and_generate_curves(cfg):
 
     run_analysis_on = 'prune_radius'  # 'loc_cutoff'
 
-    step_between_frames = 100
+    step_between_frames = 50
 
     logger.info(f'Evaluating metrics from locations')
 
@@ -798,8 +798,8 @@ def visualize_from_locations_and_generate_curves(cfg):
     precision_dict, recall_dict = {}, {}
 
     if run_analysis_on == 'prune_radius':
-        loc_cutoff = np.arange(start=0, stop=100, step=10)
-    elif run_analysis_on == 'loc_cutoff':
+        loc_cutoff = np.arange(start=0, stop=100, step=1)
+    elif run_analysis_on == 'loc_cutoff':  # not possible
         loc_cutoff = np.linspace(0, 1, 10)
     else:
         return NotImplemented
