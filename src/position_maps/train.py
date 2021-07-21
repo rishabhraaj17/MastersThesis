@@ -12,6 +12,7 @@ from mmdet.models import GaussianFocalLoss
 from omegaconf import ListConfig
 from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.plugins import DDPPlugin
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn.functional import interpolate
@@ -514,6 +515,13 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
         verbose=cfg.verbose
     )
 
+    train_logger = True
+    if cfg.wandb_position_map.enabled:
+        run_name = f"{cfg.model}-{'|'.join(cfg.train.video_classes_to_use)}"
+        train_logger = WandbLogger(project=cfg.wandb_position_map.project_name, name=run_name,
+                                   log_model=cfg.wandb_position_map.log_model)
+        train_logger.log_hyperparams(cfg)
+
     limit_val_batches = 1.0
     if not cfg.single_video_mode.enabled and len(train_dataset.datasets) == 1 \
             and len(val_dataset.datasets) == 1 \
@@ -529,10 +537,19 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
         sync_bn = True
 
     if cfg.warm_restart.enable:
-        checkpoint_root_path = f'{cfg.warm_restart.checkpoint.root}{cfg.warm_restart.checkpoint.path}' \
-                               f'{cfg.warm_restart.checkpoint.version}/checkpoints/'
-        hparams_path = f'{cfg.warm_restart.checkpoint.root}{cfg.warm_restart.checkpoint.path}' \
-                       f'{cfg.warm_restart.checkpoint.version}/hparams.yaml'
+        if cfg.warm_restart.wandb.enabled:
+            version_name = f"{cfg.warm_restart.wandb.checkpoint.run_name}".split('-')[-1]
+            checkpoint_root_path = f'{cfg.warm_restart.wandb.checkpoint.root}' \
+                                   f'{cfg.warm_restart.wandb.checkpoint.run_name}' \
+                                   f'{cfg.warm_restart.wandb.checkpoint.tail_path}' \
+                                   f'{cfg.warm_restart.wandb.checkpoint.project_name}/' \
+                                   f'{version_name}/checkpoints/'
+            hparams_path = ''
+        else:
+            checkpoint_root_path = f'{cfg.warm_restart.checkpoint.root}{cfg.warm_restart.checkpoint.path}' \
+                                   f'{cfg.warm_restart.checkpoint.version}/checkpoints/'
+            hparams_path = f'{cfg.warm_restart.checkpoint.root}{cfg.warm_restart.checkpoint.path}' \
+                           f'{cfg.warm_restart.checkpoint.version}/hparams.yaml'
 
         checkpoint_files = os.listdir(checkpoint_root_path)
 
@@ -566,7 +583,8 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                           num_nodes=cfg.trainer.num_nodes, plugins=plugins,
                           gradient_clip_val=cfg.trainer.gradient_clip_val,
                           sync_batchnorm=sync_bn, limit_val_batches=limit_val_batches,
-                          accumulate_grad_batches=cfg.trainer.accumulate_grad_batches)
+                          accumulate_grad_batches=cfg.trainer.accumulate_grad_batches,
+                          logger=train_logger)
     else:
         if cfg.resume_mode:
             checkpoint_path = f'{cfg.resume.checkpoint.path}{cfg.resume.checkpoint.version}/checkpoints/'
@@ -586,7 +604,8 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                               num_nodes=cfg.trainer.num_nodes, plugins=plugins,
                               gradient_clip_val=cfg.trainer.gradient_clip_val,
                               sync_batchnorm=sync_bn, limit_val_batches=limit_val_batches,
-                              accumulate_grad_batches=cfg.trainer.accumulate_grad_batches)
+                              accumulate_grad_batches=cfg.trainer.accumulate_grad_batches,
+                              logger=train_logger)
         else:
             trainer = Trainer(max_epochs=cfg.trainer.max_epochs, gpus=cfg.trainer.gpus,
                               fast_dev_run=cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
@@ -595,7 +614,8 @@ def setup_trainer(cfg, loss_fn, model, train_dataset, val_dataset):
                               num_nodes=cfg.trainer.num_nodes, plugins=plugins,
                               gradient_clip_val=cfg.trainer.gradient_clip_val,
                               sync_batchnorm=sync_bn, limit_val_batches=limit_val_batches,
-                              accumulate_grad_batches=cfg.trainer.accumulate_grad_batches)
+                              accumulate_grad_batches=cfg.trainer.accumulate_grad_batches,
+                              logger=train_logger)
     return model, trainer
 
 

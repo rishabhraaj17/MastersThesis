@@ -215,7 +215,7 @@ focal_loss_alpha: 0.8
 gaussuan_focal_loss_alpha: 2.0
 use_center_net_gaussian_focal_loss: True
 
-model: 'DeepLabV3PlusTemporal2DDDP'
+model: 'DeepLabV3PlusDDP'
 
 preproccesing:
   pad_factor: 8
@@ -232,14 +232,28 @@ prediction:
   threshold: 0.4
   fill_value: 0.0
 
+wandb_position_map:
+  enabled: False
+  log_model: False
+  project_name: 'PositionMap'
+
 warm_restart:
-  enable: False
-  custom_load: False
+  enable: True
+  custom_load: True
   checkpoint:
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
     path: "lightning_logs/version_"
-    version: 492265
+    version: 516403
     top_k: 1
+
+  wandb:
+    enabled: False
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/wandb/"
+      tail_path: "/files/"
+      project_name: 'PositionMap'
+      run_name: "run-20210721_163402-1zebiwjj"
+      top_k: 1
 
 resume_mode: False
 resume:
