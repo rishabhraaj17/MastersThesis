@@ -646,7 +646,8 @@ def visualize_from_locations(cfg):
         rgb_frame = extract_frame_from_video(video_path, frame_number)
 
         fn, fp, gt_bbox_centers, precision, recall, supervised_boxes, tp = get_annotation_and_metrics(
-            cfg, frame_number, gt_annotation_df, locations_to_use, max_distance, original_shape, ratio)
+            cfg, frame_number, gt_annotation_df, locations_to_use, max_distance, original_shape, ratio,
+            threshold=cfg.eval.gt_pred_loc_distance_threshold)
 
         tp_list.append(tp)
         fp_list.append(fp)
@@ -703,16 +704,17 @@ def visualize_from_locations(cfg):
 
 
 def get_annotation_and_metrics(cfg, frame_number, gt_annotation_df, locations_to_use, max_distance, original_shape,
-                               ratio):
+                               ratio, threshold):
     gt_bbox_centers, supervised_boxes = get_gt_annotation(frame_number, gt_annotation_df, original_shape)
-    fn, fp, precision, recall, tp = get_metrics_pr(cfg, gt_bbox_centers, locations_to_use, max_distance, ratio)
+    fn, fp, precision, recall, tp = get_metrics_pr(cfg, gt_bbox_centers, locations_to_use, max_distance, ratio,
+                                                   threshold=threshold)
     return fn, fp, gt_bbox_centers, precision, recall, supervised_boxes, tp
 
 
-def get_metrics_pr(cfg, gt_bbox_centers, locations_to_use, max_distance, ratio):
+def get_metrics_pr(cfg, gt_bbox_centers, locations_to_use, max_distance, ratio, threshold):
     distance_matrix = np.sqrt(mm.distances.norm2squared_matrix(
         gt_bbox_centers, locations_to_use, max_d2=max_distance)) * ratio
-    distance_matrix = cfg.eval.gt_pred_loc_distance_threshold - distance_matrix
+    distance_matrix = threshold - distance_matrix
     distance_matrix[distance_matrix < 0] = 1000
     # Hungarian
     match_rows, match_cols = scipy.optimize.linear_sum_assignment(distance_matrix)
@@ -743,6 +745,124 @@ def get_gt_annotation(frame_number, gt_annotation_df, original_shape):
     return gt_bbox_centers, supervised_boxes
 
 
+@hydra.main(config_path="config", config_name="config")
+def visualize_from_locations_and_generate_curves(cfg):
+    adjust_config(cfg)
+
+    location_version_to_use = 'runtime_pruned_scaled'  # 'pruned_scaled' 'runtime_pruned_scaled'
+    head_to_use = 0
+    prune_radius = 43
+    max_distance = float('inf')
+
+    run_analysis_on = 'prune_radius'  # 'loc_cutoff'
+
+    step_between_frames = 100
+
+    logger.info(f'Evaluating metrics from locations')
+
+    # load_locations
+    load_path = os.path.join(os.getcwd(),
+                             f'ExtractedLocations'
+                             f'/{getattr(SDDVideoClasses, cfg.eval.video_class).name}'
+                             f'/{cfg.eval.test.video_number_to_use}/extracted_locations.pt')
+    extracted_locations: ExtractedLocations = torch.load(load_path)['locations']  # mock the model
+    out_head_0, out_head_1, out_head_2 = extracted_locations.head0, extracted_locations.head1, extracted_locations.head2
+
+    # all_heads = [out_head_0, out_head_1, out_head_2]
+
+    if head_to_use == 0:
+        locations = out_head_0
+    elif head_to_use == 1:
+        locations = out_head_1
+    elif head_to_use == 2:
+        locations = out_head_2
+    else:
+        raise NotImplementedError
+
+    locations.locations = [locations.locations[idx] for idx in range(0, len(locations.locations), step_between_frames)]
+
+    padded_shape = extracted_locations.padded_shape
+    original_shape = extracted_locations.scaled_shape
+
+    sdd_meta = SDDMeta(cfg.eval.root + 'H_SDD.txt')
+    ratio = float(sdd_meta.get_meta(getattr(SDDVideoDatasets, cfg.eval.video_meta_class)
+                                    , cfg.eval.test.video_number_to_use)[0]['Ratio'].to_numpy()[0])
+
+    gt_annotation_path = f'{cfg.root}annotations/{getattr(SDDVideoClasses, cfg.eval.video_class).value}/' \
+                         f'video{cfg.eval.test.video_number_to_use}/annotation_augmented.csv'
+    gt_annotation_df = pd.read_csv(gt_annotation_path)
+    gt_annotation_df = gt_annotation_df.drop(gt_annotation_df.columns[[0]], axis=1)
+
+    logger.info(f'Starting evaluation for metrics...')
+
+    precision_dict, recall_dict = {}, {}
+
+    if run_analysis_on == 'prune_radius':
+        loc_cutoff = np.arange(start=0, stop=100, step=10)
+    elif run_analysis_on == 'loc_cutoff':
+        loc_cutoff = np.linspace(0, 1, 10)
+    else:
+        return NotImplemented
+
+    for loc_c in loc_cutoff:
+        tp_list, fp_list, fn_list = [], [], []
+        for t_idx, location in enumerate(tqdm(locations.locations)):
+            if location_version_to_use == 'default':
+                locations_to_use = location.locations
+            elif location_version_to_use == 'pruned':
+                locations_to_use = location.pruned_locations
+            elif location_version_to_use == 'pruned_scaled':
+                locations_to_use = location.scaled_locations
+            elif location_version_to_use == 'runtime_pruned_scaled':
+                # filter out overlapping locations
+                try:
+                    pruned_locations, pruned_locations_idx = prune_locations_proximity_based(
+                        location.locations,
+                        prune_radius if run_analysis_on != 'prune_radius' else loc_c)
+                    pruned_locations = torch.from_numpy(pruned_locations)
+                except TimeoutException:
+                    pruned_locations = torch.from_numpy(location.locations)
+
+                fake_padded_heatmaps = torch.zeros(size=(1, 1, padded_shape[0], padded_shape[1]))
+                pred_object_locations_scaled, _ = get_adjusted_object_locations(
+                    [pruned_locations], fake_padded_heatmaps, [{'original_shape': original_shape}])
+                locations_to_use = np.stack(pred_object_locations_scaled).squeeze() \
+                    if len(pred_object_locations_scaled) != 0 else np.zeros((0, 2))
+            else:
+                raise NotImplementedError
+
+            frame_number = location.frame_number
+
+            fn, fp, gt_bbox_centers, precision, recall, supervised_boxes, tp = get_annotation_and_metrics(
+                cfg, frame_number, gt_annotation_df, locations_to_use, max_distance, original_shape, ratio,
+                threshold=cfg.eval.gt_pred_loc_distance_threshold if run_analysis_on != 'loc_cutoff' else loc_c)
+
+            tp_list.append(tp)
+            fp_list.append(fp)
+            fn_list.append(fn)
+
+        if len(tp_list) != 0 and len(fp_list) != 0 and len(fn_list) != 0:
+            final_precision = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fp_list).sum())
+            final_recall = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fn_list).sum())
+        else:
+            final_precision = 0.
+            final_recall = 0.
+
+        precision_dict[loc_c] = final_precision
+        recall_dict[loc_c] = final_recall
+
+        logger.info(f"Precision: {final_precision} | Recall: {final_recall}")
+
+    plot_precision_vs_recall(
+        list(precision_dict.keys()), list(precision_dict.values()), list(recall_dict.values()), 'Precision vs Recall')
+    plot_precision_recall_curve(list(precision_dict.values()), list(recall_dict.values()), 'Precision-Recall Curve')
+    logger.info(f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
+                f'Video Number: {cfg.eval.test.video_number_to_use}')
+    logger.info(f"Threshold: {cfg.eval.gt_pred_loc_distance_threshold}m | "
+                f"Max-Pool kernel size: {cfg.eval.objectness.kernel} | "
+                f"Head Used: {cfg.eval.objectness.index_select}")
+
+
 if __name__ == '__main__':
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -751,4 +871,5 @@ if __name__ == '__main__':
         # join_parts_prediction(os.path.join(os.getcwd(), f'logs/HeatMapPredictions/DEATH_CIRCLE/4/'))
         # evaluate_metrics()
         # evaluate_metrics_for_each_threshold()
-        visualize_from_locations()
+        # visualize_from_locations()
+        visualize_from_locations_and_generate_curves()
