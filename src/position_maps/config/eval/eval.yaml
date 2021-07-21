@@ -16,8 +16,8 @@ eval:
 
   # dataset
   root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
-  video_class: GATES
-  video_meta_class: GATES
+  video_class: LITTLE
+  video_meta_class: LITTLE
   desired_pixel_to_meter_ratio: 0.07
   desired_pixel_to_meter_ratio_rgb: 0.07 # 0.07 # 0.25 # 0.05
   downscale_only_target_maps: False
@@ -26,18 +26,25 @@ eval:
   frame_rate: 30.  # 30.
 
   video_based:
-    enabled: True  # True
+    enabled: False  # True
     frames_per_clip: 4  # for video based
     gt_idx: -1
 
+  mutiple_dataset_mode:
+    enabled: False
+    samples_per_dataset: 12
+    dataset_idx: 0
+
   test:
     num_videos: -1
-    video_number_to_use: 3
+    video_number_to_use: 0
     #    video_classes_to_use: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
     #    video_numbers_to_use: [ [ 6 ], [ 3 ], [ 3 ], [ 7 ], [ 9, 14 ], [ 0 ], [ 6 ], [ 0 ] ]
-    video_classes_to_use: [ DEATH_CIRCLE ]  # [ GATES, DEATH_CIRCLE, LITTLE ]
-    video_numbers_to_use: [ [ 4 ] ]  # [ [ 4 ], [ 3 ], [ 0 ] ]
+    video_classes_to_use: [ GATES, LITTLE ]  # [ GATES, DEATH_CIRCLE, LITTLE ]
+    video_numbers_to_use: [ [ 0, 1, 2, 4, 7, 8 ], [ 0, 1, 2, 3 ] ]  # [ [ 4 ], [ 3 ], [ 0 ] ]
     multiple_videos: False
+
+    samples_per_dataset: 20
 
     single_video_mode:
       enabled: False
@@ -66,7 +73,7 @@ eval:
       alpha: 0.85
       gamma: 4.0
 
-  model: 'DeepLabV3PlusTemporal2D'  # DeepLabV3PlusTemporal2D, DeepLabV3Plus
+  model: 'DeepLabV3Plus'  # DeepLabV3PlusTemporal2D, DeepLabV3Plus
 
   preproccesing:
     pad_factor: 8
@@ -92,6 +99,7 @@ eval:
   plot_save_dir: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/proposed_method/v0/position_maps/'
   plot_with_overlay: True
   plots_do_nothing: False
+  save_plots: True
 
   evaluate_precision_recall: False
   blob_threshold: 0.2
@@ -120,5 +128,5 @@ eval:
   checkpoint:
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
     path: "lightning_logs/version_"
-    version: 513923  # 509506 # 497829 # 492265 #424798 # 437363  # 424798 # 509506 (best-dlv3-r50) # 513512 (T2D-best-dlv3) # 511123 (LITTLE - good) # 511116 (DC-3-good)
+    version: 516403  # 513923 # 509506 # 497829 # 492265 #424798 # 437363  # 424798 # 509506 (best-dlv3-r50) # 513512 (T2D-best-dlv3) # 511123 (LITTLE - good) # 511116 (DC-3-good)
     top_k: 1

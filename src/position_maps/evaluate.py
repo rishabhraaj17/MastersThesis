@@ -19,7 +19,7 @@ from mmdet.models.utils.gaussian_target import get_local_maximum
 from pytorch_lightning import seed_everything
 from torch.nn import MSELoss
 from torch.nn.functional import interpolate
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Subset, ConcatDataset
 from torchvision.transforms import ToPILImage
 from tqdm import tqdm
 
@@ -32,7 +32,8 @@ from interact import extract_agents_locations, correct_locations, get_position_c
 from log import get_logger
 from losses import CenterNetFocalLoss
 from patch_utils import quick_viz
-from train import setup_multiple_datasets_core, setup_single_transform, setup_single_common_transform
+from train import setup_multiple_datasets_core, setup_single_transform, setup_single_common_transform, \
+    setup_single_dataset_instance
 from utils import heat_map_collate_fn, plot_predictions, get_blob_count, overlay_images, plot_predictions_with_overlay, \
     get_scaled_shapes_with_pad_values, plot_image_with_features, ImagePadder, get_ensemble, plot_predictions_v2, \
     heat_map_temporal_4d_collate_fn
@@ -273,6 +274,43 @@ def setup_test_transform(cfg, test_h, test_w):
     return transform
 
 
+def setup_multiple_test_datasets_core(cfg, video_classes_to_use, video_numbers_to_use, num_videos, multiple_videos,
+                                      df, df_target, rgb_max_shape, use_common_transforms=True):
+    datasets = []
+    for idx, v_clz in enumerate(video_classes_to_use):
+        for v_num in video_numbers_to_use[idx]:
+            logger.info(f"Setting up {v_clz} - {v_num}")
+            condition = (df.CLASS == v_clz) & (df.NUMBER == v_num)
+            h, w = df[condition].RESCALED_SHAPE.values.item()
+            pad_values = df[condition].PAD_VALUES.values.item()
+
+            target_h, target_w = df_target[condition].RESCALED_SHAPE.values.item()
+            target_pad_values = df_target[condition].PAD_VALUES.values.item()
+
+            transform = setup_single_transform(height=target_h, width=target_w)
+            rgb_transform_fn = setup_single_transform(height=h, width=w)
+            rgb_plot_transform = setup_single_transform(height=rgb_max_shape[0], width=rgb_max_shape[1])
+            if use_common_transforms:
+                common_transform = setup_single_common_transform(use_replay_compose=cfg.using_replay_compose)
+            else:
+                common_transform = None
+
+            datasets.append(setup_single_dataset_instance(cfg=cfg, transform=transform,
+                                                          video_class=v_clz,
+                                                          num_videos=num_videos,
+                                                          video_number_to_use=v_num,
+                                                          multiple_videos=multiple_videos,
+                                                          rgb_transform_fn=rgb_transform_fn,
+                                                          rgb_new_shape=(h, w),
+                                                          rgb_pad_value=pad_values,
+                                                          target_pad_value=target_pad_values,
+                                                          rgb_plot_transform=rgb_plot_transform,
+                                                          common_transform=common_transform,
+                                                          using_replay_compose=cfg.eval.using_replay_compose,
+                                                          frame_rate=cfg.eval.frame_rate))
+    return ConcatDataset(datasets)
+
+
 def setup_multiple_test_datasets(cfg, return_dummy_transform=True):
     meta = SDDMeta(cfg.root + 'H_SDD.txt')
     df, rgb_max_shape = get_scaled_shapes_with_pad_values(
@@ -284,12 +322,13 @@ def setup_multiple_test_datasets(cfg, return_dummy_transform=True):
         root_path=cfg.root, video_classes=cfg.eval.test.video_classes_to_use,
         video_numbers=cfg.eval.test.video_numbers_to_use,
         desired_ratio=cfg.eval.desired_pixel_to_meter_ratio)
-    # note: downscale_only_target_maps=cfg.downscale_only_target_maps may not point to eval cfg & frame_rate
-    datasets = setup_multiple_datasets_core(cfg, meta, video_classes_to_use=cfg.eval.test.video_classes_to_use,
-                                            video_numbers_to_use=cfg.eval.test.video_numbers_to_use,
-                                            num_videos=cfg.eval.test.num_videos,
-                                            multiple_videos=cfg.eval.test.multiple_videos,
-                                            df=df, df_target=df_target, rgb_max_shape=rgb_max_shape)
+    # downscale_only_target_maps=cfg.downscale_only_target_maps may not point to eval cfg but not being used
+    datasets = setup_multiple_test_datasets_core(cfg, video_classes_to_use=cfg.eval.test.video_classes_to_use,
+                                                 video_numbers_to_use=cfg.eval.test.video_numbers_to_use,
+                                                 num_videos=cfg.eval.test.num_videos,
+                                                 multiple_videos=cfg.eval.test.multiple_videos,
+                                                 df=df, df_target=df_target, rgb_max_shape=rgb_max_shape,
+                                                 use_common_transforms=False)
     if return_dummy_transform:
         return datasets, None, target_max_shape
     return datasets, target_max_shape
@@ -625,9 +664,19 @@ def evaluate_v1(cfg):
 
     if cfg.eval.test.single_video_mode.enabled:
         train_dataset, test_dataset, target_max_shape = setup_single_video_dataset(cfg)
+    elif cfg.eval.mutiple_dataset_mode.enabled:
+        whole_test_dataset, target_max_shape = setup_multiple_test_datasets(cfg, return_dummy_transform=False)
+        test_dataset = []
+        for dset in whole_test_dataset.datasets:
+            test_dataset.append(
+                Subset(dset, indices=np.random.choice(
+                    len(dset), cfg.eval.mutiple_dataset_mode.samples_per_dataset, replace=False))
+            )
+        test_dataset = ConcatDataset(test_dataset)
     else:
-        # test_dataset, target_max_shape = setup_multiple_test_datasets(cfg, return_dummy_transform=False)
-        test_dataset, _, target_max_shape = setup_dataset(cfg)
+        whole_test_dataset, _, target_max_shape = setup_dataset(cfg)
+        test_dataset = Subset(whole_test_dataset, indices=np.random.choice(
+            len(whole_test_dataset), cfg.eval.test.samples_per_dataset, replace=False))
 
     collate_fn = heat_map_temporal_4d_collate_fn if cfg.eval.video_based.enabled else heat_map_collate_fn
     test_loader = DataLoader(test_dataset, batch_size=cfg.eval.batch_size, shuffle=cfg.eval.shuffle,
@@ -681,7 +730,7 @@ def evaluate_v1(cfg):
         if cfg.eval.video_based.enabled:
             frames = frames[:, -3:, ...]
             heat_masks = heat_masks[:, cfg.eval.video_based.gt_idx, None, ...]
-            
+
         loss1 = getattr(torch.Tensor, cfg.eval.loss.reduction)(model.calculate_loss(out, heat_masks))
         loss2 = getattr(torch.Tensor, cfg.eval.loss.reduction)(model.calculate_additional_losses(
             out, heat_masks, cfg.eval.loss.gaussian_weight, cfg.eval.loss.apply_sigmoid))
@@ -745,13 +794,22 @@ def evaluate_v1(cfg):
             random_idx = np.random.choice(cfg.eval.batch_size, 1, replace=False).item()
             current_random_frame = meta[random_idx]['item']
 
-            save_dir = f'{cfg.eval.plot_save_dir}{model._get_name()}_{loss_fn._get_name()}/' \
-                       f'version_{cfg.eval.checkpoint.version}/{os.path.split(checkpoint_file)[-1][:-5]}/'
+            if cfg.eval.save_plots:
+                save_dir = f'{cfg.eval.plot_save_dir}{model._get_name()}_{loss_fn._get_name()}/' \
+                           f'version_{cfg.eval.checkpoint.version}/{os.path.split(checkpoint_file)[-1][:-5]}/'
+                if cfg.eval.mutiple_dataset_mode.enabled:
+                    save_dir = save_dir + 'multiple_dataset_mode/'
+                elif cfg.eval.test.single_video_mode.enabled:
+                    save_dir = save_dir + 'single_dataset_mode/'
+                else:
+                    save_dir = save_dir + 'original_image_rescaled/'
+            else:
+                save_dir = None
             save_image_name = f'frame_{current_random_frame}'
 
             additional_text = f"{model._get_name()} | {loss_fn._get_name()} | Frame: {current_random_frame}\n" \
                               f""
-            show = np.random.choice(2, 1, replace=False, p=[0.20, 0.80]).item()
+            show = np.random.choice(2, 1, replace=False, p=[0.01, 0.99]).item()
 
             out = [o.cpu().squeeze(1) for o in out]
             if show:
@@ -766,7 +824,9 @@ def evaluate_v1(cfg):
                                                     f"| Epoch: {idx} "
                                                     f"| Frame Number: {current_random_frame} "
                                                     f"| Threshold: {cfg.prediction.threshold} | "
-                                                    f"Out Idx: 0")
+                                                    f"Out Idx: 0", 
+                                    save_dir=save_dir, 
+                                    img_name=save_image_name + '_head0')
                 plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                     heat_masks[random_idx].squeeze().cpu(),
                                     torch.nn.functional.threshold(out[-1][random_idx].sigmoid(),
@@ -778,7 +838,8 @@ def evaluate_v1(cfg):
                                                     f"| Epoch: {idx} "
                                                     f"| Frame Number: {current_random_frame} "
                                                     f"| Threshold: {cfg.prediction.threshold} | "
-                                                    f"Out Idx: -1")
+                                                    f"Out Idx: -1", 
+                                    save_dir=save_dir, img_name=save_image_name + '_head2')
 
                 if cfg.model_hub.model == 'DeepLabV3Plus' and len(out) > 2:
                     plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
@@ -793,7 +854,8 @@ def evaluate_v1(cfg):
                                                         f"| Epoch: {idx} "
                                                         f"| Frame Number: {current_random_frame} "
                                                         f"| Threshold: {cfg.prediction.threshold} | "
-                                                        f"Out Idx: -2")
+                                                        f"Out Idx: -2", 
+                                        save_dir=save_dir, img_name=save_image_name + '_head1')
 
     final_precision = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fp_list).sum())
     final_recall = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fn_list).sum())
