@@ -5,6 +5,7 @@ from pathlib import Path
 import hydra
 import numpy as np
 import pandas as pd
+import scipy
 import skimage
 import torch
 import torchvision
@@ -15,6 +16,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 import src_lib.models_hub as hub
+import motmetrics as mm
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost, scale_annotations
 from average_image.constants import SDDVideoDatasets, SDDVideoClasses
 from average_image.utils import SDDMeta
@@ -571,6 +573,7 @@ def visualize_from_locations(cfg):
     location_version_to_use = 'runtime_pruned_scaled'  # 'pruned_scaled' 'runtime_pruned_scaled'
     head_to_use = 0
     prune_radius = 40  # dc3
+    max_distance = float('inf')
 
     step_between_frames = 12
 
@@ -602,6 +605,10 @@ def visualize_from_locations(cfg):
     padded_shape = extracted_locations.padded_shape
     original_shape = extracted_locations.scaled_shape
 
+    sdd_meta = SDDMeta(cfg.eval.root + 'H_SDD.txt')
+    ratio = float(sdd_meta.get_meta(getattr(SDDVideoDatasets, cfg.eval.video_meta_class)
+                                    , cfg.eval.test.video_number_to_use)[0]['Ratio'].to_numpy()[0])
+
     gt_annotation_path = f'{cfg.root}annotations/{getattr(SDDVideoClasses, cfg.eval.video_class).value}/' \
                          f'video{cfg.eval.test.video_number_to_use}/annotation_augmented.csv'
     gt_annotation_df = pd.read_csv(gt_annotation_path)
@@ -610,6 +617,7 @@ def visualize_from_locations(cfg):
     logger.info(f'Starting evaluation for metrics...')
 
     video_frames = []
+    tp_list, fp_list, fn_list = [], [], []
     for t_idx, location in enumerate(tqdm(locations.locations)):
         if location_version_to_use == 'default':
             locations_to_use = location.locations
@@ -621,7 +629,7 @@ def visualize_from_locations(cfg):
             # filter out overlapping locations
             try:
                 pruned_locations, pruned_locations_idx = prune_locations_proximity_based(
-                        location.locations, prune_radius)
+                    location.locations, prune_radius)
                 pruned_locations = torch.from_numpy(pruned_locations)
             except TimeoutException:
                 pruned_locations = torch.from_numpy(location.locations)
@@ -637,26 +645,20 @@ def visualize_from_locations(cfg):
         frame_number = location.frame_number
         rgb_frame = extract_frame_from_video(video_path, frame_number)
 
-        frame_annotation = get_frame_annotations_and_skip_lost(gt_annotation_df, frame_number)
-        gt_annotations, gt_bbox_centers = scale_annotations(frame_annotation,
-                                                            original_scale=original_shape,
-                                                            new_scale=original_shape,
-                                                            return_track_id=False,
-                                                            tracks_with_annotations=True)
-        supervised_boxes = gt_annotations[:, :-1]
+        fn, fp, gt_bbox_centers, precision, recall, supervised_boxes, tp = get_annotation_and_metrics(
+            cfg, frame_number, gt_annotation_df, locations_to_use, max_distance, original_shape, ratio)
 
-        inside_boxes_idx = [b for b, box in enumerate(supervised_boxes)
-                            if (box[0] > 0 and box[2] < original_shape[1])
-                            and (box[1] > 0 and box[3] < original_shape[0])]
-        supervised_boxes = supervised_boxes[inside_boxes_idx]
-        gt_bbox_centers = gt_bbox_centers[inside_boxes_idx]
+        tp_list.append(tp)
+        fp_list.append(fp)
+        fn_list.append(fn)
 
         if cfg.eval.show_plots or cfg.eval.make_video:
             fig = plot_for_location_visualizations(
                 rgb_frame, gt_bbox_centers,
                 locations_to_use, boxes=supervised_boxes,
                 txt=f'Frame Number: {frame_number}\n'
-                    f'Agent Count: GT-{len(gt_bbox_centers)} | Pred-{len(locations_to_use)}',
+                    f'Agent Count: GT-{len(gt_bbox_centers)} | Pred-{len(locations_to_use)}'
+                    f'\nPrecision: {precision} | Recall: {recall}',
                 footnote_txt=f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
                              f'Video Number: {cfg.eval.test.video_number_to_use}'
                              f'\n\nL2 Matching Threshold: '
@@ -678,6 +680,13 @@ def visualize_from_locations(cfg):
     logger.info(f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
                 f'Video Number: {cfg.eval.test.video_number_to_use}')
 
+    final_precision = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fp_list).sum())
+    final_recall = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fn_list).sum())
+    logger.info(f"Threshold: {cfg.eval.gt_pred_loc_distance_threshold}m | "
+                f"Max-Pool kernel size: {cfg.eval.objectness.kernel} | "
+                f"Head Used: {cfg.eval.objectness.index_select}")
+    logger.info(f"Precision: {final_precision} | Recall: {final_recall}")
+
     if cfg.eval.make_video:
         logger.info(f"Writing Video")
         Path(os.path.join(os.getcwd(), 'location_only_videos')).mkdir(parents=True, exist_ok=True)
@@ -688,6 +697,47 @@ def visualize_from_locations(cfg):
             f'prune_radius_{prune_radius if location_version_to_use == "runtime_pruned_scaled" else 8}.avi',
             torch.cat(video_frames).permute(0, 2, 3, 1),
             cfg.eval.video_fps)
+
+
+def get_annotation_and_metrics(cfg, frame_number, gt_annotation_df, locations_to_use, max_distance, original_shape,
+                               ratio):
+    gt_bbox_centers, supervised_boxes = get_gt_annotation(frame_number, gt_annotation_df, original_shape)
+    fn, fp, precision, recall, tp = get_metrics_pr(cfg, gt_bbox_centers, locations_to_use, max_distance, ratio)
+    return fn, fp, gt_bbox_centers, precision, recall, supervised_boxes, tp
+
+
+def get_metrics_pr(cfg, gt_bbox_centers, locations_to_use, max_distance, ratio):
+    distance_matrix = np.sqrt(mm.distances.norm2squared_matrix(
+        gt_bbox_centers, locations_to_use, max_d2=max_distance)) * ratio
+    distance_matrix = cfg.eval.gt_pred_loc_distance_threshold - distance_matrix
+    distance_matrix[distance_matrix < 0] = 1000
+    # Hungarian
+    match_rows, match_cols = scipy.optimize.linear_sum_assignment(distance_matrix)
+    actually_matched_mask = distance_matrix[match_rows, match_cols] < 1000
+    match_rows = match_rows[actually_matched_mask]
+    match_cols = match_cols[actually_matched_mask]
+    tp = len(match_rows)
+    fp = len(locations_to_use) - len(match_rows)
+    fn = len(gt_bbox_centers) - len(match_rows)
+    precision = tp / (tp + fp + 1e-9)
+    recall = tp / (tp + fn + 1e-9)
+    return fn, fp, precision, recall, tp
+
+
+def get_gt_annotation(frame_number, gt_annotation_df, original_shape):
+    frame_annotation = get_frame_annotations_and_skip_lost(gt_annotation_df, frame_number)
+    gt_annotations, gt_bbox_centers = scale_annotations(frame_annotation,
+                                                        original_scale=original_shape,
+                                                        new_scale=original_shape,
+                                                        return_track_id=False,
+                                                        tracks_with_annotations=True)
+    supervised_boxes = gt_annotations[:, :-1]
+    inside_boxes_idx = [b for b, box in enumerate(supervised_boxes)
+                        if (box[0] > 0 and box[2] < original_shape[1])
+                        and (box[1] > 0 and box[3] < original_shape[0])]
+    supervised_boxes = supervised_boxes[inside_boxes_idx]
+    gt_bbox_centers = gt_bbox_centers[inside_boxes_idx]
+    return gt_bbox_centers, supervised_boxes
 
 
 if __name__ == '__main__':
