@@ -4,6 +4,7 @@ from pathlib import Path
 
 import hydra
 import numpy as np
+import pandas as pd
 import skimage
 import torch
 import torchvision
@@ -14,17 +15,19 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 import src_lib.models_hub as hub
+from average_image.bbox_utils import get_frame_annotations_and_skip_lost, scale_annotations
 from average_image.constants import SDDVideoDatasets, SDDVideoClasses
 from average_image.utils import SDDMeta
 from baselinev2.exceptions import TimeoutException
+from baselinev2.nn.data_utils import extract_frame_from_video
 from log import get_logger
 from src.position_maps.evaluate import setup_single_video_dataset, setup_dataset, get_gt_annotations_for_metrics, \
     get_precision_recall_for_metrics, get_image_array_from_figure, process_numpy_video_frame_to_tensor
 from src.position_maps.location_utils import locations_from_heatmaps, get_adjusted_object_locations, \
-    prune_locations_proximity_based
+    prune_locations_proximity_based, ExtractedLocations, Locations, Location
 from src.position_maps.losses import CenterNetFocalLoss
 from src.position_maps.utils import heat_map_temporal_4d_collate_fn, heat_map_collate_fn, ImagePadder, \
-    plot_image_with_features
+    plot_image_with_features, plot_for_location_visualizations
 
 seed_everything(42)
 logger = get_logger(__name__)
@@ -47,7 +50,7 @@ def adjust_config(cfg):
     # one video at a time
     cfg.eval.video_class = 'DEATH_CIRCLE'
     cfg.eval.video_meta_class = 'DEATH_CIRCLE'
-    cfg.eval.test.video_number_to_use = 4
+    cfg.eval.test.video_number_to_use = 3
     cfg.eval.test.num_videos = -1
     cfg.eval.dataset_workers = 12
     cfg.eval.test.multiple_videos = False
@@ -84,7 +87,7 @@ def adjust_config(cfg):
     cfg.eval.gt_pred_loc_distance_threshold = 2  # in meters
 
     # video + plot
-    cfg.eval.show_plots = False
+    cfg.eval.show_plots = True
     cfg.eval.make_video = False
 
 
@@ -561,6 +564,132 @@ def evaluate_metrics_for_each_threshold(cfg):
                 f"Head Used: {cfg.eval.objectness.index_select}")
 
 
+@hydra.main(config_path="config", config_name="config")
+def visualize_from_locations(cfg):
+    adjust_config(cfg)
+
+    location_version_to_use = 'runtime_pruned_scaled'  # 'pruned_scaled' 'runtime_pruned_scaled'
+    head_to_use = 0
+    prune_radius = 40  # dc3
+
+    step_between_frames = 12
+
+    logger.info(f'Evaluating metrics from locations')
+
+    # load_locations
+    load_path = os.path.join(os.getcwd(),
+                             f'ExtractedLocations'
+                             f'/{getattr(SDDVideoClasses, cfg.eval.video_class).name}'
+                             f'/{cfg.eval.test.video_number_to_use}/extracted_locations.pt')
+    extracted_locations: ExtractedLocations = torch.load(load_path)['locations']  # mock the model
+    out_head_0, out_head_1, out_head_2 = extracted_locations.head0, extracted_locations.head1, extracted_locations.head2
+
+    if head_to_use == 0:
+        locations = out_head_0
+    elif head_to_use == 1:
+        locations = out_head_1
+    elif head_to_use == 2:
+        locations = out_head_2
+    else:
+        raise NotImplementedError
+
+    locations.locations = [locations.locations[idx] for idx in range(0, len(locations.locations), step_between_frames)]
+
+    video_path = f"{cfg.root}videos/" \
+                 f"{getattr(SDDVideoClasses, cfg.eval.video_class).value}/" \
+                 f"video{cfg.eval.test.video_number_to_use}/video.mov"
+
+    padded_shape = extracted_locations.padded_shape
+    original_shape = extracted_locations.scaled_shape
+
+    gt_annotation_path = f'{cfg.root}annotations/{getattr(SDDVideoClasses, cfg.eval.video_class).value}/' \
+                         f'video{cfg.eval.test.video_number_to_use}/annotation_augmented.csv'
+    gt_annotation_df = pd.read_csv(gt_annotation_path)
+    gt_annotation_df = gt_annotation_df.drop(gt_annotation_df.columns[[0]], axis=1)
+
+    logger.info(f'Starting evaluation for metrics...')
+
+    video_frames = []
+    for t_idx, location in enumerate(tqdm(locations.locations)):
+        if location_version_to_use == 'default':
+            locations_to_use = location.locations
+        elif location_version_to_use == 'pruned':
+            locations_to_use = location.pruned_locations
+        elif location_version_to_use == 'pruned_scaled':
+            locations_to_use = location.scaled_locations
+        elif location_version_to_use == 'runtime_pruned_scaled':
+            # filter out overlapping locations
+            try:
+                pruned_locations, pruned_locations_idx = prune_locations_proximity_based(
+                        location.locations, prune_radius)
+                pruned_locations = torch.from_numpy(pruned_locations)
+            except TimeoutException:
+                pruned_locations = torch.from_numpy(location.locations)
+
+            fake_padded_heatmaps = torch.zeros(size=(1, 1, padded_shape[0], padded_shape[1]))
+            pred_object_locations_scaled, _ = get_adjusted_object_locations(
+                [pruned_locations], fake_padded_heatmaps, [{'original_shape': original_shape}])
+            locations_to_use = np.stack(pred_object_locations_scaled).squeeze() \
+                if len(pred_object_locations_scaled) != 0 else np.zeros((0, 2))
+        else:
+            raise NotImplementedError
+
+        frame_number = location.frame_number
+        rgb_frame = extract_frame_from_video(video_path, frame_number)
+
+        frame_annotation = get_frame_annotations_and_skip_lost(gt_annotation_df, frame_number)
+        gt_annotations, gt_bbox_centers = scale_annotations(frame_annotation,
+                                                            original_scale=original_shape,
+                                                            new_scale=original_shape,
+                                                            return_track_id=False,
+                                                            tracks_with_annotations=True)
+        supervised_boxes = gt_annotations[:, :-1]
+
+        inside_boxes_idx = [b for b, box in enumerate(supervised_boxes)
+                            if (box[0] > 0 and box[2] < original_shape[1])
+                            and (box[1] > 0 and box[3] < original_shape[0])]
+        supervised_boxes = supervised_boxes[inside_boxes_idx]
+        gt_bbox_centers = gt_bbox_centers[inside_boxes_idx]
+
+        if cfg.eval.show_plots or cfg.eval.make_video:
+            fig = plot_for_location_visualizations(
+                rgb_frame, gt_bbox_centers,
+                locations_to_use, boxes=supervised_boxes,
+                txt=f'Frame Number: {frame_number}\n'
+                    f'Agent Count: GT-{len(gt_bbox_centers)} | Pred-{len(locations_to_use)}',
+                footnote_txt=f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
+                             f'Video Number: {cfg.eval.test.video_number_to_use}'
+                             f'\n\nL2 Matching Threshold: '
+                             f'{cfg.eval.gt_pred_loc_distance_threshold}m',
+                video_mode=cfg.eval.make_video)
+
+            if cfg.eval.make_video:
+                video_frame = get_image_array_from_figure(fig)
+
+                if video_frame.shape[0] != original_shape[1] \
+                        or video_frame.shape[1] != original_shape[0]:
+                    video_frame = skimage.transform.resize(
+                        video_frame, (original_shape[1], original_shape[0]))
+                    video_frame = (video_frame * 255).astype(np.uint8)
+
+                    video_frame = process_numpy_video_frame_to_tensor(video_frame)
+                    video_frames.append(video_frame)
+
+    logger.info(f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
+                f'Video Number: {cfg.eval.test.video_number_to_use}')
+
+    if cfg.eval.make_video:
+        logger.info(f"Writing Video")
+        Path(os.path.join(os.getcwd(), 'location_only_videos')).mkdir(parents=True, exist_ok=True)
+        torchvision.io.write_video(
+            f'location_only_videos/{getattr(SDDVideoClasses, cfg.eval.video_meta_class).name}_'
+            f'{cfg.eval.test.video_number_to_use}_'
+            f'head_used_{head_to_use}'
+            f'prune_radius_{prune_radius if location_version_to_use == "runtime_pruned_scaled" else 8}.avi',
+            torch.cat(video_frames).permute(0, 2, 3, 1),
+            cfg.eval.video_fps)
+
+
 if __name__ == '__main__':
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -568,4 +697,5 @@ if __name__ == '__main__':
         # evaluate_and_store_predicted_maps()
         # join_parts_prediction(os.path.join(os.getcwd(), f'logs/HeatMapPredictions/DEATH_CIRCLE/4/'))
         # evaluate_metrics()
-        evaluate_metrics_for_each_threshold()
+        # evaluate_metrics_for_each_threshold()
+        visualize_from_locations()

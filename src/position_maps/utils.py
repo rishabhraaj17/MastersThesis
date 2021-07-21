@@ -155,6 +155,50 @@ def plot_image_with_features(im, feat1=None, feat2=None, boxes=None, txt='', mar
     return fig
 
 
+def plot_for_location_visualizations(im, feat1=None, feat2=None, boxes=None, txt='', marker_size=5,
+                                     add_on_both_axes=True,
+                                     footnote_txt='', video_mode=False):
+    fig, axs = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(12, 10))
+    rgb_ax, feat_ax = axs
+
+    rgb_ax.imshow(im)
+    feat_ax.imshow(im)
+
+    legends_dict = {}
+    if feat1 is not None:
+        add_features_to_axis(feat_ax, feat1, marker_size=marker_size, marker_color='b')
+        legends_dict.update({'b': 'Locations GT'})
+
+    if feat2 is not None:
+        add_features_to_axis(feat_ax, feat2, marker_size=marker_size, marker_color='g')
+        legends_dict.update({'g': 'Locations Pred'})
+
+    if boxes is not None:
+        add_box_to_axes(feat_ax, boxes)
+        if add_on_both_axes:
+            add_box_to_axes(rgb_ax, boxes)
+        legends_dict.update({'r': 'GT Boxes'})
+
+    rgb_ax.set_title('RGB')
+    feat_ax.set_title('RGB + Locations')
+
+    fig.subplots_adjust(wspace=0.1, hspace=0.1)
+    plt.tight_layout(pad=1.58)
+
+    legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+    fig.legend(handles=legend_patches, loc=2)
+
+    plt.suptitle(txt)
+    plt.figtext(0.99, 0.01, footnote_txt, horizontalalignment='right')
+
+    if video_mode:
+        plt.close()
+    else:
+        plt.show()
+
+    return fig
+
+
 def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=False, save_dir=None, img_name='',
                      tight_layout=True, do_nothing=False):
     fig, axs = plt.subplots(1, 3, sharex='none', sharey='none', figsize=(16, 8))
