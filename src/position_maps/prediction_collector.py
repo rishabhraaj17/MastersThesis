@@ -572,7 +572,7 @@ def visualize_from_locations(cfg):
 
     location_version_to_use = 'runtime_pruned_scaled'  # 'pruned_scaled' 'runtime_pruned_scaled'
     head_to_use = 0
-    prune_radius = 40  # dc3
+    prune_radius = 45  # dc3
     max_distance = float('inf')
 
     step_between_frames = 12
@@ -662,8 +662,11 @@ def visualize_from_locations(cfg):
                 footnote_txt=f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
                              f'Video Number: {cfg.eval.test.video_number_to_use}'
                              f'\n\nL2 Matching Threshold: '
-                             f'{cfg.eval.gt_pred_loc_distance_threshold}m',
-                video_mode=cfg.eval.make_video)
+                             f'{cfg.eval.gt_pred_loc_distance_threshold}m\n'
+                             f'Prune Radius:'
+                             f' {prune_radius if location_version_to_use == "runtime_pruned_scaled" else 8}',
+                video_mode=cfg.eval.make_video,
+                radius=prune_radius if location_version_to_use == "runtime_pruned_scaled" else 8)
 
             if cfg.eval.make_video:
                 video_frame = get_image_array_from_figure(fig)

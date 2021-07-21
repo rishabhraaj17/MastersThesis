@@ -156,7 +156,7 @@ def plot_image_with_features(im, feat1=None, feat2=None, boxes=None, txt='', mar
 
 
 def plot_for_location_visualizations(im, feat1=None, feat2=None, boxes=None, txt='', marker_size=5,
-                                     add_on_both_axes=True,
+                                     add_on_both_axes=True, radius=None,
                                      footnote_txt='', video_mode=False):
     fig, axs = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(12, 10))
     rgb_ax, feat_ax = axs
@@ -178,6 +178,11 @@ def plot_for_location_visualizations(im, feat1=None, feat2=None, boxes=None, txt
         if add_on_both_axes:
             add_box_to_axes(rgb_ax, boxes)
         legends_dict.update({'r': 'GT Boxes'})
+
+    if radius is not None:
+        for c_center in feat2:
+            feat_ax.add_artist(plt.Circle((c_center[0], c_center[1]), radius, color='yellow', fill=False))
+        legends_dict.update({'yellow': 'Prune Radius'})
 
     rgb_ax.set_title('RGB')
     feat_ax.set_title('RGB + Locations')
