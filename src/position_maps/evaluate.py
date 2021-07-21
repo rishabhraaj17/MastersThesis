@@ -692,7 +692,16 @@ def evaluate_v1(cfg):
         loss_function=loss_fn, collate_fn=heat_map_collate_fn, additional_loss_functions=gauss_loss_fn,
         desired_output_shape=None)
 
-    checkpoint_path = f'{cfg.eval.checkpoint.root}{cfg.eval.checkpoint.path}{cfg.eval.checkpoint.version}/checkpoints/'
+    if cfg.eval.checkpoint.wandb.enabled:
+        version_name = f"{cfg.eval.checkpoint.wandb.checkpoint.run_name}".split('-')[-1]
+        checkpoint_path = f'{cfg.eval.checkpoint.wandb.checkpoint.root}' \
+                          f'{cfg.eval.checkpoint.wandb.checkpoint.run_name}' \
+                          f'{cfg.eval.checkpoint.wandb.checkpoint.tail_path}' \
+                          f'{cfg.eval.checkpoint.wandb.checkpoint.project_name}/' \
+                          f'{version_name}/checkpoints/'
+    else:
+        checkpoint_path = f'{cfg.eval.checkpoint.root}{cfg.eval.checkpoint.path}' \
+                          f'{cfg.eval.checkpoint.version}/checkpoints/'
     checkpoint_files = os.listdir(checkpoint_path)
 
     epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
@@ -824,8 +833,8 @@ def evaluate_v1(cfg):
                                                     f"| Epoch: {idx} "
                                                     f"| Frame Number: {current_random_frame} "
                                                     f"| Threshold: {cfg.prediction.threshold} | "
-                                                    f"Out Idx: 0", 
-                                    save_dir=save_dir, 
+                                                    f"Out Idx: 0",
+                                    save_dir=save_dir,
                                     img_name=save_image_name + '_head0')
                 plot_predictions_v2(frames[random_idx].squeeze().cpu().permute(1, 2, 0),
                                     heat_masks[random_idx].squeeze().cpu(),
@@ -838,7 +847,7 @@ def evaluate_v1(cfg):
                                                     f"| Epoch: {idx} "
                                                     f"| Frame Number: {current_random_frame} "
                                                     f"| Threshold: {cfg.prediction.threshold} | "
-                                                    f"Out Idx: -1", 
+                                                    f"Out Idx: -1",
                                     save_dir=save_dir, img_name=save_image_name + '_head2')
 
                 if cfg.model_hub.model == 'DeepLabV3Plus' and len(out) > 2:
@@ -854,7 +863,7 @@ def evaluate_v1(cfg):
                                                         f"| Epoch: {idx} "
                                                         f"| Frame Number: {current_random_frame} "
                                                         f"| Threshold: {cfg.prediction.threshold} | "
-                                                        f"Out Idx: -2", 
+                                                        f"Out Idx: -2",
                                         save_dir=save_dir, img_name=save_image_name + '_head1')
 
     final_precision = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fp_list).sum())

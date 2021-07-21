@@ -130,3 +130,12 @@ eval:
     path: "lightning_logs/version_"
     version: 516403  # 513923 # 509506 # 497829 # 492265 #424798 # 437363  # 424798 # 509506 (best-dlv3-r50) # 513512 (T2D-best-dlv3) # 511123 (LITTLE - good) # 511116 (DC-3-good)
     top_k: 1
+
+    wandb:
+      enabled: False
+      checkpoint:
+        root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/wandb/"
+        tail_path: "/files/"
+        project_name: 'PositionMap'
+        run_name: "run-20210721_163402-1zebiwjj"
+        top_k: 1
