@@ -806,6 +806,10 @@ def evaluate_v1(cfg):
             if cfg.eval.save_plots:
                 save_dir = f'{cfg.eval.plot_save_dir}{model._get_name()}_{loss_fn._get_name()}/' \
                            f'version_{cfg.eval.checkpoint.version}/{os.path.split(checkpoint_file)[-1][:-5]}/'
+                if cfg.eval.checkpoint.wandb.enabled:
+                    save_dir = f'{cfg.eval.plot_save_dir}{model._get_name()}_{loss_fn._get_name()}/' \
+                               f'version_{cfg.eval.checkpoint.wandb.checkpoint.run_name}/' \
+                               f'{os.path.split(checkpoint_file)[-1][:-5]}/'
                 if cfg.eval.mutiple_dataset_mode.enabled:
                     save_dir = save_dir + 'multiple_dataset_mode/'
                 elif cfg.eval.test.single_video_mode.enabled:

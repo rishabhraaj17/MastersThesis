@@ -7,6 +7,8 @@ from typing import Sequence
 
 import numpy as np
 import pandas as pd
+import scipy
+import scipy.interpolate as interp
 import torch
 from matplotlib import pyplot as plt, patches
 from omegaconf import OmegaConf
@@ -101,8 +103,8 @@ def filter_out_nth_frame_from_middle(total_tracks, n):
         offending_idx = t.frames.index(n)
         track_temp = Track(
             idx=t.idx,
-            frames=t.frames[:offending_idx] + t.frames[offending_idx+1:],
-            locations=t.locations[:offending_idx] + t.locations[offending_idx+1:],
+            frames=t.frames[:offending_idx] + t.frames[offending_idx + 1:],
+            locations=t.locations[:offending_idx] + t.locations[offending_idx + 1:],
             inactive=t.inactive
         )
         tracks_having_frame_n_filtered.append(track_temp)
@@ -349,8 +351,8 @@ def plot_trajectory_with_one_frame(frame, last_frame, trajectory, frame_number, 
         add_features_to_axis(ax=img_axis, features=trajectory, marker_size=marker_size)
 
     if plot_first_and_last:
-        add_features_to_axis(img_axis, np.stack([trajectory[0]]), marker_color='aqua', marker_size=marker_size+1)
-        add_features_to_axis(img_axis, np.stack([trajectory[-1]]), marker_color='r', marker_size=marker_size+1)
+        add_features_to_axis(img_axis, np.stack([trajectory[0]]), marker_color='aqua', marker_size=marker_size + 1)
+        add_features_to_axis(img_axis, np.stack([trajectory[-1]]), marker_color='r', marker_size=marker_size + 1)
 
     img_axis.set_title('Trajectory on initial frame')
 
@@ -410,8 +412,144 @@ def viz_raw_tracks_from_active_inactive(active_tracks, inactive_tracks, video_cl
             np.stack(tr.locations),
             frame_number=f"{first_frame}-{last_frame}", track_id=tr.idx, use_lines=use_lines,
             plot_first_and_last=plot_first_and_last, marker_size=marker_size)
-        
-        
+
+
+# smooth trajectories
+# 1 - rank 2
+def interpolate_polyline(polyline, num_points):
+    duplicates = []
+    for i in range(1, len(polyline)):
+        if np.allclose(polyline[i], polyline[i - 1]):
+            duplicates.append(i)
+    if duplicates:
+        polyline = np.delete(polyline, duplicates, axis=0)
+    tck, u = interp.splprep(polyline.T, s=0)
+    u = np.linspace(0.0, 1.0, num_points)
+    return np.column_stack(interp.splev(u, tck))
+
+
+def simple_scipy_splines(polyline, num_points):
+    # throws value error for stationary points
+    tck, u = interp.splprep(polyline.T, s=0)
+    u = np.linspace(0.0, 1.0, num_points)
+    return np.column_stack(interp.splev(u, tck))
+
+
+# 2
+def approximate_b_spline_path(x: list, y: list, n_path_points: int,
+                              degree: int = 3) -> tuple:
+    """
+    approximate points with a B-Spline path
+    :param x: x position list of approximated points
+    :param y: y position list of approximated points
+    :param n_path_points: number of path points
+    :param degree: (Optional) B Spline curve degree
+    :return: x and y position list of the result path
+    """
+    t = range(len(x))
+    x_tup = interp.splrep(t, x, k=degree)
+    y_tup = interp.splrep(t, y, k=degree)
+
+    x_list = list(x_tup)
+    x_list[1] = x + np.arange(x.shape[0])  # [0.0, 0.0, 0.0, 0.0]
+
+    y_list = list(y_tup)
+    y_list[1] = y + np.arange(y.shape[0])  # [0.0, 0.0, 0.0, 0.0]
+
+    ipl_t = np.linspace(0.0, len(x) - 1, n_path_points)
+    rx = interp.splev(ipl_t, x_list)
+    ry = interp.splev(ipl_t, y_list)
+
+    return rx, ry
+
+
+def interpolate_b_spline_path(x: list, y: list, n_path_points: int,
+                              degree: int = 3) -> tuple:
+    """
+    interpolate points with a B-Spline path
+    :param x: x positions of interpolated points
+    :param y: y positions of interpolated points
+    :param n_path_points: number of path points
+    :param degree: B-Spline degree
+    :return: x and y position list of the result path
+    """
+    # seems to be doing nothing
+    ipl_t = np.linspace(0.0, len(x) - 1, len(x))
+    spl_i_x = interp.make_interp_spline(ipl_t, x, k=degree)
+    spl_i_y = interp.make_interp_spline(ipl_t, y, k=degree)
+
+    travel = np.linspace(0.0, len(x) - 1, n_path_points)
+    return spl_i_x(travel), spl_i_y(travel)
+
+
+# 3 - rank 1
+def calc_bezier_path(control_points, n_points=100):
+    """
+    Compute bezier path (trajectory) given control points.
+    :param control_points: (numpy array)
+    :param n_points: (int) number of points in the trajectory
+    :return: (numpy array)
+    """
+    traj = []
+    for t in np.linspace(0, 1, n_points):
+        traj.append(bezier(t, control_points))
+
+    return np.array(traj)
+
+
+def bernstein_poly(n, i, t):
+    """
+    Bernstein polynom.
+    :param n: (int) polynom degree
+    :param i: (int)
+    :param t: (float)
+    :return: (float)
+    """
+    return scipy.special.comb(n, i) * t ** i * (1 - t) ** (n - i)
+
+
+def bezier(t, control_points):
+    """
+    Return one point on the bezier curve.
+    :param t: (float) number in [0, 1]
+    :param control_points: (numpy array)
+    :return: (numpy array) Coordinates of the point
+    """
+    n = len(control_points) - 1
+    return np.sum([bernstein_poly(n, i, t) * control_points[i] for i in range(n + 1)], axis=0)
+
+
+def bezier_derivatives_control_points(control_points, n_derivatives):
+    """
+    Compute control points of the successive derivatives of a given bezier curve.
+    A derivative of a bezier curve is a bezier curve.
+    See https://pomax.github.io/bezierinfo/#derivatives
+    for detailed explanations
+    :param control_points: (numpy array)
+    :param n_derivatives: (int)
+    e.g., n_derivatives=2 -> compute control points for first and second derivatives
+    :return: ([numpy array])
+    """
+    w = {0: control_points}
+    for i in range(n_derivatives):
+        n = len(w[i])
+        w[i + 1] = np.array([(n - 1) * (w[i][j + 1] - w[i][j])
+                             for j in range(n - 1)])
+    return w
+
+
+def curvature(dx, dy, ddx, ddy):
+    """
+    Compute curvature at one point given first and second derivatives.
+    :param dx: (float) First derivative along x axis
+    :param dy: (float)
+    :param ddx: (float) Second derivative along x axis
+    :param ddy: (float)
+    :return: (float)
+    """
+    return (dx * ddy - dy * ddx) / (dx ** 2 + dy ** 2) ** (3 / 2)
+
+
 def viz_dataset_trajectories():
     cfg = OmegaConf.load('config/training/training.yaml')
 
@@ -446,6 +584,21 @@ def viz_dataset_trajectories():
 
         plot_trajectory_alongside_frame(
             frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_num, track_id=track_num)
+
+        # smooth trajectories
+        try:
+            # its good but not as smooth as the next one
+            # obs_trajectory = interpolate_polyline(obs_trajectory.numpy(), 8)
+            # gt_trajectory = interpolate_polyline(gt_trajectory.numpy(), 12)
+
+            # this looks best but is weird for stationary - look example
+            obs_trajectory = calc_bezier_path(obs_trajectory.numpy(), 8)
+            gt_trajectory = calc_bezier_path(gt_trajectory.numpy(), 12)
+
+            plot_trajectory_alongside_frame(
+                frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_num, track_id=track_num)
+        except TypeError:
+            continue
 
 
 if __name__ == '__main__':

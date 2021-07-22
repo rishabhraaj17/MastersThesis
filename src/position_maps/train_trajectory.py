@@ -69,8 +69,8 @@ def evaluate(cfg):
     )
     # load dict
     path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/wandb/' \
-           'run-20210719_165710-2drog07h/files/TrajectoryPredictionBaseline/2drog07h/checkpoints/' \
-           'epoch=46-step=7895.ckpt'
+           'run-20210720_204724-3ebzenze/files/' \
+           'TrajectoryPredictionBaseline/3ebzenze/checkpoints/epoch=46-step=125677.ckpt'
     state_dict = torch.load(path)['state_dict']
     model.load_state_dict(state_dict)
 
@@ -114,5 +114,5 @@ def evaluate(cfg):
 
 
 if __name__ == '__main__':
-    # evaluate()
-    train_lightning()
+    evaluate()
+    # train_lightning()
