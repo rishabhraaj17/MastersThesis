@@ -1,5 +1,6 @@
 import math
 import os
+from typing import Callable
 
 import networkx as nx
 import numpy as np
@@ -602,3 +603,29 @@ class TrajectoryDatasetFromFile(Dataset):
                 self.non_linear_ped[start:end], self.loss_mask[start:end, :],
             ]
         return out
+
+
+class SmoothTrajectoryDataset(Dataset):
+    def __init__(self, base_dataset: Dataset, smoother: Callable, threshold: int = 1):
+        super(SmoothTrajectoryDataset, self).__init__()
+        self.base_dataset = base_dataset
+        self.smoother = smoother
+        self.threshold = threshold
+
+    def __len__(self):
+        return len(self.base_dataset)
+
+    def __getitem__(self, item):
+        out = self.base_dataset.__getitem__(item)
+        (obs_trajectory, pred_trajectory, obs_trajectory_rel, pred_trajectory_rel), out_extra = out[:4], out[4:]
+
+        # smooth
+        obs_trajectory = self.smoother(obs_trajectory.numpy(), obs_trajectory.shape[-1], self.threshold)
+        pred_trajectory = self.smoother(pred_trajectory.numpy(), pred_trajectory.shape[-1], self.threshold)
+
+        trajectory_rel = torch.from_numpy(np.diff(np.concatenate((obs_trajectory, pred_trajectory), axis=-1)))
+        obs_trajectory_rel[:, :, 1:] = trajectory_rel[:, :, :7]
+        pred_trajectory_rel = trajectory_rel[:, :, 7:]
+
+        return [torch.from_numpy(obs_trajectory), torch.from_numpy(pred_trajectory),
+                obs_trajectory_rel, pred_trajectory_rel, *out_extra]

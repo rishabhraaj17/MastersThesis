@@ -22,7 +22,7 @@ from baselinev2.plot_utils import add_line_to_axis, add_features_to_axis, plot_t
 from src.position_maps.interplay_utils import Track, Tracks
 from src_lib.datasets.opentraj_based import get_multiple_gt_dataset
 from src_lib.datasets.trajectory_stgcnn import STGCNNTrajectoryDataset, seq_collate, seq_collate_dict, \
-    seq_collate_with_graphs, seq_collate_with_graphs_dict, seq_collate_with_dataset_idx_dict
+    seq_collate_with_graphs, seq_collate_with_graphs_dict, seq_collate_with_dataset_idx_dict, SmoothTrajectoryDataset
 
 VIDEO_CLASS = SDDVideoClasses.DEATH_CIRCLE
 VIDEO_NUMBER = 4
@@ -234,11 +234,15 @@ def final_displacement_error(
         return torch.sum(loss)
 
 
-def get_single_dataset(cfg, video_class, v_num, split_dataset):
+def get_single_dataset(cfg, video_class, v_num, split_dataset, smooth_trajectories=False, smoother=lambda x: x,
+                       threshold=1):
     load_path = f"{cfg.root}{video_class}/{v_num}/"
     dataset = STGCNNTrajectoryDataset(
         load_path, obs_len=cfg.obs_len, pred_len=cfg.pred_len, skip=cfg.skip,
         delim=cfg.delim, video_class=video_class, video_number=v_num, construct_graph=cfg.construct_graph)
+
+    if smooth_trajectories:
+        dataset = SmoothTrajectoryDataset(base_dataset=dataset, smoother=smoother, threshold=threshold)
 
     if not split_dataset:
         return dataset
@@ -252,7 +256,8 @@ def get_single_dataset(cfg, video_class, v_num, split_dataset):
     return train_dataset, val_dataset
 
 
-def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True):
+def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True,
+                          smooth_trajectories=False, smoother=lambda x: x, threshold=1):
     conf = cfg.tp_module.datasets
     video_classes = conf.video_classes
     video_numbers = conf.video_numbers
@@ -261,11 +266,15 @@ def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True):
     for v_idx, video_class in enumerate(tqdm(video_classes)):
         for v_num in video_numbers[v_idx]:
             if split_dataset:
-                t_dset, v_dset = get_single_dataset(conf, video_class, v_num, split_dataset)
+                t_dset, v_dset = get_single_dataset(conf, video_class, v_num, split_dataset,
+                                                    smooth_trajectories=smooth_trajectories,
+                                                    smoother=smoother, threshold=threshold)
                 train_datasets.append(t_dset)
                 val_datasets.append(v_dset)
             else:
-                dset = get_single_dataset(cfg, video_class, v_num, split_dataset)
+                dset = get_single_dataset(cfg, video_class, v_num, split_dataset,
+                                          smooth_trajectories=smooth_trajectories,
+                                          smoother=smoother, threshold=threshold)
                 train_datasets.append(dset)
 
     if split_dataset:
@@ -550,13 +559,61 @@ def curvature(dx, dy, ddx, ddy):
     return (dx * ddy - dy * ddx) / (dx ** 2 + dy ** 2) ** (3 / 2)
 
 
+def bezier_smoother(trajectory, num_points, threshold=1):
+    distance = np.diff(trajectory, axis=-1)
+    distance = np.hypot(distance[:, 0], distance[:, 1]).sum(axis=-1)
+
+    out_trajectories = np.zeros_like(trajectory)
+    # having length greater than threshold
+    valid_trajectories_idx = np.where(distance > threshold)
+    invalid_trajectories_idx = np.setdiff1d(np.arange(distance.shape[0]), valid_trajectories_idx)
+
+    out_trajectories[invalid_trajectories_idx] = trajectory[invalid_trajectories_idx]
+    trajectories_to_smooth = trajectory[valid_trajectories_idx]
+
+    smoothed_trajectories = np.transpose(
+        np.stack([calc_bezier_path(t.T, num_points) for t in trajectories_to_smooth]), (0, 2, 1))
+
+    out_trajectories[valid_trajectories_idx] = smoothed_trajectories
+
+    return out_trajectories
+
+
+def splrep_smoother(trajectory, num_points, threshold=1):
+    distance = np.diff(trajectory, axis=-1)
+    distance = np.hypot(distance[:, 0], distance[:, 1]).sum(axis=-1)
+
+    out_trajectories = np.zeros_like(trajectory)
+    # having length greater than threshold
+    valid_trajectories_idx = np.where(distance > threshold)
+    invalid_trajectories_idx = np.setdiff1d(np.arange(distance.shape[0]), valid_trajectories_idx)
+
+    out_trajectories[invalid_trajectories_idx] = trajectory[invalid_trajectories_idx]
+    trajectories_to_smooth = trajectory[valid_trajectories_idx]
+
+    smoothed_trajectories = np.transpose(
+        np.stack([interpolate_polyline(t.T, num_points) for t in trajectories_to_smooth]), (0, 2, 1))
+
+    out_trajectories[valid_trajectories_idx] = smoothed_trajectories
+
+    return out_trajectories
+
+
 def viz_dataset_trajectories():
     cfg = OmegaConf.load('config/training/training.yaml')
 
     if cfg.tp_module.datasets.use_generated:
-        train_dataset, val_dataset = get_multiple_datasets(cfg=cfg, split_dataset=True, with_dataset_idx=True)
+        train_dataset, val_dataset = get_multiple_datasets(
+            cfg=cfg, split_dataset=True, with_dataset_idx=True,
+            smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
+            smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
+            threshold=cfg.tp_module.smooth_trajectories.min_length)
     else:
-        train_dataset, val_dataset = get_multiple_gt_dataset(cfg=cfg, split_dataset=True, with_dataset_idx=True)
+        train_dataset, val_dataset = get_multiple_gt_dataset(
+            cfg=cfg, split_dataset=True, with_dataset_idx=True,
+            smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
+            smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
+            threshold=cfg.tp_module.smooth_trajectories.min_length)
 
     loader = DataLoader(train_dataset, batch_size=1, collate_fn=seq_collate_with_dataset_idx_dict)
     for batch in tqdm(loader):
@@ -577,6 +634,8 @@ def viz_dataset_trajectories():
         track_num = int(track_lists[:, random_trajectory_idx, ...][0].item())
 
         current_dataset = loader.dataset.datasets[dataset_idx].dataset
+        if isinstance(current_dataset, SmoothTrajectoryDataset):
+            current_dataset = current_dataset.base_dataset
 
         video_path = f"{cfg.root}videos/{getattr(SDDVideoClasses, current_dataset.video_class).value}" \
                      f"/video{current_dataset.video_number}/video.mov"
@@ -584,21 +643,6 @@ def viz_dataset_trajectories():
 
         plot_trajectory_alongside_frame(
             frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_num, track_id=track_num)
-
-        # smooth trajectories
-        try:
-            # its good but not as smooth as the next one
-            # obs_trajectory = interpolate_polyline(obs_trajectory.numpy(), 8)
-            # gt_trajectory = interpolate_polyline(gt_trajectory.numpy(), 12)
-
-            # this looks best but is weird for stationary - look example
-            obs_trajectory = calc_bezier_path(obs_trajectory.numpy(), 8)
-            gt_trajectory = calc_bezier_path(gt_trajectory.numpy(), 12)
-
-            plot_trajectory_alongside_frame(
-                frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_num, track_id=track_num)
-        except TypeError:
-            continue
 
 
 if __name__ == '__main__':

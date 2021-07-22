@@ -13,9 +13,9 @@ from average_image.constants import SDDVideoClasses
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import plot_trajectory_alongside_frame
 from log import get_logger
-from src.position_maps.trajectory_utils import get_multiple_datasets
+from src.position_maps.trajectory_utils import get_multiple_datasets, bezier_smoother, splrep_smoother
 from src_lib.datasets.opentraj_based import get_multiple_gt_dataset
-from src_lib.datasets.trajectory_stgcnn import seq_collate_with_dataset_idx_dict
+from src_lib.datasets.trajectory_stgcnn import seq_collate_with_dataset_idx_dict, SmoothTrajectoryDataset
 
 warnings.filterwarnings("ignore")
 
@@ -23,19 +23,38 @@ seed_everything(42)
 logger = get_logger(__name__)
 
 
-@hydra.main(config_path="config", config_name="config")
-def train_lightning(cfg):
-    logger.info(f"Setting up dataset and model")
+def setup_dataset(cfg):
     if cfg.tp_module.datasets.use_generated:
-        train_dataset, val_dataset = get_multiple_datasets(cfg=cfg, split_dataset=True, with_dataset_idx=True)
+        train_dataset, val_dataset = get_multiple_datasets(
+            cfg=cfg, split_dataset=True, with_dataset_idx=True,
+            smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
+            smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
+            threshold=cfg.tp_module.smooth_trajectories.min_length)
     else:
-        train_dataset, val_dataset = get_multiple_gt_dataset(cfg=cfg, split_dataset=True, with_dataset_idx=True)
+        train_dataset, val_dataset = get_multiple_gt_dataset(
+            cfg=cfg, split_dataset=True, with_dataset_idx=True,
+            smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
+            smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
+            threshold=cfg.tp_module.smooth_trajectories.min_length)
+    return train_dataset, val_dataset
 
+
+def setup_model(cfg, train_dataset, val_dataset):
     model = getattr(hub, cfg.tp_module.model)(
         config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
         desired_output_shape=None, loss_function=None,
         additional_loss_functions=None, collate_fn=seq_collate_with_dataset_idx_dict
     )
+    return model
+
+
+@hydra.main(config_path="config", config_name="config")
+def train_lightning(cfg):
+    logger.info(f"Setting up dataset and model")
+    train_dataset, val_dataset = setup_dataset(cfg)
+
+    model = setup_model(cfg, train_dataset, val_dataset)
+
     checkpoint_callback = ModelCheckpoint(
         monitor=cfg.monitor,
         save_top_k=cfg.tp_module.trainer.num_checkpoints_to_save,
@@ -58,15 +77,10 @@ def train_lightning(cfg):
 @hydra.main(config_path="config", config_name="config")
 def evaluate(cfg):
     logger.info(f"Setting up dataset and model")
-    if cfg.tp_module.datasets.use_generated:
-        train_dataset, val_dataset = get_multiple_datasets(cfg=cfg, split_dataset=True, with_dataset_idx=True)
-    else:
-        train_dataset, val_dataset = get_multiple_gt_dataset(cfg=cfg, split_dataset=True, with_dataset_idx=True)
-    model = getattr(hub, cfg.tp_module.model)(
-        config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
-        desired_output_shape=None, loss_function=None,
-        additional_loss_functions=None, collate_fn=seq_collate_with_dataset_idx_dict
-    )
+    train_dataset, val_dataset = setup_dataset(cfg)
+
+    model = setup_model(cfg, train_dataset, val_dataset)
+
     # load dict
     path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/wandb/' \
            'run-20210720_204724-3ebzenze/files/' \
@@ -103,6 +117,8 @@ def evaluate(cfg):
         track_num = int(track_lists[:, random_trajectory_idx, ...][0].item())
 
         current_dataset = loader.dataset.datasets[dataset_idx].dataset
+        if isinstance(current_dataset, SmoothTrajectoryDataset):
+            current_dataset = current_dataset.base_dataset
 
         video_path = f"{cfg.root}videos/{getattr(SDDVideoClasses, current_dataset.video_class).value}" \
                      f"/video{current_dataset.video_number}/video.mov"

@@ -25,6 +25,12 @@ mode: 'min'
 # scheduler
 tp_module:
   model: 'TrajectoryTransformer'  # 'RNNBaseline'  # 'TrajectoryTransformer'
+
+  smooth_trajectories:
+    enabled: True
+    min_length: 4
+    smoother: 'bezier'  # or 'simple'
+
   datasets:
     root_gt: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/OpenTraj/datasets/SDD/'
     root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/Trajectories/'
