@@ -145,6 +145,8 @@ def overfit(cfg):
 
     loader = DataLoader(train_dataset, batch_size=1, shuffle=True, pin_memory=True, drop_last=False,
                         collate_fn=seq_collate_with_dataset_idx_dict)
+    val_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, pin_memory=True, drop_last=False,
+                            collate_fn=seq_collate_with_dataset_idx_dict)
 
     opt = torch.optim.Adam(model.parameters(), lr=model.config.tp_module.optimizer.lr,
                            weight_decay=model.config.tp_module.optimizer.weight_decay,
