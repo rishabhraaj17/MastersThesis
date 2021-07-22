@@ -6,7 +6,9 @@ import torch
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 import src_lib.models_hub as hub
 from average_image.constants import SDDVideoClasses
@@ -129,6 +131,91 @@ def evaluate(cfg):
             additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
 
 
+@hydra.main(config_path="config", config_name="config")
+def overfit(cfg):
+    device = 'cuda:0'
+    epochs = 500
+    plot_idx = 5
+
+    logger.info(f"Overfit - Setting up dataset and model")
+    train_dataset, val_dataset = setup_dataset(cfg)
+
+    model = setup_model(cfg, train_dataset, val_dataset)
+    model.to(device)
+
+    loader = DataLoader(train_dataset, batch_size=1, shuffle=True, pin_memory=True, drop_last=False,
+                        collate_fn=seq_collate_with_dataset_idx_dict)
+
+    opt = torch.optim.Adam(model.parameters(), lr=model.config.tp_module.optimizer.lr,
+                           weight_decay=model.config.tp_module.optimizer.weight_decay,
+                           amsgrad=model.config.tp_module.optimizer.amsgrad)
+    sch = ReduceLROnPlateau(opt,
+                            patience=model.config.tp_module.scheduler.patience,
+                            verbose=model.config.tp_module.scheduler.verbose,
+                            factor=model.config.tp_module.scheduler.factor,
+                            min_lr=model.config.tp_module.scheduler.min_lr)
+
+    train_loss, ade_list, fde_list = [], [], []
+    for epoch in range(epochs):
+        model.train()
+        with tqdm(loader, position=0) as t:
+            t.set_description('Epoch %i' % epoch)
+            for b_idx, batch in enumerate(loader):
+                opt.zero_grad()
+
+                batch = {k: v.to(device) for k, v in batch.items()}
+                target = batch['gt_xy']
+
+                out = model(batch)
+
+                pred = out['out_xy']
+
+                loss = model.calculate_loss(pred, target)
+
+                ade, fde = model.calculate_metrics(pred, target, model.config.tp_module.metrics.mode)
+
+                t.set_postfix(loss=loss.item(), ade=ade.item(), fde=fde.item(),
+                              running_loss=torch.tensor(train_loss).mean().item(),
+                              running_ade=torch.tensor(ade_list).mean().item(),
+                              running_fde=torch.tensor(fde_list).mean().item())
+                t.update()
+
+                train_loss.append(loss.item())
+                ade_list.append(ade.item())
+                fde_list.append(fde.item())
+
+                loss.backward()
+                opt.step()
+
+            if epoch % plot_idx == 0:
+                dataset_idx = batch['dataset_idx'].item()
+                seq_start_end = batch['seq_start_end']
+                frame_nums = batch['in_frames']
+                track_lists = batch['in_tracks']
+
+                random_trajectory_idx = np.random.choice(frame_nums.shape[1], 1, replace=False).item()
+
+                obs_trajectory = batch['in_xy'][:, random_trajectory_idx, ...]
+                gt_trajectory = batch['gt_xy'][:, random_trajectory_idx, ...]
+                pred_trajectory = out['out_xy'][:, random_trajectory_idx, ...]
+
+                frame_num = int(frame_nums[:, random_trajectory_idx, ...][0].item())
+                track_num = int(track_lists[:, random_trajectory_idx, ...][0].item())
+
+                current_dataset = loader.dataset.datasets[dataset_idx].dataset
+                if isinstance(current_dataset, SmoothTrajectoryDataset):
+                    current_dataset = current_dataset.base_dataset
+
+                video_path = f"{cfg.root}videos/{getattr(SDDVideoClasses, current_dataset.video_class).value}" \
+                             f"/video{current_dataset.video_number}/video.mov"
+                frame = extract_frame_from_video(video_path, frame_num)
+
+                plot_trajectory_alongside_frame(
+                    frame, obs_trajectory.cpu(), gt_trajectory.cpu(), pred_trajectory.detach().cpu(), frame_num,
+                    track_id=track_num, additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
+
+
 if __name__ == '__main__':
-    evaluate()
+    overfit()
+    # evaluate()
     # train_lightning()

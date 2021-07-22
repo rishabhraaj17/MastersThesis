@@ -105,13 +105,16 @@ class TransformerMotionDecoder(nn.Module):
             d_o = torch.cat((last_obs_vel, d_o))
 
         pred_dxdy = self.projector(d_o[1:, ...])
-        out_xy = []
-        for pred_vel in pred_dxdy:
-            last_obs_pos += pred_vel
-            out_xy.append(last_obs_pos)
+
+        out_xy = pred_dxdy.cumsum(0) + in_xy[-1, None, ...]
+        # out_xy = []
+        # for pred_vel in pred_dxdy:
+        #     last_obs_pos += pred_vel
+        #     out_xy.append(last_obs_pos)
+        # out_xy = torch.stack(out_xy)
 
         out = {
-            'out_xy': torch.stack(out_xy),
+            'out_xy': out_xy,
             'out_dxdy': pred_dxdy
         }
         return out
@@ -141,7 +144,7 @@ class TrajectoryTransformer(Base):
         pred = out['out_xy']
 
         loss = self.calculate_loss(pred, target)
-        ade, fde = self.calculate_metrics(pred, target, self.config.tp_module.metrics.mode)
+        ade, fde = self.calculate_metrics(pred.clone().detach(), target, self.config.tp_module.metrics.mode)
         return loss, ade, fde
 
     @staticmethod
