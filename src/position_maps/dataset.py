@@ -212,7 +212,16 @@ class SDDFrameAndAnnotationDataset(Dataset):
         return dff
 
     @staticmethod
-    def _read_annotation_file_and_filter(path, original_shape, use_generated=False):
+    def drop_bad_frames(df, frame_numbers):
+        return df.drop(df[df.frame_number.isin(frame_numbers)].index)
+
+    def post_process_annotations(self, df):
+        if self.video_label == SDDVideoClasses.NEXUS:
+            if self.video_number_to_use in [7]:
+                return self.drop_bad_frames(df=df, frame_numbers=[1518, 1528, 1545, 6518])
+        return df
+
+    def _read_annotation_file_and_filter(self, path, original_shape, use_generated=False):
         dff = pd.read_csv(path)
         if not use_generated:
             dff = dff.drop(dff.columns[[0]], axis=1)
@@ -221,6 +230,7 @@ class SDDFrameAndAnnotationDataset(Dataset):
         h -= 1
         w -= 1
         dff = dff.drop(dff[(dff.x_min < 0) | (dff.x_max > w) | (dff.y_min < 0) | (dff.y_max > h)].index)
+        dff = self.post_process_annotations(df=dff)
         return dff
 
     def __len__(self):
