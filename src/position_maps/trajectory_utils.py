@@ -644,6 +644,24 @@ def viz_dataset_trajectories():
         plot_trajectory_alongside_frame(
             frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_num, track_id=track_num)
 
+        # verify_rel_velocities(batch, frame, frame_num, obs_trajectory, pred_trajectory, random_trajectory_idx,
+        #                       track_num)
+
+
+def verify_rel_velocities(batch, frame, frame_num, obs_trajectory,
+                          pred_trajectory, random_trajectory_idx, track_num, show=False):
+    # viz vel constructed trajectory
+    first_pos = obs_trajectory[0, None, :]
+    rel_traj = torch.cat((torch.tensor([0., 0.])[None, :],
+                          batch['in_dxdy'][:, random_trajectory_idx, ...],
+                          batch['gt_dxdy'][:, random_trajectory_idx, ...]), dim=0)
+    traj_constructed = rel_traj.cumsum(dim=0) + first_pos
+    obs_constructed = traj_constructed[:8, :]
+    pred_constructed = traj_constructed[8:, :]
+    if show:
+        plot_trajectory_alongside_frame(
+            frame, obs_constructed, pred_constructed, pred_trajectory, frame_num, track_id=track_num)
+
 
 if __name__ == '__main__':
     viz_dataset_trajectories()
