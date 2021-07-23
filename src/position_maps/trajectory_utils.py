@@ -15,11 +15,12 @@ from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 from tqdm import tqdm
 
-from average_image.constants import SDDVideoClasses
+from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.dataset import ConcatenateDataset
 from baselinev2.plot_utils import add_line_to_axis, add_features_to_axis, plot_trajectory_alongside_frame
 from src.position_maps.interplay_utils import Track, Tracks
+from src_lib.datasets.extracted_dataset import get_train_and_val_datasets, extracted_collate
 from src_lib.datasets.opentraj_based import get_multiple_gt_dataset
 from src_lib.datasets.trajectory_stgcnn import STGCNNTrajectoryDataset, seq_collate, seq_collate_dict, \
     seq_collate_with_graphs, seq_collate_with_graphs_dict, seq_collate_with_dataset_idx_dict, SmoothTrajectoryDataset
@@ -608,20 +609,33 @@ def splrep_smoother(trajectory, num_points, threshold=1):
 def viz_dataset_trajectories():
     cfg = OmegaConf.load('config/training/training.yaml')
 
-    if cfg.tp_module.datasets.use_generated:
-        train_dataset, val_dataset = get_multiple_datasets(
-            cfg=cfg, split_dataset=True, with_dataset_idx=True,
-            smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
-            smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
-            threshold=cfg.tp_module.smooth_trajectories.min_length)
+    if cfg.tp_module.datasets.use_standard_dataset:
+        collate_fn = seq_collate_with_dataset_idx_dict
+        if cfg.tp_module.datasets.use_generated:
+            train_dataset, val_dataset = get_multiple_datasets(
+                cfg=cfg, split_dataset=True, with_dataset_idx=True,
+                smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
+                smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
+                threshold=cfg.tp_module.smooth_trajectories.min_length)
+        else:
+            train_dataset, val_dataset = get_multiple_gt_dataset(
+                cfg=cfg, split_dataset=True, with_dataset_idx=True,
+                smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
+                smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
+                threshold=cfg.tp_module.smooth_trajectories.min_length)
     else:
-        train_dataset, val_dataset = get_multiple_gt_dataset(
-            cfg=cfg, split_dataset=True, with_dataset_idx=True,
-            smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
-            smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
-            threshold=cfg.tp_module.smooth_trajectories.min_length)
+        collate_fn = extracted_collate
+        train_dataset, val_dataset = get_train_and_val_datasets(
+            video_classes=[getattr(SDDVideoClasses, v_c) for v_c in cfg.tp_module.datasets.train.video_classes],
+            video_numbers=cfg.tp_module.datasets.train.video_numbers,
+            meta_label=[getattr(SDDVideoDatasets, v_c) for v_c in cfg.tp_module.datasets.train.video_classes],
+            val_video_classes=[getattr(SDDVideoClasses, v_c) for v_c in cfg.tp_module.datasets.val.video_classes],
+            val_video_numbers=cfg.tp_module.datasets.val.video_numbers,
+            val_meta_label=[getattr(SDDVideoDatasets, v_c) for v_c in cfg.tp_module.datasets.val.video_classes],
+            get_generated=cfg.tp_module.datasets.use_generated
+        )
 
-    loader = DataLoader(train_dataset, batch_size=1, collate_fn=seq_collate_with_dataset_idx_dict)
+    loader = DataLoader(train_dataset, batch_size=1, collate_fn=collate_fn, shuffle=True)
     for batch in tqdm(loader):
         target = pred = batch['gt_xy']
 
@@ -639,12 +653,18 @@ def viz_dataset_trajectories():
         frame_num = int(frame_nums[:, random_trajectory_idx, ...][0].item())
         track_num = int(track_lists[:, random_trajectory_idx, ...][0].item())
 
-        current_dataset = loader.dataset.datasets[dataset_idx].dataset
+        current_dataset = loader.dataset.datasets[dataset_idx].dataset \
+            if cfg.tp_module.datasets.use_standard_dataset else loader.dataset.datasets[dataset_idx]
         if isinstance(current_dataset, SmoothTrajectoryDataset):
             current_dataset = current_dataset.base_dataset
 
-        video_path = f"{cfg.root}videos/{getattr(SDDVideoClasses, current_dataset.video_class).value}" \
-                     f"/video{current_dataset.video_number}/video.mov"
+        if cfg.tp_module.datasets.use_standard_dataset:
+            video_path = f"{cfg.root}videos/{getattr(SDDVideoClasses, current_dataset.video_class).value}" \
+                         f"/video{current_dataset.video_number}/video.mov"
+        else:
+            video_path = f"{cfg.root}videos/{current_dataset.video_class.value}" \
+                         f"/video{current_dataset.video_number}/video.mov"
+
         frame = extract_frame_from_video(video_path, frame_num)
 
         plot_trajectory_alongside_frame(

@@ -11,11 +11,12 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 import src_lib.models_hub as hub
-from average_image.constants import SDDVideoClasses
+from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import plot_trajectory_alongside_frame
 from log import get_logger
 from src.position_maps.trajectory_utils import get_multiple_datasets, bezier_smoother, splrep_smoother
+from src_lib.datasets.extracted_dataset import get_train_and_val_datasets, extracted_collate
 from src_lib.datasets.opentraj_based import get_multiple_gt_dataset
 from src_lib.datasets.trajectory_stgcnn import seq_collate_with_dataset_idx_dict, SmoothTrajectoryDataset
 
@@ -26,26 +27,44 @@ logger = get_logger(__name__)
 
 
 def setup_dataset(cfg):
-    if cfg.tp_module.datasets.use_generated:
-        train_dataset, val_dataset = get_multiple_datasets(
-            cfg=cfg, split_dataset=True, with_dataset_idx=True,
-            smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
-            smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
-            threshold=cfg.tp_module.smooth_trajectories.min_length)
+    if cfg.tp_module.datasets.use_standard_dataset:
+        if cfg.tp_module.datasets.use_generated:
+            train_dataset, val_dataset = get_multiple_datasets(
+                cfg=cfg, split_dataset=True, with_dataset_idx=True,
+                smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
+                smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
+                threshold=cfg.tp_module.smooth_trajectories.min_length)
+        else:
+            train_dataset, val_dataset = get_multiple_gt_dataset(
+                cfg=cfg, split_dataset=True, with_dataset_idx=True,
+                smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
+                smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
+                threshold=cfg.tp_module.smooth_trajectories.min_length)
     else:
-        train_dataset, val_dataset = get_multiple_gt_dataset(
-            cfg=cfg, split_dataset=True, with_dataset_idx=True,
-            smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
-            smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
-            threshold=cfg.tp_module.smooth_trajectories.min_length)
+        train_dataset, val_dataset = get_train_and_val_datasets(
+            video_classes=[getattr(SDDVideoClasses, v_c) for v_c in cfg.tp_module.datasets.train.video_classes],
+            video_numbers=cfg.tp_module.datasets.train.video_numbers,
+            meta_label=[getattr(SDDVideoDatasets, v_c) for v_c in cfg.tp_module.datasets.train.video_classes],
+            val_video_classes=[getattr(SDDVideoClasses, v_c) for v_c in cfg.tp_module.datasets.val.video_classes],
+            val_video_numbers=cfg.tp_module.datasets.val.video_numbers,
+            val_meta_label=[getattr(SDDVideoDatasets, v_c) for v_c in cfg.tp_module.datasets.val.video_classes],
+            get_generated=cfg.tp_module.datasets.use_generated,
+            meta_path='../../../Datasets/SDD/H_SDD.txt',
+            root='../../../Datasets/SDD/pm_extracted_annotations/'
+            if cfg.tp_module.datasets.use_generated else '../../../Datasets/SDD_Features/'
+        )
     return train_dataset, val_dataset
 
 
 def setup_model(cfg, train_dataset, val_dataset):
+    if cfg.tp_module.datasets.use_standard_dataset:
+        collate_fn = seq_collate_with_dataset_idx_dict
+    else:
+        collate_fn = extracted_collate
     model = getattr(hub, cfg.tp_module.model)(
         config=cfg, train_dataset=train_dataset, val_dataset=val_dataset,
         desired_output_shape=None, loss_function=None,
-        additional_loss_functions=None, collate_fn=seq_collate_with_dataset_idx_dict
+        additional_loss_functions=None, collate_fn=collate_fn
     )
     return model
 
@@ -118,12 +137,18 @@ def evaluate(cfg):
         frame_num = int(frame_nums[:, random_trajectory_idx, ...][0].item())
         track_num = int(track_lists[:, random_trajectory_idx, ...][0].item())
 
-        current_dataset = loader.dataset.datasets[dataset_idx].dataset
+        current_dataset = loader.dataset.datasets[dataset_idx].dataset \
+            if cfg.tp_module.datasets.use_standard_dataset else loader.dataset.datasets[dataset_idx]
         if isinstance(current_dataset, SmoothTrajectoryDataset):
             current_dataset = current_dataset.base_dataset
 
-        video_path = f"{cfg.root}videos/{getattr(SDDVideoClasses, current_dataset.video_class).value}" \
-                     f"/video{current_dataset.video_number}/video.mov"
+        if cfg.tp_module.datasets.use_standard_dataset:
+            video_path = f"{cfg.root}videos/{getattr(SDDVideoClasses, current_dataset.video_class).value}" \
+                         f"/video{current_dataset.video_number}/video.mov"
+        else:
+            video_path = f"{cfg.root}videos/{current_dataset.video_class.value}" \
+                         f"/video{current_dataset.video_number}/video.mov"
+
         frame = extract_frame_from_video(video_path, frame_num)
 
         plot_trajectory_alongside_frame(
@@ -136,6 +161,7 @@ def overfit(cfg):
     device = 'cuda:0'
     epochs = 500
     plot_idx = 5
+    batch_size = 32
 
     logger.info(f"Overfit - Setting up dataset and model")
     train_dataset, val_dataset = setup_dataset(cfg)
@@ -143,10 +169,15 @@ def overfit(cfg):
     model = setup_model(cfg, train_dataset, val_dataset)
     model.to(device)
 
-    loader = DataLoader(train_dataset, batch_size=1, shuffle=True, pin_memory=True, drop_last=False,
-                        collate_fn=seq_collate_with_dataset_idx_dict)
-    val_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, pin_memory=True, drop_last=False,
-                            collate_fn=seq_collate_with_dataset_idx_dict)
+    if cfg.tp_module.datasets.use_standard_dataset:
+        collate_fn = seq_collate_with_dataset_idx_dict
+    else:
+        collate_fn = extracted_collate
+
+    loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True, drop_last=False,
+                        collate_fn=collate_fn)
+    val_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True, drop_last=False,
+                            collate_fn=collate_fn)
 
     opt = torch.optim.Adam(model.parameters(), lr=model.config.tp_module.optimizer.lr,
                            weight_decay=model.config.tp_module.optimizer.weight_decay,
@@ -190,7 +221,6 @@ def overfit(cfg):
                 opt.step()
 
             if epoch % plot_idx == 0:
-                dataset_idx = batch['dataset_idx'].item()
                 seq_start_end = batch['seq_start_end']
                 frame_nums = batch['in_frames']
                 track_lists = batch['in_tracks']
@@ -204,12 +234,19 @@ def overfit(cfg):
                 frame_num = int(frame_nums[:, random_trajectory_idx, ...][0].item())
                 track_num = int(track_lists[:, random_trajectory_idx, ...][0].item())
 
-                current_dataset = loader.dataset.datasets[dataset_idx].dataset
+                dataset_idx = batch['dataset_idx'][random_trajectory_idx].item()
+                current_dataset = loader.dataset.datasets[dataset_idx].dataset \
+                    if cfg.tp_module.datasets.use_standard_dataset else loader.dataset.datasets[dataset_idx]
                 if isinstance(current_dataset, SmoothTrajectoryDataset):
                     current_dataset = current_dataset.base_dataset
 
-                video_path = f"{cfg.root}videos/{getattr(SDDVideoClasses, current_dataset.video_class).value}" \
-                             f"/video{current_dataset.video_number}/video.mov"
+                if cfg.tp_module.datasets.use_standard_dataset:
+                    video_path = f"{cfg.root}videos/{getattr(SDDVideoClasses, current_dataset.video_class).value}" \
+                                 f"/video{current_dataset.video_number}/video.mov"
+                else:
+                    video_path = f"{cfg.root}videos/{current_dataset.video_class.value}" \
+                                 f"/video{current_dataset.video_number}/video.mov"
+
                 frame = extract_frame_from_video(video_path, frame_num)
 
                 plot_trajectory_alongside_frame(

@@ -34,6 +34,9 @@ tp_module:
   datasets:
     root_gt: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/OpenTraj/datasets/SDD/'
     root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/Trajectories/'
+
+    use_standard_dataset: False
+
     filename: 'trajectories.pt'
 
     use_generated: False

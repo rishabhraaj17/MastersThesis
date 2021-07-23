@@ -48,9 +48,9 @@ def extracted_collate(batch):
         'gt_frames': torch.stack(gt_frame_numbers).transpose(1, 0),
         'in_tracks': torch.stack(in_track_ids).transpose(1, 0),
         'gt_tracks': torch.stack(gt_track_ids).transpose(1, 0),
-        'non_linear_ped': non_linear_ped,
-        'loss_mask': loss_mask,
-        'seq_start_end': seq_start_end,
+        'non_linear_ped': torch.tensor(non_linear_ped),
+        'loss_mask': torch.tensor(loss_mask),
+        'seq_start_end': torch.tensor(seq_start_end),
         'ratio': torch.tensor(ratio),
         'dataset_idx': torch.LongTensor(dataset_idx)
     }
@@ -174,7 +174,7 @@ class BaselineExtractedDataset(Dataset):
 
 
 def get_dataset(video_clazz: SDDVideoClasses, video_number: int, mode: NetworkMode, meta_label: SDDVideoDatasets,
-                get_generated: bool = False, split_name: str = 'splits_v1', return_as_dict=True, meta_path=META_PATH,
+                get_generated: bool = False, split_name: str = 'splits_v1', return_as_dict=True, meta_path=None,
                 root=None):
     return BaselineExtractedDataset(
         video_clazz, video_number, mode, meta_label=meta_label, split_name='v0',
@@ -189,7 +189,7 @@ def get_dataset(video_clazz: SDDVideoClasses, video_number: int, mode: NetworkMo
 def get_multiple_datasets(
         video_classes: Sequence[SDDVideoClasses], video_numbers: Sequence[Sequence[int]], mode: NetworkMode,
         meta_label: Sequence[SDDVideoDatasets], get_generated: bool = False,
-        split_name: str = 'splits_v1', return_as_dict=True, meta_path=META_PATH,
+        split_name: str = 'splits_v1', return_as_dict=True, meta_path=None,
         root=None):
     datasets = []
     for idx, (v_clz, m) in enumerate(zip(video_classes, meta_label)):
@@ -205,48 +205,52 @@ def get_multiple_datasets(
 def get_train_datasets(
         video_classes: Sequence[SDDVideoClasses], video_numbers: Sequence[Sequence[int]],
         meta_label: Sequence[SDDVideoDatasets], get_generated: bool = False,
-        split_name: str = 'splits_v1', return_as_dict=True, meta_path=META_PATH,
+        split_name: str = 'splits_v1', return_as_dict=True, meta_path=None,
         root=None):
     return ConcatenateDataset(get_multiple_datasets(
         video_classes=video_classes, video_numbers=video_numbers, mode=NetworkMode.TRAIN, meta_label=meta_label,
         get_generated=get_generated, split_name=split_name, return_as_dict=return_as_dict,
-        meta_path=meta_path, root=root))
+        meta_path=META_PATH if meta_path is None else meta_path, root=root))
 
 
 def get_val_datasets(
         video_classes: Sequence[SDDVideoClasses], video_numbers: Sequence[Sequence[int]],
         meta_label: Sequence[SDDVideoDatasets], get_generated: bool = False,
-        split_name: str = 'splits_v1', return_as_dict=True, meta_path=META_PATH,
+        split_name: str = 'splits_v1', return_as_dict=True, meta_path=None,
         root=None):
     return ConcatenateDataset(get_multiple_datasets(
         video_classes=video_classes, video_numbers=video_numbers, mode=NetworkMode.VALIDATION, meta_label=meta_label,
         get_generated=get_generated, split_name=split_name, return_as_dict=return_as_dict,
-        meta_path=meta_path, root=root))
+        meta_path=META_PATH if meta_path is None else meta_path, root=root))
 
 
 def get_test_datasets(
         video_classes: Sequence[SDDVideoClasses], video_numbers: Sequence[Sequence[int]],
         meta_label: Sequence[SDDVideoDatasets], get_generated: bool = False,
-        split_name: str = 'splits_v1', return_as_dict=True, meta_path=META_PATH,
+        split_name: str = 'splits_v1', return_as_dict=True, meta_path=None,
         root=None):
     return ConcatenateDataset(get_multiple_datasets(
         video_classes=video_classes, video_numbers=video_numbers, mode=NetworkMode.TEST, meta_label=meta_label,
         get_generated=get_generated, split_name=split_name, return_as_dict=return_as_dict,
-        meta_path=meta_path, root=root))
+        meta_path=META_PATH if meta_path is None else meta_path, root=root))
 
 
 def get_train_and_val_datasets(
         video_classes: Sequence[SDDVideoClasses], video_numbers: Sequence[Sequence[int]],
-        meta_label: Sequence[SDDVideoDatasets], get_generated: bool = False,
-        split_name: str = 'splits_v1', return_as_dict=True, meta_path=META_PATH,
+        meta_label: Sequence[SDDVideoDatasets], val_video_classes: Sequence[SDDVideoClasses],
+        val_video_numbers: Sequence[Sequence[int]], val_meta_label: Sequence[SDDVideoDatasets],
+        get_generated: bool = False, split_name: str = 'splits_v1', return_as_dict=True, meta_path=None,
         root=None):
     train_datasets = get_train_datasets(
         video_classes=video_classes, video_numbers=video_numbers, meta_label=meta_label, get_generated=get_generated,
-        split_name=split_name, return_as_dict=return_as_dict, meta_path=meta_path, root=root
+        split_name=split_name, return_as_dict=return_as_dict,
+        meta_path=META_PATH if meta_path is None else meta_path, root=root
     )
     val_datasets = get_val_datasets(
-        video_classes=video_classes, video_numbers=video_numbers, meta_label=meta_label, get_generated=get_generated,
-        split_name=split_name, return_as_dict=return_as_dict, meta_path=meta_path, root=root
+        video_classes=val_video_classes, video_numbers=val_video_numbers, meta_label=val_meta_label,
+        get_generated=get_generated,
+        split_name=split_name, return_as_dict=return_as_dict,
+        meta_path=META_PATH if meta_path is None else meta_path, root=root
     )
     return train_datasets, val_datasets
 
