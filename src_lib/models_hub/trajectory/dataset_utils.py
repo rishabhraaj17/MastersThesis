@@ -1,10 +1,14 @@
-from typing import Sequence
+from pathlib import Path
+from typing import List
 
+import numpy as np
 import pandas as pd
-import torch
 from sklearn.model_selection import train_test_split
+from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
+from baselinev2.nn.data_utils import array_split_by_length
+from baselinev2.structures import SingleTrack
 from log import get_logger
 
 logger = get_logger(__name__)
@@ -54,11 +58,76 @@ def split_annotations(annotations):
     return train_set, val_set, test_set
 
 
+def make_trainable_trajectory_dataset_by_length(track_obj, length=20):
+    final_tracks, relative_distances = [], []
+    for track in track_obj:
+        if len(track.data) > length:
+            # split array into parts of max length
+            splits, remaining_part = array_split_by_length(track.data, length=length)
+            for split in splits:
+                rel_distances = np.diff(split[:, 2:], axis=0).astype(np.float32)
+                relative_distances.append(rel_distances)
+                final_tracks.append(split.astype(np.float32))
+
+    final_tracks = np.stack(final_tracks) if len(final_tracks) != 0 else np.zeros((0, 4))
+    relative_distances = np.stack(relative_distances) if len(relative_distances) != 0 else np.zeros((0, 2))
+
+    return final_tracks, relative_distances
+
+
+def turn_splits_into_trajectory_dataset(split: pd.DataFrame, num_frames_in_jump=12, time_between_frames=0.4):
+    unique_tracks = split.track.unique()
+    final_tracks_save, relative_distances_save = [], []
+    for t_id in tqdm(unique_tracks):
+        track_df = split[split.track == t_id]
+
+        tracks_list: List[SingleTrack] = []
+        for start_frame in range(len(track_df)):
+            track_df_with_jumps: pd.DataFrame = track_df.iloc[start_frame::num_frames_in_jump]
+            track: SingleTrack = SingleTrack(
+                data=track_df_with_jumps.to_numpy(),
+                frames=track_df_with_jumps.frame.to_numpy(),
+                valid=True if len(track_df_with_jumps) >= 20 else False
+            )
+            tracks_list.append(track)
+
+        tracks, distances = make_trainable_trajectory_dataset_by_length(track_obj=tracks_list)
+        if tracks.size != 0:
+            final_tracks_save.append(tracks)
+        if distances.size != 0:
+            relative_distances_save.append(distances)
+
+    final_tracks_save = np.concatenate(final_tracks_save) if len(final_tracks_save) != 0 else np.zeros((0, 4))
+    relative_distances_save = np.concatenate(relative_distances_save) if len(relative_distances_save) != 0 \
+        else np.zeros((0, 2))
+
+    return {'tracks': final_tracks_save, 'distances': relative_distances_save}
+
+
 def process_annotation(annotation_path, path_to_save):
     df = pd.read_csv(annotation_path)
 
     train_set, val_set, test_set = split_annotations(df)
-    print()
+
+    logger.info('Processing Train set')
+    train_dataset = turn_splits_into_trajectory_dataset(train_set)
+    logger.info('Processing Validation set')
+    val_dataset = turn_splits_into_trajectory_dataset(val_set)
+    logger.info('Processing Test set')
+    test_dataset = turn_splits_into_trajectory_dataset(test_set)
+
+    Path(path_to_save).mkdir(parents=True, exist_ok=True)
+
+    np.save(path_to_save + 'train_tracks.npy', train_dataset['tracks'])
+    np.save(path_to_save + 'train_distances.npy', train_dataset['distances'])
+
+    np.save(path_to_save + 'val_tracks.npy', val_dataset['tracks'])
+    np.save(path_to_save + 'val_distances.npy', val_dataset['distances'])
+
+    np.save(path_to_save + 'test_tracks.npy', test_dataset['tracks'])
+    np.save(path_to_save + 'test_distances.npy', test_dataset['distances'])
+
+    logger.info(f'Saved track datasets at {path_to_save}')
 
 
 def generate_annotation_for_all_extracted_tracks(video_classes, video_numbers):
@@ -67,7 +136,7 @@ def generate_annotation_for_all_extracted_tracks(video_classes, video_numbers):
             logger.info(f'Processing extracted annotation for {video_class.value} - {video_number}')
             process_annotation(
                 annotation_path=f'{EXTRACTION_BASE_PATH}/{video_class.name}/{video_number}/trajectories.csv',
-                path_to_save=f'{SAVE_BASE_PATH}/{video_class.value}/video{video_number}/v0/')
+                path_to_save=f'{SAVE_BASE_PATH}{video_class.value}/video{video_number}/v0/')
     logger.info('Finished generating all annotations!')
 
 
