@@ -255,6 +255,6 @@ def overfit(cfg):
 
 
 if __name__ == '__main__':
-    overfit()
+    # overfit()
     # evaluate()
-    # train_lightning()
+    train_lightning()
