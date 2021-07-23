@@ -125,7 +125,8 @@ def get_dataframe_from_lists(frame_id, track_id, x, y):
     return df
 
 
-def dump_tracks_to_file(min_track_length: int = 20, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None):
+def dump_tracks_to_file(min_track_length: int = 20, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None,
+                        dump_as_csv_only=False):
     print(f"Brewing Trajectory file for {VIDEO_CLASS} - {VIDEO_NUMBER}")
     total_tracks: Sequence[Track] = get_total_tracks()
 
@@ -134,9 +135,14 @@ def dump_tracks_to_file(min_track_length: int = 20, duplicate_frames_to_filter=(
                                                        duplicate_frames_to_filter=duplicate_frames_to_filter,
                                                        filter_nth_frame_from_middle=filter_nth_frame_from_middle)
 
-    df = get_dataframe_from_lists(frame_id, track_id, x, y)
+    df: pd.DataFrame = get_dataframe_from_lists(frame_id, track_id, x, y)
 
     Path(TRAJECTORIES_LOAD_PATH).mkdir(parents=True, exist_ok=True)
+    if dump_as_csv_only:
+        df.to_csv(f"{TRAJECTORIES_LOAD_PATH}trajectories.csv", index=False)
+        print(f"Dumping Trajectories to {TRAJECTORIES_LOAD_PATH}trajectories.csv")
+        # return None
+
     with open(f"{TRAJECTORIES_LOAD_PATH}trajectories.txt", 'w') as f:
         df_to_dump = df.to_string(header=False, index=False)
         f.write(df_to_dump)
@@ -669,5 +675,6 @@ if __name__ == '__main__':
 
     # frame_count = 12490
     # step = 999
-    # filter_middle = [i for i in range(0, frame_count, step)]
-    # dump_tracks_to_file(min_track_length=0, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None)
+    # filter_middle = [i for i in range(step, frame_count, step)]
+    # dump_tracks_to_file(min_track_length=0, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None,
+    #                     dump_as_csv_only=True)
