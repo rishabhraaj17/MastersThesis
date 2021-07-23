@@ -159,9 +159,9 @@ def evaluate(cfg):
 @hydra.main(config_path="config", config_name="config")
 def overfit(cfg):
     device = 'cuda:0'
-    epochs = 500
-    plot_idx = 5
-    batch_size = 32
+    epochs = 1000
+    plot_idx = 100
+    batch_size = 8
 
     logger.info(f"Overfit - Setting up dataset and model")
     train_dataset, val_dataset = setup_dataset(cfg)

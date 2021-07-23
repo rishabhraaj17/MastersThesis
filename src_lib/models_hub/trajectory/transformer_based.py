@@ -343,7 +343,9 @@ class TrajectoryGANTransformer(BaseGAN):
 
         # Train with fake
         with torch.no_grad():
+            self.generator.eval()
             fake_pred = self.generator(x)
+            self.generator.train()
 
         fake_pred = self.discriminator(x, fake_pred['out_dxdy'])
         fake_gt = torch.zeros_like(fake_pred)
