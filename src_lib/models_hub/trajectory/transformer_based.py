@@ -92,7 +92,6 @@ class TransformerMotionDecoder(nn.Module):
         d_o = last_obs_vel.clone()
 
         for _ in range(self.seq_len):
-
             # add positional encoding
             # (S, B, E) -> (B, S, E)
             d_o = d_o.permute(1, 0, 2)
@@ -231,7 +230,7 @@ class TransformerMotionDiscriminator(nn.Module):
         net_params = self.config.trajectory_based.transformer.discriminator
 
         self.motion_encoder = TransformerMotionEncoder(self.config)
-        
+
         self.embedding = nn.Sequential(
             nn.Linear(in_features=net_params.in_features, out_features=net_params.d_model // 2),
             nn.ReLU(),
@@ -263,7 +262,7 @@ class TransformerMotionDiscriminator(nn.Module):
         enc_out = self.motion_encoder(x)
 
         gt_x = self.embedding(gt_x)
-        
+
         # add cls token to act as classifier head
         cls_tokens = self.cls_token.expand(-1, gt_x.shape[1], -1)
         gt_x = torch.cat((cls_tokens, gt_x), dim=0)
@@ -274,7 +273,7 @@ class TransformerMotionDiscriminator(nn.Module):
         gt_x = self.positional_encoding(gt_x)
         # (B, S, E) -> (S, B, E)
         gt_x = gt_x.permute(1, 0, 2)
-        
+
         dec_out = self.motion_decoder(gt_x, enc_out)
 
         # out = self.classifier(dec_out.mean(0))  # mean over all time-steps - can take 1st or last ts as well?
@@ -369,16 +368,202 @@ class TrajectoryGANTransformer(BaseGAN):
         return torch.linalg.norm((pred - target), ord=2, dim=0).mean(dim=0).mean()
 
 
+class TrajectoryGANTransformerV2(BaseGAN):
+    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                 additional_loss_functions: List[nn.Module] = None,
+                 desc_loss_function: nn.Module = nn.BCEWithLogitsLoss(),
+                 collate_fn: Optional[Callable] = None):
+        super(TrajectoryGANTransformerV2, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
+        )
+        self.config = config
+        self.desc_loss_function = desc_loss_function
+
+        self.net_params = self.config.trajectory_based.transformer
+
+        self.generator = TransformerMotionGenerator(self.config)
+        self.discriminator = TransformerMotionDiscriminator(self.config)
+
+    def forward(self, x):
+        return self.generator(x)
+
+    def configure_optimizers(self):
+        opt_disc = torch.optim.Adam(self.discriminator.parameters(), lr=self.net_params.discriminator.lr,
+                                    weight_decay=self.net_params.discriminator.weight_decay,
+                                    amsgrad=self.net_params.discriminator.weight_decay)
+        opt_gen = torch.optim.Adam(self.generator.parameters(), lr=self.net_params.generator.lr,
+                                   weight_decay=self.net_params.generator.weight_decay,
+                                   amsgrad=self.net_params.generator.weight_decay)
+        return [opt_disc, opt_gen], []
+
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        # Train discriminator
+        result = None
+        if optimizer_idx == 0:
+            result = self._disc_step(batch)
+
+        # Train generator
+        if optimizer_idx == 1:
+            result = self._gen_step(batch)
+
+        return result
+
+    def _disc_step(self, x):
+        disc_loss = self._get_disc_loss(x)
+        self.log("train/discriminator/loss", disc_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return disc_loss
+
+    def _gen_step(self, x):
+        loss, fake_loss, ade, fde = self._get_gen_loss(x)
+        gen_loss = loss + fake_loss
+        self.log('train/generator/loss', gen_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("train/generator/loss", loss, on_epoch=True)
+        self.log("train/generator/adv_loss", fake_loss, on_epoch=True)
+        self.log('train/generator/ade', ade, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/generator/fde', fde, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return gen_loss
+
+    def eval_step(self, x):
+        x = self.get_k_batches(x, self.config.tp_module.datasets.batch_multiplier)
+        batch_size = x["size"]
+
+        with torch.no_grad():
+            self.generator.eval()
+            out = self.generator(x)
+            self.generator.train()
+
+        target = x['gt_xy']
+        pred = out['out_xy']
+
+        loss = self.calculate_loss(pred, target)
+        loss = loss.view(self.config.tp_module.datasets.batch_multiplier, -1)
+        loss, _ = loss.min(dim=0, keepdim=True)
+        loss = torch.mean(loss)
+
+        ade, fde = cal_ade(target, pred, mode='raw'), cal_fde(target, pred, mode='raw')
+        ade = ade.view(self.config.tp_module.datasets.batch_multiplier, batch_size) * x['ratio'][0]
+        fde = fde.view(self.config.tp_module.datasets.batch_multiplier, batch_size) * x['ratio'][0]
+
+        fde, _ = fde.min(dim=0)
+        modes_caught = (fde < self.config.tp_module.datasets.mode_dist_threshold).float()
+
+        ade, _ = ade.min(dim=0, keepdim=True)
+
+        return loss, modes_caught.mean().item(), ade.mean().item(), fde.mean().item()
+
+    def validation_step(self, batch, batch_idx, optimizer_idx):
+        loss, modes_caught, ade, fde = self.eval_step(batch)
+        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val/modes", modes_caught, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/ade', ade, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/fde', fde, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return loss
+
+    def _get_disc_loss(self, x):
+        # clamp loss?
+        # Train with real
+        real_pred = self.discriminator(x, x['gt_dxdy'])
+        real_gt = torch.ones_like(real_pred)
+        real_loss = self.desc_loss_function(real_pred, real_gt)
+
+        # Train with fake
+        with torch.no_grad():
+            self.generator.eval()
+            fake_pred = self.generator(x)
+            self.generator.train()
+
+        fake_pred = self.discriminator(x, fake_pred['out_dxdy'])
+        fake_gt = torch.zeros_like(fake_pred)
+        fake_loss = self.desc_loss_function(fake_pred, fake_gt)
+
+        disc_loss = real_loss + fake_loss
+
+        return disc_loss
+
+    def _get_gen_loss(self, x):
+        x = self.get_k_batches(x, self.config.tp_module.datasets.batch_multiplier)
+        batch_size = x["size"]
+
+        out = self.generator(x)
+
+        target = x['gt_xy']
+        pred = out['out_xy']
+
+        fake_pred = self.discriminator(x, out['out_dxdy'])
+        fake_gt = torch.zeros_like(fake_pred)
+        fake_loss = self.desc_loss_function(fake_pred, fake_gt)
+
+        loss = self.calculate_loss(pred, target)
+        loss = loss.view(self.config.tp_module.datasets.batch_multiplier, -1)
+        loss, _ = loss.min(dim=0, keepdim=True)
+        loss = torch.mean(loss)
+
+        ade, fde = cal_ade(target, pred, mode='raw'), cal_fde(target, pred, mode='raw')
+        ade = ade.view(self.config.tp_module.datasets.batch_multiplier, batch_size) * x['ratio'][0]
+        fde = fde.view(self.config.tp_module.datasets.batch_multiplier, batch_size) * x['ratio'][0]
+
+        ade, _ = ade.min(dim=0, keepdim=True)
+        fde, _ = fde.min(dim=0, keepdim=True)
+
+        return loss, fake_loss, ade.mean().item(), fde.mean().item()
+
+    def calculate_loss(self, pred, target):
+        return self.l2_loss(pred, target)
+
+    @staticmethod
+    def l2_loss(pred_traj, pred_traj_gt, mode='average', typz="mse"):
+        seq_len, batch, _ = pred_traj.size()
+        d_Traj = pred_traj_gt - pred_traj
+
+        if typz == "mse":
+            loss = torch.norm((d_Traj), 2, -1)
+        elif typz == "average":
+            loss = ((torch.norm(d_Traj, 2, -1)) + (torch.norm(d_Traj[-1], 2, -1))) / 2.
+        else:
+            raise AssertionError('Mode {} must be either mse or  average.'.format(typz))
+
+        if mode == 'sum':
+            return torch.sum(loss)
+        elif mode == 'average':
+            return torch.mean(loss, dim=0)
+        elif mode == 'raw':
+            return loss.sum(dim=0)
+
+    @staticmethod
+    def get_k_batches(batch, k):
+        new_batch = {}
+        for name, data in batch.items():
+            if name in ["in_xy", "in_dxdy", "gt_xy", "gt_dxdy"]:
+                new_batch[name] = data.repeat(1, k, 1).clone()
+            elif name in ["gt_frames", "in_frames", "in_tracks", "gt_tracks"]:
+                new_batch[name] = data.repeat(k, 1).clone()
+            else:
+                new_batch[name] = data
+        new_batch.update({'size': batch['in_xy'].shape[1]})
+        return new_batch
+
+    @staticmethod
+    def calculate_metrics(pred, target, mode='sum'):
+        ade = cal_ade(target, pred, mode=mode)
+        fde = cal_fde(target, pred, mode=mode)
+        return ade, fde
+
+
 if __name__ == '__main__':
-    conf = OmegaConf.load('../../../src/position_maps/config/model/model.yaml')
+    conf = OmegaConf.merge(OmegaConf.load('../../../src/position_maps/config/model/model.yaml'),
+                           OmegaConf.load('../../../src/position_maps/config/training/training.yaml'))
     inp = {
         'in_dxdy': torch.randn((7, 2, 2)),
         'in_xy': torch.randn((8, 2, 2)),
         'gt_xy': torch.randn((12, 2, 2)),
-        'gt_dxdy': torch.randn((12, 2, 2))
+        'gt_dxdy': torch.randn((12, 2, 2)),
+        'ratio': torch.tensor([1, 1, 1])
     }
-    m = TrajectoryGANTransformer(conf, None, None)
-    o = m._get_disc_loss(inp)
+    m = TrajectoryGANTransformerV2(conf, None, None)
+    o = m.eval_step(inp)
     # m = TrajectoryTransformer(conf, None, None)
     # o = m._one_step(inp)
     print()

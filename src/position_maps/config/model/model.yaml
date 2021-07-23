@@ -573,11 +573,11 @@ trajectory_based:
       out_features: 2
       seq_len: 12
 
-      d_model: 64
-      nhead: 8
-      dim_feedforward: 512  # 2048 for 512 d_model
+      d_model: 32  # 64
+      nhead: 4  # 8
+      dim_feedforward: 128  # 512  # 2048 for 512 d_model
       dropout: 0.1
       activation: 'relu'
 
-      num_layers: 6
+      num_layers: 4  # 6
       norm: null  # 'layer_norm'

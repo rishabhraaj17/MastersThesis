@@ -42,6 +42,8 @@ tp_module:
     use_generated: False
 
     val_ratio: 0.2
+    batch_multiplier: 10
+    mode_dist_threshold: 2
 
     # we split same dataset into train & val (in time)
     video_classes: [ DEATH_CIRCLE ]
