@@ -13,8 +13,8 @@ from log import get_logger
 
 logger = get_logger(__name__)
 
-EXTRACTION_BASE_PATH = '../../../src/position_maps/logs/Trajectories/'
-SAVE_BASE_PATH = '../../../Datasets/SDD/pm_extracted_annotations/'
+EXTRACTION_BASE_PATH = '../../src/position_maps/logs/Trajectories/'
+SAVE_BASE_PATH = '../../Datasets/SDD/pm_extracted_annotations/'
 
 ALL_VIDEO_CLASSES = [
     SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.DEATH_CIRCLE,
@@ -135,7 +135,7 @@ def generate_annotation_for_all_extracted_tracks(video_classes, video_numbers):
         for video_number in video_numbers[idx]:
             logger.info(f'Processing extracted annotation for {video_class.value} - {video_number}')
             process_annotation(
-                annotation_path=f'{EXTRACTION_BASE_PATH}/{video_class.name}/{video_number}/trajectories.csv',
+                annotation_path=f'{EXTRACTION_BASE_PATH}{video_class.name}/{video_number}/trajectories.csv',
                 path_to_save=f'{SAVE_BASE_PATH}{video_class.value}/video{video_number}/v0/')
     logger.info('Finished generating all annotations!')
 
