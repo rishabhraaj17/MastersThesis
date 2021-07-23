@@ -454,7 +454,7 @@ class TrajectoryGANTransformerV2(BaseGAN):
 
         return loss, modes_caught.mean().item(), ade.mean().item(), fde.mean().item()
 
-    def validation_step(self, batch, batch_idx, optimizer_idx):
+    def validation_step(self, batch, batch_idx):
         loss, modes_caught, ade, fde = self.eval_step(batch)
         self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log("val/modes", modes_caught, on_step=True, on_epoch=True, prog_bar=True, logger=True)

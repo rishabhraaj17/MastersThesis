@@ -24,10 +24,10 @@ mode: 'min'
 # TP module
 # scheduler
 tp_module:
-  model: 'TrajectoryTransformer'  # 'RNNBaseline'  # 'TrajectoryTransformer'
+  model: 'TrajectoryGANTransformerV2'  # 'TrajectoryTransformer'  # 'RNNBaseline'  # 'TrajectoryTransformer'
 
   smooth_trajectories:
-    enabled: True
+    enabled: False
     min_length: 4
     smoother: 'bezier'  # or 'simple'
 
