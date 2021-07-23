@@ -218,7 +218,15 @@ class SDDFrameAndAnnotationDataset(Dataset):
     def post_process_annotations(self, df):
         if self.video_label == SDDVideoClasses.NEXUS:
             if self.video_number_to_use in [7]:
-                return self.drop_bad_frames(df=df, frame_numbers=[1518, 1528, 1545, 6518])
+                group0 = [i for i in range(1509, 1577, 1)]
+                group1 = [i for i in range(10710, 10717, 1)] + [i for i in range(10735, 10762, 1)] + [10792, 10793]
+                group2 = [i for i in range(6505, 6552, 1)]
+                group3 = [i for i in range(8168, 8182, 1)]
+                group_extra = [10313, 5430, 5930, 1485, 1486, 1487]
+                frame_numbers = group0 + group1 + group2 + group3 + group_extra
+                return self.drop_bad_frames(
+                    df=df,
+                    frame_numbers=frame_numbers)
         return df
 
     def _read_annotation_file_and_filter(self, path, original_shape, use_generated=False):

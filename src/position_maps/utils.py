@@ -248,7 +248,8 @@ def plot_predictions(img, mask, pred_mask, additional_text='', all_heatmaps=Fals
 def plot_predictions_v2(img, mask, pred_mask, logits_mask, additional_text='',
                         all_heatmaps=False, save_dir=None, img_name='',
                         tight_layout=True, do_nothing=False, show_colorbar=False):
-    fig, axs = plt.subplots(1, 4, sharex='none', sharey='none', figsize=(20, 8))
+    fig_size = (20, 8) if img.shape[0] > img.shape[1] else (18, 4)
+    fig, axs = plt.subplots(1, 4, sharex='none', sharey='none', figsize=fig_size)
     img_axis, mask_axis, pred_mask_axis, logits_axis = axs
     if img is not None:
         if all_heatmaps:
