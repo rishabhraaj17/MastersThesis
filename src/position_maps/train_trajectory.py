@@ -20,6 +20,7 @@ from src.position_maps.trajectory_utils import get_multiple_datasets, bezier_smo
 from src_lib.datasets.extracted_dataset import get_train_and_val_datasets, extracted_collate
 from src_lib.datasets.opentraj_based import get_multiple_gt_dataset
 from src_lib.datasets.trajectory_stgcnn import seq_collate_with_dataset_idx_dict, SmoothTrajectoryDataset
+from src_lib.models_hub import TransformerNoisyMotionGenerator
 
 warnings.filterwarnings("ignore")
 
@@ -348,13 +349,24 @@ def overfit(cfg):
 
                 frame = extract_frame_from_video(video_path, frame_num)
 
-                plot_trajectory_alongside_frame(
-                    frame, obs_trajectory.cpu(), gt_trajectory.cpu(), pred_trajectory.detach().cpu(), frame_num,
-                    track_id=track_num, additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
+                if isinstance(model, TransformerNoisyMotionGenerator):
+                    preds = []
+                    with torch.no_grad():
+                        for i in range(10):
+                            multi_out = model(batch)
+                            preds.append(multi_out['out_xy'][:, random_trajectory_idx, ...])
+                        preds = torch.stack(preds, dim=1).cpu()
+                        plot_trajectory_alongside_frame_stochastic(
+                            frame, obs_trajectory.cpu(), gt_trajectory.cpu(), preds, frame_num, track_id=track_num,
+                            additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
+                else:
+                    plot_trajectory_alongside_frame(
+                        frame, obs_trajectory.cpu(), gt_trajectory.cpu(), pred_trajectory.detach().cpu(), frame_num,
+                        track_id=track_num, additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
 
 
 if __name__ == '__main__':
-    # overfit()
+    overfit()
     # evaluate()
     # train_lightning()
-    evaluate_stochastic()
+    # evaluate_stochastic()
