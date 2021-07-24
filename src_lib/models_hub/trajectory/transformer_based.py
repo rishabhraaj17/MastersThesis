@@ -401,6 +401,9 @@ class TrajectoryGANTransformerV2(BaseGAN):
         self.generator = TransformerMotionGenerator(self.config)
         self.discriminator = TransformerMotionDiscriminator(self.config)
 
+        self.generator.apply(init_weights)
+        self.discriminator.apply(init_weights)
+
     def forward(self, x):
         return self.generator(x)
 
