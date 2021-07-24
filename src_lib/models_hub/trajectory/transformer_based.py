@@ -11,6 +11,12 @@ from baselinev2.stochastic.losses import cal_ade, cal_fde
 from src_lib.models_hub import Base, BaseGAN
 
 
+def init_weights(param):
+    classname = param.__class__.__name__
+    if classname.find('Linear') != -1:
+        torch.nn.init.kaiming_normal_(param.weight)
+
+
 class TransformerMotionEncoder(nn.Module):
     def __init__(self, config: DictConfig):
         super(TransformerMotionEncoder, self).__init__()
@@ -207,17 +213,25 @@ class TransformerMotionGenerator(nn.Module):
         super(TransformerMotionGenerator, self).__init__()
         self.config = config
         net_params = self.config.trajectory_based.transformer.encoder
+        gen_params = self.config.trajectory_based.transformer.generator
 
         self.motion_encoder = TransformerMotionEncoder(config=self.config)
+
+        self.noise_scalar = gen_params.noise_scalar
         self.noise_embedding = nn.Sequential(
-            nn.Linear(in_features=net_params.d_model * 2, out_features=net_params.d_model)
+            nn.Linear(in_features=net_params.d_model + self.noise_scalar, out_features=gen_params.mlp_scalar),
+            getattr(nn, gen_params.noise_activation)(),
+            nn.Linear(in_features=gen_params.mlp_scalar, out_features=net_params.d_model),
+            getattr(nn, gen_params.noise_activation)()
         )
         self.motion_decoder = TransformerMotionDecoder(config=self.config)
 
     def forward(self, x):
         out = self.motion_encoder(x)
-        out = torch.cat((out, torch.randn_like(out)), dim=-1)
-        out = self.noise_embedding(out)
+        seq_len, batch_size, _ = out.shape
+        out = torch.cat((out, torch.randn((seq_len, batch_size, self.noise_scalar)).to(out)), dim=-1)
+        if self.noise_scalar:
+            out = self.noise_embedding(out)
         out = self.motion_decoder(x, out)
         return out
 

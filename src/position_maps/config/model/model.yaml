@@ -564,6 +564,10 @@ trajectory_based:
       weight_decay: 5e10
       amsgrad: False
 
+      noise_scalar: 4
+      mlp_scalar: 64
+      noise_activation: 'Tanh'
+
     discriminator:
       lr: 1e-3
       weight_decay: 5e10
