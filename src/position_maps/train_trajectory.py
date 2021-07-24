@@ -292,7 +292,7 @@ def overfit_gan(cfg):
     #                         min_lr=model.config.tp_module.scheduler.min_lr)
 
     train_loss, ade_list, fde_list, adv_loss, disc_adv_loss = [], [], [], [], []
-    loss, disc_loss, ade, fde, fake_loss = \
+    loss, disc_loss, ade, fde, fake_loss_gen = \
         torch.tensor([0]), torch.tensor([0]), torch.tensor([0]), torch.tensor([0]), torch.tensor([0])
     g_steps_yet, d_steps_yet = 0, 0
     for epoch in range(epochs):
@@ -312,7 +312,8 @@ def overfit_gan(cfg):
 
                     real_pred = model.discriminator(batch, batch['gt_dxdy'])
                     real_gt = torch.ones_like(real_pred)
-                    real_loss = model.desc_loss_function(real_pred, real_gt)
+                    real_loss = model.calculate_discriminator_loss(pred=real_pred, target=real_gt, is_real=True,
+                                                                   is_disc=True)
 
                     # Train with fake
                     with torch.no_grad():
@@ -322,7 +323,8 @@ def overfit_gan(cfg):
 
                     fake_pred = model.discriminator(batch, fake_pred['out_dxdy'])
                     fake_gt = torch.zeros_like(fake_pred)
-                    fake_loss = model.desc_loss_function(fake_pred, fake_gt)
+                    fake_loss = model.calculate_discriminator_loss(pred=fake_pred, target=fake_gt, is_real=False,
+                                                                   is_disc=True)
 
                     disc_loss = real_loss + fake_loss
 
@@ -345,12 +347,13 @@ def overfit_gan(cfg):
 
                     fake_pred = model.discriminator(batch, out['out_dxdy'])
                     fake_gt = torch.zeros_like(fake_pred)
-                    fake_loss = model.desc_loss_function(fake_pred, fake_gt)
+                    fake_loss_gen = model.calculate_discriminator_loss(pred=fake_pred, target=fake_gt, is_real=False,
+                                                                   is_disc=False)
 
                     loss = model.calculate_loss(pred, target)
                     loss = loss.view(model.config.tp_module.datasets.batch_multiplier, -1)
                     loss, _ = loss.min(dim=0, keepdim=True)
-                    loss = torch.mean(loss) + fake_loss
+                    loss = torch.mean(loss) + fake_loss_gen
 
                     ade, fde = cal_ade(target, pred, mode='raw'), cal_fde(target, pred, mode='raw')
                     ade = ade.view(model.config.tp_module.datasets.batch_multiplier, batch_size) * batch['ratio'][0]
@@ -364,7 +367,7 @@ def overfit_gan(cfg):
                     train_loss.append(loss.item())
                     ade_list.append(ade.item())
                     fde_list.append(fde.item())
-                    adv_loss.append(fake_loss.item())
+                    adv_loss.append(fake_loss_gen.item())
 
                     loss.backward()
                     opt_gen.step()
@@ -372,7 +375,7 @@ def overfit_gan(cfg):
                     g_steps_yet += 1
 
                 t.set_postfix(gen_loss=loss.item(), disc_loss=disc_loss.item(),
-                              gen_adv_loss=fake_loss.item(), ade=ade.item(), fde=fde.item(),
+                              gen_adv_loss=fake_loss_gen.item(), ade=ade.item(), fde=fde.item(),
                               running_disc_loss=torch.tensor(disc_adv_loss).mean().item(),
                               running_gen_adv_loss=torch.tensor(adv_loss).mean().item(),
                               running_gen_loss=torch.tensor(train_loss).mean().item(),
