@@ -585,3 +585,7 @@ trajectory_based:
 
       num_layers: 4  # 6
       norm: null  # 'layer_norm'
+
+      use_gan_loss: True
+      gan_loss_type: 'vanilla'
+      gan_loss_weight: 1.0

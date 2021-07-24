@@ -1,6 +1,7 @@
 from typing import Callable, List, Optional, Tuple, Union
 
 import torch
+from mmedit.models import GANLoss
 from omegaconf import DictConfig, OmegaConf
 from pytorchvideo.layers import PositionalEncoding
 from torch import nn
@@ -466,7 +467,7 @@ class TrajectoryGANTransformerV2(BaseGAN):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
                  desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
                  additional_loss_functions: List[nn.Module] = None,
-                 desc_loss_function: nn.Module = nn.BCEWithLogitsLoss(),
+                 desc_loss_function: nn.Module = None,
                  collate_fn: Optional[Callable] = None):
         super(TrajectoryGANTransformerV2, self).__init__(
             config=config, train_dataset=train_dataset, val_dataset=val_dataset,
@@ -474,6 +475,13 @@ class TrajectoryGANTransformerV2(BaseGAN):
             additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
         )
         self.config = config
+        if desc_loss_function is None:
+            if self.config.trajectory_based.transformer.discriminator.use_gan_loss:
+                desc_loss_function = GANLoss(
+                    gan_type=self.config.trajectory_based.transformer.discriminator.gan_loss_type,
+                    loss_weight=self.config.trajectory_based.transformer.discriminator.gan_loss_weight)
+            else:
+                desc_loss_function = nn.BCEWithLogitsLoss()
         self.desc_loss_function = desc_loss_function
 
         self.net_params = self.config.trajectory_based.transformer
@@ -647,6 +655,11 @@ class TrajectoryGANTransformerV2(BaseGAN):
         ade = cal_ade(target, pred, mode=mode)
         fde = cal_fde(target, pred, mode=mode)
         return ade, fde
+
+    def calculate_discriminator_loss(self, pred, target=None, is_real=True, is_disc=False):
+        if self.config.trajectory_based.transformer.discriminator.use_gan_loss:
+            return self.desc_loss_function(input=pred, target_is_real=is_real, is_disc=is_disc)
+        return self.desc_loss_function(pred, target)
 
 
 if __name__ == '__main__':

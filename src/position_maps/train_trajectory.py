@@ -294,6 +294,7 @@ def overfit_gan(cfg):
     train_loss, ade_list, fde_list, adv_loss, disc_adv_loss = [], [], [], [], []
     loss, disc_loss, ade, fde, fake_loss = \
         torch.tensor([0]), torch.tensor([0]), torch.tensor([0]), torch.tensor([0]), torch.tensor([0])
+    g_steps_yet, d_steps_yet = 0, 0
     for epoch in range(epochs):
         model.train()
         opt_switch = 0
@@ -305,6 +306,9 @@ def overfit_gan(cfg):
 
                 if opt_switch == 0:
                     opt_disc.zero_grad()
+
+                    # batch = model.get_k_batches(batch, model.config.tp_module.datasets.batch_multiplier)
+                    # batch_size = batch["size"]
 
                     real_pred = model.discriminator(batch, batch['gt_dxdy'])
                     real_gt = torch.ones_like(real_pred)
@@ -327,6 +331,7 @@ def overfit_gan(cfg):
                     disc_loss.backward()
                     opt_disc.step()
                     opt_switch = 1
+                    d_steps_yet += 1
                 elif opt_switch == 1:
                     opt_gen.zero_grad()
 
@@ -364,6 +369,7 @@ def overfit_gan(cfg):
                     loss.backward()
                     opt_gen.step()
                     opt_switch = 0
+                    g_steps_yet += 1
 
                 t.set_postfix(gen_loss=loss.item(), disc_loss=disc_loss.item(),
                               gen_adv_loss=fake_loss.item(), ade=ade.item(), fde=fde.item(),
