@@ -292,7 +292,8 @@ def overfit_gan(cfg):
     #                         min_lr=model.config.tp_module.scheduler.min_lr)
 
     train_loss, ade_list, fde_list, adv_loss, disc_adv_loss = [], [], [], [], []
-    loss, disc_loss, ade, fde, fake_loss = 0, 0, 0, 0, 0
+    loss, disc_loss, ade, fde, fake_loss = \
+        torch.tensor([0]), torch.tensor([0]), torch.tensor([0]), torch.tensor([0]), torch.tensor([0])
     for epoch in range(epochs):
         model.train()
         opt_switch = 0
@@ -300,7 +301,7 @@ def overfit_gan(cfg):
             t.set_description('Epoch %i' % epoch)
             for b_idx, batch in enumerate(loader):
                 batch = {k: v.to(device) for k, v in batch.items()}
-                batch_size = batch["size"]
+                # batch_size = batch["size"]
 
                 if opt_switch == 0:
                     opt_disc.zero_grad()
@@ -326,19 +327,18 @@ def overfit_gan(cfg):
                     disc_loss.backward()
                     opt_disc.step()
                     opt_switch = 1
-
-                if opt_switch == 1:
+                elif opt_switch == 1:
                     opt_gen.zero_grad()
 
-                    x = model.get_k_batches(x, model.config.tp_module.datasets.batch_multiplier)
-                    batch_size = x["size"]
+                    batch = model.get_k_batches(batch, model.config.tp_module.datasets.batch_multiplier)
+                    batch_size = batch["size"]
 
-                    out = model.generator(x)
+                    out = model.generator(batch)
 
-                    target = x['gt_xy']
+                    target = batch['gt_xy']
                     pred = out['out_xy']
 
-                    fake_pred = model.discriminator(x, out['out_dxdy'])
+                    fake_pred = model.discriminator(batch, out['out_dxdy'])
                     fake_gt = torch.zeros_like(fake_pred)
                     fake_loss = model.desc_loss_function(fake_pred, fake_gt)
 
@@ -348,11 +348,13 @@ def overfit_gan(cfg):
                     loss = torch.mean(loss) + fake_loss
 
                     ade, fde = cal_ade(target, pred, mode='raw'), cal_fde(target, pred, mode='raw')
-                    ade = ade.view(model.config.tp_module.datasets.batch_multiplier, batch_size) * x['ratio'][0]
-                    fde = fde.view(model.config.tp_module.datasets.batch_multiplier, batch_size) * x['ratio'][0]
+                    ade = ade.view(model.config.tp_module.datasets.batch_multiplier, batch_size) * batch['ratio'][0]
+                    fde = fde.view(model.config.tp_module.datasets.batch_multiplier, batch_size) * batch['ratio'][0]
 
                     ade, _ = ade.min(dim=0, keepdim=True)
                     fde, _ = fde.min(dim=0, keepdim=True)
+
+                    ade, fde = ade.mean(), fde.mean()
 
                     train_loss.append(loss.item())
                     ade_list.append(ade.item())
@@ -436,8 +438,8 @@ def overfit_gan(cfg):
                 gt_trajectory = gt_trajectory[:, 0, :]
 
                 plot_trajectory_alongside_frame_stochastic(
-                    frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_num, track_id=track_num,
-                    additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
+                    frame, obs_trajectory.cpu(), gt_trajectory.cpu(), pred_trajectory.cpu(), frame_num,
+                    track_id=track_num, additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -550,8 +552,8 @@ def overfit(cfg):
 
 
 if __name__ == '__main__':
-    overfit()
-    # overfit_gan()
+    # overfit()
+    overfit_gan()
     # evaluate()
     # train_lightning()
     # evaluate_stochastic()
