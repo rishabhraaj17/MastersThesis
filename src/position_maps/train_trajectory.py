@@ -13,7 +13,8 @@ from tqdm import tqdm
 import src_lib.models_hub as hub
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from baselinev2.nn.data_utils import extract_frame_from_video
-from baselinev2.plot_utils import plot_trajectory_alongside_frame
+from baselinev2.plot_utils import plot_trajectory_alongside_frame, plot_trajectory_alongside_frame_stochastic
+from baselinev2.stochastic.losses import cal_ade, cal_fde
 from log import get_logger
 from src.position_maps.trajectory_utils import get_multiple_datasets, bezier_smoother, splrep_smoother
 from src_lib.datasets.extracted_dataset import get_train_and_val_datasets, extracted_collate
@@ -109,8 +110,13 @@ def evaluate(cfg):
     state_dict = torch.load(path)['state_dict']
     model.load_state_dict(state_dict)
 
+    if cfg.tp_module.datasets.use_standard_dataset:
+        collate_fn = seq_collate_with_dataset_idx_dict
+    else:
+        collate_fn = extracted_collate
+
     loader = DataLoader(val_dataset, batch_size=1, shuffle=True, pin_memory=True, drop_last=False,
-                        collate_fn=seq_collate_with_dataset_idx_dict)
+                        collate_fn=collate_fn)
 
     for batch in loader:
         target = batch['gt_xy']
@@ -152,6 +158,99 @@ def evaluate(cfg):
         frame = extract_frame_from_video(video_path, frame_num)
 
         plot_trajectory_alongside_frame(
+            frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_num, track_id=track_num,
+            additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
+
+
+@hydra.main(config_path="config", config_name="config")
+def evaluate_stochastic(cfg):
+    logger.info(f"Stochastic - Setting up dataset and model")
+    train_dataset, val_dataset = setup_dataset(cfg)
+
+    model = setup_model(cfg, train_dataset, val_dataset)
+
+    # load dict
+    path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/wandb/' \
+           'run-20210724_011735-83lknvvr/files/' \
+           'TrajectoryPredictionBaseline/83lknvvr/checkpoints/epoch=2-step=72530.ckpt'
+    state_dict = torch.load(path)['state_dict']
+    model.load_state_dict(state_dict)
+
+    if cfg.tp_module.datasets.use_standard_dataset:
+        collate_fn = seq_collate_with_dataset_idx_dict
+    else:
+        collate_fn = extracted_collate
+
+    loader = DataLoader(val_dataset, batch_size=2, shuffle=True, pin_memory=True, drop_last=False,
+                        collate_fn=collate_fn)
+
+    for batch in loader:
+        batch = model.get_k_batches(batch, model.config.tp_module.datasets.batch_multiplier)
+        batch_size = batch["size"]
+
+        with torch.no_grad():
+            model.generator.eval()
+            out = model.generator(batch)
+            model.generator.train()
+
+        target = batch['gt_xy']
+        pred = out['out_xy']
+
+        obs_separated = batch['in_xy'].view(batch['in_xy'].shape[0], -1, batch_size, batch['in_xy'].shape[-1])
+        target_separated = target.view(target.shape[0], -1, batch_size, target.shape[-1])
+        pred_separated = pred.view(pred.shape[0], -1, batch_size, pred.shape[-1])
+
+        loss = model.calculate_loss(pred, target)
+        loss = loss.view(model.config.tp_module.datasets.batch_multiplier, -1)
+        loss, _ = loss.min(dim=0, keepdim=True)
+        loss = torch.mean(loss)
+
+        ade, fde = cal_ade(target, pred, mode='raw'), cal_fde(target, pred, mode='raw')
+        ade = ade.view(model.config.tp_module.datasets.batch_multiplier, batch_size) * batch['ratio'][0]
+        fde = fde.view(model.config.tp_module.datasets.batch_multiplier, batch_size) * batch['ratio'][0]
+
+        fde, _ = fde.min(dim=0)
+        modes_caught = (fde < model.config.tp_module.datasets.mode_dist_threshold).float()
+
+        ade, _ = ade.min(dim=0, keepdim=True)
+
+        seq_start_end = batch['seq_start_end']
+        frame_nums = batch['in_frames'].view(model.config.tp_module.datasets.batch_multiplier, 8, batch_size)
+        track_lists = batch['in_tracks'].view(model.config.tp_module.datasets.batch_multiplier, 8, batch_size)
+
+        random_trajectory_idx = np.random.choice(frame_nums.shape[-1], 1, replace=False).item()
+
+        dataset_idx = batch['dataset_idx'][random_trajectory_idx].item()
+
+        obs_trajectory = obs_separated[:, :, random_trajectory_idx, ...]
+        gt_trajectory = target_separated[:, :, random_trajectory_idx, ...]
+        pred_trajectory = pred_separated[:, :, random_trajectory_idx, ...]
+
+        frame_num = int(frame_nums[0, random_trajectory_idx, ...][0].item())
+        track_num = int(track_lists[0, random_trajectory_idx, ...][0].item())
+
+        current_dataset = loader.dataset.datasets[dataset_idx].dataset \
+            if cfg.tp_module.datasets.use_standard_dataset else loader.dataset.datasets[dataset_idx]
+        if isinstance(current_dataset, SmoothTrajectoryDataset):
+            current_dataset = current_dataset.base_dataset
+
+        if cfg.tp_module.datasets.use_standard_dataset:
+            video_path = f"{cfg.root}videos/{getattr(SDDVideoClasses, current_dataset.video_class).value}" \
+                         f"/video{current_dataset.video_number}/video.mov"
+        else:
+            video_path = f"{cfg.root}videos/{current_dataset.video_class.value}" \
+                         f"/video{current_dataset.video_number}/video.mov"
+
+        frame = extract_frame_from_video(video_path, frame_num)
+
+        ade = ade.squeeze()[random_trajectory_idx]
+        fde = fde.squeeze()[random_trajectory_idx]
+
+        # single for give data
+        obs_trajectory = obs_trajectory[:, 0, :]
+        gt_trajectory = gt_trajectory[:, 0, :]
+
+        plot_trajectory_alongside_frame_stochastic(
             frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_num, track_id=track_num,
             additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
 
@@ -257,4 +356,5 @@ def overfit(cfg):
 if __name__ == '__main__':
     # overfit()
     # evaluate()
-    train_lightning()
+    # train_lightning()
+    evaluate_stochastic()
