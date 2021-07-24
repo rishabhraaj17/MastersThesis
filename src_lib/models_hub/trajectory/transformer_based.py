@@ -572,7 +572,7 @@ class TrajectoryGANTransformerV2(BaseGAN):
         # Train with real
         real_pred = self.discriminator(x, x['gt_dxdy'])
         real_gt = torch.ones_like(real_pred)
-        real_loss = self.desc_loss_function(real_pred, real_gt)
+        real_loss = self.calculate_discriminator_loss(pred=real_pred, target=real_gt, is_real=True, is_disc=True)
 
         # Train with fake
         with torch.no_grad():
@@ -582,7 +582,7 @@ class TrajectoryGANTransformerV2(BaseGAN):
 
         fake_pred = self.discriminator(x, fake_pred['out_dxdy'])
         fake_gt = torch.zeros_like(fake_pred)
-        fake_loss = self.desc_loss_function(fake_pred, fake_gt)
+        fake_loss = self.calculate_discriminator_loss(pred=fake_pred, target=fake_gt, is_real=False, is_disc=True)
 
         disc_loss = real_loss + fake_loss
 
@@ -599,7 +599,7 @@ class TrajectoryGANTransformerV2(BaseGAN):
 
         fake_pred = self.discriminator(x, out['out_dxdy'])
         fake_gt = torch.zeros_like(fake_pred)
-        fake_loss = self.desc_loss_function(fake_pred, fake_gt)
+        fake_loss = self.calculate_discriminator_loss(pred=fake_pred, target=fake_gt, is_real=False, is_disc=False)
 
         loss = self.calculate_loss(pred, target)
         loss = loss.view(self.config.tp_module.datasets.batch_multiplier, -1)
