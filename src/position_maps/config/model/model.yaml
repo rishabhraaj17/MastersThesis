@@ -589,3 +589,10 @@ trajectory_based:
       use_gan_loss: True
       gan_loss_type: 'vanilla'
       gan_loss_weight: 1.0
+
+  images:
+    global:
+      out_channels: 64
+
+    local:
+      out_channels: 32
