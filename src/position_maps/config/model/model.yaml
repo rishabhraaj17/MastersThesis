@@ -591,8 +591,39 @@ trajectory_based:
       gan_loss_weight: 1.0
 
   images:
-    global:
-      out_channels: 64
+    globall:
+      out_channels: 128
 
     local:
-      out_channels: 32
+      out_channels: 64
+
+    encoder: # also for motion_generator
+      in_features: 2
+      seq_len: 8
+
+      d_model: 128 # 64
+      nhead: 4 # 8
+      dim_feedforward: 512 # 64 # 512  # 2048 for 512 d_model
+      dropout: 0.1
+      activation: 'relu'
+
+      num_layers: 4 # 6
+      norm: null  # 'layer_norm'
+
+      noise_scalar: 4
+      mlp_scalar: 256
+      noise_activation: 'Tanh'
+
+    decoder:
+      in_features: 2
+      out_features: 2
+      seq_len: 14
+
+      d_model: 128 # 64
+      nhead: 4 # 6
+      dim_feedforward: 512 # 64 # 512  # 2048 for 512 d_model
+      dropout: 0.1
+      activation: 'relu'
+
+      num_layers: 4 # 6
+      norm: null  # 'layer_norm'

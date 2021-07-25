@@ -287,10 +287,10 @@ def overfit_gan(cfg):
                                amsgrad=model.net_params.generator.weight_decay)
 
     # load states
-    states = torch.load('transformerGANep100_gt_dc24.pt')
-    model.load_state_dict(states['model'])
-    opt_gen.load_state_dict(states['opt_gen'])
-    opt_disc.load_state_dict(states['opt_disc'])
+    # states = torch.load('transformerGANep100_gt_dc24.pt')
+    # model.load_state_dict(states['model'])
+    # opt_gen.load_state_dict(states['opt_gen'])
+    # opt_disc.load_state_dict(states['opt_disc'])
     # sch = ReduceLROnPlateau(opt_gen,
     #                         patience=model.config.tp_module.scheduler.patience,
     #                         verbose=model.config.tp_module.scheduler.verbose,
