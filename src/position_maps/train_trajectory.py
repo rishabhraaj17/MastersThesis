@@ -259,7 +259,7 @@ def evaluate_stochastic(cfg):
 @hydra.main(config_path="config", config_name="config")
 def overfit_gan(cfg):
     device = 'cuda:0'
-    epochs = 1000
+    epochs = 2000
     plot_idx = 100
     batch_size = 8
 
@@ -295,16 +295,18 @@ def overfit_gan(cfg):
     loss, disc_loss, ade, fde, fake_loss_gen = \
         torch.tensor([0]), torch.tensor([0]), torch.tensor([0]), torch.tensor([0]), torch.tensor([0])
     g_steps_yet, d_steps_yet = 0, 0
+    gen_only_cutoff = 100
+    disc_only_cutoff = 900
+    opt_switch = 1
     for epoch in range(epochs):
         model.train()
-        opt_switch = 0
         with tqdm(loader, position=0) as t:
             t.set_description('Epoch %i' % epoch)
             for b_idx, batch in enumerate(loader):
                 batch = {k: v.to(device) for k, v in batch.items()}
                 # batch_size = batch["size"]
 
-                if opt_switch == 0:
+                if opt_switch == 0 and epoch > gen_only_cutoff:
                     opt_disc.zero_grad()
 
                     # batch = model.get_k_batches(batch, model.config.tp_module.datasets.batch_multiplier)
@@ -332,9 +334,10 @@ def overfit_gan(cfg):
 
                     disc_loss.backward()
                     opt_disc.step()
-                    opt_switch = 1
+                    if epoch > disc_only_cutoff:
+                        opt_switch = 1
                     d_steps_yet += 1
-                elif opt_switch == 1:
+                elif opt_switch == 1 and epoch > 0 and not gen_only_cutoff < epoch < disc_only_cutoff:
                     opt_gen.zero_grad()
 
                     batch = model.get_k_batches(batch, model.config.tp_module.datasets.batch_multiplier)
@@ -345,10 +348,13 @@ def overfit_gan(cfg):
                     target = batch['gt_xy']
                     pred = out['out_xy']
 
-                    fake_pred = model.discriminator(batch, out['out_dxdy'])
-                    fake_gt = torch.zeros_like(fake_pred)
-                    fake_loss_gen = model.calculate_discriminator_loss(pred=fake_pred, target=fake_gt, is_real=False,
-                                                                   is_disc=False)
+                    if epoch > gen_only_cutoff:
+                        fake_pred = model.discriminator(batch, out['out_dxdy'])
+                        fake_gt = torch.zeros_like(fake_pred)
+                        fake_loss_gen = model.calculate_discriminator_loss(
+                            pred=fake_pred, target=fake_gt, is_real=False, is_disc=False)
+                    if epoch <= gen_only_cutoff:
+                        fake_loss_gen = fake_loss_gen.to(pred)
 
                     loss = model.calculate_loss(pred, target)
                     loss = loss.view(model.config.tp_module.datasets.batch_multiplier, -1)
@@ -371,7 +377,8 @@ def overfit_gan(cfg):
 
                     loss.backward()
                     opt_gen.step()
-                    opt_switch = 0
+                    if epoch > gen_only_cutoff:
+                        opt_switch = 0
                     g_steps_yet += 1
 
                 t.set_postfix(gen_loss=loss.item(), disc_loss=disc_loss.item(),
@@ -383,7 +390,7 @@ def overfit_gan(cfg):
                               running_fde=torch.tensor(fde_list).mean().item())
                 t.update()
 
-            if epoch % plot_idx == 0:
+            if epoch % plot_idx == 0 and epoch != 0:
                 with torch.no_grad():
                     model.generator.eval()
                     out = model.generator(batch)
