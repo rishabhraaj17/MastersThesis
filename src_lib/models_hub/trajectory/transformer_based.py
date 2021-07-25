@@ -160,7 +160,7 @@ class TrajectoryTransformer(Base):
         return ade, fde
 
     def calculate_loss(self, pred, target):
-        return torch.linalg.norm((pred - target), ord=2, dim=0).mean(dim=0).mean()
+        return torch.linalg.norm((pred - target), ord=2, dim=-1).mean(dim=0).mean()
 
     def training_step(self, batch, batch_idx):
         loss, ade, fde = self._one_step(batch)
@@ -624,7 +624,8 @@ class TrajectoryGANTransformerV2(BaseGAN):
         d_Traj = pred_traj_gt - pred_traj
 
         if typz == "mse":
-            loss = torch.norm((d_Traj), 2, -1)
+            loss = torch.linalg.norm(d_Traj, ord=2, dim=-1)
+            # loss = torch.norm((d_Traj), 2, -1)
         elif typz == "average":
             loss = ((torch.norm(d_Traj, 2, -1)) + (torch.norm(d_Traj[-1], 2, -1))) / 2.
         else:
