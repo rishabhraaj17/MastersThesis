@@ -532,7 +532,7 @@ trajectory_based:
         dropout: 0.0
 
   transformer:
-    encoder:
+    encoder:  # also for motion_generator
       in_features: 2
       seq_len: 7
 
@@ -560,8 +560,8 @@ trajectory_based:
       norm: null  # 'layer_norm'
 
     generator:
-      lr: 1e-3
-      weight_decay: 5e10
+      lr: 1e-4
+      weight_decay: 5e-10
       amsgrad: False
 
       noise_scalar: 4
@@ -569,8 +569,8 @@ trajectory_based:
       noise_activation: 'Tanh'
 
     discriminator:
-      lr: 1e-3
-      weight_decay: 5e10
+      lr: 1e-4
+      weight_decay: 5e-10
       amsgrad: False
 
       in_features: 2

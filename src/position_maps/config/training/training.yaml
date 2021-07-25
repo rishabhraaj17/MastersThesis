@@ -24,7 +24,7 @@ mode: 'min'
 # TP module
 # scheduler
 tp_module:
-  model: 'TrajectoryGANTransformerV2'  # 'TrajectoryTransformer'  # 'RNNBaseline'  # 'TrajectoryTransformer'
+  model: 'TrajectoryGANTransformerV2'  # 'TransformerNoisyMotionGenerator' # 'TrajectoryGANTransformerV2'  # 'TrajectoryTransformer'  # 'RNNBaseline'  # 'TrajectoryTransformer'
 
   smooth_trajectories:
     enabled: False
@@ -68,7 +68,7 @@ tp_module:
     shuffle: True
     pin_memory: True
     drop_last: False
-    num_workers: 0
+    num_workers: 12
     val_batch_size_factor: 2
 
   scheduler:

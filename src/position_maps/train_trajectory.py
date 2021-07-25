@@ -261,7 +261,7 @@ def overfit_gan(cfg):
     device = 'cuda:0'
     epochs = 2000
     plot_idx = 100
-    batch_size = 8
+    batch_size = 4
 
     logger.info(f"Overfit GAN - Setting up dataset and model")
     train_dataset, val_dataset = setup_dataset(cfg)
@@ -295,8 +295,8 @@ def overfit_gan(cfg):
     loss, disc_loss, ade, fde, fake_loss_gen = \
         torch.tensor([0]), torch.tensor([0]), torch.tensor([0]), torch.tensor([0]), torch.tensor([0])
     g_steps_yet, d_steps_yet = 0, 0
-    gen_only_cutoff = 100
-    disc_only_cutoff = 900
+    gen_only_cutoff = 0
+    disc_only_cutoff = 0
     opt_switch = 1
     for epoch in range(epochs):
         model.train()
@@ -306,7 +306,7 @@ def overfit_gan(cfg):
                 batch = {k: v.to(device) for k, v in batch.items()}
                 # batch_size = batch["size"]
 
-                if opt_switch == 0 and epoch > gen_only_cutoff:
+                if opt_switch == 0 and epoch >= gen_only_cutoff:
                     opt_disc.zero_grad()
 
                     # batch = model.get_k_batches(batch, model.config.tp_module.datasets.batch_multiplier)
@@ -337,7 +337,7 @@ def overfit_gan(cfg):
                     if epoch > disc_only_cutoff:
                         opt_switch = 1
                     d_steps_yet += 1
-                elif opt_switch == 1 and epoch > 0 and not gen_only_cutoff < epoch < disc_only_cutoff:
+                elif opt_switch == 1 and epoch >= 0 and not gen_only_cutoff < epoch < disc_only_cutoff:
                     opt_gen.zero_grad()
 
                     batch = model.get_k_batches(batch, model.config.tp_module.datasets.batch_multiplier)
@@ -377,7 +377,7 @@ def overfit_gan(cfg):
 
                     loss.backward()
                     opt_gen.step()
-                    if epoch > gen_only_cutoff:
+                    if epoch >= gen_only_cutoff:
                         opt_switch = 0
                     g_steps_yet += 1
 
@@ -387,7 +387,8 @@ def overfit_gan(cfg):
                               running_gen_adv_loss=torch.tensor(adv_loss).mean().item(),
                               running_gen_loss=torch.tensor(train_loss).mean().item(),
                               running_ade=torch.tensor(ade_list).mean().item(),
-                              running_fde=torch.tensor(fde_list).mean().item())
+                              running_fde=torch.tensor(fde_list).mean().item(),
+                              gen_step_yet=g_steps_yet, disc_step_yet=d_steps_yet)
                 t.update()
 
             if epoch % plot_idx == 0 and epoch != 0:
@@ -415,7 +416,7 @@ def overfit_gan(cfg):
                 fde, _ = fde.min(dim=0)
                 modes_caught = (fde < model.config.tp_module.datasets.mode_dist_threshold).float()
 
-                ade, _ = ade.min(dim=0, keepdim=True)
+                ade, ade_min_idx = ade.min(dim=0, keepdim=True)
 
                 seq_start_end = batch['seq_start_end']
                 frame_nums = batch['in_frames'].view(model.config.tp_module.datasets.batch_multiplier, 8, batch_size)
@@ -455,7 +456,8 @@ def overfit_gan(cfg):
 
                 plot_trajectory_alongside_frame_stochastic(
                     frame, obs_trajectory.cpu(), gt_trajectory.cpu(), pred_trajectory.cpu(), frame_num,
-                    track_id=track_num, additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
+                    track_id=track_num, additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}",
+                    best_idx=ade_min_idx.squeeze()[random_trajectory_idx].item())
 
 
 @hydra.main(config_path="config", config_name="config")
