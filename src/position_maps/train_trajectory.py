@@ -20,7 +20,7 @@ from src.position_maps.trajectory_utils import get_multiple_datasets, bezier_smo
 from src_lib.datasets.extracted_dataset import get_train_and_val_datasets, extracted_collate
 from src_lib.datasets.opentraj_based import get_multiple_gt_dataset
 from src_lib.datasets.trajectory_stgcnn import seq_collate_with_dataset_idx_dict, SmoothTrajectoryDataset
-from src_lib.models_hub import TransformerNoisyMotionGenerator
+from src_lib.models_hub import TransformerNoisyMotionGenerator, TrajectoryGANTransformerV2
 
 warnings.filterwarnings("ignore")
 
@@ -497,6 +497,9 @@ def overfit(cfg):
             t.set_description('Epoch %i' % epoch)
             for b_idx, batch in enumerate(loader):
                 opt.zero_grad()
+
+                # batch = TrajectoryGANTransformerV2.get_k_batches(batch, 10)
+                # batch = {k: v.to(device) for k, v in batch.items() if k != 'size'}
 
                 batch = {k: v.to(device) for k, v in batch.items()}
                 target = batch['gt_xy']
