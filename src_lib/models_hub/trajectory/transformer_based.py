@@ -237,6 +237,32 @@ class TransformerMotionGenerator(nn.Module):
         return out
 
 
+class TransformerMotionEncoderWithNoise(nn.Module):
+    def __init__(self, config: DictConfig):
+        super(TransformerMotionEncoderWithNoise, self).__init__()
+        self.config = config
+        net_params = self.config.trajectory_based.transformer.encoder
+        gen_params = self.config.trajectory_based.transformer.generator
+
+        self.motion_encoder = TransformerMotionEncoder(config=self.config)
+
+        self.noise_scalar = gen_params.noise_scalar
+        self.noise_embedding = nn.Sequential(
+            nn.Linear(in_features=net_params.d_model + self.noise_scalar, out_features=gen_params.mlp_scalar),
+            getattr(nn, gen_params.noise_activation)(),
+            nn.Linear(in_features=gen_params.mlp_scalar, out_features=net_params.d_model),
+            getattr(nn, gen_params.noise_activation)()
+        )
+
+    def forward(self, x):
+        out = self.motion_encoder(x)
+        seq_len, batch_size, _ = out.shape
+        out = torch.cat((out, torch.randn((seq_len, batch_size, self.noise_scalar)).to(out)), dim=-1)
+        if self.noise_scalar:
+            out = self.noise_embedding(out)
+        return out
+
+
 class TransformerNoisyMotionGenerator(Base):
     def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
                  desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
