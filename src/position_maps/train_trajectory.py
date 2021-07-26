@@ -315,8 +315,8 @@ def overfit_gan(cfg):
                 if opt_switch == 0 and epoch >= gen_only_cutoff:
                     opt_disc.zero_grad()
 
-                    # batch = model.get_k_batches(batch, model.config.tp_module.datasets.batch_multiplier)
-                    # batch_size = batch["size"]
+                    batch = model.get_k_batches(batch, model.config.tp_module.datasets.batch_multiplier)
+                    batch_size = batch["size"]
 
                     real_pred = model.discriminator(batch, batch['gt_dxdy'])
                     real_gt = torch.ones_like(real_pred)
@@ -365,6 +365,7 @@ def overfit_gan(cfg):
                     loss = model.calculate_loss(pred, target)
                     loss = loss.view(model.config.tp_module.datasets.batch_multiplier, -1)
                     loss, _ = loss.min(dim=0, keepdim=True)
+                    # loss *= batch['ratio'][0]
                     loss = torch.mean(loss) + fake_loss_gen
 
                     ade, fde = cal_ade(target, pred, mode='raw'), cal_fde(target, pred, mode='raw')

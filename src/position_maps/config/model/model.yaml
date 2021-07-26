@@ -610,7 +610,7 @@ trajectory_based:
       num_layers: 4 # 6
       norm: null  # 'layer_norm'
 
-      noise_scalar: 4
+      noise_scalar: 16
       mlp_scalar: 256
       noise_activation: 'Tanh'
 

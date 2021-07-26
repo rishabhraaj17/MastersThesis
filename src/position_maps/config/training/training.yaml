@@ -39,7 +39,7 @@ tp_module:
 
     filename: 'trajectories.pt'
 
-    use_generated: False
+    use_generated: True
 
     val_ratio: 0.2
     batch_multiplier: 10
@@ -52,10 +52,10 @@ tp_module:
     # not in use right now
     train:
       video_classes: [ DEATH_CIRCLE ]
-      video_numbers: [ [ 0, 1, 2, 3, 4 ] ]
+      video_numbers: [ [ 0, 2, 4 ] ]
     val:
       video_classes: [ DEATH_CIRCLE ]
-      video_numbers: [ [ 0, 1, 2, 3, 4 ] ]
+      video_numbers: [ [ 2, 4 ] ]
 
     obs_len: 8
     pred_len: 12
