@@ -36,6 +36,18 @@ class Track(object):
         return f"Track: {self.idx}"
 
 
+class ExtractedTrack(object):
+    def __init__(self, idx):
+        super(ExtractedTrack, self).__init__()
+        self.idx = idx
+        self.frames = []
+        self.coordinates = []
+        self.active = True
+
+    def __repr__(self):
+        return f"Track: {self.idx}"
+
+
 class VideoSequenceTracksData(object):
     def __init__(self, video_class, video_number, tracks: List[Track]):
         super(VideoSequenceTracksData, self).__init__()
@@ -61,6 +73,30 @@ class VideoSequenceTracksData(object):
 
     def get_alive_extracted_features(self):
         gt_features = [np.stack(t.extracted_coordinates) for t in self.tracks]
+        return gt_features
+
+
+class ExtractedTracksData(object):
+    def __init__(self, video_class, video_number, tracks: List[ExtractedTrack]):
+        super(ExtractedTracksData, self).__init__()
+        self.video_class = video_class
+        self.video_number = video_number
+        self.tracks = tracks
+
+    def __getitem__(self, item):
+        return [t for t in self.tracks if t.idx == item][0]
+
+    def __contains__(self, item):
+        for t in self.tracks:
+            if t.idx == item:
+                return True
+        return False
+
+    def __repr__(self):
+        return f"{self.video_class.name} | {self.video_number}\n{self.tracks}"
+
+    def get_alive_features(self):
+        gt_features = [np.stack(t.coordinates) for t in self.tracks if t.active]
         return gt_features
 
 
@@ -173,13 +209,14 @@ class TracksAnalyzer(object):
     def get_frame_from_figure(fig, original_shape):
         video_frame = get_image_array_from_figure(fig)
 
-        if video_frame.shape[0] != original_shape[1] \
-                or video_frame.shape[1] != original_shape[0]:
-            video_frame = skimage.transform.resize(
-                video_frame, (original_shape[1], original_shape[0]))
-            video_frame = (video_frame * 255).astype(np.uint8)
-
-            video_frame = process_numpy_video_frame_to_tensor(video_frame)
+        # if video_frame.shape[0] != original_shape[1] \
+        #         or video_frame.shape[1] != original_shape[0]:
+        #     video_frame = skimage.transform.resize(
+        #         video_frame, (original_shape[1], original_shape[0]))
+        #     video_frame = (video_frame * 255).astype(np.uint8)
+        #
+        #     video_frame = process_numpy_video_frame_to_tensor(video_frame)
+        video_frame = process_numpy_video_frame_to_tensor(video_frame)
         return video_frame
 
     @staticmethod
@@ -234,7 +271,7 @@ class TracksAnalyzer(object):
 
         return fig
 
-    def perform_analysis_on_multiple_sequences(self):
+    def perform_analysis_on_multiple_sequences(self, show_extracted_tracks_only=False):
         for v_idx, (v_clz, v_meta_clz) in enumerate(zip(self.video_classes, self.video_meta_classes)):
             for v_num in self.video_numbers[v_idx]:
                 gt_annotation_path = f"{self.root}annotations/{v_clz.value}/video{v_num}/annotation_augmented.csv"
@@ -242,9 +279,13 @@ class TracksAnalyzer(object):
                                             f"video{v_num}/trajectories.csv"
                 ref_img = torchvision.io.read_image(f"{self.root}annotations/{v_clz.value}/video{v_num}/reference.jpg")
                 video_path = f"{self.root}/videos/{v_clz.value}/video{v_num}/video.mov"
-                self.perform_analysis_on_single_sequence(
-                    gt_annotation_path, extracted_annotation_path, v_clz, v_meta_clz, v_num, (ref_img.shape[1:]), 
-                    video_path)
+                if show_extracted_tracks_only:
+                    self.construct_extracted_tracks_only(
+                        extracted_annotation_path, v_clz, v_num, video_path, (ref_img.shape[1:]))
+                else:
+                    self.perform_analysis_on_single_sequence(
+                        gt_annotation_path, extracted_annotation_path, v_clz, v_meta_clz, v_num, (ref_img.shape[1:]),
+                        video_path)
 
     def perform_analysis_on_single_sequence(
             self, gt_annotation_path, extracted_annotation_path, video_class,
@@ -323,16 +364,79 @@ class TracksAnalyzer(object):
                 video_frames.append(self.get_frame_from_figure(fig, original_shape=image_shape))
         if self.config.make_video:
             print(f"Writing Video")
-            Path(os.path.join(os.getcwd(), 'logs/analysis_videos')).mkdir(parents=True, exist_ok=True)
+            Path(os.path.join(os.getcwd(), 'logs/analysis_videos/')).mkdir(parents=True, exist_ok=True)
             torchvision.io.write_video(
-                f'location_only_videos/{video_class.name}_'
+                f'logs/analysis_videos/{video_class.name}_'
                 f'{video_number}_'
                 f'neighbourhood_radius_{self.config.threshold}.avi',
                 torch.cat(video_frames).permute(0, 2, 3, 1),
                 self.config.video_fps)
         print(f"Analysis done for {video_class.name} - {video_number}")
+        return video_sequence_track_data
+
+    def construct_extracted_tracks_only(
+            self, extracted_annotation_path, video_class, video_number, video_path, image_shape):
+        video_sequence_track_data = ExtractedTracksData(
+            video_class=video_class, video_number=video_number, tracks=[])
+        video_frames = []
+
+        extracted_df = pd.read_csv(extracted_annotation_path)
+
+        for frame in tqdm(extracted_df.frame.unique()):
+            extracted_centers, extracted_track_ids = self.get_extracted_centers(extracted_df, frame)
+            if frame == 0:
+                for e_t_idx, e_center in zip(extracted_track_ids, extracted_centers):
+                    track = ExtractedTrack(idx=int(e_t_idx))
+                    track.frames.append(frame)
+                    track.coordinates.append(e_center.tolist())
+                    video_sequence_track_data.tracks.append(track)
+            else:
+                for e_t_idx, e_center in zip(extracted_track_ids, extracted_centers):
+                    if e_t_idx in video_sequence_track_data:
+                        track = video_sequence_track_data[e_t_idx]
+                        track.frames.append(frame)
+                        track.coordinates.append(e_center.tolist())
+                    else:
+                        track = ExtractedTrack(idx=int(e_t_idx))
+                        track.frames.append(frame)
+                        track.coordinates.append(e_center.tolist())
+                        video_sequence_track_data.tracks.append(track)
+
+            # filter out inactive tracks
+            for t in video_sequence_track_data.tracks:
+                if t.frames[-1] != frame:
+                    t.active = False
+
+            if self.config.show_plot or self.config.make_video:
+                fig = self.plot(
+                    frame=extract_frame_from_video(video_path, frame_number=frame),
+                    boxes=[],
+                    gt_features=[],
+                    extracted_features=video_sequence_track_data.get_alive_features(),
+                    frame_number=frame,
+                    marker_size=self.config.marker_size,
+                    radius=self.config.threshold,
+                    fig_title="",
+                    footnote_text=f"{video_class.name} - {video_number}",
+                    video_mode=self.config.make_video,
+                    box_annotation=extracted_track_ids,
+                    boxes_with_annotation=True
+                )
+            if self.config.make_video:
+                video_frames.append(self.get_frame_from_figure(fig, original_shape=tuple(image_shape)))
+        if self.config.make_video:
+            print(f"Writing Video")
+            Path(os.path.join(os.getcwd(), 'logs/analysis_videos/')).mkdir(parents=True, exist_ok=True)
+            torchvision.io.write_video(
+                f'logs/analysis_videos/extracted_only_{video_class.name}_'
+                f'{video_number}_'
+                f'neighbourhood_radius_{self.config.threshold}.avi',
+                torch.cat(video_frames).permute(0, 2, 3, 1),
+                self.config.video_fps)
+        print(f"Analysis done for {video_class.name} - {video_number}")
+        return video_sequence_track_data
 
 
 if __name__ == '__main__':
     analyzer = TracksAnalyzer(OmegaConf.load('config/training/training.yaml'))
-    analyzer.perform_analysis_on_multiple_sequences()
+    analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=True)
