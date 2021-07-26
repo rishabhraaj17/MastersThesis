@@ -272,6 +272,7 @@ class TracksAnalyzer(object):
         return fig
 
     def perform_analysis_on_multiple_sequences(self, show_extracted_tracks_only=False):
+        metrics = {}
         for v_idx, (v_clz, v_meta_clz) in enumerate(zip(self.video_classes, self.video_meta_classes)):
             for v_num in self.video_numbers[v_idx]:
                 gt_annotation_path = f"{self.root}annotations/{v_clz.value}/video{v_num}/annotation_augmented.csv"
@@ -283,9 +284,27 @@ class TracksAnalyzer(object):
                     self.construct_extracted_tracks_only(
                         extracted_annotation_path, v_clz, v_num, video_path, (ref_img.shape[1:]))
                 else:
-                    self.perform_analysis_on_single_sequence(
+                    data, p, r = self.perform_analysis_on_single_sequence(
                         gt_annotation_path, extracted_annotation_path, v_clz, v_meta_clz, v_num, (ref_img.shape[1:]),
                         video_path)
+                    ade, fde = self.calculate_ade_fde_for_associations(
+                        video_sequence_track_data=data, meta_class=v_meta_clz, video_number=v_num)
+                    if v_clz.name in metrics.keys():
+                        metrics[v_clz.name][v_num] = {
+                            'ade': ade, 'fde': fde,
+                            'precision': p, 'recall': r,
+                            'neighbourhood_radius': self.config.threshold
+                        }
+                    else:
+                        metrics[v_clz.name] = {
+                            v_num: {
+                                'ade': ade, 'fde': fde,
+                                'precision': p, 'recall': r,
+                                'neighbourhood_radius': self.config.threshold
+                            }
+                        }
+        self.save_as_csv(metrics=metrics)
+        return metrics
 
     def perform_analysis_on_single_sequence(
             self, gt_annotation_path, extracted_annotation_path, video_class,
@@ -294,6 +313,7 @@ class TracksAnalyzer(object):
             video_class=video_class, video_number=video_number, tracks=[])
         ratio = self.get_ratio(meta_class=video_meta_class, video_number=video_number)
         video_frames = []
+        tp_list, fp_list, fn_list = [], [], []
 
         gt_df = self.get_gt_df(gt_annotation_path)
         extracted_df = pd.read_csv(extracted_annotation_path)
@@ -308,6 +328,9 @@ class TracksAnalyzer(object):
                 ratio=ratio,
                 threshold=self.config.threshold
             )
+            tp_list.append(tp)
+            fp_list.append(fp)
+            fn_list.append(fn)
             if frame == 0:
                 for r, c in zip(match_rows, match_cols):
                     gt_coordinates = gt_bbox_centers[r]
@@ -362,6 +385,8 @@ class TracksAnalyzer(object):
                 )
             if self.config.make_video:
                 video_frames.append(self.get_frame_from_figure(fig, original_shape=image_shape))
+        overall_precision = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fp_list).sum())
+        overall_recall = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fn_list).sum())
         if self.config.make_video:
             print(f"Writing Video")
             Path(os.path.join(os.getcwd(), 'logs/analysis_videos/')).mkdir(parents=True, exist_ok=True)
@@ -372,7 +397,64 @@ class TracksAnalyzer(object):
                 torch.cat(video_frames).permute(0, 2, 3, 1),
                 self.config.video_fps)
         print(f"Analysis done for {video_class.name} - {video_number}")
-        return video_sequence_track_data
+        return video_sequence_track_data, overall_precision, overall_recall
+
+    @staticmethod
+    def split_track_ids_into_chunks_of_indices(idx_list):
+        search_num = idx_list[0]
+        splits_idx = []
+        temp = []
+        for i, e in enumerate(idx_list):
+            if e == search_num:
+                temp.append(i)
+            else:
+                splits_idx.append(temp)
+                search_num = e
+                temp = [i]
+        splits_idx.append(temp)
+        return splits_idx
+
+    def calculate_ade_fde_for_associations(
+            self, video_sequence_track_data: VideoSequenceTracksData, meta_class, video_number):
+        ratio = self.get_ratio(meta_class=meta_class, video_number=video_number)
+        global_ade, global_fde = [], []
+        for track in video_sequence_track_data.tracks:
+            local_ade, local_fde = [], []
+            extracted_split_idx_list = self.split_track_ids_into_chunks_of_indices(np.array(track.extracted_idx_list))
+            for split_idx in extracted_split_idx_list:
+                split_gt_locations = np.array(track.gt_coordinates)[split_idx]
+                split_extracted_locations = np.array(track.extracted_coordinates)[split_idx]
+                ade = np.linalg.norm(
+                    (split_gt_locations - split_extracted_locations), ord=2, axis=-1).mean().item() * ratio
+                fde = np.linalg.norm(
+                    (split_gt_locations[-1] - split_extracted_locations[-1]), ord=2, axis=-1).item() * ratio
+                local_ade.append(ade)
+                local_fde.append(fde)
+            global_ade.append(np.array(local_ade).mean().item())
+            global_fde.append(np.array(local_fde).mean().item())
+        return np.array(global_ade).mean().item(), np.array(global_fde).mean().item()
+
+    def save_as_csv(self, metrics):
+        video_class, video_number, ade, fde, precision, recall, radius = [], [], [], [], [], [], []
+        for k, v in metrics.items():
+            for vk, vv in v.items():
+                video_class.append(k)
+                video_number.append(vk)
+                ade.append(vv['ade'])
+                fde.append(vv['fde'])
+                precision.append(vv['precision'])
+                recall.append(vv['recall'])
+                radius.append(vv['neighbourhood_radius'])
+        df: pd.DataFrame = pd.DataFrame({
+            'class': video_class,
+            'number': video_number,
+            'ade': ade,
+            'fde': fde,
+            'precision': precision,
+            'recall': recall,
+            'neighbourhood_radius': radius
+        })
+        df.to_csv(f"{self.root}/pm_extracted_annotations/metrics.csv", index=False)
 
     def construct_extracted_tracks_only(
             self, extracted_annotation_path, video_class, video_number, video_path, image_shape):
@@ -439,4 +521,5 @@ class TracksAnalyzer(object):
 
 if __name__ == '__main__':
     analyzer = TracksAnalyzer(OmegaConf.load('config/training/training.yaml'))
-    analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=True)
+    out = analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=False)
+    print()
