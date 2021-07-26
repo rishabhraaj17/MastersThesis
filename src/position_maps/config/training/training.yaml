@@ -468,6 +468,9 @@ metrics_analysis:
   video_classes: [ DEATH_CIRCLE ]
   video_numbers: [ [ 0, 2, 4 ] ]
 
+  match_distance: 'inf'
+  threshold: 2  # meters
+
 
 
 
