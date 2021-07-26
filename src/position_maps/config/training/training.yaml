@@ -463,6 +463,11 @@ patch_mode:
   factor: 0.1
   min_lr: 1e-10
 
+metrics_analysis:
+  root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
+  video_classes: [ DEATH_CIRCLE ]
+  video_numbers: [ [ 0, 2, 4 ] ]
+
 
 
 
