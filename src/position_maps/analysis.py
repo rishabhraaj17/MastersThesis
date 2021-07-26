@@ -6,6 +6,7 @@ import pandas as pd
 import scipy
 import torchvision.io
 from omegaconf import OmegaConf
+from tqdm import tqdm
 
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost, scale_annotations
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
@@ -23,6 +24,9 @@ class Track(object):
         self.gt_coordinates = []
         self.extracted_coordinates = []
 
+    def __repr__(self):
+        return f"Track: {self.idx}"
+
 
 class VideoSequenceTracksData(object):
     def __init__(self, video_class, video_number, tracks: List[Track]):
@@ -30,6 +34,18 @@ class VideoSequenceTracksData(object):
         self.video_class = video_class
         self.video_number = video_number
         self.tracks = tracks
+
+    def __getitem__(self, item):
+        return [t for t in self.tracks if t.idx == item][0]
+
+    def __contains__(self, item):
+        for t in self.tracks:
+            if t.idx == item:
+                return True
+        return False
+
+    def __repr__(self):
+        return f"{self.video_class.name} | {self.video_number}\n{self.tracks}"
 
 
 class TracksAnalyzer(object):
@@ -55,8 +71,7 @@ class TracksAnalyzer(object):
 
     def get_extracted_centers(self, extracted_df, frame):
         extracted_centers = self.get_frame_annotations(df=extracted_df, frame_number=frame)
-        extracted_centers = extracted_centers[:, 2:]
-        return extracted_centers
+        return extracted_centers[:, 2:], extracted_centers[:, 1]
 
     @staticmethod
     def get_gt_annotation(frame_number, gt_annotation_df, original_shape):
@@ -73,7 +88,7 @@ class TracksAnalyzer(object):
         #                     and (box[1] > 0 and box[3] < original_shape[0])]
         # supervised_boxes = supervised_boxes[inside_boxes_idx]
         # gt_bbox_centers = gt_bbox_centers[inside_boxes_idx]
-        return gt_bbox_centers, supervised_boxes
+        return gt_bbox_centers, supervised_boxes, gt_annotations[:, -1]
 
     @staticmethod
     def get_frame_annotations(df: pd.DataFrame, frame_number: int):
@@ -112,6 +127,32 @@ class TracksAnalyzer(object):
         match_cols = match_cols[actually_matched_mask]
         return match_rows, match_cols
 
+    @staticmethod
+    def get_frame_by_track_annotations(df: pd.DataFrame, frame_number: int, track_id: int, for_gt: bool,
+                                       return_current_frame_only: bool = False):
+        track_id_key = 'track_id' if for_gt else 'track'
+        filtered_by_track_id = df.loc[df[track_id_key] == track_id]
+        if return_current_frame_only:
+            idx: pd.DataFrame = filtered_by_track_id.loc[filtered_by_track_id["frame"] == frame_number]
+            return idx.to_numpy()
+        return filtered_by_track_id.to_numpy()
+
+    def construct_new_track(self, extracted_coordinates, extracted_track_id, frame, gt_coordinates, gt_track_id):
+        track = Track(idx=gt_track_id)
+        self.update_existing_track(track, extracted_coordinates, extracted_track_id, frame,
+                                   gt_coordinates, gt_track_id)
+        return track
+
+    @staticmethod
+    def update_existing_track(existing_track, extracted_coordinates, extracted_track_id, frame, gt_coordinates,
+                              gt_track_id):
+        existing_track.gt_idx_list.append(gt_track_id)
+        existing_track.extracted_idx_list.append(int(extracted_track_id))
+        existing_track.gt_frames.append(frame)
+        existing_track.extracted_frames.append(frame)
+        existing_track.gt_coordinates.append(gt_coordinates.tolist())
+        existing_track.extracted_coordinates.append(extracted_coordinates.tolist())
+
     def perform_analysis_on_multiple_sequences(self):
         for v_idx, (v_clz, v_meta_clz) in enumerate(zip(self.video_classes, self.video_meta_classes)):
             for v_num in self.video_numbers[v_idx]:
@@ -125,26 +166,58 @@ class TracksAnalyzer(object):
     def perform_analysis_on_single_sequence(
             self, gt_annotation_path, extracted_annotation_path, video_class,
             video_meta_class, video_number, image_shape):
-        tracks_data: List[Track] = []
+        video_sequence_track_data = VideoSequenceTracksData(
+            video_class=video_class, video_number=video_number, tracks=[])
         ratio = self.get_ratio(meta_class=video_meta_class, video_number=video_number)
 
         gt_df = self.get_gt_df(gt_annotation_path)
         extracted_df = pd.read_csv(extracted_annotation_path)
 
-        for frame in gt_df.frame.unique():
-            gt_bbox_centers, supervised_boxes = self.get_gt_annotation(
+        for frame in tqdm(gt_df.frame.unique()):
+            gt_bbox_centers, supervised_boxes, gt_track_ids = self.get_gt_annotation(
                 frame_number=frame, gt_annotation_df=gt_df, original_shape=tuple(image_shape))
-            extracted_centers = self.get_extracted_centers(extracted_df, frame)
+            extracted_centers, extracted_track_ids = self.get_extracted_centers(extracted_df, frame)
             (match_rows, match_cols), (fn, fp, precision, recall, tp) = self.get_associations_and_metrics(
                 gt_centers=gt_bbox_centers, extracted_centers=extracted_centers,
                 max_distance=float(self.config.match_distance),
                 ratio=ratio,
                 threshold=self.config.threshold
             )
-            print()
+            if frame == 0:
+                for r, c in zip(match_rows, match_cols):
+                    gt_coordinates = gt_bbox_centers[r]
+                    extracted_coordinates = extracted_centers[c]
 
-        video_sequence_track_data = VideoSequenceTracksData(
-            video_class=video_class, video_number=video_number, tracks=tracks_data)
+                    gt_track_id = gt_track_ids[r]
+                    extracted_track_id = extracted_track_ids[c]
+
+                    track = self.construct_new_track(extracted_coordinates, extracted_track_id, frame, gt_coordinates,
+                                                     gt_track_id)
+
+                    video_sequence_track_data.tracks.append(track)
+            else:
+                for r, c in zip(match_rows, match_cols):
+                    gt_coordinates = gt_bbox_centers[r]
+                    extracted_coordinates = extracted_centers[c]
+
+                    gt_track_id = gt_track_ids[r]
+                    extracted_track_id = extracted_track_ids[c]
+                    gt_tracks_for_agents_in_frame = self.get_frame_by_track_annotations(
+                        gt_df, frame_number=frame, track_id=gt_track_id, for_gt=True)
+                    extracted_tracks_for_agents_in_frame = self.get_frame_by_track_annotations(
+                        extracted_df, frame_number=frame, track_id=extracted_track_id, for_gt=False)
+
+                    if gt_track_id in video_sequence_track_data:
+                        existing_track = video_sequence_track_data[gt_track_id]
+                        self.update_existing_track(existing_track, extracted_coordinates, extracted_track_id, frame,
+                                                   gt_coordinates, gt_track_id)
+                    else:
+                        track = self.construct_new_track(extracted_coordinates, extracted_track_id, frame,
+                                                         gt_coordinates,
+                                                         gt_track_id)
+
+                        video_sequence_track_data.tracks.append(track)
+        print()
 
 
 if __name__ == '__main__':
