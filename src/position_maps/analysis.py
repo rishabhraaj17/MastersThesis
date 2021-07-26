@@ -1,16 +1,24 @@
+import os
+from pathlib import Path
 from typing import List
 
 import motmetrics as mm
 import numpy as np
 import pandas as pd
 import scipy
+import skimage
+import torch
 import torchvision.io
+from matplotlib import pyplot as plt, patches
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
 from average_image.bbox_utils import get_frame_annotations_and_skip_lost, scale_annotations
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from average_image.utils import SDDMeta
+from baselinev2.nn.data_utils import extract_frame_from_video
+from baselinev2.plot_utils import add_box_to_axes, add_box_to_axes_with_annotation
+from src.position_maps.evaluate import get_image_array_from_figure, process_numpy_video_frame_to_tensor
 
 
 class Track(object):
@@ -46,6 +54,14 @@ class VideoSequenceTracksData(object):
 
     def __repr__(self):
         return f"{self.video_class.name} | {self.video_number}\n{self.tracks}"
+
+    def get_alive_gt_features(self):
+        gt_features = [np.stack(t.gt_coordinates) for t in self.tracks]
+        return gt_features
+
+    def get_alive_extracted_features(self):
+        gt_features = [np.stack(t.extracted_coordinates) for t in self.tracks]
+        return gt_features
 
 
 class TracksAnalyzer(object):
@@ -152,6 +168,71 @@ class TracksAnalyzer(object):
         existing_track.extracted_frames.append(frame)
         existing_track.gt_coordinates.append(gt_coordinates.tolist())
         existing_track.extracted_coordinates.append(extracted_coordinates.tolist())
+        
+    @staticmethod
+    def get_frame_from_figure(fig, original_shape):
+        video_frame = get_image_array_from_figure(fig)
+
+        if video_frame.shape[0] != original_shape[1] \
+                or video_frame.shape[1] != original_shape[0]:
+            video_frame = skimage.transform.resize(
+                video_frame, (original_shape[1], original_shape[0]))
+            video_frame = (video_frame * 255).astype(np.uint8)
+
+            video_frame = process_numpy_video_frame_to_tensor(video_frame)
+        return video_frame
+
+    @staticmethod
+    def add_features_to_axis(ax, features, marker_size=8, marker_shape='o', marker_color='blue'):
+        for f in features:
+            ax.plot(f[:, 0], f[:, 1], marker_shape, markerfacecolor=marker_color, markeredgecolor='k',
+                    markersize=marker_size)
+        
+    def plot(self, frame, boxes, gt_features, extracted_features, frame_number, box_annotation,
+             marker_size=1, radius=None, fig_title='', footnote_text='', video_mode=False,
+             boxes_with_annotation=True):
+        fig, axs = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(8, 10))
+
+        axs.imshow(frame)
+        
+        legends_dict = {}
+        if gt_features is not None:
+            self.add_features_to_axis(axs, gt_features, marker_size=marker_size, marker_color='b')
+            legends_dict.update({'b': 'GT Locations'})
+
+        if extracted_features is not None:
+            self.add_features_to_axis(axs, extracted_features, marker_size=marker_size, marker_color='g')
+            legends_dict.update({'g': 'Extracted Locations'})
+
+        if boxes is not None:
+            if boxes_with_annotation:
+                add_box_to_axes_with_annotation(axs, boxes, box_annotation)
+            else:
+                add_box_to_axes(axs, boxes)
+            legends_dict.update({'r': 'GT Boxes'})
+
+        if radius is not None:
+            for c_center in np.concatenate(extracted_features):
+                axs.add_artist(plt.Circle((c_center[0], c_center[1]), radius, color='yellow', fill=False))
+            legends_dict.update({'yellow': 'Neighbourhood Radius'})
+
+        axs.set_title(f'Frame: {frame_number}')
+
+        fig.subplots_adjust(wspace=0.1, hspace=0.1)
+        plt.tight_layout(pad=1.58)
+
+        legend_patches = [patches.Patch(color=key, label=val) for key, val in legends_dict.items()]
+        fig.legend(handles=legend_patches, loc=2)
+
+        plt.suptitle(fig_title)
+        plt.figtext(0.99, 0.01, footnote_text, horizontalalignment='right')
+
+        if video_mode:
+            plt.close()
+        else:
+            plt.show()
+
+        return fig
 
     def perform_analysis_on_multiple_sequences(self):
         for v_idx, (v_clz, v_meta_clz) in enumerate(zip(self.video_classes, self.video_meta_classes)):
@@ -160,15 +241,18 @@ class TracksAnalyzer(object):
                 extracted_annotation_path = f"{self.root}pm_extracted_annotations/{v_clz.value}/" \
                                             f"video{v_num}/trajectories.csv"
                 ref_img = torchvision.io.read_image(f"{self.root}annotations/{v_clz.value}/video{v_num}/reference.jpg")
+                video_path = f"{self.root}/videos/{v_clz.value}/video{v_num}/video.mov"
                 self.perform_analysis_on_single_sequence(
-                    gt_annotation_path, extracted_annotation_path, v_clz, v_meta_clz, v_num, (ref_img.shape[1:]))
+                    gt_annotation_path, extracted_annotation_path, v_clz, v_meta_clz, v_num, (ref_img.shape[1:]), 
+                    video_path)
 
     def perform_analysis_on_single_sequence(
             self, gt_annotation_path, extracted_annotation_path, video_class,
-            video_meta_class, video_number, image_shape):
+            video_meta_class, video_number, image_shape, video_path):
         video_sequence_track_data = VideoSequenceTracksData(
             video_class=video_class, video_number=video_number, tracks=[])
         ratio = self.get_ratio(meta_class=video_meta_class, video_number=video_number)
+        video_frames = []
 
         gt_df = self.get_gt_df(gt_annotation_path)
         extracted_df = pd.read_csv(extracted_annotation_path)
@@ -217,7 +301,36 @@ class TracksAnalyzer(object):
                                                          gt_track_id)
 
                         video_sequence_track_data.tracks.append(track)
-        print()
+                        
+            if self.config.show_plot or self.config.make_video:
+                fig = self.plot(
+                    frame=extract_frame_from_video(video_path, frame_number=frame),
+                    boxes=supervised_boxes,
+                    gt_features=video_sequence_track_data.get_alive_gt_features()
+                    if self.config.plot_gt_features else [],
+                    extracted_features=video_sequence_track_data.get_alive_extracted_features(),
+                    frame_number=frame,
+                    marker_size=self.config.marker_size,
+                    radius=self.config.threshold,
+                    fig_title=f"Precision: {precision} | Recall: {recall}",
+                    footnote_text=f"{video_class.name} - {video_number}\n"
+                                  f"Neighbourhood Radius: {self.config.threshold}m",
+                    video_mode=self.config.make_video,
+                    box_annotation=gt_track_ids,
+                    boxes_with_annotation=True
+                )
+            if self.config.make_video:
+                video_frames.append(self.get_frame_from_figure(fig, original_shape=image_shape))
+        if self.config.make_video:
+            print(f"Writing Video")
+            Path(os.path.join(os.getcwd(), 'logs/analysis_videos')).mkdir(parents=True, exist_ok=True)
+            torchvision.io.write_video(
+                f'location_only_videos/{video_class.name}_'
+                f'{video_number}_'
+                f'neighbourhood_radius_{self.config.threshold}.avi',
+                torch.cat(video_frames).permute(0, 2, 3, 1),
+                self.config.video_fps)
+        print(f"Analysis done for {video_class.name} - {video_number}")
 
 
 if __name__ == '__main__':

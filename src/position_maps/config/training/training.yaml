@@ -469,7 +469,13 @@ metrics_analysis:
   video_numbers: [ [ 0, 2, 4 ] ]
 
   match_distance: 'inf'
-  threshold: 2  # meters
+  threshold: 1  # meters
+
+  make_video: False
+  video_fps: 2
+  plot_gt_features: False
+  show_plot: True
+  marker_size: 2
 
 
 
