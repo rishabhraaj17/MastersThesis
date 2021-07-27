@@ -32,6 +32,13 @@ logger = get_logger(__name__)
 
 ROOT = '/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/src/position_maps/logs/'
 MODEL_PATH_MAPPING = {
+    SDDVideoClasses.DEATH_CIRCLE: {
+        0: f'{ROOT}lightning_logs/version_509506/',
+        1: f'{ROOT}lightning_logs/version_509506/',
+        2: f'{ROOT}lightning_logs/version_509506/',
+        3: f'{ROOT}lightning_logs/version_511116/',
+        4: f'{ROOT}lightning_logs/version_509506/'
+    },
     SDDVideoClasses.GATES: {
         0: f'{ROOT}wandb/run-20210722_141934-8rgel6j7/files/PositionMap/8rgel6j7',
         1: f'{ROOT}wandb/run-20210722_141934-8rgel6j7/files/PositionMap/8rgel6j7',
