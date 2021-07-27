@@ -427,6 +427,22 @@ def setup_frame_only_dataset(cfg):
     return train_dataset
 
 
+def setup_frame_only_dataset_flexible(cfg, video_class, video_number):
+    df, rgb_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=video_class,
+        video_numbers=video_number,
+        desired_ratio=cfg.desired_pixel_to_meter_ratio_rgb)
+    df_target, target_max_shape = get_scaled_shapes_with_pad_values(
+        root_path=cfg.root, video_classes=video_class,
+        video_numbers=video_number,
+        desired_ratio=cfg.desired_pixel_to_meter_ratio)
+    train_dataset = setup_multiple_frame_only_datasets_core(
+        cfg=cfg, video_classes_to_use=video_class,
+        video_numbers_to_use=video_number,
+        num_videos=-1, multiple_videos=False, df=df, df_target=df_target, use_common_transforms=False)
+    return train_dataset
+
+
 @hydra.main(config_path="config", config_name="config")
 def extract_trajectories(cfg):
     init_track_each_frame = True
