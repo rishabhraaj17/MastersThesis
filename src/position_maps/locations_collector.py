@@ -53,19 +53,19 @@ MODEL_PATH_MAPPING = {
     SDDVideoClasses.HYANG: {
         0: f'{ROOT}wandb/run-20210723_120209-3mjnkhii/files/PositionMap/3mjnkhii',
         1: f'{ROOT}wandb/run-20210723_161846-3gh1f2yo/files/PositionMap/3gh1f2yo',
-        2: '',
-        3: '',
+        2: f'{ROOT}wandb/run-20210727_141237-13buko8r/files/PositionMap/13buko8r',
+        3: f'{ROOT}wandb/run-20210727_141237-13buko8r/files/PositionMap/13buko8r',
         4: f'{ROOT}wandb/run-20210723_162311-cto6qmqr/files/PositionMap/cto6qmqr',
         5: f'{ROOT}wandb/run-20210724_005133-2i25j4c8/files/PositionMap/2i25j4c8',
-        6: '',
+        6: f'{ROOT}wandb/run-20210727_141237-13buko8r/files/PositionMap/13buko8r',
         7: f'{ROOT}wandb/run-20210723_120209-3mjnkhii/files/PositionMap/3mjnkhii',
         8: f'{ROOT}wandb/run-20210723_120209-3mjnkhii/files/PositionMap/3mjnkhii',
         9: f'{ROOT}wandb/run-20210723_120209-3mjnkhii/files/PositionMap/3mjnkhii',
-        10: '',
-        11: '',
-        12: '',
-        13: '',
-        14: ''
+        10: f'{ROOT}wandb/run-20210727_141237-13buko8r/files/PositionMap/13buko8r',
+        11: f'{ROOT}wandb/run-20210727_141237-13buko8r/files/PositionMap/13buko8r',
+        12: f'{ROOT}wandb/run-20210727_141237-13buko8r/files/PositionMap/13buko8r',
+        13: f'{ROOT}wandb/run-20210727_141237-13buko8r/files/PositionMap/13buko8r',
+        14: f'{ROOT}wandb/run-20210727_141237-13buko8r/files/PositionMap/13buko8r'
     },
     SDDVideoClasses.LITTLE: {
         0: f'{ROOT}wandb/run-20210721_174114-2pz3vle2/files/PositionMap/2pz3vle2',
