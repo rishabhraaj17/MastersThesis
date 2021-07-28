@@ -440,11 +440,11 @@ def extract_locations_for_all(cfg):
             filename = 'extracted_locations.pt'
             save_path = os.path.join(os.getcwd(),
                                      f'ExtractedLocations'
-                                     f'/{getattr(SDDVideoClasses, cfg.single_video_mode.video_classes_to_use[0]).name}'
-                                     f'/{cfg.single_video_mode.video_numbers_to_use[0][0]}/')
+                                     f'/{v_clz.name}'
+                                     f'/{v_num}/')
             Path(save_path).mkdir(parents=True, exist_ok=True)
             torch.save(save_dict, save_path + filename)
-            logger.info(f"Saved trajectories at {save_path}{filename}")
+            logger.info(f"Saved trajectories at {save_path}{filename}\n\n")
 
 
 if __name__ == '__main__':

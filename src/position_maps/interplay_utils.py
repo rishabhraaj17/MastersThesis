@@ -17,7 +17,7 @@ from torchvision.datasets.video_utils import VideoClips
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from average_image.utils import SDDMeta
 from log import get_logger
-from patch_utils import quick_viz
+from src.position_maps.patch_utils import quick_viz
 from unsupervised_tp_0.dataset import sort_list
 
 logger = get_logger(__name__)

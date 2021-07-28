@@ -1,0 +1,346 @@
+# @package _global_
+
+device: 'cuda:0'  # 'cuda:0'
+data_augmentation: True
+
+# optimizer
+# Adam
+lr: 2e-3
+weight_decay: 0
+amsgrad: False
+
+# scheduler
+# ReduceLROnPlateau
+patience: 5
+verbose: True
+factor: 0.1
+min_lr: 1e-10
+# extra
+monitor: 'val_loss_epoch'
+interval: 'epoch'
+frequency: 1
+mode: 'min'
+
+# TP module
+# scheduler
+tp_module:
+  model: 'TrajectoryGANTransformerV2'  # 'TransformerNoisyMotionGenerator' # 'TrajectoryGANTransformerV2'  # 'TrajectoryTransformer'  # 'RNNBaseline'  # 'TrajectoryTransformer'
+
+  smooth_trajectories:
+    enabled: False
+    min_length: 4
+    smoother: 'bezier'  # or 'simple'
+
+  datasets:
+    root_gt: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/OpenTraj/datasets/SDD/'
+    root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/Trajectories/'
+
+    use_standard_dataset: False
+
+    filename: 'trajectories.pt'
+
+    use_generated: True
+
+    val_ratio: 0.2
+    batch_multiplier: 10
+    mode_dist_threshold: 2
+
+    # we split same dataset into train & val (in time)
+    video_classes: [ DEATH_CIRCLE ]
+    video_numbers: [ [ 4 ] ]
+
+    # not in use right now
+    train:
+      video_classes: [ DEATH_CIRCLE ]
+      video_numbers: [ [ 2 ] ]
+    val:
+      video_classes: [ DEATH_CIRCLE ]
+      video_numbers: [ [ 2 ] ]
+    test:
+      video_classes: [ DEATH_CIRCLE ]
+      video_numbers: [ [ 2 ] ]
+
+    obs_len: 8
+    pred_len: 12
+    skip: 1
+    delim: 'space'
+    construct_graph: False
+
+  loader:
+    batch_size: 8
+    shuffle: True
+    pin_memory: True
+    drop_last: False
+    num_workers: 12
+    val_batch_size_factor: 2
+
+  scheduler:
+    patience: 20
+    verbose: True
+    factor: 0.1
+    min_lr: 1e-10
+    # extra
+    monitor: 'val_loss_epoch'
+    interval: 'epoch'
+    frequency: 1
+    mode: 'min'
+
+  # Adam
+  optimizer:
+    lr: 1e-4
+    weight_decay: 0
+    amsgrad: False
+
+  metrics:
+    mode: 'average'
+
+  trainer:
+    max_epochs: 400
+    gpus: 1
+    fast_dev_run: False
+    num_checkpoints_to_save: 3
+    deterministic: True
+    accelerator: null #'ddp_cpu' # null  # 'ddp', 'ddp_cpu'
+    replace_sampler_ddp: False
+    num_nodes: 1
+    find_unused_parameters: True
+    gradient_clip_val: 2.0
+    accumulate_grad_batches: 1
+
+# loaders
+batch_size: 2
+shuffle: False  # keep it always False
+num_workers: 12
+pin_memory: True
+drop_last: True
+val_batch_size_factor: 2
+
+single_video_mode:
+  enabled: False
+
+  num_videos: -1
+  video_classes_to_use: [ GATES ]
+  video_numbers_to_use: [ [ 3 ] ] # nexus 3, 4 are bad
+  multiple_videos: False
+
+  val_percent: 0.2
+
+# trainer
+trainer:
+  max_epochs: 400
+  gpus: 1
+  fast_dev_run: False
+  num_checkpoints_to_save: 4
+  deterministic: False
+  accelerator: 'ddp' #'ddp_cpu' # null  # 'ddp', 'ddp_cpu'
+  replace_sampler_ddp: False
+  num_nodes: 1
+  find_unused_parameters: True
+  gradient_clip_val: 2.0
+  accumulate_grad_batches: 1
+
+
+# dataset
+root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
+desired_pixel_to_meter_ratio: 0.30 # 0.35
+desired_pixel_to_meter_ratio_rgb: 0.30 # 0.25 # 0.05
+frame_rate: 12.  # 5.  # 30.
+
+video_based: # !!!!! Keep an eye !!!!
+  enabled: False
+  frames_per_clip: 4  # 5  # for video based
+  gt_idx: -1
+
+train:
+  num_videos: -1
+  video_number_to_use: 3
+  # all videos
+  #  video_classes_to_use: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
+  #  video_numbers_to_use: [ [ 1, 2, 3, 4, 5 ], [ 0, 1, 2 ], [ 0, 1, 2, 4 ], [ 0, 1, 2, 3, 5, 6, 8 ],
+  #                          [ 0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13 ], [ 1, 2, 3 ],
+  #                          [ 0, 1, 2, 7, 8, 9, 10, 11 ], [ 1, 2, 3 ] ] # nexus 3, 4 are bad
+  #  # Portraits -> H > W
+  #  video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS ]
+  #  video_numbers_to_use: [ [ 0, 1, 2, 4 ], [ 0, 1, 2, 3, 5, 6, 8 ],
+  #                          [ 0, 1, 4, 5, 8 ], [ 1, 2, 3 ],
+  #                          [ 0, 1, 2, 7, 8, 9, 10, 11 ] ] # nexus 3, 4 are bad
+  #  video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG ]
+  #  video_numbers_to_use: [ [ 0, 1, 2, 4 ], [ 0, 1, 2, 3, 5, 6, 8 ],
+  #                          [ 0, 1, 4, 5, 8 ] ] # nexus 3, 4 are bad
+  #  video_classes_to_use: [ GATES, LITTLE ]
+  #  video_numbers_to_use: [ [ 0, 1, 2, 7, 8 ], [ 1, 2, 3 ] ] # nexus 3, 4 are bad
+  #  video_classes_to_use: [ HYANG ]
+  #  video_numbers_to_use: [ [ 0, 1, 4, 5 ] ] # nexus 3, 4 are bad
+  #  video_classes_to_use: [ NEXUS ]
+  #  video_numbers_to_use: [ [ 0, 1, 6, 7, 8, 9, 10, 11 ] ] # nexus 3, 4 are bad
+  # Portraits -> H > W
+  #  video_classes_to_use: [ DEATH_CIRCLE, GATES, LITTLE ]
+  #  video_numbers_to_use: [ [ 2, 4 ], [5], [0] ] # nexus 3, 4 are bad
+  #  video_classes_to_use: [ GATES ]
+  #  video_numbers_to_use: [ [ 2 ] ] # nexus 3, 4 are bad
+  video_classes_to_use: [ HYANG ]
+  video_numbers_to_use: [ [ 2, 3, 6, 10, 11, 12, 13 ] ] # nexus 3, 4 are bad
+  multiple_videos: False
+
+val:
+  num_videos: -1
+  video_number_to_use: 3
+  # all videos
+  #  video_classes_to_use: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
+  #  video_numbers_to_use: [ [ 0 ], [ 3 ], [ 3 ], [ 4 ], [ 7 ], [ 0 ], [ 6 ], [ 0 ] ]
+  # Portraits -> H > W
+  # Portraits -> H > W
+  #  video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS ]
+  #  video_numbers_to_use: [ [ 3 ], [ 4 ], [ 7 ], [ 0 ], [ 6 ] ]
+  #  video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG ]
+  #  video_numbers_to_use: [ [ 3 ], [ 4 ], [ 7 ] ]
+  #  video_classes_to_use: [ GATES, LITTLE ]
+  #  video_numbers_to_use: [ [ 4 ], [ 0 ] ]
+  video_classes_to_use: [ HYANG ]
+  video_numbers_to_use: [ [ 14 ] ]
+  #  video_classes_to_use: [ HYANG ]
+  #  video_numbers_to_use: [ [ 7, 8, 9 ] ]
+  #  video_classes_to_use: [ NEXUS ]
+  #  video_numbers_to_use: [ [ 2 ] ] # nexus 3, 4 are bad
+  #  video_classes_to_use: [ GATES ]
+  #  video_numbers_to_use: [ [ 4, 6 ] ]
+  multiple_videos: False
+
+dataset_workers: 12
+
+use_generated_dataset: True
+
+plot_samples: False
+
+# dataset dummy values
+scale_factor: null # 0.25
+desired_size: [ 490, 360 ]
+heatmap_shape: null
+seg_map_objectness_threshold: 0.5
+heatmap_region_limit_threshold: 0.0
+focal_loss_alpha: 0.8
+gaussuan_focal_loss_alpha: 2.0
+use_center_net_gaussian_focal_loss: True
+downscale_only_target_maps: False
+using_replay_compose: True
+manual_annotation_processing: False
+
+# gaussian
+return_combined_heatmaps: True
+sigma: 2.5 # 3.2 # 0.7
+
+model: 'DeepLabV3PlusDDP'
+
+preproccesing:
+  pad_factor: 8
+
+loss:
+  reduction: 'mean'
+  gaussian_weight: [ 0.5 ]
+  apply_sigmoid: [ True ]
+  bfl:
+    alpha: 0.85
+    gamma: 4.0
+
+prediction:
+  threshold: 0.4
+  fill_value: 0.0
+
+wandb_position_map:
+  enabled: False
+  log_model: False
+  project_name: 'PositionMap'
+
+warm_restart:
+  enable: True
+  custom_load: True
+  checkpoint:
+    root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+    path: "lightning_logs/version_"
+    version: 516403
+    top_k: 1
+
+  wandb:
+    enabled: False
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/wandb/"
+      tail_path: "/files/"
+      project_name: 'PositionMap'
+      run_name: "run-20210721_163402-1zebiwjj"
+      top_k: 1
+
+resume_mode: False
+resume:
+  checkpoint:
+    path: "lightning_logs/version_"
+    version: 472698
+    top_k: 1
+
+
+overfit:
+  num_epochs: 6000
+  batch_size: 2
+  num_workers: 0
+  pin_memory: True
+  drop_last: False
+
+  subset_indices: 128  # 450  # [ 0, 85, 32, 5, 125, 200 ]
+  #  subset_indices: [0]
+
+  plot_checkpoint: 99
+
+  use_pretrained:
+    enabled: False
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+      path: "lightning_logs/version_"
+      version: 509506 # 492265 # 497829 # 492265 #424798 # 437363  # 424798
+      top_k: 1
+
+interplay:
+  num_epochs: 1  # 400
+
+  use_pretrained:
+    enabled: True
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+      path: "lightning_logs/version_"
+      version: 509506 # 492265 # 497829 # 492265 #424798 # 437363  # 424798
+      top_k: 1
+
+  train_position_model: False
+
+  subset_indices: 32  # 450  # [ 0, 85, 32, 5, 125, 200 ]
+
+  batch_size: 2
+  shuffle: False  # keep it always False
+  num_workers: 0
+  pin_memory: False
+  drop_last: False
+
+  video_class: [ DEATH_CIRCLE ]
+  video_number: [ [ 2 ] ]
+
+  objectness:
+    kernel: 3
+    loc_cutoff: 0.05
+    marker_size: 3
+    index_select: 0
+
+metrics_analysis:
+  root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
+  video_classes: [ DEATH_CIRCLE ]
+  video_numbers: [ [ 0, 1, 2, 3, 4 ] ]
+
+  match_distance: 'inf'
+  threshold: 1  # meters
+
+  make_video: False
+  video_fps: 2
+  plot_gt_features: False
+  show_plot: False
+  marker_size: 2
+
+
+
+

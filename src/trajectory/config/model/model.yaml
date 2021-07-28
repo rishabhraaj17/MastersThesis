@@ -1,0 +1,236 @@
+# @package _global_
+dropout: 0.0
+batch_norm: False
+use_torch_deform_conv: True
+
+deep_lab_v3:
+  backbone: 'r50'  # 'r50', 'r101', 'mnv3_large'
+  pretrained: False
+  aux_loss: True
+  num_classes: 1
+
+deep_lab_v3_plus:
+  in_channels: 3
+
+  norm:
+    type: 'BN'
+    requires_grad: True
+  use_up_module: False
+  use_fcrn_up_project: False
+  align_corners: True
+  use_correctors: False
+  with_aux_head: True
+  pretrained: 'open-mmlab://resnet50_v1c' # or url
+
+  small:
+    pretrained: 'open-mmlab://resnet18_v1c' # or url
+    with_aux_head: False
+    align_corners: True
+    aspp_head: False  # if false then DepthwiseSeparableASPPHead
+    with_deconv_head: True
+    head_conf: 'three_two_small'
+    resnet_depth: 18
+
+    load_pretrained_manually: False
+    #  local_pretrained_path: '/usr/stud/rajr/.cache/torch/hub/checkpoints/resnet18_v1c-2cccc1ad.pth'
+    local_pretrained_path: '/home/rishabh/.cache/torch/hub/checkpoints/resnet18_v1c-2cccc1ad.pth'
+    load_strictly: False
+
+  up:
+    in_ch: 1
+    out_ch: 1
+    use_convt2d: False
+    bilinear: False
+    ch_div_factor: 1
+    skip_double_conv: True
+    use_double_conv: True
+
+  aspp_head: False  # if false then DepthwiseSeparableASPPHead
+  with_deconv_head: True
+  head_conf: 'three_two'
+  resnet_depth: 50
+
+  load_pretrained_manually: True
+  #  local_pretrained_path: '/usr/stud/rajr/.cache/torch/hub/checkpoints/resnet50_v1c-2cccc1ad.pth'
+  local_pretrained_path: '/home/rishabh/.cache/torch/hub/checkpoints/resnet50_v1c-2cccc1ad.pth'
+  load_strictly: False
+
+  head:
+    out_ch: 1
+  aux_head:
+    out_ch: 1
+
+  head_corrector:
+    in_ch: [ 64, 32 ]
+    out_ch: [ 32, 1 ]
+
+  aux_head_corrector:
+    in_ch: [ 32, 16, 8 ]
+    out_ch: [ 16, 8, 1 ]
+
+trajectory_based:
+  rnn:
+    deterministic:
+      rnn_type: 'LSTM'  # 'GRU'  'RNN'
+      batch_first: False
+
+      in_features: 2
+      out_features: 2
+
+      embedding_dim_scalars: 8
+      encoder_h_g_scalar: 8
+      decoder_h_g_scalar: 16
+
+      pred_len: 12
+      mlp_vec: 64
+      mlp_scalar: 32
+      social_attention: False
+      social_dim_scalar: 10
+
+    generator:
+      rnn_type: 'LSTM'  # 'GRU'  'RNN'
+      batch_first: False
+
+      in_features: 2
+      out_features: 2
+
+      embedding_dim_scalars: 8
+      encoder_h_g_scalar: 8
+      decoder_h_g_scalar: 16
+
+      pred_len: 12
+      noise_scalar: 4
+      mlp_vec: 64
+      mlp_scalar: 32
+      noise_type: "local"
+      social_attention: False
+      social_dim_scalar: 10
+
+    discriminator:
+      encoder_h_dim_d: 64
+      embedding_dim_scalars: 16
+      dropout: 0.0
+      mlp_scalar: 32
+      social_attention: False
+      social_dim_scalar: 10
+
+      batch_first: False
+
+      encoder_prediction:
+        rnn_type: 'LSTM'  # 'GRU'  'RNN'
+        batch_first: False
+
+        in_features: 2
+        encoder_h_dim_d: 64
+        embedding_dim: 64
+        dropout: 0.0
+
+        mlp_dim: 32
+        dropout_cnn: 0
+        batch_norm: False
+
+      motion_encoder:
+        rnn_type: 'LSTM'  # 'GRU'  'RNN'
+        batch_first: False
+
+        in_features: 2
+        encoder_h_dim: 64
+        embedding_dim: 16
+        dropout: 0.0
+
+  transformer:
+    encoder:  # also for motion_generator
+      in_features: 2
+      seq_len: 7
+
+      d_model: 32 # 64
+      nhead: 4 # 8
+      dim_feedforward: 128 # 64 # 512  # 2048 for 512 d_model
+      dropout: 0.1
+      activation: 'relu'
+
+      num_layers: 4 # 6
+      norm: null  # 'layer_norm'
+
+    decoder:
+      in_features: 2
+      out_features: 2
+      seq_len: 12
+
+      d_model: 32 # 64
+      nhead: 4 # 6
+      dim_feedforward: 128 # 64 # 512  # 2048 for 512 d_model
+      dropout: 0.1
+      activation: 'relu'
+
+      num_layers: 4 # 6
+      norm: null  # 'layer_norm'
+
+    generator:
+      lr: 1e-4
+      weight_decay: 5e-10
+      amsgrad: False
+
+      noise_scalar: 4
+      mlp_scalar: 64
+      noise_activation: 'Tanh'
+
+    discriminator:
+      lr: 1e-4
+      weight_decay: 5e-10
+      amsgrad: False
+
+      in_features: 2
+      out_features: 2
+      seq_len: 12
+
+      d_model: 32  # 64
+      nhead: 4  # 8
+      dim_feedforward: 128  # 512  # 2048 for 512 d_model
+      dropout: 0.1
+      activation: 'relu'
+
+      num_layers: 4  # 6
+      norm: null  # 'layer_norm'
+
+      use_gan_loss: True
+      gan_loss_type: 'vanilla'
+      gan_loss_weight: 1.0
+
+  images:
+    globall:
+      out_channels: 128
+
+    local:
+      out_channels: 64
+
+    encoder: # also for motion_generator
+      in_features: 2
+      seq_len: 8
+
+      d_model: 128 # 64
+      nhead: 4 # 8
+      dim_feedforward: 512 # 64 # 512  # 2048 for 512 d_model
+      dropout: 0.1
+      activation: 'relu'
+
+      num_layers: 4 # 6
+      norm: null  # 'layer_norm'
+
+      noise_scalar: 16
+      mlp_scalar: 256
+      noise_activation: 'Tanh'
+
+    decoder:
+      in_features: 2
+      out_features: 2
+      seq_len: 14
+
+      d_model: 128 # 64
+      nhead: 4 # 6
+      dim_feedforward: 512 # 64 # 512  # 2048 for 512 d_model
+      dropout: 0.1
+      activation: 'relu'
+
+      num_layers: 4 # 6
+      norm: null  # 'layer_norm'

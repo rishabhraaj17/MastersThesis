@@ -1,0 +1,120 @@
+# @package _global_
+
+eval:
+  batch_size: 4
+  num_workers: 0  # 12
+  pin_memory: True
+  drop_last: False
+  shuffle: True
+
+  device: 'cpu'  # 'cuda:0', 'cpu'
+  use_lightning_loader: False
+  use_ensemble: False
+
+  data_augmentation: True
+  resize_transform_only: True  # set true to plot both supervised and unsupervised boxes
+
+  # dataset
+  root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
+  desired_pixel_to_meter_ratio: 0.07
+  desired_pixel_to_meter_ratio_rgb: 0.07 # 0.07 # 0.25 # 0.05
+  frame_rate: 30.  # 30.
+
+  video_based:
+    enabled: False  # True
+    frames_per_clip: 4  # for video based
+    gt_idx: -1
+
+  mutiple_dataset_mode:
+    enabled: True
+    samples_per_dataset: 16
+    dataset_idx: 0
+
+  test:
+    num_videos: -1
+    video_number_to_use: 3
+    #    video_classes_to_use: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
+    #    video_numbers_to_use: [ [ 6 ], [ 3 ], [ 3 ], [ 7 ], [ 9, 14 ], [ 0 ], [ 6 ], [ 0 ] ]
+    #    video_classes_to_use: [ GATES, LITTLE ]  # [ GATES, DEATH_CIRCLE, LITTLE ]
+    #    video_numbers_to_use: [ [ 0, 1, 2, 4, 7, 8 ], [ 0, 1, 2, 3 ] ]  # [ [ 4 ], [ 3 ], [ 0 ] ]
+    video_classes_to_use: [ QUAD ]  # [ GATES, DEATH_CIRCLE, LITTLE ]
+    video_numbers_to_use: [ [ 0, 1, 2, 3 ] ]  # [ [ 4 ], [ 3 ], [ 0 ] ]
+    multiple_videos: False
+
+    samples_per_dataset: 20
+
+    single_video_mode:
+      enabled: False
+
+      num_videos: -1
+      video_classes_to_use: [ LITTLE ]
+      video_numbers_to_use: [ [ 0 ] ] # nexus 3, 4 are bad
+      multiple_videos: False
+
+      val_percent: 0.2
+
+  dataset_workers: 12
+
+  use_generated_dataset: True
+
+  plot_samples: False
+
+  loss:
+    reduction: 'mean'
+    gaussian_weight: [ 0.5 ]
+    apply_sigmoid: [ True ]
+    bfl:
+      alpha: 0.85
+      gamma: 4.0
+
+  model: 'DeepLabV3Plus'  # DeepLabV3PlusTemporal2D, DeepLabV3Plus
+
+  preproccesing:
+    pad_factor: 8
+
+  # gaussian
+  return_combined_heatmaps: True
+  sigma: 1.0
+
+  seg_map_objectness_threshold: 0.5
+  pick_heatmap_from_stack_number: -2
+
+  show_plots: True
+  plot_checkpoint: 1
+  plot_save_dir: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/proposed_method/v0/position_maps/'
+  plots_do_nothing: False
+  save_plots: True
+
+  evaluate_precision_recall: False
+  objectness_threshold: 0.2
+  gt_pred_loc_distance_threshold: 2 # meters
+
+  objectness:
+    kernel: 3
+    loc_cutoff: 0.05
+    marker_size: 3
+    index_select: -1
+    prune_radius: 10
+
+  make_video: False
+  video_fps: 2
+
+  max_pool:
+    kernel_size: 2
+    stride: 1
+    padding: 1
+
+  checkpoint:
+    root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+    path: "lightning_logs/version_"
+    version: 516516  # 513923 # 509506 # 497829 # 492265 #424798 # 437363  # 424798 # 509506 (best-dlv3-r50) # 513512 (T2D-best-dlv3) # 511123 (LITTLE - good) # 511116 (DC-3-good)
+    top_k: 1
+
+    wandb:
+      enabled: True
+      checkpoint:
+        root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/wandb/"
+        tail_path: "/files/"
+        project_name: 'PositionMap'
+        run_name: "run-20210722_104400-3e76emv1"
+        top_k: 1
