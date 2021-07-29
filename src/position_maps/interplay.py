@@ -1083,6 +1083,10 @@ def extract_trajectories_from_locations(cfg):
     extracted_locations: ExtractedLocations = torch.load(load_path)['locations']  # mock the model
     out_head_0, out_head_1, out_head_2 = extracted_locations.head0, extracted_locations.head1, extracted_locations.head2
 
+    uq, uc = np.unique([i.frame_number for i in out_head_0.locations], return_counts=True)
+    uc_gt = uc > 1
+    repeating_frames = uq[uc_gt]
+
     if head_to_use == 0:
         out_head = out_head_0
     elif head_to_use == 1:
@@ -1112,6 +1116,7 @@ def extract_trajectories_from_locations(cfg):
         'track_ids_used': track_ids_used,
         'active': active_tracks,
         'inactive': inactive_tracks,
+        'repeating_frames': repeating_frames
     }
     filename = 'extracted_trajectories.pt'
     save_path = os.path.join(os.getcwd(),
@@ -1123,8 +1128,109 @@ def extract_trajectories_from_locations(cfg):
     logger.info(f"Saved trajectories at {save_path}{filename}")
 
 
+@hydra.main(config_path="config", config_name="config")
+def extract_trajectories_from_locations_multiple_videos(cfg):
+    use_minimal_version = True
+
+    location_version_to_use = 'pruned_scaled'  # 'pruned_scaled' 'runtime_pruned_scaled'
+    head_to_use = 0
+    # 50 - as small we go more trajectories but shorter trajectories
+    max_matching_euclidean_distance = 500.  # 1000 ~ 500. > 200. looks good
+
+    prune_radius = 40  # dc3
+
+    init_track_each_frame = True
+    enable_forward_pass = False
+
+    logger.info(f'Extract trajectories from locations...')
+
+    # adjust config here
+    cfg.device = 'cpu'  # 'cuda:0'
+    cfg.single_video_mode.enabled = True  # for now we work on single video
+    cfg.preproccesing.pad_factor = 8
+    cfg.frame_rate = 30.
+    cfg.video_based.enabled = False
+
+    cfg.desired_pixel_to_meter_ratio_rgb = 0.07
+    cfg.desired_pixel_to_meter_ratio = 0.07
+
+    video_classes_to_use = [
+        SDDVideoClasses.GATES,
+        SDDVideoClasses.HYANG,
+        SDDVideoClasses.LITTLE,
+        SDDVideoClasses.NEXUS,
+        SDDVideoClasses.QUAD,
+        SDDVideoClasses.BOOKSTORE,
+        SDDVideoClasses.COUPA]
+    video_numbers_to_use = [
+        [i for i in range(9)],
+        [i for i in range(15)],
+        [i for i in range(4)],
+        [i for i in range(12) if i not in [3, 4, 5]],
+        [i for i in range(4)],
+        [i for i in range(7)],
+        [i for i in range(4)], ]
+
+    for v_idx, v_clz in enumerate(video_classes_to_use):
+        for v_num in video_numbers_to_use[v_idx]:
+            logger.info(f'Dataset: {v_clz.name} - {v_num}')
+            # load_locations
+            load_path = os.path.join(os.getcwd(),
+                                     f'ExtractedLocations'
+                                     f'/{v_clz.name}'
+                                     f'/{v_num}/extracted_locations.pt')
+            extracted_locations: ExtractedLocations = torch.load(load_path)['locations']  # mock the model
+            out_head_0, out_head_1, out_head_2 = \
+                extracted_locations.head0, extracted_locations.head1, extracted_locations.head2
+
+            uq, uc = np.unique([i.frame_number for i in out_head_0.locations], return_counts=True)
+            uc_gt = uc > 1
+            repeating_frames = uq[uc_gt]
+
+            if head_to_use == 0:
+                out_head = out_head_0
+            elif head_to_use == 1:
+                out_head = out_head_1
+            elif head_to_use == 2:
+                out_head = out_head_2
+            else:
+                raise NotImplementedError
+
+            if use_minimal_version:
+                video_path = f"{cfg.root}videos/" \
+                             f"{v_clz.value}/" \
+                             f"video{v_num}/video.mov"
+                active_tracks, inactive_tracks, track_ids_used = extract_trajectories_from_locations_core_minimal(
+                    locations=out_head, init_track_each_frame=init_track_each_frame,
+                    video_path=video_path, prune_radius=prune_radius, padded_shape=extracted_locations.padded_shape,
+                    original_shape=extracted_locations.scaled_shape,
+                    location_version_to_use=location_version_to_use, max_distance=max_matching_euclidean_distance)
+            else:
+                logger.info(f'Setting up DataLoader and Model...')
+                active_tracks, inactive_tracks, track_ids_used = extract_trajectories_from_locations_core(
+                    cfg, enable_forward_pass, out_head=out_head, init_track_each_frame=init_track_each_frame,
+                    location_version_to_use=location_version_to_use, max_distance=max_matching_euclidean_distance)
+
+            # save extracted trajectories
+            save_dict = {
+                'track_ids_used': track_ids_used,
+                'active': active_tracks,
+                'inactive': inactive_tracks,
+                'repeating_frames': repeating_frames
+            }
+            filename = 'extracted_trajectories.pt'
+            save_path = os.path.join(os.getcwd(),
+                                     f'ExtractedTrajectories'
+                                     f'/{v_clz.name}'
+                                     f'/{v_num}/')
+            Path(save_path).mkdir(parents=True, exist_ok=True)
+            torch.save(save_dict, save_path + filename)
+            logger.info(f"Saved trajectories at {save_path}{filename}")
+
+
 if __name__ == '__main__':
     # interplay_v0()
     # extract_trajectories()
-    extract_trajectories_from_locations()
+    # extract_trajectories_from_locations()
+    extract_trajectories_from_locations_multiple_videos()
     # extract_trajectories_resumable()
