@@ -335,7 +335,8 @@ def plot_trajectory_with_initial_and_last_frame(frame, last_frame, trajectory, f
     return fig
 
 
-def plot_trajectory_with_one_frame(frame, last_frame, trajectory, frame_number, track_id,
+def plot_trajectory_with_one_frame(frame, last_frame, trajectory, frame_number, track_id, obs_trajectory=None,
+                                   active_tracks=None, current_frame_locations=None, last_frame_locations=None,
                                    epoch='', additional_text='', return_figure_only=False, save_path=None,
                                    use_lines=False, plot_first_and_last=True, marker_size=8):
     if last_frame is not None:
@@ -347,8 +348,14 @@ def plot_trajectory_with_one_frame(frame, last_frame, trajectory, frame_number, 
 
         if use_lines:
             add_line_to_axis(ax=last_image_axis, features=trajectory, marker_size=marker_size)
+            if obs_trajectory is not None:
+                add_line_to_axis(
+                    ax=last_image_axis, features=obs_trajectory, marker_size=marker_size, marker_color='g')
         else:
             add_features_to_axis(ax=last_image_axis, features=trajectory, marker_size=marker_size)
+            if obs_trajectory is not None:
+                add_features_to_axis(
+                    ax=last_image_axis, features=obs_trajectory, marker_size=marker_size, marker_color='g')
 
         if plot_first_and_last:
             add_features_to_axis(last_image_axis, np.stack([trajectory[0]]),
@@ -363,12 +370,37 @@ def plot_trajectory_with_one_frame(frame, last_frame, trajectory, frame_number, 
 
     if use_lines:
         add_line_to_axis(ax=img_axis, features=trajectory, marker_size=marker_size)
+        if obs_trajectory is not None:
+            add_line_to_axis(
+                ax=img_axis, features=obs_trajectory, marker_size=marker_size, marker_color='g')
     else:
         add_features_to_axis(ax=img_axis, features=trajectory, marker_size=marker_size)
+        if obs_trajectory is not None:
+            add_line_to_axis(
+                ax=img_axis, features=obs_trajectory, marker_size=marker_size, marker_color='g')
 
     if plot_first_and_last:
         add_features_to_axis(img_axis, np.stack([trajectory[0]]), marker_color='aqua', marker_size=marker_size + 1)
         add_features_to_axis(img_axis, np.stack([trajectory[-1]]), marker_color='r', marker_size=marker_size + 1)
+
+    if active_tracks is not None:
+        active_tracks_to_vis = [t.locations for t in active_tracks.tracks]
+        last_locations = [t.locations[-1] for t in active_tracks.tracks]
+        track_ids = [t.idx for t in active_tracks.tracks]
+
+        for a_t, last_loc, t_idx in zip(active_tracks_to_vis, last_locations, track_ids):
+            a_t = np.stack(a_t)
+            if use_lines:
+                add_line_to_axis(ax=img_axis, features=a_t, marker_size=1, marker_color='g')
+            else:
+                add_features_to_axis(ax=img_axis, features=a_t, marker_size=1, marker_color='g')
+            img_axis.annotate(t_idx, (last_loc[0], last_loc[1]), color='w', weight='bold', fontsize=6, ha='center',
+                              va='center')
+
+    if current_frame_locations is not None:
+        add_features_to_axis(img_axis, current_frame_locations, marker_shape='*')
+    if last_frame_locations is not None:
+        add_features_to_axis(img_axis, last_frame_locations, marker_shape='+')
 
     img_axis.set_title('Trajectory on initial frame')
 

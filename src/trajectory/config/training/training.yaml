@@ -142,9 +142,9 @@ trainer:
 
 # dataset
 root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
-desired_pixel_to_meter_ratio: 0.30 # 0.35
-desired_pixel_to_meter_ratio_rgb: 0.30 # 0.25 # 0.05
-frame_rate: 12.  # 5.  # 30.
+desired_pixel_to_meter_ratio: 0.07 # 0.35
+desired_pixel_to_meter_ratio_rgb: 0.07 # 0.25 # 0.05
+frame_rate: 30.  # 5.  # 30.
 
 video_based: # !!!!! Keep an eye !!!!
   enabled: False
@@ -257,7 +257,7 @@ warm_restart:
   checkpoint:
     root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
     path: "lightning_logs/version_"
-    version: 516403
+    version: 509506
     top_k: 1
 
   wandb:
