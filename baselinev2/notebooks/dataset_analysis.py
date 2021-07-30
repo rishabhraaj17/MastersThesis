@@ -61,11 +61,11 @@ def plot_relative_distances_line_plot(distances, title, save_path=None):
     plt.scatter(distances[..., 0], distances[..., 1])
     median = np.median(distances, axis=0)
     mean = np.mean(distances, axis=0)
-    plt.plot(mean[0], mean[1], 'o', markerfacecolor='aqua', markeredgecolor='k',
-             markersize=10, markeredgewidth=1)
-    plt.plot(median[0], median[1], 'o', markerfacecolor='green', markeredgecolor='k',
-             markersize=10, markeredgewidth=1)
-    plt.title(f'{title} | Aqua - Mean')
+    # plt.plot(mean[0], mean[1], 'o', markerfacecolor='aqua', markeredgecolor='k',
+    #          markersize=10, markeredgewidth=1)
+    # plt.plot(median[0], median[1], 'o', markerfacecolor='green', markeredgecolor='k',
+    #          markersize=10, markeredgewidth=1)
+    # plt.title(f'{title} | Aqua - Mean')
 
     if save_path is not None:
         Path(save_path).mkdir(parents=True, exist_ok=True)
@@ -75,7 +75,7 @@ def plot_relative_distances_line_plot(distances, title, save_path=None):
         plt.show()
 
 
-def whole_dataset_analysis(generated_dataset, split, mem_mode, root_path):
+def whole_dataset_analysis(generated_dataset, split, mem_mode, root_path, use_all_splits=False):
     obs_trajectories, pred_trajectories, obs_relative_distances_list, \
     pred_relative_distances_list, to_meter_list = \
         [], [], [], [], []
@@ -87,11 +87,12 @@ def whole_dataset_analysis(generated_dataset, split, mem_mode, root_path):
         for vid in videos:
             logger.info(f'Generating for {clz.name} - Video {vid}')
             plot_path = f"{ROOT_PATH}Plots/baseline_v2/nn/STATS/{clz.value}{vid}/" \
-                        f"{'generated/' if generated_dataset else 'gt/'}{split.name}/"
+                        f"{'generated/' if generated_dataset else 'gt/'}{'together' if use_all_splits else split.name}/"
 
             obs_trajectory, pred_trajectory, obs_relative_distances, pred_relative_distances, to_meter = \
                 get_trajectory_splits(video_class=clz, video_number=vid, split=split, root=root_path,
-                                      meta_label=meta, mmap_mode=mem_mode, generated=generated_dataset)
+                                      meta_label=meta, mmap_mode=mem_mode, generated=generated_dataset,
+                                      use_all_splits=use_all_splits)
 
             full_length_trajectory = np.concatenate((obs_trajectory, pred_trajectory), axis=1)
             full_length_distances = np.concatenate((obs_relative_distances, pred_relative_distances), axis=1)
@@ -139,7 +140,7 @@ def whole_dataset_analysis(generated_dataset, split, mem_mode, root_path):
     full_length_distances_list = np.concatenate(full_length_distances_list, axis=0)
 
     plot_path = f"{ROOT_PATH}Plots/baseline_v2/nn/STATS/full_dataset/" \
-                f"{'generated/' if generated_dataset else 'gt/'}{split.name}/"
+                f"{'generated/' if generated_dataset else 'gt/'}{'together' if use_all_splits else split.name}/"
 
     plot_trajectory_length_histogram(obs_trajectories, 1, 'Observed Trajectory - Len:8',
                                      save_path=plot_path + 'histogram/')
@@ -251,13 +252,14 @@ if __name__ == '__main__':
 
     mem_mode = None
     split = NetworkMode.TEST
-    generated_dataset = True
+    generated_dataset = False
 
     root_path = GENERATED_DATASET_ROOT if generated_dataset else SAVE_BASE_PATH
 
     if analyze_whole_dataset:
         logger.info('Whole Dataset Analysis')
-        whole_dataset_analysis(generated_dataset=generated_dataset, split=split, mem_mode=mem_mode, root_path=root_path)
+        whole_dataset_analysis(generated_dataset=generated_dataset, split=split, mem_mode=mem_mode, root_path=root_path,
+                               use_all_splits=True)
     elif find_distribution_whole_dataset:
         logger.info('Distribution Analysis')
         whole_dataset_distribution_analysis(generated_dataset=generated_dataset, split=split,
