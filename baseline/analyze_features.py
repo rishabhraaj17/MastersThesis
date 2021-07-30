@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 import scipy.stats as st
 from scipy.stats._continuous_distns import _distn_names
-from statsmodels import datasets as sm_datasets
+# from statsmodels import datasets as sm_datasets
 import matplotlib
 import matplotlib.pyplot as plt
 

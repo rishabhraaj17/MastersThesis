@@ -246,8 +246,8 @@ def whole_dataset_distribution_analysis(generated_dataset, split, mem_mode, root
 
 
 if __name__ == '__main__':
-    analyze_whole_dataset = False
-    find_distribution_whole_dataset = True
+    analyze_whole_dataset = True
+    find_distribution_whole_dataset = False
 
     mem_mode = None
     split = NetworkMode.TEST
