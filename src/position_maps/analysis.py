@@ -557,7 +557,7 @@ class TracksAnalyzerClassical(TracksAnalyzer):
             'recall': recall,
             'neighbourhood_radius': radius
         })
-        df.to_csv(f"{self.root}/{self.extracted_folder}/metrics.csv", index=False)
+        df.to_csv(f"{self.root}/{self.extracted_folder}/metrics_{self.config.threshold}m.csv", index=False)
 
     def perform_analysis_on_multiple_sequences(self, show_extracted_tracks_only=False):
         metrics = {}
@@ -757,6 +757,6 @@ class TracksAnalyzerClassical(TracksAnalyzer):
 
 if __name__ == '__main__':
     # analyzer = TracksAnalyzer(OmegaConf.load('config/training/training.yaml'))
-    analyzer = TracksAnalyzerClassical(OmegaConf.load('config/training/training.yaml'), use_patch_filtered=False)
+    analyzer = TracksAnalyzerClassical(OmegaConf.load('config/training/training.yaml'), use_patch_filtered=True)
     out = analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=False)
     print()
