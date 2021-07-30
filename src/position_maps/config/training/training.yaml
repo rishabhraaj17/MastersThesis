@@ -466,7 +466,7 @@ patch_mode:
 metrics_analysis:
   root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
   video_classes: [ DEATH_CIRCLE ]
-  video_numbers: [ [ 0, 2, 4 ] ]
+  video_numbers: [ [ 0, 1, 2, 3, 4 ] ]
 
   match_distance: 'inf'
   threshold: 1  # meters
@@ -474,7 +474,7 @@ metrics_analysis:
   make_video: False
   video_fps: 2
   plot_gt_features: False
-  show_plot: True
+  show_plot: False
   marker_size: 2
 
 
