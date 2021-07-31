@@ -25,8 +25,8 @@ from src_lib.datasets.opentraj_based import get_multiple_gt_dataset
 from src_lib.datasets.trajectory_stgcnn import STGCNNTrajectoryDataset, seq_collate, seq_collate_dict, \
     seq_collate_with_graphs, seq_collate_with_graphs_dict, seq_collate_with_dataset_idx_dict, SmoothTrajectoryDataset
 
-VIDEO_CLASS = SDDVideoClasses.DEATH_CIRCLE
-VIDEO_NUMBER = 4
+VIDEO_CLASS = SDDVideoClasses.GATES
+VIDEO_NUMBER = 0
 
 FILENAME = 'extracted_trajectories.pt'
 BASE_PATH = os.path.join(os.getcwd(), f'logs/ExtractedTrajectories/{VIDEO_CLASS.name}/{VIDEO_NUMBER}/')
@@ -34,11 +34,14 @@ LOAD_PATH = f"{BASE_PATH}{FILENAME}"
 TRAJECTORIES_LOAD_PATH = os.path.join(os.getcwd(), f'logs/Trajectories/{VIDEO_CLASS.name}/{VIDEO_NUMBER}/')
 
 
-def get_total_tracks():
-    tracks = torch.load(LOAD_PATH)
+def get_total_tracks(path=None):
+    path = path if path is not None else LOAD_PATH
+    tracks = torch.load(path)
     active_tracks, inactive_tracks = tracks['active'], tracks['inactive']
     total_tracks = active_tracks.tracks + inactive_tracks.tracks
-    return total_tracks
+    if 'repeating_frames' in tracks.keys():
+        return total_tracks, tracks['repeating_frames']
+    return total_tracks, None
 
 
 def split_tracks_into_lists(min_track_length, total_tracks, duplicate_frames_to_filter=(0,),
@@ -129,7 +132,11 @@ def get_dataframe_from_lists(frame_id, track_id, x, y):
 def dump_tracks_to_file(min_track_length: int = 20, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None,
                         dump_as_csv_only=False):
     print(f"Brewing Trajectory file for {VIDEO_CLASS} - {VIDEO_NUMBER}")
-    total_tracks: Sequence[Track] = get_total_tracks()
+    # total_tracks: Sequence[Track] = get_total_tracks()
+    total_tracks, repeating_frames = get_total_tracks()
+
+    if filter_nth_frame_from_middle is None:
+        filter_nth_frame_from_middle = repeating_frames.tolist()[1:]
 
     # lists for frame_id, track_id, x, y
     frame_id, track_id, x, y = split_tracks_into_lists(min_track_length, total_tracks,
@@ -148,6 +155,57 @@ def dump_tracks_to_file(min_track_length: int = 20, duplicate_frames_to_filter=(
         df_to_dump = df.to_string(header=False, index=False)
         f.write(df_to_dump)
     print(f"Dumping Trajectories to {TRAJECTORIES_LOAD_PATH}trajectories.txt")
+
+
+def dump_tracks_to_file_multiple(
+        min_track_length: int = 20, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None,
+        dump_as_csv_only=False):
+    video_classes_to_use = [
+        SDDVideoClasses.GATES,
+        SDDVideoClasses.HYANG,
+        SDDVideoClasses.LITTLE,
+        SDDVideoClasses.NEXUS,
+        SDDVideoClasses.QUAD,
+        SDDVideoClasses.BOOKSTORE,
+        SDDVideoClasses.COUPA]
+    video_numbers_to_use = [
+        [i for i in range(9)],
+        [i for i in range(15)],
+        [i for i in range(4)],
+        [i for i in range(12) if i not in [3, 4, 5]],
+        [i for i in range(4)],
+        [i for i in range(7)],
+        [i for i in range(4)], ]
+
+    for v_idx, v_clz in enumerate(video_classes_to_use):
+        for v_num in video_numbers_to_use[v_idx]:
+            print(f'Extracting for {v_clz.name} - {v_num}')
+
+            path = os.path.join(
+                os.getcwd(), f'logs/ExtractedTrajectories/{v_clz.name}/{v_num}/extracted_trajectories.pt')
+            total_tracks, repeating_frames = get_total_tracks(path=path)
+
+            if filter_nth_frame_from_middle is None:
+                filter_nth_frame_from_middle = repeating_frames.tolist()[1:]
+
+            # lists for frame_id, track_id, x, y
+            frame_id, track_id, x, y = split_tracks_into_lists(min_track_length, total_tracks,
+                                                               duplicate_frames_to_filter=duplicate_frames_to_filter,
+                                                               filter_nth_frame_from_middle=filter_nth_frame_from_middle)
+
+            df: pd.DataFrame = get_dataframe_from_lists(frame_id, track_id, x, y)
+
+            save_path = os.path.join(os.getcwd(), f'logs/Trajectories/{v_clz.name}/{v_num}/')
+            Path(save_path).mkdir(parents=True, exist_ok=True)
+            if dump_as_csv_only:
+                df.to_csv(f"{save_path}trajectories.csv", index=False)
+                print(f"Dumping Trajectories to {save_path}trajectories.csv")
+                # return None
+
+            with open(f"{save_path}trajectories.txt", 'w') as f:
+                df_to_dump = df.to_string(header=False, index=False)
+                f.write(df_to_dump)
+            print(f"Dumping Trajectories to {save_path}trajectories.txt")
 
 
 def relative_to_abs(rel_traj, start_pos):
@@ -730,3 +788,6 @@ if __name__ == '__main__':
     # filter_middle = [i for i in range(step, frame_count, step)]
     # dump_tracks_to_file(min_track_length=0, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None,
     #                     dump_as_csv_only=True)
+    # dump_tracks_to_file_multiple(
+    #     min_track_length=0, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None,
+    #     dump_as_csv_only=True)
