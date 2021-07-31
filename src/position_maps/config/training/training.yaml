@@ -24,7 +24,7 @@ mode: 'min'
 # TP module
 # scheduler
 tp_module:
-  model: 'TrajectoryGANTransformerV2'  # 'TransformerNoisyMotionGenerator' # 'TrajectoryGANTransformerV2'  # 'TrajectoryTransformer'  # 'RNNBaseline'  # 'TrajectoryTransformer'
+  model: 'RNNBaseline'  # 'TransformerNoisyMotionGenerator' # 'TrajectoryGANTransformerV2'  # 'TrajectoryTransformer'  # 'RNNBaseline'  # 'TrajectoryTransformer'
 
   smooth_trajectories:
     enabled: False
@@ -35,11 +35,11 @@ tp_module:
     root_gt: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/OpenTraj/datasets/SDD/'
     root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/Trajectories/'
 
-    use_standard_dataset: False
+    use_standard_dataset: True
 
     filename: 'trajectories.pt'
 
-    use_generated: True
+    use_generated: False
 
     val_ratio: 0.2
     batch_multiplier: 10
@@ -56,6 +56,9 @@ tp_module:
     val:
       video_classes: [ DEATH_CIRCLE ]
       video_numbers: [ [ 2, 4 ] ]
+    test:
+      video_classes: [ DEATH_CIRCLE ]
+      video_numbers: [ [ 2, 4 ] ]
 
     obs_len: 8
     pred_len: 12
@@ -68,7 +71,7 @@ tp_module:
     shuffle: True
     pin_memory: True
     drop_last: False
-    num_workers: 12
+    num_workers: 0
     val_batch_size_factor: 2
 
   scheduler:
@@ -84,12 +87,13 @@ tp_module:
 
   # Adam
   optimizer:
-    lr: 1e-4
+    lr: 1e-3
     weight_decay: 0
     amsgrad: False
 
   metrics:
-    mode: 'average'
+    mode: 'raw'
+    in_meters: False
 
   trainer:
     max_epochs: 400

@@ -8,7 +8,11 @@ import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
+from average_image.constants import SDDVideoDatasets
+from average_image.utils import SDDMeta
 
+META_ROOT = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/H_SDD.txt'
+# META_ROOT = '/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/H_SDD.txt'
 # https://github.com/abduallahmohamed/Social-STGCNN/blob/dbbb111a0f645e4002dd4885564da226c5e0b19f/utils.py#L86
 
 def seq_collate(data):
@@ -102,10 +106,10 @@ def seq_collate_with_dataset_idx(data):
     obs_seq_list, pred_seq_list, obs_seq_rel_list, pred_seq_rel_list = [], [], [], []
     obs_frames_list, pred_frames_list, non_linear_ped_list, loss_mask_list = [], [], [], []
     obs_tracks_list, pred_tracks_list = [], []
-    dataset_idx = []
+    dataset_idx, ratio = [], []
     for d in data:
         (obs_seq, pred_seq, obs_seq_rel, pred_seq_rel,
-         obs_frames, pred_frames, obs_tracks, pred_tracks, non_linear_ped, loss_mask), d_idx = d[0], d[1]
+         obs_frames, pred_frames, obs_tracks, pred_tracks, non_linear_ped, loss_mask, r), d_idx = d[0], d[1]
         obs_seq_list.append(obs_seq)
         pred_seq_list.append(pred_seq)
         obs_seq_rel_list.append(obs_seq_rel)
@@ -117,6 +121,7 @@ def seq_collate_with_dataset_idx(data):
         non_linear_ped_list.append(non_linear_ped)
         loss_mask_list.append(loss_mask)
         dataset_idx.append(d_idx)
+        ratio.append(torch.tensor(r).unsqueeze(0).repeat(obs_seq.shape[0], 1))
 
     _len = [len(seq) for seq in obs_seq_list]
     cum_start_idx = [0] + np.cumsum(_len).tolist()
@@ -137,9 +142,10 @@ def seq_collate_with_dataset_idx(data):
     loss_mask = torch.cat(loss_mask_list, dim=0)
     seq_start_end = torch.LongTensor(seq_start_end)
     dataset_idx = torch.LongTensor(dataset_idx)
+    ratio = torch.cat(ratio)
     out = [
         obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, obs_frames, pred_frames, obs_tracks, pred_tracks,
-        non_linear_ped, loss_mask, seq_start_end, dataset_idx
+        non_linear_ped, loss_mask, seq_start_end, dataset_idx, ratio
     ]
 
     return tuple(out)
@@ -148,7 +154,7 @@ def seq_collate_with_dataset_idx(data):
 def seq_collate_with_dataset_idx_dict(data):
     obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, obs_frames, \
     pred_frames, obs_tracks, pred_tracks, non_linear_ped, loss_mask, \
-    seq_start_end, dataset_idx = seq_collate_with_dataset_idx(data)
+    seq_start_end, dataset_idx, ratio = seq_collate_with_dataset_idx(data)
 
     return {
         'in_xy': obs_traj, 'in_dxdy': obs_traj_rel[1:, ...],
@@ -156,7 +162,8 @@ def seq_collate_with_dataset_idx_dict(data):
         'in_frames': obs_frames, 'gt_frames': pred_frames,
         'in_tracks': obs_tracks, 'gt_tracks': pred_tracks,
         'non_linear_ped': non_linear_ped, 'loss_mask': loss_mask,
-        'seq_start_end': seq_start_end, 'dataset_idx': dataset_idx
+        'seq_start_end': seq_start_end, 'dataset_idx': dataset_idx,
+        'ratio': ratio
     }
 
 
@@ -256,6 +263,11 @@ class STGCNNTrajectoryDataset(Dataset):
         self.construct_graph = construct_graph
         self.video_class = video_class
         self.video_number = video_number
+        self.sdd_meta = SDDMeta(META_ROOT)
+        self.sdd_ratio = float(
+            self.sdd_meta.get_meta(
+                getattr(SDDVideoDatasets, video_class),
+                video_number)[0]['Ratio'].to_numpy()[0])
 
         all_files = os.listdir(self.data_dir)
         all_files = [os.path.join(self.data_dir, _path) for _path in all_files]
@@ -395,7 +407,7 @@ class STGCNNTrajectoryDataset(Dataset):
                 self.obs_tracks[start:end, :], self.pred_tracks[start:end, :],
                 self.non_linear_ped[start:end], self.loss_mask[start:end, :],
                 self.v_obs[index], self.A_obs[index],
-                self.v_pred[index], self.A_pred[index]
+                self.v_pred[index], self.A_pred[index], self.sdd_ratio
             ]
         else:
             out = [
@@ -404,6 +416,7 @@ class STGCNNTrajectoryDataset(Dataset):
                 self.obs_frames[start:end, :], self.pred_frames[start:end, :],
                 self.obs_tracks[start:end, :], self.pred_tracks[start:end, :],
                 self.non_linear_ped[start:end], self.loss_mask[start:end, :],
+                self.sdd_ratio
             ]
         return out
 
@@ -454,6 +467,11 @@ class TrajectoryDatasetFromFile(Dataset):
         self.construct_graph = construct_graph
         self.video_class = video_class
         self.video_number = video_number
+        self.sdd_meta = SDDMeta(META_ROOT)
+        self.sdd_ratio = float(
+            self.sdd_meta.get_meta(
+                getattr(SDDVideoDatasets, video_class),
+                video_number)[0]['Ratio'].to_numpy()[0])
 
         all_files = [self.annotation_file]
         num_peds_in_seq = []
@@ -592,7 +610,7 @@ class TrajectoryDatasetFromFile(Dataset):
                 self.obs_tracks[start:end, :], self.pred_tracks[start:end, :],
                 self.non_linear_ped[start:end], self.loss_mask[start:end, :],
                 self.v_obs[index], self.A_obs[index],
-                self.v_pred[index], self.A_pred[index]
+                self.v_pred[index], self.A_pred[index], self.sdd_ratio
             ]
         else:
             out = [
@@ -601,6 +619,7 @@ class TrajectoryDatasetFromFile(Dataset):
                 self.obs_frames[start:end, :], self.pred_frames[start:end, :],
                 self.obs_tracks[start:end, :], self.pred_tracks[start:end, :],
                 self.non_linear_ped[start:end], self.loss_mask[start:end, :],
+                self.sdd_ratio
             ]
         return out
 

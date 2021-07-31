@@ -119,31 +119,43 @@ class RNNBaseline(Base):
         out = self(batch)
         pred = out['out_xy']
 
-        loss = self.calculate_loss(pred, target)
+        loss = self.calculate_loss(pred, target, batch['ratio'])
         ade, fde = self.calculate_metrics(pred, target, self.config.tp_module.metrics.mode)
         return loss, ade, fde
 
     @staticmethod
     def calculate_metrics(pred, target, mode='sum'):
-        ade = cal_ade(target, pred, mode=mode)
-        fde = cal_fde(target, pred, mode=mode)
+        ade = cal_ade(target, pred, mode=mode).squeeze()
+        fde = cal_fde(target, pred, mode=mode).squeeze()
         return ade, fde
 
-    def calculate_loss(self, pred, target):
-        return torch.linalg.norm((pred - target), ord=2, dim=0).mean(dim=0).mean()
+    def calculate_loss(self, pred, target, ratio):
+        if self.config.tp_module.metrics.in_meters:
+            out = torch.linalg.norm((pred - target), ord=2, dim=-1).mean(dim=0) * ratio.squeeze()
+            return out.mean()
+        else:
+            return torch.linalg.norm((pred - target), ord=2, dim=-1).mean(dim=0).mean()
 
     def training_step(self, batch, batch_idx):
         loss, ade, fde = self._one_step(batch)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('train/ade', ade, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('train/fde', fde, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/ade', ade.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/fde', fde.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/ade_pixel', (ade * batch['ratio'].squeeze()).mean(),
+                 on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/fde_pixel', (fde * batch['ratio'].squeeze()).mean(),
+                 on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss, ade, fde = self._one_step(batch)
         self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('val/ade', ade, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('val/fde', fde, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/ade', ade.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/fde', fde.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/ade_pixel', (ade * batch['ratio'].squeeze()).mean(),
+                 on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/fde_pixel', (fde * batch['ratio'].squeeze()).mean(),
+                 on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def train_dataloader(self) -> DataLoader:
