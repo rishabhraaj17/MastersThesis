@@ -145,6 +145,8 @@ def whole_dataset_analysis(generated_dataset, split, mem_mode, root_path, use_al
     full_length_trajectory_list = np.concatenate(full_length_trajectory_list, axis=0)
     full_length_distances_list = np.concatenate(full_length_distances_list, axis=0)
 
+    logger.info(f'Total tracks count: {full_length_trajectory_list.shape}')
+
     if for_phase2:
         plot_path = f"{ROOT_PATH}Plots/baseline_v2/nn/STATS_NN/full_dataset/" \
                     f"{'generated/' if generated_dataset else 'gt/'}{'together' if use_all_splits else split.name}/"
@@ -257,8 +259,8 @@ def whole_dataset_distribution_analysis(generated_dataset, split, mem_mode, root
 
 
 if __name__ == '__main__':
-    analyze_whole_dataset = False
-    analyze_whole_dataset_for_phase2 = True
+    analyze_whole_dataset = True
+    analyze_whole_dataset_for_phase2 = False
     find_distribution_whole_dataset = False
 
     mem_mode = None
