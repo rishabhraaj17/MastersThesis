@@ -427,8 +427,8 @@ def extract_locations_for_all(cfg):
 
             save_dict = {
                 'locations': ExtractedLocations(
-                    video_class=getattr(SDDVideoClasses, cfg.single_video_mode.video_classes_to_use[0]),
-                    video_numbers=cfg.single_video_mode.video_numbers_to_use[0][0],
+                    video_class=v_clz,
+                    video_numbers=v_num,
                     shape=meta[0]['downscale_shape'],
                     scaled_shape=meta[0]['original_shape'],
                     head0=head0_locations,
