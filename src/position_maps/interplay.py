@@ -1034,6 +1034,8 @@ def extract_trajectories_from_locations_core_minimal(
 
 
 def init_tracks_from_empty(active_tracks, current_track, location, locations_to_use, track_ids_used):
+    if locations_to_use.ndim == 1:
+        locations_to_use = locations_to_use[None, :]
     for agent_pred_loc in locations_to_use:
         agent_pred_loc = list(agent_pred_loc)
         track = Track(idx=current_track, frames=[location.frame_number], locations=[agent_pred_loc])
