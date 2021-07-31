@@ -1,4 +1,5 @@
 import os
+import shutil
 from pathlib import Path
 from typing import List
 
@@ -753,10 +754,38 @@ class TracksAnalyzerClassical(TracksAnalyzer):
                 self.config.video_fps)
         print(f"Analysis done for {video_class.name} - {video_number}")
         return video_sequence_track_data
+    
+    
+def internal_csv_mover():
+    video_classes_to_use = [
+        SDDVideoClasses.GATES,
+        SDDVideoClasses.HYANG,
+        SDDVideoClasses.LITTLE,
+        SDDVideoClasses.NEXUS,
+        SDDVideoClasses.QUAD,
+        SDDVideoClasses.BOOKSTORE,
+        SDDVideoClasses.COUPA]
+    video_numbers_to_use = [
+        [i for i in range(9)],
+        [i for i in range(15)],
+        [i for i in range(4)],
+        [i for i in range(12) if i not in [3, 4, 5]],
+        [i for i in range(4)],
+        [i for i in range(7)],
+        [i for i in range(4)], ]
+
+    from_path_root = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/Trajectories/'
+    to_path_root = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/pm_extracted_annotations/'
+    for v_idx, v_clz in enumerate(video_classes_to_use):
+        for v_num in video_numbers_to_use[v_idx]:
+            from_path = f"{from_path_root}{v_clz.name}/{v_num}/trajectories.csv"
+            to_path = f"{to_path_root}{v_clz.value}/video{v_num}/trajectories.csv"
+            shutil.copyfile(from_path, to_path)
 
 
 if __name__ == '__main__':
-    # analyzer = TracksAnalyzer(OmegaConf.load('config/training/training.yaml'))
-    analyzer = TracksAnalyzerClassical(OmegaConf.load('config/training/training.yaml'), use_patch_filtered=True)
+    # internal_csv_mover()
+    analyzer = TracksAnalyzer(OmegaConf.load('config/training/training.yaml'))
+    # analyzer = TracksAnalyzerClassical(OmegaConf.load('config/training/training.yaml'), use_patch_filtered=True)
     out = analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=False)
     print()

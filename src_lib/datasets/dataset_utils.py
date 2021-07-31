@@ -21,8 +21,10 @@ ALL_VIDEO_CLASSES = [
     SDDVideoClasses.GATES, SDDVideoClasses.HYANG, SDDVideoClasses.LITTLE, SDDVideoClasses.NEXUS,
     SDDVideoClasses.QUAD]
 ALL_VIDEO_NUMBERS = [
-    [i for i in range(7)], [i for i in range(4)], [i for i in range(5)], [i for i in range(9)],
-    [i for i in range(15)], [i for i in range(4)], [i for i in range(12)], [i for i in range(4)]]
+    [i for i in range(7)], [i for i in range(4)],
+    [i for i in range(5)],
+    [i for i in range(9)],
+    [i for i in range(15)], [i for i in range(4)], [i for i in range(12) if i not in [3, 4, 5]], [i for i in range(4)]]
 
 
 def adjust_splits_for_frame(larger_set, smaller_set):
@@ -142,5 +144,5 @@ def generate_annotation_for_all_extracted_tracks(video_classes, video_numbers):
 
 if __name__ == '__main__':
     generate_annotation_for_all_extracted_tracks(
-        video_classes=[ALL_VIDEO_CLASSES[2]],
-        video_numbers=[ALL_VIDEO_NUMBERS[2]])
+        video_classes=ALL_VIDEO_CLASSES,
+        video_numbers=ALL_VIDEO_NUMBERS)
