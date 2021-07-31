@@ -27,6 +27,13 @@ ALL_VIDEO_NUMBERS = [
     [i for i in range(15)], [i for i in range(4)], [i for i in range(12) if i not in [3, 4, 5]], [i for i in range(4)]]
 
 
+def adjust_dataframe_framerate(df, for_gt, frame_rate=30., time_step=0.4):
+    frame_txt = 'frame_id' if for_gt else 'frame'
+    df = df[df[frame_txt] % int(round(frame_rate * time_step)) == 0]
+    df[frame_txt] /= int(round(frame_rate * time_step))
+    return df
+
+
 def adjust_splits_for_frame(larger_set, smaller_set):
     frame_label = 'frame'
     last_frame_in_larger = larger_set.iloc[-1][frame_label]

@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from average_image.constants import SDDVideoClasses
 from baselinev2.nn.dataset import ConcatenateDataset
+from src_lib.datasets.dataset_utils import adjust_dataframe_framerate
 from src_lib.datasets.trajectory_stgcnn import TrajectoryDatasetFromFile, SmoothTrajectoryDataset
 
 pd.options.mode.chained_assignment = None  # default='warn'
@@ -427,12 +428,15 @@ def load_sdd_dir(path: str, **kwargs):
 
 
 def get_single_gt_dataset(cfg, video_class, video_number, split_dataset,
-                          smooth_trajectories=False, smoother=lambda x: x, threshold=1):
+                          smooth_trajectories=False, smoother=lambda x: x, threshold=1,
+                          frame_rate=30., time_step=0.4):
     load_path = f"{cfg.root_gt}{getattr(SDDVideoClasses, video_class).value}/video{video_number}/annotations.txt"
     open_traj_dataset = load_sdd(load_path)
     data_df = open_traj_dataset.data[open_traj_dataset.critical_columns]
     data_df = data_df.sort_values(by=['frame_id']).reset_index()
     data_df: pd.DataFrame = data_df.drop(columns=['index'])
+
+    data_df = adjust_dataframe_framerate(data_df, for_gt=True, frame_rate=frame_rate, time_step=time_step)
 
     temp_file = tempfile.NamedTemporaryFile(suffix='.txt')
     data_df.to_csv(temp_file, header=False, index=False, sep=' ')
@@ -456,7 +460,8 @@ def get_single_gt_dataset(cfg, video_class, video_number, split_dataset,
 
 
 def get_multiple_gt_dataset(cfg, split_dataset=True, with_dataset_idx=True,
-                            smooth_trajectories=False, smoother=lambda x: x, threshold=1):
+                            smooth_trajectories=False, smoother=lambda x: x, threshold=1,
+                            frame_rate=30., time_step=0.4):
     conf = cfg.tp_module.datasets
     video_classes = conf.video_classes
     video_numbers = conf.video_numbers
@@ -467,13 +472,15 @@ def get_multiple_gt_dataset(cfg, split_dataset=True, with_dataset_idx=True,
             if split_dataset:
                 t_dset, v_dset = get_single_gt_dataset(conf, video_class, v_num, split_dataset,
                                                        smooth_trajectories=smooth_trajectories,
-                                                       smoother=smoother, threshold=threshold)
+                                                       smoother=smoother, threshold=threshold,
+                                                       frame_rate=frame_rate, time_step=time_step)
                 train_datasets.append(t_dset)
                 val_datasets.append(v_dset)
             else:
                 dset = get_single_gt_dataset(cfg, video_class, v_num, split_dataset,
                                              smooth_trajectories=smooth_trajectories,
-                                             smoother=smoother, threshold=threshold)
+                                             smoother=smoother, threshold=threshold,
+                                             frame_rate=frame_rate, time_step=time_step)
                 train_datasets.append(dset)
 
     if split_dataset:

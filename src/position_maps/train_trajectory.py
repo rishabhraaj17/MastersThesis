@@ -35,13 +35,19 @@ def setup_dataset(cfg):
                 cfg=cfg, split_dataset=True, with_dataset_idx=True,
                 smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
                 smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
-                threshold=cfg.tp_module.smooth_trajectories.min_length)
+                threshold=cfg.tp_module.smooth_trajectories.min_length,
+                from_temp_file=cfg.tp_module.datasets.from_temp_file,
+                frame_rate=cfg.tp_module.datasets.frame_rate,
+                time_step=cfg.tp_module.datasets.time_step
+            )
         else:
             train_dataset, val_dataset = get_multiple_gt_dataset(
                 cfg=cfg, split_dataset=True, with_dataset_idx=True,
                 smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
                 smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
-                threshold=cfg.tp_module.smooth_trajectories.min_length)
+                threshold=cfg.tp_module.smooth_trajectories.min_length,
+                frame_rate=cfg.tp_module.datasets.frame_rate,
+                time_step=cfg.tp_module.datasets.time_step)
     else:
         train_dataset, val_dataset = get_train_and_val_datasets(
             video_classes=[getattr(SDDVideoClasses, v_c) for v_c in cfg.tp_module.datasets.train.video_classes],
@@ -581,7 +587,7 @@ def overfit(cfg):
 
 if __name__ == '__main__':
     # overfit()
-    overfit_gan()
+    # overfit_gan()
     # evaluate()
-    # train_lightning()
+    train_lightning()
     # evaluate_stochastic()

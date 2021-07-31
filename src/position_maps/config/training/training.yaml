@@ -24,7 +24,7 @@ mode: 'min'
 # TP module
 # scheduler
 tp_module:
-  model: 'RNNBaseline'  # 'TransformerNoisyMotionGenerator' # 'TrajectoryGANTransformerV2'  # 'TrajectoryTransformer'  # 'RNNBaseline'  # 'TrajectoryTransformer'
+  model: 'RNNGANBaseline'  # 'TransformerNoisyMotionGenerator' # 'TrajectoryGANTransformerV2'  # 'TrajectoryTransformer'  # 'RNNBaseline'  # 'TrajectoryTransformer'
 
   smooth_trajectories:
     enabled: False
@@ -39,7 +39,11 @@ tp_module:
 
     filename: 'trajectories.pt'
 
-    use_generated: False
+    use_generated: True
+    from_temp_file: True
+
+    frame_rate: 30.
+    time_step: 0.4  # 0.0333 for standard 1 ts per frame
 
     val_ratio: 0.2
     batch_multiplier: 10
@@ -469,11 +473,17 @@ patch_mode:
 
 metrics_analysis:
   root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
-  video_classes: [ DEATH_CIRCLE ]
-  video_numbers: [ [ 0, 1, 2, 3, 4 ] ]
+  #  video_classes: [ DEATH_CIRCLE ]
+  #  video_numbers: [ [ 0, 1, 2, 3, 4 ] ]
+  video_classes: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
+  video_numbers: [ [ 0, 1, 2, 3, 4, 5, 6 ], [ 0, 1, 2, 3 ], [ 0, 1, 2, 3, 4 ], [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ],
+                            [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], [ 0, 1, 2, 3 ],
+                            [ 0, 1, 2, 6, 7, 8, 9, 10, 11 ], [ 0, 1, 2, 3 ] ]
 
   match_distance: 'inf'
-  threshold: 1  # meters
+  threshold: 2  # meters
+
+  trajectory_threshold: 1
 
   make_video: False
   video_fps: 2

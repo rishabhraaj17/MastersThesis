@@ -1,5 +1,6 @@
 import os
 import subprocess
+import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -20,10 +21,12 @@ from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.dataset import ConcatenateDataset
 from baselinev2.plot_utils import add_line_to_axis, add_features_to_axis, plot_trajectory_alongside_frame
 from src.position_maps.interplay_utils import Track, Tracks
+from src_lib.datasets.dataset_utils import adjust_dataframe_framerate
 from src_lib.datasets.extracted_dataset import get_train_and_val_datasets, extracted_collate
 from src_lib.datasets.opentraj_based import get_multiple_gt_dataset
 from src_lib.datasets.trajectory_stgcnn import STGCNNTrajectoryDataset, seq_collate, seq_collate_dict, \
-    seq_collate_with_graphs, seq_collate_with_graphs_dict, seq_collate_with_dataset_idx_dict, SmoothTrajectoryDataset
+    seq_collate_with_graphs, seq_collate_with_graphs_dict, seq_collate_with_dataset_idx_dict, SmoothTrajectoryDataset, \
+    TrajectoryDatasetFromFile
 
 VIDEO_CLASS = SDDVideoClasses.GATES
 VIDEO_NUMBER = 0
@@ -321,8 +324,38 @@ def get_single_dataset(cfg, video_class, v_num, split_dataset, smooth_trajectori
     return train_dataset, val_dataset
 
 
+def get_single_gt_dataset_from_tempfile(cfg, video_class, video_number, split_dataset,
+                                        smooth_trajectories=False, smoother=lambda x: x, threshold=1,
+                                        frame_rate=30., time_step=0.4):
+    load_path = f"{cfg.root}{video_class}/{video_number}/trajectories.csv"
+
+    data_df = pd.read_csv(load_path)
+    data_df = adjust_dataframe_framerate(data_df, for_gt=False, frame_rate=frame_rate, time_step=time_step)
+
+    temp_file = tempfile.NamedTemporaryFile(suffix='.txt')
+    data_df.to_csv(temp_file, header=False, index=False, sep=' ')
+    dataset = TrajectoryDatasetFromFile(
+        temp_file, obs_len=cfg.obs_len, pred_len=cfg.pred_len, skip=cfg.skip,
+        delim=cfg.delim, video_class=video_class, video_number=video_number, construct_graph=cfg.construct_graph)
+
+    if smooth_trajectories:
+        dataset = SmoothTrajectoryDataset(base_dataset=dataset, smoother=smoother, threshold=threshold)
+
+    if not split_dataset:
+        return dataset
+
+    val_dataset_len = round(len(dataset) * cfg.val_ratio)
+    train_indices = torch.arange(start=0, end=len(dataset) - val_dataset_len)
+    val_indices = torch.arange(start=len(dataset) - val_dataset_len, end=len(dataset))
+
+    train_dataset = Subset(dataset, train_indices)
+    val_dataset = Subset(dataset, val_indices)
+    return train_dataset, val_dataset
+
+
 def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True,
-                          smooth_trajectories=False, smoother=lambda x: x, threshold=1):
+                          smooth_trajectories=False, smoother=lambda x: x, threshold=1,
+                          from_temp_file=True, frame_rate=30., time_step=0.4):
     conf = cfg.tp_module.datasets
     video_classes = conf.video_classes
     video_numbers = conf.video_numbers
@@ -331,15 +364,27 @@ def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True,
     for v_idx, video_class in enumerate(tqdm(video_classes)):
         for v_num in video_numbers[v_idx]:
             if split_dataset:
-                t_dset, v_dset = get_single_dataset(conf, video_class, v_num, split_dataset,
-                                                    smooth_trajectories=smooth_trajectories,
-                                                    smoother=smoother, threshold=threshold)
+                if from_temp_file:
+                    t_dset, v_dset = get_single_gt_dataset_from_tempfile(conf, video_class, v_num, split_dataset,
+                                                                         smooth_trajectories=smooth_trajectories,
+                                                                         smoother=smoother, threshold=threshold,
+                                                                         frame_rate=frame_rate, time_step=time_step)
+                else:
+                    t_dset, v_dset = get_single_dataset(conf, video_class, v_num, split_dataset,
+                                                        smooth_trajectories=smooth_trajectories,
+                                                        smoother=smoother, threshold=threshold)
                 train_datasets.append(t_dset)
                 val_datasets.append(v_dset)
             else:
-                dset = get_single_dataset(cfg, video_class, v_num, split_dataset,
-                                          smooth_trajectories=smooth_trajectories,
-                                          smoother=smoother, threshold=threshold)
+                if from_temp_file:
+                    dset = get_single_gt_dataset_from_tempfile(cfg, video_class, v_num, split_dataset,
+                                                               smooth_trajectories=smooth_trajectories,
+                                                               smoother=smoother, threshold=threshold,
+                                                               frame_rate=frame_rate, time_step=time_step)
+                else:
+                    dset = get_single_dataset(cfg, video_class, v_num, split_dataset,
+                                              smooth_trajectories=smooth_trajectories,
+                                              smoother=smoother, threshold=threshold)
                 train_datasets.append(dset)
 
     if split_dataset:
@@ -706,13 +751,20 @@ def viz_dataset_trajectories():
                 cfg=cfg, split_dataset=True, with_dataset_idx=True,
                 smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
                 smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
-                threshold=cfg.tp_module.smooth_trajectories.min_length)
+                threshold=cfg.tp_module.smooth_trajectories.min_length,
+                from_temp_file=cfg.tp_module.datasets.from_temp_file,
+                frame_rate=cfg.tp_module.datasets.frame_rate,
+                time_step=cfg.tp_module.datasets.time_step
+            )
         else:
             train_dataset, val_dataset = get_multiple_gt_dataset(
                 cfg=cfg, split_dataset=True, with_dataset_idx=True,
                 smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
                 smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
-                threshold=cfg.tp_module.smooth_trajectories.min_length)
+                threshold=cfg.tp_module.smooth_trajectories.min_length,
+                frame_rate=cfg.tp_module.datasets.frame_rate,
+                time_step=cfg.tp_module.datasets.time_step
+            )
     else:
         collate_fn = extracted_collate
         train_dataset, val_dataset = get_train_and_val_datasets(
