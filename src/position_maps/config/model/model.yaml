@@ -499,6 +499,10 @@ trajectory_based:
       social_attention: False
       social_dim_scalar: 10
 
+      lr: 1e-4
+      weight_decay: 5e-10
+      amsgrad: False
+
     discriminator:
       encoder_h_dim_d: 64
       embedding_dim_scalars: 16
@@ -508,6 +512,14 @@ trajectory_based:
       social_dim_scalar: 10
 
       batch_first: False
+
+      use_gan_loss: True
+      gan_loss_type: 'vanilla'
+      gan_loss_weight: 1.0
+
+      lr: 1e-4
+      weight_decay: 5e-10
+      amsgrad: False
 
       encoder_prediction:
         rnn_type: 'LSTM'  # 'GRU'  'RNN'

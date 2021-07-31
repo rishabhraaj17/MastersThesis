@@ -1,6 +1,7 @@
 from typing import Tuple, List, Optional, Callable, Union
 
 import torch
+from mmedit.models import GANLoss
 from omegaconf import DictConfig, OmegaConf
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -8,7 +9,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from baselinev2.stochastic.losses import cal_fde, cal_ade
 from baselinev2.stochastic.model_modules import preprocess_dataset_elements, make_mlp
-from src_lib.models_hub import Base
+from src_lib.models_hub import Base, init_weights
 
 
 class RNNBaseline(Base):
@@ -139,22 +140,22 @@ class RNNBaseline(Base):
     def training_step(self, batch, batch_idx):
         loss, ade, fde = self._one_step(batch)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('train/ade', ade.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('train/fde', fde.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('train/ade_pixel', (ade * batch['ratio'].squeeze()).mean(),
+        self.log('train/ade_pixel', ade.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/fde_pixel', fde.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/ade', (ade * batch['ratio'].squeeze()).mean(),
                  on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('train/fde_pixel', (fde * batch['ratio'].squeeze()).mean(),
+        self.log('train/fde', (fde * batch['ratio'].squeeze()).mean(),
                  on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss, ade, fde = self._one_step(batch)
         self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('val/ade', ade.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('val/fde', fde.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('val/ade_pixel', (ade * batch['ratio'].squeeze()).mean(),
+        self.log('val/ade_pixel', ade.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/fde_pixel', fde.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/ade', (ade * batch['ratio'].squeeze()).mean(),
                  on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('val/fde_pixel', (fde * batch['ratio'].squeeze()).mean(),
+        self.log('val/fde', (fde * batch['ratio'].squeeze()).mean(),
                  on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
@@ -512,6 +513,229 @@ class MotionEncoder(nn.Module):
         output, state = self.encoder(obs_traj, state_tuple)
         final_h = state[0]
         return output, final_h
+
+
+class RNNGANBaseline(Base):
+    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None,
+                 desc_loss_function: nn.Module = None):
+        super(RNNGANBaseline, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
+        )
+        self.generator = RNNBaselineGenerator(config=self.config, train_dataset=None, val_dataset=None)
+        self.discriminator = Discriminator(config=self.config)
+        if desc_loss_function is None:
+            if self.config.trajectory_based.rnn.discriminator.use_gan_loss:
+                desc_loss_function = GANLoss(
+                    gan_type=self.config.trajectory_based.rnn.discriminator.gan_loss_type,
+                    loss_weight=self.config.trajectory_based.rnn.discriminator.gan_loss_weight)
+            else:
+                desc_loss_function = nn.BCEWithLogitsLoss()
+        self.desc_loss_function = desc_loss_function
+
+        self.net_params = self.config.trajectory_based.rnn
+
+        self.generator.apply(init_weights)
+        self.discriminator.apply(init_weights)
+
+    def forward(self, x):
+        return self.generator(x)
+
+    def configure_optimizers(self):
+        opt_disc = torch.optim.Adam(self.discriminator.parameters(), lr=self.net_params.discriminator.lr,
+                                    weight_decay=self.net_params.discriminator.weight_decay,
+                                    amsgrad=self.net_params.discriminator.weight_decay)
+        opt_gen = torch.optim.Adam(self.generator.parameters(), lr=self.net_params.generator.lr,
+                                   weight_decay=self.net_params.generator.weight_decay,
+                                   amsgrad=self.net_params.generator.weight_decay)
+        return [opt_disc, opt_gen], []
+
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        # Train discriminator
+        result = None
+        if optimizer_idx == 0:
+            result = self._disc_step(batch)
+
+        # Train generator
+        if optimizer_idx == 1:
+            result = self._gen_step(batch)
+
+        return result
+
+    def _disc_step(self, x):
+        disc_loss = self._get_disc_loss(x)
+        self.log("train/discriminator/loss", disc_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return disc_loss
+
+    def _gen_step(self, x):
+        loss, fake_loss, ade, fde = self._get_gen_loss(x)
+        gen_loss = loss + fake_loss
+        ade, _ = ade.min(dim=0)
+        fde, _ = fde.min(dim=0)
+        self.log('train/generator/loss', gen_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("train/generator/loss", loss, on_epoch=True)
+        self.log("train/generator/adv_loss", fake_loss, on_epoch=True)
+        self.log('train/generator/ade_pixel', ade.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/generator/fde_pixel', fde.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/generator/ade', (ade * x['ratio'].squeeze()).mean(),
+                 on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/generator/fde', (fde * x['ratio'].squeeze()).mean(),
+                 on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return gen_loss
+
+    def eval_step(self, x):
+        x = self.get_k_batches(x, self.config.tp_module.datasets.batch_multiplier)
+        batch_size = x["size"]
+
+        with torch.no_grad():
+            self.generator.eval()
+            out = self.generator(x)
+            self.generator.train()
+
+        target = x['gt_xy']
+        pred = out['out_xy']
+
+        loss = self.calculate_loss(pred, target)
+        loss = loss.view(self.config.tp_module.datasets.batch_multiplier, -1)
+        loss, _ = loss.min(dim=0, keepdim=True)
+        if self.config.tp_module.metrics.in_meters:
+            loss = loss.squeeze() * x['ratio'].squeeze()
+        loss = torch.mean(loss)
+
+        ade, fde = cal_ade(target, pred, mode='raw'), cal_fde(target, pred, mode='raw')
+        ade = ade.view(self.config.tp_module.datasets.batch_multiplier, batch_size)
+        fde = fde.view(self.config.tp_module.datasets.batch_multiplier, batch_size)
+
+        fde_min, _ = fde.min(dim=0)
+        modes_caught = (fde < self.config.tp_module.datasets.mode_dist_threshold).float()
+
+        return loss, modes_caught.mean().item(), ade, fde
+
+    def validation_step(self, batch, batch_idx):
+        loss, modes_caught, ade, fde = self.eval_step(batch)
+        ade, _ = ade.min(dim=0)
+        fde, _ = fde.min(dim=0)
+        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val/modes", modes_caught, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/ade_pixel', ade.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/fde_pixel', fde.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/ade', (ade * batch['ratio'].squeeze()).mean(),
+                 on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('val/fde', (fde * batch['ratio'].squeeze()).mean(),
+                 on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return loss
+
+    def _get_disc_loss(self, x):
+        # clamp loss?
+        # Train with real
+        real_pred = self.discriminator(x['in_xy'], x['in_dxdy'], x['gt_xy'], x['gt_dxdy'])
+        real_gt = torch.ones_like(real_pred)
+        real_loss = self.calculate_discriminator_loss(pred=real_pred, target=real_gt, is_real=True, is_disc=True)
+
+        # Train with fake
+        with torch.no_grad():
+            self.generator.eval()
+            fake_pred = self.generator(x)
+            self.generator.train()
+
+        fake_pred = self.discriminator(x['in_xy'], x['in_dxdy'], fake_pred['out_xy'], fake_pred['out_dxdy'])
+        fake_gt = torch.zeros_like(fake_pred)
+        fake_loss = self.calculate_discriminator_loss(pred=fake_pred, target=fake_gt, is_real=False, is_disc=True)
+
+        disc_loss = real_loss + fake_loss
+
+        return disc_loss
+
+    def _get_gen_loss(self, x):
+        x = self.get_k_batches(x, self.config.tp_module.datasets.batch_multiplier)
+        batch_size = x["size"]
+
+        out = self.generator(x)
+
+        target = x['gt_xy']
+        pred = out['out_xy']
+
+        fake_pred = self.discriminator(x['in_xy'], x['in_dxdy'], out['out_xy'], out['out_dxdy'])
+        fake_gt = torch.zeros_like(fake_pred)
+        fake_loss = self.calculate_discriminator_loss(pred=fake_pred, target=fake_gt, is_real=False, is_disc=False)
+
+        loss = self.calculate_loss(pred, target)
+        loss = loss.view(self.config.tp_module.datasets.batch_multiplier, -1)
+        loss, _ = loss.min(dim=0, keepdim=True)
+        if self.config.tp_module.metrics.in_meters:
+            loss = loss.squeeze() * x['ratio'].squeeze()
+        loss = torch.mean(loss)
+
+        ade, fde = cal_ade(target, pred, mode='raw'), cal_fde(target, pred, mode='raw')
+        ade = ade.view(self.config.tp_module.datasets.batch_multiplier, batch_size)
+        fde = fde.view(self.config.tp_module.datasets.batch_multiplier, batch_size)
+
+        return loss, fake_loss, ade, fde
+
+    def calculate_loss(self, pred, target):
+        return self.l2_loss(pred, target)
+
+    def train_dataloader(self) -> DataLoader:
+        return DataLoader(
+            dataset=self.train_dataset, batch_size=self.config.tp_module.loader.batch_size,
+            shuffle=self.config.tp_module.loader.shuffle, num_workers=self.config.tp_module.loader.num_workers,
+            collate_fn=self.collate_fn, pin_memory=self.config.tp_module.loader.pin_memory,
+            drop_last=self.config.tp_module.loader.drop_last)
+
+    def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
+        return DataLoader(
+            dataset=self.val_dataset,
+            batch_size=self.config.tp_module.loader.batch_size * self.config.tp_module.loader.val_batch_size_factor,
+            shuffle=False, num_workers=self.config.tp_module.loader.num_workers,
+            collate_fn=self.collate_fn, pin_memory=self.config.tp_module.loader.pin_memory,
+            drop_last=self.config.tp_module.loader.drop_last)
+
+    @staticmethod
+    def l2_loss(pred_traj, pred_traj_gt, mode='average', typz="mse"):
+        seq_len, batch, _ = pred_traj.size()
+        d_Traj = pred_traj_gt - pred_traj
+
+        if typz == "mse":
+            loss = torch.linalg.norm(d_Traj, ord=2, dim=-1)
+            # loss = torch.norm((d_Traj), 2, -1)
+        elif typz == "average":
+            loss = ((torch.norm(d_Traj, 2, -1)) + (torch.norm(d_Traj[-1], 2, -1))) / 2.
+        else:
+            raise AssertionError('Mode {} must be either mse or  average.'.format(typz))
+
+        if mode == 'sum':
+            return torch.sum(loss)
+        elif mode == 'average':
+            return torch.mean(loss, dim=0)
+        elif mode == 'raw':
+            return loss.sum(dim=0)
+
+    @staticmethod
+    def get_k_batches(batch, k):
+        new_batch = {}
+        for name, data in batch.items():
+            if name in ["in_xy", "in_dxdy", "gt_xy", "gt_dxdy"]:
+                new_batch[name] = data.repeat(1, k, 1).clone()
+            elif name in ["gt_frames", "in_frames", "in_tracks", "gt_tracks"]:
+                new_batch[name] = data.squeeze().repeat(k, 1).clone()
+            else:
+                new_batch[name] = data
+        new_batch.update({'size': batch['in_xy'].shape[1]})
+        return new_batch
+
+    @staticmethod
+    def calculate_metrics(pred, target, mode='sum'):
+        ade = cal_ade(target, pred, mode=mode)
+        fde = cal_fde(target, pred, mode=mode)
+        return ade, fde
+
+    def calculate_discriminator_loss(self, pred, target=None, is_real=True, is_disc=False):
+        if self.config.trajectory_based.rnn.discriminator.use_gan_loss:
+            return self.desc_loss_function(input=pred, target_is_real=is_real, is_disc=is_disc)
+        return self.desc_loss_function(pred, target)
 
 
 if __name__ == '__main__':
