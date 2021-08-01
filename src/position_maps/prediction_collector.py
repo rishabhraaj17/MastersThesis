@@ -904,117 +904,136 @@ def visualize_from_locations_and_generate_curves_for_all_and_all(cfg):
         [i for i in range(4)],
     ]
 
+    results_dict = {}
+
     for v_idx, vid_clz in enumerate(video_classes_to_use):
         for vid_num in video_numbers_to_use[v_idx]:
             logger.info(f'Running analysis for {vid_clz.name} - {vid_num}')
 
-            # vid_clz = getattr(SDDVideoClasses, cfg.eval.video_class)
-            # vid_num = cfg.eval.test.video_number_to_use
+            out_dict = extract_for_a_sequence_core(
+                cfg, location_version_to_use, max_distance, prune_radius, run_analysis_on,
+                step_between_frames, vid_clz, vid_num)
 
-            # load_locations
-            load_path = os.path.join(os.getcwd(),
-                                     f'ExtractedLocations'
-                                     f'/{vid_clz.name}'
-                                     f'/{vid_num}/extracted_locations.pt')
-            extracted_locations: ExtractedLocations = torch.load(load_path)['locations']  # mock the model
-            out_head_0, out_head_1, out_head_2 = \
-                extracted_locations.head0, extracted_locations.head1, extracted_locations.head2
+            if vid_clz not in results_dict.keys():
+                results_dict[vid_clz] = {
+                    vid_num: out_dict
+                }
+            else:
+                results_dict[vid_clz][vid_num] = out_dict
 
-            all_heads = [out_head_0, out_head_1, out_head_2]
-            for head in all_heads:
-                locations = head
+    torch.save(results_dict, os.path.join(os.getcwd(), 'analysis_dict.pt'))
+    logger.info(f"Saved results at {os.path.join(os.getcwd(), 'analysis_dict.pt')}")
 
-                locations.locations = [locations.locations[idx]
-                                       for idx in range(0, len(locations.locations), step_between_frames)]
 
-                padded_shape = extracted_locations.padded_shape
-                original_shape = extracted_locations.scaled_shape
+def extract_for_a_sequence_core(cfg, location_version_to_use, max_distance, prune_radius, run_analysis_on,
+                                step_between_frames, vid_clz, vid_num):
+    load_path = os.path.join(os.getcwd(),
+                             f'ExtractedLocations'
+                             f'/{vid_clz.name}'
+                             f'/{vid_num}/extracted_locations.pt')
+    extracted_locations: ExtractedLocations = torch.load(load_path)['locations']  # mock the model
+    out_head_0, out_head_1, out_head_2 = \
+        extracted_locations.head0, extracted_locations.head1, extracted_locations.head2
+    all_heads = [out_head_0, out_head_1, out_head_2]
 
-                sdd_meta = SDDMeta(cfg.eval.root + 'H_SDD.txt')
-                ratio = float(sdd_meta.get_meta(
-                    getattr(SDDVideoDatasets, vid_clz.name), vid_num)[0]['Ratio'].to_numpy()[0])
+    out_dict = {}
+    for h_idx, head in enumerate(all_heads):
+        locations = head
 
-                gt_annotation_path = f'{cfg.root}annotations/{vid_clz.value}/' \
-                                     f'video{vid_num}/annotation_augmented.csv'
-                gt_annotation_df = pd.read_csv(gt_annotation_path)
-                gt_annotation_df = gt_annotation_df.drop(gt_annotation_df.columns[[0]], axis=1)
+        locations.locations = [locations.locations[idx]
+                               for idx in range(0, len(locations.locations), step_between_frames)]
 
-                logger.info(f'Starting evaluation for metrics...')
+        padded_shape = extracted_locations.padded_shape
+        original_shape = extracted_locations.scaled_shape
 
-                precision_dict, recall_dict = {}, {}
+        sdd_meta = SDDMeta(cfg.eval.root + 'H_SDD.txt')
+        ratio = float(sdd_meta.get_meta(
+            getattr(SDDVideoDatasets, vid_clz.name), vid_num)[0]['Ratio'].to_numpy()[0])
 
-                if run_analysis_on == 'prune_radius':
-                    loc_cutoff = np.arange(start=0, stop=80, step=5)
-                elif run_analysis_on == 'loc_cutoff':  # not possible
-                    loc_cutoff = np.linspace(0, 1, 10)
+        gt_annotation_path = f'{cfg.root}annotations/{vid_clz.value}/' \
+                             f'video{vid_num}/annotation_augmented.csv'
+        gt_annotation_df = pd.read_csv(gt_annotation_path)
+        gt_annotation_df = gt_annotation_df.drop(gt_annotation_df.columns[[0]], axis=1)
+
+        logger.info(f'Starting evaluation for metrics...')
+
+        precision_dict, recall_dict = {}, {}
+
+        if run_analysis_on == 'prune_radius':
+            loc_cutoff = np.arange(start=0, stop=5, step=5)
+        elif run_analysis_on == 'loc_cutoff':  # not possible
+            loc_cutoff = np.linspace(0, 1, 10)
+        else:
+            loc_cutoff = []
+
+        for loc_c in loc_cutoff:
+            tp_list, fp_list, fn_list = [], [], []
+            for t_idx, location in enumerate(tqdm(locations.locations)):
+                if location_version_to_use == 'default':
+                    locations_to_use = location.locations
+                elif location_version_to_use == 'pruned':
+                    locations_to_use = location.pruned_locations
+                elif location_version_to_use == 'pruned_scaled':
+                    locations_to_use = location.scaled_locations
+                elif location_version_to_use == 'runtime_pruned_scaled':
+                    # filter out overlapping locations
+                    try:
+                        pruned_locations, pruned_locations_idx = prune_locations_proximity_based(
+                            location.locations,
+                            prune_radius if run_analysis_on != 'prune_radius' else loc_c)
+                        pruned_locations = torch.from_numpy(pruned_locations)
+                    except TimeoutException:
+                        pruned_locations = torch.from_numpy(location.locations)
+
+                    fake_padded_heatmaps = torch.zeros(size=(1, 1, padded_shape[0], padded_shape[1]))
+                    pred_object_locations_scaled, _ = get_adjusted_object_locations(
+                        [pruned_locations], fake_padded_heatmaps, [{'original_shape': original_shape}])
+                    locations_to_use = np.stack(pred_object_locations_scaled).squeeze() \
+                        if len(pred_object_locations_scaled) != 0 else np.zeros((0, 2))
                 else:
-                    return NotImplemented
+                    print('Bad path')
 
-                for loc_c in loc_cutoff:
-                    tp_list, fp_list, fn_list = [], [], []
-                    for t_idx, location in enumerate(tqdm(locations.locations)):
-                        if location_version_to_use == 'default':
-                            locations_to_use = location.locations
-                        elif location_version_to_use == 'pruned':
-                            locations_to_use = location.pruned_locations
-                        elif location_version_to_use == 'pruned_scaled':
-                            locations_to_use = location.scaled_locations
-                        elif location_version_to_use == 'runtime_pruned_scaled':
-                            # filter out overlapping locations
-                            try:
-                                pruned_locations, pruned_locations_idx = prune_locations_proximity_based(
-                                    location.locations,
-                                    prune_radius if run_analysis_on != 'prune_radius' else loc_c)
-                                pruned_locations = torch.from_numpy(pruned_locations)
-                            except TimeoutException:
-                                pruned_locations = torch.from_numpy(location.locations)
+                frame_number = location.frame_number
 
-                            fake_padded_heatmaps = torch.zeros(size=(1, 1, padded_shape[0], padded_shape[1]))
-                            pred_object_locations_scaled, _ = get_adjusted_object_locations(
-                                [pruned_locations], fake_padded_heatmaps, [{'original_shape': original_shape}])
-                            locations_to_use = np.stack(pred_object_locations_scaled).squeeze() \
-                                if len(pred_object_locations_scaled) != 0 else np.zeros((0, 2))
-                        else:
-                            raise NotImplementedError
+                fn, fp, gt_bbox_centers, precision, recall, supervised_boxes, tp = get_annotation_and_metrics(
+                    cfg, frame_number, gt_annotation_df, locations_to_use, max_distance, original_shape, ratio,
+                    threshold=cfg.eval.gt_pred_loc_distance_threshold
+                    if run_analysis_on != 'loc_cutoff' else loc_c)
 
-                        frame_number = location.frame_number
+                tp_list.append(tp)
+                fp_list.append(fp)
+                fn_list.append(fn)
 
-                        fn, fp, gt_bbox_centers, precision, recall, supervised_boxes, tp = get_annotation_and_metrics(
-                            cfg, frame_number, gt_annotation_df, locations_to_use, max_distance, original_shape, ratio,
-                            threshold=cfg.eval.gt_pred_loc_distance_threshold
-                            if run_analysis_on != 'loc_cutoff' else loc_c)
+            if len(tp_list) != 0 and len(fp_list) != 0 and len(fn_list) != 0:
+                final_precision = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fp_list).sum())
+                final_recall = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fn_list).sum())
+            else:
+                final_precision = 0.
+                final_recall = 0.
 
-                        tp_list.append(tp)
-                        fp_list.append(fp)
-                        fn_list.append(fn)
+            precision_dict[loc_c] = final_precision
+            recall_dict[loc_c] = final_recall
 
-                    if len(tp_list) != 0 and len(fp_list) != 0 and len(fn_list) != 0:
-                        final_precision = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fp_list).sum())
-                        final_recall = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fn_list).sum())
-                    else:
-                        final_precision = 0.
-                        final_recall = 0.
+            logger.info(f"Radius: {loc_c} | Precision: {final_precision} | Recall: {final_recall}")
 
-                    precision_dict[loc_c] = final_precision
-                    recall_dict[loc_c] = final_recall
+        plot_path = os.path.join(os.getcwd(), f'ExtractedLocationsPlots/{vid_clz.name}/{vid_num}/')
+        plot_precision_vs_recall(
+            list(precision_dict.keys()),
+            list(precision_dict.values()),
+            list(recall_dict.values()),
+            'Precision vs Recall', outname=f'pr_head_{h_idx}.png', outdir=plot_path)
+        plot_precision_recall_curve(
+            list(precision_dict.values()),
+            list(recall_dict.values()),
+            'Precision-Recall Curve', outname=f'pr_auc_ap_head_{h_idx}.png', outdir=plot_path)
+        logger.info(f'Video Class: {vid_clz.name} | '
+                    f'Video Number: {vid_num}')
+        logger.info(f"Threshold: {cfg.eval.gt_pred_loc_distance_threshold}m | "
+                    f"Plots saved : {plot_path} | Head: {h_idx}")
+        logger.info('**************************************************************************************\n')
 
-                    logger.info(f"Radius: {loc_c} | Precision: {final_precision} | Recall: {final_recall}")
-
-                plot_path = os.path.join(os.getcwd(), f'ExtractedLocationsPlots/{vid_clz.name}/{vid_num}/')
-                plot_precision_vs_recall(
-                    list(precision_dict.keys()),
-                    list(precision_dict.values()),
-                    list(recall_dict.values()),
-                    'Precision vs Recall', outname='pr.png', outdir=plot_path)
-                plot_precision_recall_curve(
-                    list(precision_dict.values()),
-                    list(recall_dict.values()),
-                    'Precision-Recall Curve', outname='pr_auc_ap.png', outdir=plot_path)
-                logger.info(f'Video Class: {vid_clz.name} | '
-                            f'Video Number: {vid_num}')
-                logger.info(f"Threshold: {cfg.eval.gt_pred_loc_distance_threshold}m | "
-                            f"Plots saved : {plot_path}")
-                logger.info('**************************************************************************************\n')
+        out_dict[h_idx] = {'precision': precision_dict, 'recall': recall_dict}
+    return out_dict
 
 
 if __name__ == '__main__':
