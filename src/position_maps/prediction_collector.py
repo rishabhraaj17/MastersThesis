@@ -1,3 +1,4 @@
+import multiprocessing
 import os
 import warnings
 from pathlib import Path
@@ -925,8 +926,55 @@ def visualize_from_locations_and_generate_curves_for_all_and_all(cfg):
     logger.info(f"Saved results at {os.path.join(os.getcwd(), 'analysis_dict.pt')}")
 
 
+@hydra.main(config_path="config", config_name="config")
+def visualize_from_locations_and_generate_curves_for_all_and_all_multi_processing(cfg):
+    adjust_config(cfg)
+
+    location_version_to_use = 'runtime_pruned_scaled'  # don't touch it
+    prune_radius = 43  # no effect
+    max_distance = float('inf')
+
+    run_analysis_on = 'prune_radius'  # 'loc_cutoff' - don't touch it
+
+    step_between_frames = 5
+
+    logger.info(f'Evaluating metrics from locations')
+
+    video_classes_to_use = [
+        SDDVideoClasses.DEATH_CIRCLE,
+        SDDVideoClasses.GATES,
+        SDDVideoClasses.HYANG,
+        SDDVideoClasses.LITTLE,
+        SDDVideoClasses.NEXUS,
+        SDDVideoClasses.QUAD,
+        SDDVideoClasses.BOOKSTORE,
+        SDDVideoClasses.COUPA,
+    ]
+    video_numbers_to_use = [
+        [i for i in range(5)],
+        [i for i in range(9)],
+        [i for i in range(15)],
+        [i for i in range(4)],
+        [i for i in range(12) if i not in [3, 4, 5]],
+        [i for i in range(4)],
+        [i for i in range(7)],
+        [i for i in range(4)],
+    ]
+
+    with multiprocessing.Pool(processes=4) as pool:
+        results = pool.starmap(
+            extract_for_a_sequence_core,
+            [(cfg, location_version_to_use, max_distance, prune_radius, run_analysis_on,
+              step_between_frames, vid_clz, vid_num) for v_idx, vid_clz in enumerate(video_classes_to_use) for vid_num
+             in video_numbers_to_use[v_idx]])
+
+    torch.save(results, os.path.join(os.getcwd(), 'analysis_dict.pt'))
+    logger.info(f"Saved results at {os.path.join(os.getcwd(), 'analysis_dict.pt')}")
+
+
 def extract_for_a_sequence_core(cfg, location_version_to_use, max_distance, prune_radius, run_analysis_on,
                                 step_between_frames, vid_clz, vid_num):
+    logger.info(f'Running analysis for {vid_clz.name} - {vid_num}')
     load_path = os.path.join(os.getcwd(),
                              f'ExtractedLocations'
                              f'/{vid_clz.name}'
@@ -960,7 +1008,7 @@ def extract_for_a_sequence_core(cfg, location_version_to_use, max_distance, prun
         precision_dict, recall_dict = {}, {}
 
         if run_analysis_on == 'prune_radius':
-            loc_cutoff = np.arange(start=0, stop=5, step=5)
+            loc_cutoff = np.arange(start=0, stop=80, step=5)
         elif run_analysis_on == 'loc_cutoff':  # not possible
             loc_cutoff = np.linspace(0, 1, 10)
         else:
@@ -1033,7 +1081,7 @@ def extract_for_a_sequence_core(cfg, location_version_to_use, max_distance, prun
         logger.info('**************************************************************************************\n')
 
         out_dict[h_idx] = {'precision': precision_dict, 'recall': recall_dict}
-    return out_dict
+    return {vid_clz: {vid_num: out_dict}}
 
 
 if __name__ == '__main__':
@@ -1046,4 +1094,4 @@ if __name__ == '__main__':
         # evaluate_metrics_for_each_threshold()
         # visualize_from_locations()
         # visualize_from_locations_and_generate_curves()
-        visualize_from_locations_and_generate_curves_for_all_and_all()
+        visualize_from_locations_and_generate_curves_for_all_and_all_multi_processing()
