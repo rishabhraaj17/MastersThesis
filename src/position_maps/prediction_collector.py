@@ -654,6 +654,10 @@ def visualize_from_locations(cfg):
         fn_list.append(fn)
 
         if cfg.eval.show_plots or cfg.eval.make_video:
+            if locations_to_use.ndim == 1:
+                locations_to_use = locations_to_use[None, :]
+            if locations_to_use.size == 0:
+                locations_to_use = np.zeros((0, 2))
             fig = plot_for_location_visualizations(
                 rgb_frame, gt_bbox_centers,
                 locations_to_use, boxes=supervised_boxes,
@@ -672,14 +676,14 @@ def visualize_from_locations(cfg):
             if cfg.eval.make_video:
                 video_frame = get_image_array_from_figure(fig)
 
-                if video_frame.shape[0] != original_shape[1] \
-                        or video_frame.shape[1] != original_shape[0]:
-                    video_frame = skimage.transform.resize(
-                        video_frame, (original_shape[1], original_shape[0]))
-                    video_frame = (video_frame * 255).astype(np.uint8)
+                # if video_frame.shape[0] != original_shape[1] \
+                #         or video_frame.shape[1] != original_shape[0]:
+                #     video_frame = skimage.transform.resize(
+                #         video_frame, (original_shape[1], original_shape[0]))
+                #     video_frame = (video_frame * 255).astype(np.uint8)
 
-                    video_frame = process_numpy_video_frame_to_tensor(video_frame)
-                    video_frames.append(video_frame)
+                video_frame = process_numpy_video_frame_to_tensor(video_frame)
+                video_frames.append(video_frame)
 
     logger.info(f'Video Class: {getattr(SDDVideoClasses, cfg.eval.video_meta_class).name} | '
                 f'Video Number: {cfg.eval.test.video_number_to_use}')
@@ -871,5 +875,5 @@ if __name__ == '__main__':
         # join_parts_prediction(os.path.join(os.getcwd(), f'logs/HeatMapPredictions/DEATH_CIRCLE/4/'))
         # evaluate_metrics()
         # evaluate_metrics_for_each_threshold()
-        # visualize_from_locations()
-        visualize_from_locations_and_generate_curves()
+        visualize_from_locations()
+        # visualize_from_locations_and_generate_curves()
