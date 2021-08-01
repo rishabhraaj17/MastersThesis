@@ -48,7 +48,8 @@ MODEL_PATH_MAPPING = {
         5: f'{ROOT}lightning_logs/version_516516/',
         6: f'{ROOT}lightning_logs/version_516516/',
         7: f'{ROOT}wandb/run-20210722_104027-y1v1m659/files/PositionMap/y1v1m659',
-        8: f'{ROOT}wandb/run-20210722_104027-y1v1m659/files/PositionMap/y1v1m659'
+        # 8: f'{ROOT}wandb/run-20210722_104027-y1v1m659/files/PositionMap/y1v1m659'
+        8: f'{ROOT}wandb/run-20210801_132110-2p70nv6k/files/PositionMap/2p70nv6k'
     },
     SDDVideoClasses.HYANG: {
         0: f'{ROOT}wandb/run-20210723_120209-3mjnkhii/files/PositionMap/3mjnkhii',
@@ -59,18 +60,22 @@ MODEL_PATH_MAPPING = {
         5: f'{ROOT}wandb/run-20210724_005133-2i25j4c8/files/PositionMap/2i25j4c8',
         6: f'{ROOT}wandb/run-20210727_141237-13buko8r/files/PositionMap/13buko8r',
         7: f'{ROOT}wandb/run-20210723_120209-3mjnkhii/files/PositionMap/3mjnkhii',
-        8: f'{ROOT}wandb/run-20210723_120209-3mjnkhii/files/PositionMap/3mjnkhii',
-        9: f'{ROOT}wandb/run-20210723_120209-3mjnkhii/files/PositionMap/3mjnkhii',
+        # 8: f'{ROOT}wandb/run-20210723_120209-3mjnkhii/files/PositionMap/3mjnkhii',
+        8: f'{ROOT}wandb/run-20210801_125932-gnlv30vi/files/PositionMap/gnlv30vi',
+        # 9: f'{ROOT}wandb/run-20210723_120209-3mjnkhii/files/PositionMap/3mjnkhii',
+        9: f'{ROOT}wandb/run-20210801_130419-eqm84e4x/files/PositionMap/eqm84e4x',
         10: f'{ROOT}wandb/run-20210727_141237-13buko8r/files/PositionMap/13buko8r',
         11: f'{ROOT}wandb/run-20210727_141237-13buko8r/files/PositionMap/13buko8r',
         12: f'{ROOT}wandb/run-20210727_141237-13buko8r/files/PositionMap/13buko8r',
         13: f'{ROOT}wandb/run-20210727_141237-13buko8r/files/PositionMap/13buko8r',
-        14: f'{ROOT}wandb/run-20210727_141237-13buko8r/files/PositionMap/13buko8r'
+        # 14: f'{ROOT}wandb/run-20210727_141237-13buko8r/files/PositionMap/13buko8r',
+        14: f'{ROOT}wandb/run-20210801_132432-3ct0h4kt/files/PositionMap/3ct0h4kt',
     },
     SDDVideoClasses.LITTLE: {
         0: f'{ROOT}wandb/run-20210721_174114-2pz3vle2/files/PositionMap/2pz3vle2',
         1: f'{ROOT}wandb/run-20210721_174114-2pz3vle2/files/PositionMap/2pz3vle2',
-        2: f'{ROOT}wandb/run-20210721_174114-2pz3vle2/files/PositionMap/2pz3vle2',
+        # 2: f'{ROOT}wandb/run-20210721_174114-2pz3vle2/files/PositionMap/2pz3vle2',
+        2: f'{ROOT}wandb/run-20210801_133334-34n1xo5e/files/PositionMap/34n1xo5e',
         3: f'{ROOT}wandb/run-20210721_174114-2pz3vle2/files/PositionMap/2pz3vle2'
     },
     SDDVideoClasses.NEXUS: {
@@ -370,6 +375,23 @@ def extract_locations_for_all(cfg):
     # video_classes_to_use = [SDDVideoClasses.DEATH_CIRCLE]
     # video_numbers_to_use = [[i for i in range(5)]]
 
+    # video_classes_to_use = [
+    #     SDDVideoClasses.GATES,
+    #     SDDVideoClasses.HYANG,
+    #     SDDVideoClasses.LITTLE,
+    #     SDDVideoClasses.NEXUS,
+    #     SDDVideoClasses.QUAD,
+    #     SDDVideoClasses.BOOKSTORE,
+    #     SDDVideoClasses.COUPA]
+    # video_numbers_to_use = [
+    #     [i for i in range(9)],
+    #     [i for i in range(15)],
+    #     [i for i in range(4)],
+    #     [i for i in range(12) if i not in [3, 4, 5]],
+    #     [i for i in range(4)],
+    #     [i for i in range(7)],
+    #     [i for i in range(4)], ]
+
     video_classes_to_use = [
         SDDVideoClasses.GATES,
         SDDVideoClasses.HYANG,
@@ -377,7 +399,8 @@ def extract_locations_for_all(cfg):
         SDDVideoClasses.NEXUS,
         SDDVideoClasses.QUAD,
         SDDVideoClasses.BOOKSTORE,
-        SDDVideoClasses.COUPA]
+        SDDVideoClasses.COUPA,
+    ]
     video_numbers_to_use = [
         [i for i in range(9)],
         [i for i in range(15)],
@@ -385,7 +408,8 @@ def extract_locations_for_all(cfg):
         [i for i in range(12) if i not in [3, 4, 5]],
         [i for i in range(4)],
         [i for i in range(7)],
-        [i for i in range(4)], ]
+        [i for i in range(4)],
+    ]
 
     for v_idx, v_clz in enumerate(video_classes_to_use):
         for v_num in video_numbers_to_use[v_idx]:

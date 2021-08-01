@@ -50,9 +50,9 @@ def adjust_config(cfg):
     cfg.eval.test.single_video_mode.multiple_videos = False
 
     # one video at a time
-    cfg.eval.video_class = 'DEATH_CIRCLE'
-    cfg.eval.video_meta_class = 'DEATH_CIRCLE'
-    cfg.eval.test.video_number_to_use = 3
+    cfg.eval.video_class = 'COUPA'
+    cfg.eval.video_meta_class = 'COUPA'
+    cfg.eval.test.video_number_to_use = 1
     cfg.eval.test.num_videos = -1
     cfg.eval.dataset_workers = 12
     cfg.eval.test.multiple_videos = False
@@ -89,7 +89,7 @@ def adjust_config(cfg):
     cfg.eval.gt_pred_loc_distance_threshold = 2  # in meters
 
     # video + plot
-    cfg.eval.show_plots = True
+    cfg.eval.show_plots = False
     cfg.eval.make_video = False
 
 
@@ -126,6 +126,7 @@ def plot_precision_recall_curve(ps, rs, title, outname=None, outdir="./", adjust
     if outname is not None:
         plt.savefig(os.path.join(outdir, outname), dpi=150, facecolor='w', edgecolor='w', orientation='landscape',
                     bbox_inches='tight')
+        plt.close()
     plt.show()
 
 
@@ -151,6 +152,7 @@ def plot_precision_vs_recall(ths, ps, rs, title, outname=None, outdir="./", adju
     if outname is not None:
         plt.savefig(os.path.join(outdir, outname), dpi=150, facecolor='w', edgecolor='w', orientation='landscape',
                     bbox_inches='tight')
+        plt.close()
     plt.show()
 
 
@@ -760,7 +762,7 @@ def visualize_from_locations_and_generate_curves(cfg):
 
     run_analysis_on = 'prune_radius'  # 'loc_cutoff'
 
-    step_between_frames = 50
+    step_between_frames = 5
 
     logger.info(f'Evaluating metrics from locations')
 
@@ -802,7 +804,7 @@ def visualize_from_locations_and_generate_curves(cfg):
     precision_dict, recall_dict = {}, {}
 
     if run_analysis_on == 'prune_radius':
-        loc_cutoff = np.arange(start=0, stop=100, step=1)
+        loc_cutoff = np.arange(start=0, stop=80, step=5)
     elif run_analysis_on == 'loc_cutoff':  # not possible
         loc_cutoff = np.linspace(0, 1, 10)
     else:
@@ -867,6 +869,154 @@ def visualize_from_locations_and_generate_curves(cfg):
                 f"Head Used: {cfg.eval.objectness.index_select}")
 
 
+@hydra.main(config_path="config", config_name="config")
+def visualize_from_locations_and_generate_curves_for_all_and_all(cfg):
+    adjust_config(cfg)
+
+    location_version_to_use = 'runtime_pruned_scaled'  # don't touch it
+    prune_radius = 43  # no effect
+    max_distance = float('inf')
+
+    run_analysis_on = 'prune_radius'  # 'loc_cutoff' - don't touch it
+
+    step_between_frames = 5
+
+    logger.info(f'Evaluating metrics from locations')
+
+    video_classes_to_use = [
+        SDDVideoClasses.DEATH_CIRCLE,
+        SDDVideoClasses.GATES,
+        SDDVideoClasses.HYANG,
+        SDDVideoClasses.LITTLE,
+        SDDVideoClasses.NEXUS,
+        SDDVideoClasses.QUAD,
+        SDDVideoClasses.BOOKSTORE,
+        SDDVideoClasses.COUPA,
+    ]
+    video_numbers_to_use = [
+        [i for i in range(5)],
+        [i for i in range(9)],
+        [i for i in range(15)],
+        [i for i in range(4)],
+        [i for i in range(12) if i not in [3, 4, 5]],
+        [i for i in range(4)],
+        [i for i in range(7)],
+        [i for i in range(4)],
+    ]
+
+    for v_idx, vid_clz in enumerate(video_classes_to_use):
+        for vid_num in video_numbers_to_use[v_idx]:
+            logger.info(f'Running analysis for {vid_clz.name} - {vid_num}')
+
+            # vid_clz = getattr(SDDVideoClasses, cfg.eval.video_class)
+            # vid_num = cfg.eval.test.video_number_to_use
+
+            # load_locations
+            load_path = os.path.join(os.getcwd(),
+                                     f'ExtractedLocations'
+                                     f'/{vid_clz.name}'
+                                     f'/{vid_num}/extracted_locations.pt')
+            extracted_locations: ExtractedLocations = torch.load(load_path)['locations']  # mock the model
+            out_head_0, out_head_1, out_head_2 = \
+                extracted_locations.head0, extracted_locations.head1, extracted_locations.head2
+
+            all_heads = [out_head_0, out_head_1, out_head_2]
+            for head in all_heads:
+                locations = head
+
+                locations.locations = [locations.locations[idx]
+                                       for idx in range(0, len(locations.locations), step_between_frames)]
+
+                padded_shape = extracted_locations.padded_shape
+                original_shape = extracted_locations.scaled_shape
+
+                sdd_meta = SDDMeta(cfg.eval.root + 'H_SDD.txt')
+                ratio = float(sdd_meta.get_meta(
+                    getattr(SDDVideoDatasets, vid_clz.name), vid_num)[0]['Ratio'].to_numpy()[0])
+
+                gt_annotation_path = f'{cfg.root}annotations/{vid_clz.value}/' \
+                                     f'video{vid_num}/annotation_augmented.csv'
+                gt_annotation_df = pd.read_csv(gt_annotation_path)
+                gt_annotation_df = gt_annotation_df.drop(gt_annotation_df.columns[[0]], axis=1)
+
+                logger.info(f'Starting evaluation for metrics...')
+
+                precision_dict, recall_dict = {}, {}
+
+                if run_analysis_on == 'prune_radius':
+                    loc_cutoff = np.arange(start=0, stop=80, step=5)
+                elif run_analysis_on == 'loc_cutoff':  # not possible
+                    loc_cutoff = np.linspace(0, 1, 10)
+                else:
+                    return NotImplemented
+
+                for loc_c in loc_cutoff:
+                    tp_list, fp_list, fn_list = [], [], []
+                    for t_idx, location in enumerate(tqdm(locations.locations)):
+                        if location_version_to_use == 'default':
+                            locations_to_use = location.locations
+                        elif location_version_to_use == 'pruned':
+                            locations_to_use = location.pruned_locations
+                        elif location_version_to_use == 'pruned_scaled':
+                            locations_to_use = location.scaled_locations
+                        elif location_version_to_use == 'runtime_pruned_scaled':
+                            # filter out overlapping locations
+                            try:
+                                pruned_locations, pruned_locations_idx = prune_locations_proximity_based(
+                                    location.locations,
+                                    prune_radius if run_analysis_on != 'prune_radius' else loc_c)
+                                pruned_locations = torch.from_numpy(pruned_locations)
+                            except TimeoutException:
+                                pruned_locations = torch.from_numpy(location.locations)
+
+                            fake_padded_heatmaps = torch.zeros(size=(1, 1, padded_shape[0], padded_shape[1]))
+                            pred_object_locations_scaled, _ = get_adjusted_object_locations(
+                                [pruned_locations], fake_padded_heatmaps, [{'original_shape': original_shape}])
+                            locations_to_use = np.stack(pred_object_locations_scaled).squeeze() \
+                                if len(pred_object_locations_scaled) != 0 else np.zeros((0, 2))
+                        else:
+                            raise NotImplementedError
+
+                        frame_number = location.frame_number
+
+                        fn, fp, gt_bbox_centers, precision, recall, supervised_boxes, tp = get_annotation_and_metrics(
+                            cfg, frame_number, gt_annotation_df, locations_to_use, max_distance, original_shape, ratio,
+                            threshold=cfg.eval.gt_pred_loc_distance_threshold
+                            if run_analysis_on != 'loc_cutoff' else loc_c)
+
+                        tp_list.append(tp)
+                        fp_list.append(fp)
+                        fn_list.append(fn)
+
+                    if len(tp_list) != 0 and len(fp_list) != 0 and len(fn_list) != 0:
+                        final_precision = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fp_list).sum())
+                        final_recall = np.array(tp_list).sum() / (np.array(tp_list).sum() + np.array(fn_list).sum())
+                    else:
+                        final_precision = 0.
+                        final_recall = 0.
+
+                    precision_dict[loc_c] = final_precision
+                    recall_dict[loc_c] = final_recall
+
+                    logger.info(f"Radius: {loc_c} | Precision: {final_precision} | Recall: {final_recall}")
+
+                plot_path = os.path.join(os.getcwd(), f'ExtractedLocationsPlots/{vid_clz.name}/{vid_num}/')
+                plot_precision_vs_recall(
+                    list(precision_dict.keys()),
+                    list(precision_dict.values()),
+                    list(recall_dict.values()),
+                    'Precision vs Recall', outname='pr.png', outdir=plot_path)
+                plot_precision_recall_curve(
+                    list(precision_dict.values()),
+                    list(recall_dict.values()),
+                    'Precision-Recall Curve', outname='pr_auc_ap.png', outdir=plot_path)
+                logger.info(f'Video Class: {vid_clz.name} | '
+                            f'Video Number: {vid_num}')
+                logger.info(f"Threshold: {cfg.eval.gt_pred_loc_distance_threshold}m | "
+                            f"Plots saved : {plot_path}")
+                logger.info('**************************************************************************************\n')
+
+
 if __name__ == '__main__':
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -875,5 +1025,6 @@ if __name__ == '__main__':
         # join_parts_prediction(os.path.join(os.getcwd(), f'logs/HeatMapPredictions/DEATH_CIRCLE/4/'))
         # evaluate_metrics()
         # evaluate_metrics_for_each_threshold()
-        visualize_from_locations()
+        # visualize_from_locations()
         # visualize_from_locations_and_generate_curves()
+        visualize_from_locations_and_generate_curves_for_all_and_all()
