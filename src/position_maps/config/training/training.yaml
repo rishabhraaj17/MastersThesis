@@ -50,8 +50,13 @@ tp_module:
     mode_dist_threshold: 2
 
     # we split same dataset into train & val (in time)
-    video_classes: [ DEATH_CIRCLE ]
-    video_numbers: [ [ 4 ] ]
+    video_classes: [ LITTLE ]
+    video_numbers: [ [ 0 ] ]
+
+#    video_classes: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
+#    video_numbers: [ [ 0, 1, 2, 3, 4, 5, 6 ], [ 0, 1, 2, 3 ], [ 0, 1, 2, 3, 4 ], [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ],
+#                     [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], [ 0, 1, 2, 3 ],
+#                     [ 0, 1, 2, 6, 7, 8, 9, 10, 11 ], [ 0, 1, 2, 3 ] ]
 
     # not in use right now
     train:
@@ -111,6 +116,26 @@ tp_module:
     find_unused_parameters: True
     gradient_clip_val: 2.0
     accumulate_grad_batches: 1
+
+  device: 'cuda:0'
+
+  warm_restart:
+    enable: True
+    custom_load: True
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+      path: "lightning_logs/version_"
+      version: 516403
+      top_k: 1
+
+    wandb:
+      enabled: True
+      checkpoint:
+        root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/wandb/"
+        tail_path: "/files/"
+        project_name: 'TrajectoryPredictionBaseline'
+        run_name: "run-20210801_135455-1u8hovb0"
+        top_k: 1
 
 # loaders
 batch_size: 2

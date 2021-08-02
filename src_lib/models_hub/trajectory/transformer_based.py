@@ -671,7 +671,7 @@ class TrajectoryGANTransformerV2(BaseGAN):
             if name in ["in_xy", "in_dxdy", "gt_xy", "gt_dxdy"]:
                 new_batch[name] = data.repeat(1, k, 1).clone()
             elif name in ["gt_frames", "in_frames", "in_tracks", "gt_tracks"]:
-                new_batch[name] = data.repeat(k, 1).clone()
+                new_batch[name] = data.squeeze().repeat(k, 1).clone()
             else:
                 new_batch[name] = data
         new_batch.update({'size': batch['in_xy'].shape[1]})

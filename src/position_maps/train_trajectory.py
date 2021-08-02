@@ -1,3 +1,4 @@
+import os
 import warnings
 
 import hydra
@@ -84,6 +85,9 @@ def train_lightning(cfg):
 
     model = setup_model(cfg, train_dataset, val_dataset)
 
+    if cfg.tp_module.warm_restart.enable:
+        model = load_checkpoint(cfg, model)
+
     checkpoint_callback = ModelCheckpoint(
         monitor=cfg.monitor,
         save_top_k=cfg.tp_module.trainer.num_checkpoints_to_save,
@@ -101,6 +105,36 @@ def train_lightning(cfg):
                       accumulate_grad_batches=cfg.tp_module.trainer.accumulate_grad_batches,
                       logger=wandb_logger)
     trainer.fit(model)
+
+
+def load_checkpoint(cfg, model):
+    if cfg.tp_module.warm_restart.wandb.enabled:
+        version_name = f"{cfg.tp_module.warm_restart.wandb.checkpoint.run_name}".split('-')[-1]
+        checkpoint_root_path = f'{cfg.tp_module.warm_restart.wandb.checkpoint.root}' \
+                               f'{cfg.tp_module.warm_restart.wandb.checkpoint.run_name}' \
+                               f'{cfg.tp_module.warm_restart.wandb.checkpoint.tail_path}' \
+                               f'{cfg.tp_module.warm_restart.wandb.checkpoint.project_name}/' \
+                               f'{version_name}/checkpoints/'
+    else:
+        checkpoint_root_path = \
+            f'{cfg.tp_module.warm_restart.checkpoint.root}{cfg.tp_module.warm_restart.checkpoint.path}' \
+            f'{cfg.tp_module.warm_restart.checkpoint.version}/checkpoints/'
+    checkpoint_files = os.listdir(checkpoint_root_path)
+    epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
+    epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
+    checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
+    model_path = checkpoint_root_path + checkpoint_files[-cfg.tp_module.warm_restart.checkpoint.top_k]
+    logger.info(f'Resuming from : {model_path}')
+    if cfg.tp_module.warm_restart.custom_load:
+        logger.info(f'Loading weights manually as custom load is {cfg.tp_module.warm_restart.custom_load}')
+        load_dict = torch.load(model_path, map_location=cfg.tp_module.device)
+
+        model.load_state_dict(load_dict['state_dict'])
+        model.to(cfg.tp_module.device)
+        model.train()
+    else:
+        logger.warning('Not supported, no checkpoint loaded')
+    return model
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -177,11 +211,7 @@ def evaluate_stochastic(cfg):
     model = setup_model(cfg, train_dataset, val_dataset)
 
     # load dict
-    path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/wandb/' \
-           'run-20210724_011735-83lknvvr/files/' \
-           'TrajectoryPredictionBaseline/83lknvvr/checkpoints/epoch=2-step=72530.ckpt'
-    state_dict = torch.load(path)['state_dict']
-    model.load_state_dict(state_dict)
+    model = load_checkpoint(cfg, model)
 
     if cfg.tp_module.datasets.use_standard_dataset:
         collate_fn = seq_collate_with_dataset_idx_dict
@@ -191,7 +221,11 @@ def evaluate_stochastic(cfg):
     loader = DataLoader(val_dataset, batch_size=2, shuffle=True, pin_memory=True, drop_last=False,
                         collate_fn=collate_fn)
 
+    ade_list, fde_list, loss_list = [], [], []
+
     for batch in loader:
+        batch = {k: v.to(cfg.tp_module.device) for k, v in batch.items()}
+
         batch = model.get_k_batches(batch, model.config.tp_module.datasets.batch_multiplier)
         batch_size = batch["size"]
 
@@ -213,19 +247,23 @@ def evaluate_stochastic(cfg):
         loss = torch.mean(loss)
 
         ade, fde = cal_ade(target, pred, mode='raw'), cal_fde(target, pred, mode='raw')
-        ade = ade.view(model.config.tp_module.datasets.batch_multiplier, batch_size) * batch['ratio'][0]
-        fde = fde.view(model.config.tp_module.datasets.batch_multiplier, batch_size) * batch['ratio'][0]
+        ade = ade.view(model.config.tp_module.datasets.batch_multiplier, batch_size) * batch['ratio'].squeeze()
+        fde = fde.view(model.config.tp_module.datasets.batch_multiplier, batch_size) * batch['ratio'].squeeze()
 
         fde, _ = fde.min(dim=0)
         modes_caught = (fde < model.config.tp_module.datasets.mode_dist_threshold).float()
 
-        ade, _ = ade.min(dim=0, keepdim=True)
+        ade, ade_min_idx = ade.min(dim=0, keepdim=True)
+
+        ade_list.append(ade.mean().item())
+        fde_list.append(fde.mean().item())
+        loss_list.append(loss.item())
 
         seq_start_end = batch['seq_start_end']
         frame_nums = batch['in_frames'].view(model.config.tp_module.datasets.batch_multiplier, 8, batch_size)
         track_lists = batch['in_tracks'].view(model.config.tp_module.datasets.batch_multiplier, 8, batch_size)
 
-        random_trajectory_idx = np.random.choice(frame_nums.shape[-1], 1, replace=False).item()
+        random_trajectory_idx = np.random.choice(batch['dataset_idx'].shape[-1], 1, replace=False).item()
 
         dataset_idx = batch['dataset_idx'][random_trajectory_idx].item()
 
@@ -258,8 +296,14 @@ def evaluate_stochastic(cfg):
         gt_trajectory = gt_trajectory[:, 0, :]
 
         plot_trajectory_alongside_frame_stochastic(
-            frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_num, track_id=track_num,
+            frame, obs_trajectory.cpu(), gt_trajectory.cpu(), pred_trajectory.cpu(), frame_num, track_id=track_num,
+            best_idx=ade_min_idx.squeeze()[random_trajectory_idx],
             additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
+
+    loss_list = np.array(loss_list).mean()
+    ade_list = np.array(ade_list).mean()
+    fde_list = np.array(fde_list).mean()
+    logger.info(f"Loss: {loss_list} | ADE: {ade_list} | FDE: {fde_list}")
 
 
 @hydra.main(config_path="config", config_name="config")
