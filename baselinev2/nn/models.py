@@ -15,6 +15,7 @@ from baselinev2.config import MANUAL_SEED, LINEAR_CFG, SDD_VIDEO_CLASSES_LIST_FO
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import BaselineDataset, BaselineGeneratedDataset
 from baselinev2.plot_utils import plot_trajectories
+from baselinev2.stochastic.losses import cal_ade, cal_fde, cal_ade_fde_stochastic
 from log import initialize_logging, get_logger
 
 initialize_logging()
@@ -668,6 +669,34 @@ class ConstantLinearBaseline(object):
         self.uv = uv if uv is not None else self.uv
 
         self.trajectories = []
+
+
+class ConstantLinearBaselineV2(ConstantLinearBaseline):
+    def __init__(self, xy=None, uv=None, prediction_length=12, relative_velocities=False):
+        super(ConstantLinearBaselineV2, self).__init__(
+            xy=xy, uv=uv, prediction_length=prediction_length, relative_velocities=relative_velocities)
+
+
+    def eval(self, obs_trajectory, obs_distances, gt_trajectory, ratio, batch_size):
+        self.reset(xy=obs_trajectory[:, -1, ...], uv=obs_distances[:, -1, ...])
+
+        pred_trajectory = self()
+
+        pred_trajectory = torch.from_numpy(pred_trajectory).transpose(0, 1)
+        gt_trajectory = torch.from_numpy(gt_trajectory).transpose(0, 1)
+
+        gt_trajectory = gt_trajectory.view(gt_trajectory.shape[0], -1, batch_size, gt_trajectory.shape[-1])
+        pred_trajectory = pred_trajectory.view(pred_trajectory.shape[0], -1, batch_size, pred_trajectory.shape[-1])
+
+        ade, fde, best_idx = cal_ade_fde_stochastic(gt_trajectory, pred_trajectory)
+
+        ade = ade.squeeze()
+        fde = fde.squeeze()
+
+        ade *= ratio.squeeze().cpu()
+        fde *= ratio.squeeze().cpu()
+
+        return pred_trajectory, ade, fde
 
 
 if __name__ == '__main__':

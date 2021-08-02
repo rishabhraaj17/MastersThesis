@@ -13,9 +13,11 @@ from tqdm import tqdm
 
 import src_lib.models_hub as hub
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
+from baselinev2.exceptions import InvalidFrameException
 from baselinev2.nn.data_utils import extract_frame_from_video
+from baselinev2.nn.models import ConstantLinearBaseline, ConstantLinearBaselineV2
 from baselinev2.plot_utils import plot_trajectory_alongside_frame, plot_trajectory_alongside_frame_stochastic
-from baselinev2.stochastic.losses import cal_ade, cal_fde
+from baselinev2.stochastic.losses import cal_ade, cal_fde, cal_ade_fde_stochastic
 from log import get_logger
 from src.position_maps.trajectory_utils import get_multiple_datasets, bezier_smoother, splrep_smoother
 from src_lib.datasets.extracted_dataset import get_train_and_val_datasets, extracted_collate
@@ -221,9 +223,12 @@ def evaluate_stochastic(cfg):
     loader = DataLoader(val_dataset, batch_size=2, shuffle=True, pin_memory=True, drop_last=False,
                         collate_fn=collate_fn)
 
-    ade_list, fde_list, loss_list = [], [], []
+    constant_linear_baseline_caller = ConstantLinearBaselineV2()
 
-    for batch in loader:
+    ade_list, fde_list, loss_list = [], [], []
+    linear_ade_list, linear_fde_list = [], []
+
+    for b_idx, batch in enumerate(tqdm(loader)):
         batch = {k: v.to(cfg.tp_module.device) for k, v in batch.items()}
 
         batch = model.get_k_batches(batch, model.config.tp_module.datasets.batch_multiplier)
@@ -233,6 +238,13 @@ def evaluate_stochastic(cfg):
             model.generator.eval()
             out = model.generator(batch)
             model.generator.train()
+
+        constant_linear_baseline_pred_trajectory, constant_linear_baseline_ade, constant_linear_baseline_fde = \
+            constant_linear_baseline_caller.eval(
+                obs_trajectory=batch['in_xy'].permute(1, 0, 2).cpu().numpy(),
+                obs_distances=batch['in_dxdy'].permute(1, 0, 2).cpu().numpy(),
+                gt_trajectory=batch['gt_xy'].permute(1, 0, 2).cpu().numpy()
+                , ratio=batch['ratio'].squeeze(), batch_size=batch_size)
 
         target = batch['gt_xy']
         pred = out['out_xy']
@@ -246,18 +258,25 @@ def evaluate_stochastic(cfg):
         loss, _ = loss.min(dim=0, keepdim=True)
         loss = torch.mean(loss)
 
-        ade, fde = cal_ade(target, pred, mode='raw'), cal_fde(target, pred, mode='raw')
-        ade = ade.view(model.config.tp_module.datasets.batch_multiplier, batch_size) * batch['ratio'].squeeze()
-        fde = fde.view(model.config.tp_module.datasets.batch_multiplier, batch_size) * batch['ratio'].squeeze()
+        # ade, fde = cal_ade(target, pred, mode='raw'), cal_fde(target, pred, mode='raw')
+        ade, fde, best_idx = cal_ade_fde_stochastic(target_separated, pred_separated)
+        # ade = ade.view(model.config.tp_module.datasets.batch_multiplier, batch_size) * batch['ratio'].squeeze()
+        # fde = fde.view(model.config.tp_module.datasets.batch_multiplier, batch_size) * batch['ratio'].squeeze()
 
-        fde, _ = fde.min(dim=0)
+        # fde, _ = fde.min(dim=0)
         modes_caught = (fde < model.config.tp_module.datasets.mode_dist_threshold).float()
 
-        ade, ade_min_idx = ade.min(dim=0, keepdim=True)
+        # ade, ade_min_idx = ade.min(dim=0, keepdim=True)
+
+        ade *= batch['ratio'].squeeze()
+        fde *= batch['ratio'].squeeze()
 
         ade_list.append(ade.mean().item())
         fde_list.append(fde.mean().item())
         loss_list.append(loss.item())
+
+        linear_ade_list.append(constant_linear_baseline_ade.mean().item())
+        linear_fde_list.append(constant_linear_baseline_fde.mean().item())
 
         seq_start_end = batch['seq_start_end']
         frame_nums = batch['in_frames'].view(model.config.tp_module.datasets.batch_multiplier, 8, batch_size)
@@ -286,8 +305,6 @@ def evaluate_stochastic(cfg):
             video_path = f"{cfg.root}videos/{current_dataset.video_class.value}" \
                          f"/video{current_dataset.video_number}/video.mov"
 
-        frame = extract_frame_from_video(video_path, frame_num)
-
         ade = ade.squeeze()[random_trajectory_idx]
         fde = fde.squeeze()[random_trajectory_idx]
 
@@ -295,15 +312,25 @@ def evaluate_stochastic(cfg):
         obs_trajectory = obs_trajectory[:, 0, :]
         gt_trajectory = gt_trajectory[:, 0, :]
 
-        plot_trajectory_alongside_frame_stochastic(
-            frame, obs_trajectory.cpu(), gt_trajectory.cpu(), pred_trajectory.cpu(), frame_num, track_id=track_num,
-            best_idx=ade_min_idx.squeeze()[random_trajectory_idx],
-            additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
+        if b_idx % 500 == 0:
+            try:
+                frame = extract_frame_from_video(video_path, frame_num)
+    
+                plot_trajectory_alongside_frame_stochastic(
+                    frame, obs_trajectory.cpu(), gt_trajectory.cpu(), pred_trajectory.cpu(), frame_num, track_id=track_num,
+                    best_idx=best_idx.squeeze()[random_trajectory_idx],
+                    additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
+            except InvalidFrameException:
+                continue
 
     loss_list = np.array(loss_list).mean()
     ade_list = np.array(ade_list).mean()
     fde_list = np.array(fde_list).mean()
-    logger.info(f"Loss: {loss_list} | ADE: {ade_list} | FDE: {fde_list}")
+    linear_ade_list = np.array(linear_ade_list).mean()
+    linear_fde_list = np.array(linear_fde_list).mean()
+
+    logger.info(f"Loss: {loss_list}\nADE: {ade_list} | FDE: {fde_list}\n"
+                f"Linear ADE: {linear_ade_list} | Linear FDE: {linear_fde_list}")
 
 
 @hydra.main(config_path="config", config_name="config")
