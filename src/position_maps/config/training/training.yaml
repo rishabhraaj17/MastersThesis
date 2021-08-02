@@ -471,6 +471,36 @@ patch_mode:
   factor: 0.1
   min_lr: 1e-10
 
+trajectory_extender:
+  num_epochs: 1  # 400
+
+  use_pretrained:
+    enabled: True
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+      path: "lightning_logs/version_"
+      version: 509506 # 492265 # 497829 # 492265 #424798 # 437363  # 424798
+      top_k: 1
+
+  train_position_model: False
+
+  subset_indices: 32  # 450  # [ 0, 85, 32, 5, 125, 200 ]
+
+  batch_size: 2
+  shuffle: False  # keep it always False
+  num_workers: 0
+  pin_memory: False
+  drop_last: False
+
+  video_class: [ BOOKSTORE ]
+  video_number: [ [ 0 ] ]
+
+  objectness:
+    kernel: 3
+    loc_cutoff: 0.05
+    marker_size: 3
+    index_select: 0
+
 metrics_analysis:
   root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
   #  video_classes: [ DEATH_CIRCLE ]

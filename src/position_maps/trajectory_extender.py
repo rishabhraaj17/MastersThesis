@@ -196,7 +196,7 @@ def setup_trajectory_model(cfg):
 def get_video_dataset(cfg):
     logger.info(f"Setting up video dataset")
     video_train_dataset = setup_frame_only_dataset_flexible(
-        cfg=cfg, video_class=cfg.interplay.video_class, video_number=cfg.interplay.video_number)
+        cfg=cfg, video_class=cfg.trajectory_extender.video_class, video_number=cfg.trajectory_extender.video_number)
     video_train_loader = DataLoader(
         video_train_dataset, batch_size=1, shuffle=False, pin_memory=False, drop_last=False, collate_fn=None)
     return video_train_loader
@@ -381,8 +381,8 @@ def baseline_interplay(cfg):
 
     load_path = os.path.join('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs',
                              f'ExtractedLocations'
-                             f'/{getattr(SDDVideoClasses, cfg.interplay.video_class[0]).name}'
-                             f'/{cfg.interplay.video_number[0][0]}/extracted_locations.pt')
+                             f'/{getattr(SDDVideoClasses, cfg.trajectory_extender.video_class[0]).name}'
+                             f'/{cfg.trajectory_extender.video_number[0][0]}/extracted_locations.pt')
     extracted_locations: ExtractedLocations = torch.load(load_path)['locations']  # mock the model
     out_head_0, out_head_1, out_head_2 = extracted_locations.head0, extracted_locations.head1, extracted_locations.head2
 
@@ -403,7 +403,7 @@ def baseline_interplay(cfg):
         raise NotImplementedError
 
     valid_locs = get_valid_locations_from_segmentation_maps(
-        cfg, getattr(SDDVideoClasses, cfg.interplay.video_class[0]), cfg.interplay.video_number[0][0])
+        cfg, getattr(SDDVideoClasses, cfg.trajectory_extender.video_class[0]), cfg.trajectory_extender.video_number[0][0])
 
     track_ids_used = []
     current_track = 0
@@ -479,8 +479,8 @@ def baseline_interplay(cfg):
     filename = 'extracted_trajectories.pt'
     save_path = os.path.join(os.getcwd(),
                              f'ExtractedTrajectories'
-                             f'/{getattr(SDDVideoClasses, cfg.interplay.video_class[0]).name}'
-                             f'/{cfg.interplay.video_number[0][0]}/')
+                             f'/{getattr(SDDVideoClasses, cfg.trajectory_extender.video_class[0]).name}'
+                             f'/{cfg.trajectory_extender.video_number[0][0]}/')
     Path(save_path).mkdir(parents=True, exist_ok=True)
     torch.save(save_dict, save_path + filename)
     logger.info(f"Saved trajectories at {save_path}{filename}")
