@@ -7,6 +7,7 @@ import hydra
 import motmetrics as mm
 import numpy as np
 import torch
+import torchvision
 from matplotlib import pyplot as plt
 from pytorch_lightning import seed_everything
 from torch.nn.functional import interpolate
@@ -21,6 +22,7 @@ from log import get_logger
 from src.position_maps.interplay_utils import setup_multiple_frame_only_datasets_core, Tracks, Track
 from src.position_maps.location_utils import ExtractedLocations, prune_locations_proximity_based, \
     get_adjusted_object_locations, Locations, Location
+from src.position_maps.segmentation_utils import dump_image_mapping, dump_class_mapping
 from src.position_maps.trajectory_utils import plot_trajectory_with_one_frame
 from src.position_maps.utils import get_scaled_shapes_with_pad_values, ImagePadder
 from src_lib.datasets.extracted_dataset import extracted_collate, get_train_and_val_datasets, get_test_datasets
@@ -65,6 +67,44 @@ def init_tracks_from_empty(active_tracks, current_track, location, locations_to_
         track_ids_used.append(current_track)
         current_track += 1
     return current_track
+
+
+def get_valid_locations_from_segmentation_maps(cfg, vid_clz, vid_num):
+    seg_root = os.path.split(os.path.split(cfg.root)[0])[0]
+    video_mappings = dump_image_mapping(os.path.join(seg_root, f"SDD_SEG_MAPS/"))
+
+    instance_mask = torchvision.io.read_image(
+        os.path.join(
+            seg_root,
+            f"SDD_SEG_MAPS/{video_mappings[vid_clz.value][vid_num][0]}/GLAY/"
+            f"{video_mappings[vid_clz.value][vid_num][1]}"))
+    instance_mask = instance_mask.permute(1, 2, 0).numpy()
+
+    instance_class_mappings = dump_class_mapping(os.path.join(seg_root, f"SDD_SEG_MAPS/"))
+
+    valid_classes = [v for k, v in instance_class_mappings.items()
+                     if k in ['foot_path', 'street', 'grass_path', 'parking']]
+    valid_x_axis_locs, valid_y_axis_locs = [], []
+    for v in valid_classes:
+        y_points, x_points, z_points = np.where(instance_mask == v)
+        valid_x_axis_locs.append(x_points)
+        valid_y_axis_locs.append(y_points)
+
+        # verify_map = np.zeros_like(instance_mask)
+        # for l in np.stack((valid_x_axis_locs[-1], valid_y_axis_locs[-1]), axis=-1):
+        #     verify_map[l[1], l[0]] = 255
+        # plt.imshow(verify_map, cmap='gray')
+        # plt.show()
+
+    valid_x_axis_locs = np.concatenate(valid_x_axis_locs)
+    valid_y_axis_locs = np.concatenate(valid_y_axis_locs)
+    valid_locs = np.stack((valid_x_axis_locs, valid_y_axis_locs), axis=-1)
+
+    # verify
+    # verify_map = np.zeros_like(instance_mask)
+    # for l in valid_locs:
+    #     verify_map[l[1], l[0]] = 255
+    return valid_locs
 
 
 def setup_frame_only_dataset_flexible(cfg, video_class, video_number):
@@ -191,7 +231,7 @@ def get_video_model(cfg):
 def construct_tracks_from_locations(
         active_tracks, frame_number, inactive_tracks, current_frame_locations,
         track_ids_used, current_track, init_track_each_frame=True, max_distance=float('inf'),
-        trajectory_model=None, current_frame=None):
+        trajectory_model=None, current_frame=None, valid_locs=np.zeros((0, 2))):
     current_track_local = current_track
     recently_killed_tracks = Tracks.init_with_empty_tracks()
 
@@ -264,14 +304,18 @@ def construct_tracks_from_locations(
                 # since it was there in the last frame we just extend it and
                 # add it back to the actives if it was not in the
                 # in valid region
-                # todo - check for valid regions
-                t.frames.append(frame_number)
-                t.locations.append(out['out_xy'].squeeze(1)[0].tolist())
-                t.inactive -= 1
+                valid_locations_to_use_idx = np.all(
+                    np.equal(np.round(out['out_xy'][0].numpy()).astype(np.int), valid_locs), axis=-1).any()
+                if valid_locations_to_use_idx.item():
+                    t.frames.append(frame_number)
+                    t.locations.append(out['out_xy'].squeeze(1)[0].tolist())
+                    t.inactive -= 1
 
-                currently_active_tracks.append(t)
+                    currently_active_tracks.append(t)
+                    # remove from inactives
+                    inactive_tracks.tracks.remove(t)
                 # after some viz
-                # we should train model on 1frame jump (maybe instead 8/12 use 24/48?)
+                # we should train model on 1frame jump (maybe instead 8/12 use 24/48?) - ongoing
                 # if the predictions go in the bad direction, error accumulates -> filter with invalid region
                 # for new agents not matched we start a new track, so we only need to worry about killed tracks
 
@@ -349,6 +393,9 @@ def baseline_interplay(cfg):
     else:
         raise NotImplementedError
 
+    valid_locs = get_valid_locations_from_segmentation_maps(
+        cfg, getattr(SDDVideoClasses, cfg.interplay.video_class[0]), cfg.interplay.video_number[0][0])
+
     track_ids_used = []
     current_track = 0
 
@@ -411,10 +458,11 @@ def baseline_interplay(cfg):
                     current_track=current_track, init_track_each_frame=True,
                     max_distance=max_distance,
                     trajectory_model=trajectory_model,
-                    current_frame=frame)
+                    current_frame=frame,
+                    valid_locs=valid_locs)
     # save extracted trajectories
     save_dict = {
-            'track_ids_used': track_ids_used,
+        'track_ids_used': track_ids_used,
         'active': active_tracks,
         'inactive': inactive_tracks,
         'repeating_frames': repeating_frames

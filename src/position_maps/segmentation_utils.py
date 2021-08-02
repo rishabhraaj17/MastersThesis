@@ -66,7 +66,7 @@ def analyse_maps(folder_path):
         print()
 
 
-def dump_class_mapping(root_path):
+def dump_class_mapping(root_path, save_on_disk=False):
     data = {
         'foot_path': 0,
         'street': 10,
@@ -76,92 +76,94 @@ def dump_class_mapping(root_path):
         'tree': 50,
         'building': 60
     }
-    with open(f'{root_path}class_mappings.yaml', 'w+') as f:
-        yaml.dump(data, f)
+    if save_on_disk:
+        with open(f'{root_path}class_mappings.yaml', 'w+') as f:
+            yaml.dump(data, f)
     return data
 
 
-def dump_image_mapping(root_path):
+def dump_image_mapping(root_path, save_on_disk=False):
     data = {
-        'bookstore:': {
-            0: ('test', '0.jpg'),
-            1: ('train', '00.jpg'),
-            2: ('train', '01.jpg'),
-            3: ('train', '02.jpg'),
-            4: ('train', '03.jpg'),
-            5: ('train', '04.jpg'),
-            6: ('train', '05.jpg')
+        'bookstore': {
+            0: ('test', '0.png'),
+            1: ('train', '00.png'),
+            2: ('train', '01.png'),
+            3: ('train', '02.png'),
+            4: ('train', '03.png'),
+            5: ('train', '04.png'),
+            6: ('train', '05.png')
         },
         'coupa': {
-            0: ('test', '1.jpg'),
-            1: ('train', '06.jpg'),
-            2: ('train', '07.jpg'),
-            3: ('train', '08.jpg')
+            0: ('test', '1.png'),
+            1: ('train', '06.png'),
+            2: ('train', '07.png'),
+            3: ('train', '08.png')
         },
         'deathCircle': {
-            0: ('test', '2.jpg'),
-            1: ('train', '09.jpg'),
-            2: ('train', '10.jpg'),
-            3: ('train', '11.jpg'),
-            4: ('train', '12.jpg'),
+            0: ('test', '2.png'),
+            1: ('train', '09.png'),
+            2: ('train', '10.png'),
+            3: ('train', '11.png'),
+            4: ('train', '12.png'),
         },
         'gates': {
-            0: ('test', '3.jpg'),
-            1: ('train', '13.jpg'),
-            2: ('train', '14.jpg'),
-            3: ('train', '15.jpg'),
-            4: ('train', '16.jpg'),
-            5: ('train', '17.jpg'),
-            6: ('train', '18.jpg'),
-            7: ('train', '19.jpg'),
-            8: ('train', '20.jpg')
+            0: ('test', '3.png'),
+            1: ('train', '13.png'),
+            2: ('train', '14.png'),
+            3: ('train', '15.png'),
+            4: ('train', '16.png'),
+            5: ('train', '17.png'),
+            6: ('train', '18.png'),
+            7: ('train', '19.png'),
+            8: ('train', '20.png')
         },
         'hyang': {
-            0: ('test', '4.jpg'),
-            1: ('train', '21.jpg'),
-            2: ('train', '22.jpg'),
-            3: ('train', '23.jpg'),
-            4: ('train', '24.jpg'),
-            5: ('train', '25.jpg'),
-            6: ('train', '26.jpg'),
-            7: ('train', '27.jpg'),
-            8: ('train', '28.jpg'),
-            9: ('train', '29.jpg'),
-            10: ('train', '30.jpg'),
-            11: ('train', '31.jpg'),
-            12: ('train', '32.jpg'),
-            13: ('train', '33.jpg'),
-            14: ('train', '34.jpg')
+            0: ('test', '4.png'),
+            1: ('train', '21.png'),
+            2: ('train', '22.png'),
+            3: ('train', '23.png'),
+            4: ('train', '24.png'),
+            5: ('train', '25.png'),
+            6: ('train', '26.png'),
+            7: ('train', '27.png'),
+            8: ('train', '28.png'),
+            9: ('train', '29.png'),
+            10: ('train', '30.png'),
+            11: ('train', '31.png'),
+            12: ('train', '32.png'),
+            13: ('train', '33.png'),
+            14: ('train', '34.png')
         },
         'little': {
-            0: ('test', '5.jpg'),
-            1: ('train', '35.jpg'),
-            2: ('train', '36.jpg'),
-            3: ('train', '37.jpg'),
+            0: ('test', '5.png'),
+            1: ('train', '35.png'),
+            2: ('train', '36.png'),
+            3: ('train', '37.png'),
         },
         'nexus': {
-            0: ('test', '6.jpg'),
-            1: ('train', '38.jpg'),
-            2: ('train', '39.jpg'),
-            3: ('train', '40.jpg'),
-            4: ('train', '41.jpg'),
-            5: ('train', '42.jpg'),
-            6: ('train', '43.jpg'),
-            7: ('train', '44.jpg'),
-            8: ('train', '45.jpg'),
-            9: ('train', '46.jpg'),
-            10: ('train', '47.jpg'),
-            11: ('train', '48.jpg'),
+            0: ('test', '6.png'),
+            1: ('train', '38.png'),
+            2: ('train', '39.png'),
+            3: ('train', '40.png'),
+            4: ('train', '41.png'),
+            5: ('train', '42.png'),
+            6: ('train', '43.png'),
+            7: ('train', '44.png'),
+            8: ('train', '45.png'),
+            9: ('train', '46.png'),
+            10: ('train', '47.png'),
+            11: ('train', '48.png'),
         },
         'quad': {
-            0: ('test', '7.jpg'),
-            1: ('train', '49.jpg'),
-            2: ('train', '50.jpg'),
-            3: ('train', '51.jpg'),
+            0: ('test', '7.png'),
+            1: ('train', '49.png'),
+            2: ('train', '50.png'),
+            3: ('train', '51.png'),
         }
     }
-    with open(f'{root_path}img_mappings.yaml', 'w+') as f:
-        yaml.dump(data, f)
+    if save_on_disk:
+        with open(f'{root_path}img_mappings.yaml', 'w+') as f:
+            yaml.dump(data, f)
     return data
 
 

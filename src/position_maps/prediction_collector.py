@@ -29,6 +29,7 @@ from src.position_maps.evaluate import setup_single_video_dataset, setup_dataset
 from src.position_maps.location_utils import locations_from_heatmaps, get_adjusted_object_locations, \
     prune_locations_proximity_based, ExtractedLocations, Locations, Location
 from src.position_maps.losses import CenterNetFocalLoss
+from src.position_maps.segmentation_utils import dump_image_mapping, dump_class_mapping
 from src.position_maps.utils import heat_map_temporal_4d_collate_fn, heat_map_collate_fn, ImagePadder, \
     plot_image_with_features, plot_for_location_visualizations
 
@@ -984,6 +985,9 @@ def extract_for_a_sequence_core(cfg, location_version_to_use, max_distance, prun
         extracted_locations.head0, extracted_locations.head1, extracted_locations.head2
     all_heads = [out_head_0, out_head_1, out_head_2]
 
+    # load validity information
+    valid_locs = get_valid_locations_from_segmentation_maps(cfg, vid_clz, vid_num)
+
     out_dict = {}
     for h_idx, head in enumerate(all_heads):
         locations = head
@@ -1038,6 +1042,13 @@ def extract_for_a_sequence_core(cfg, location_version_to_use, max_distance, prun
                         [pruned_locations], fake_padded_heatmaps, [{'original_shape': original_shape}])
                     locations_to_use = np.stack(pred_object_locations_scaled).squeeze() \
                         if len(pred_object_locations_scaled) != 0 else np.zeros((0, 2))
+                    # valid_locations_to_use_idx = np.all(
+                    #     np.equal(np.round(locations_to_use).astype(np.int), valid_locs), axis=-1).any()
+                    valid_locations_to_use_idx = []
+                    for candidate_loc in np.round(locations_to_use).astype(np.int):
+                        valid_locations_to_use_idx.append(
+                            np.all(np.equal(candidate_loc[None, :], valid_locs), axis=-1).any())
+                    locations_to_use = locations_to_use[np.array(valid_locations_to_use_idx)]
                 else:
                     print('Bad path')
 
@@ -1082,6 +1093,33 @@ def extract_for_a_sequence_core(cfg, location_version_to_use, max_distance, prun
 
         out_dict[h_idx] = {'precision': precision_dict, 'recall': recall_dict}
     return {vid_clz: {vid_num: out_dict}}
+
+
+def get_valid_locations_from_segmentation_maps(cfg, vid_clz, vid_num):
+    seg_root = os.path.split(os.path.split(cfg.root)[0])[0]
+    video_mappings = dump_image_mapping(os.path.join(seg_root, f"SDD_SEG_MAPS/"))
+
+    instance_mask = torchvision.io.read_image(
+        os.path.join(
+            seg_root,
+            f"SDD_SEG_MAPS/{video_mappings[vid_clz.value][vid_num][0]}/GLAY/"
+            f"{video_mappings[vid_clz.value][vid_num][1]}"))
+    instance_mask = instance_mask.permute(1, 2, 0).numpy()
+
+    instance_class_mappings = dump_class_mapping(os.path.join(seg_root, f"SDD_SEG_MAPS/"))
+
+    valid_classes = [v for k, v in instance_class_mappings.items()
+                     if k in ['foot_path', 'street', 'grass_path', 'parking']]
+    valid_x_axis_locs, valid_y_axis_locs = [], []
+    for v in valid_classes:
+        y_points, x_points, z_points = np.where(instance_mask == v)
+        valid_x_axis_locs.append(x_points)
+        valid_y_axis_locs.append(y_points)
+    valid_x_axis_locs = np.concatenate(valid_x_axis_locs)
+    valid_y_axis_locs = np.concatenate(valid_y_axis_locs)
+    valid_locs = np.stack((valid_x_axis_locs, valid_y_axis_locs), axis=-1)
+
+    return valid_locs
 
 
 if __name__ == '__main__':
