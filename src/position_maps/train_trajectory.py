@@ -18,6 +18,7 @@ from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.nn.models import ConstantLinearBaseline, ConstantLinearBaselineV2
 from baselinev2.plot_utils import plot_trajectory_alongside_frame, plot_trajectory_alongside_frame_stochastic
 from baselinev2.stochastic.losses import cal_ade, cal_fde, cal_ade_fde_stochastic
+from baselinev2.stochastic.model_modules import preprocess_dataset_elements_from_dict
 from log import get_logger
 from src.position_maps.trajectory_utils import get_multiple_datasets, bezier_smoother, splrep_smoother
 from src_lib.datasets.extracted_dataset import get_train_and_val_datasets, extracted_collate
@@ -229,6 +230,7 @@ def evaluate_stochastic(cfg):
     linear_ade_list, linear_fde_list = [], []
 
     for b_idx, batch in enumerate(tqdm(loader)):
+        # batch = preprocess_dataset_elements_from_dict(batch, moving_only=False, stationary_only=True)
         batch = {k: v.to(cfg.tp_module.device) for k, v in batch.items()}
 
         batch = model.get_k_batches(batch, model.config.tp_module.datasets.batch_multiplier)
@@ -317,7 +319,8 @@ def evaluate_stochastic(cfg):
                 frame = extract_frame_from_video(video_path, frame_num)
     
                 plot_trajectory_alongside_frame_stochastic(
-                    frame, obs_trajectory.cpu(), gt_trajectory.cpu(), pred_trajectory.cpu(), frame_num, track_id=track_num,
+                    frame, obs_trajectory.cpu(), gt_trajectory.cpu(), pred_trajectory.cpu(),
+                    frame_num, track_id=track_num,
                     best_idx=best_idx.squeeze()[random_trajectory_idx],
                     additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
             except InvalidFrameException:

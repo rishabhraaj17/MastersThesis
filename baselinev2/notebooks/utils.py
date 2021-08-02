@@ -109,6 +109,12 @@ def get_trajectory_length(trajectory, use_l2=False):
     return length, length.sum(axis=-1)
 
 
+def get_trajectory_length_fast(trajectory):
+    length = np.diff(trajectory, axis=0)
+    length = np.linalg.norm(length, ord=2, axis=-1)
+    return length, length.sum(axis=0)
+
+
 if __name__ == '__main__':
     v_clz = SDDVideoClasses.LITTLE
     v_clz_meta = SDDVideoDatasets.LITTLE

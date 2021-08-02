@@ -935,9 +935,9 @@ def evaluate_per_loader_single_model(plot, plot_path, model_caller, loader, vide
            constant_linear_baseline_ade_list, constant_linear_baseline_fde_list
 
 
-def filter_on_relative_distances(feasible_idx, gt_uv, in_uv, relative_distance_filter_threshold):
-    full_uv = torch.cat((in_uv, gt_uv), dim=1)
-    all_idx = np.arange(full_uv.shape[0])
+def filter_on_relative_distances(feasible_idx, gt_uv, in_uv, relative_distance_filter_threshold, axis=1):
+    full_uv = torch.cat((in_uv, gt_uv), dim=axis)
+    all_idx = np.arange(full_uv.shape[1])
     positive_outlier_idx = np.where(full_uv.numpy() > relative_distance_filter_threshold)[0]
     positive_outlier_idx = np.unique(positive_outlier_idx)
     negative_outlier_idx = np.where(full_uv.numpy() < -relative_distance_filter_threshold)[0]
