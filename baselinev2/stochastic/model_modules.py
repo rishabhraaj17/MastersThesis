@@ -693,8 +693,8 @@ def preprocess_dataset_elements_from_dict(
             'seq_start_end': seq_start_end,
             'dataset_idx': dataset_idx,
             'ratio': ratio,
-            'feasible_idx': feasible_idx
-            if (moving_only or stationary_only or return_stationary_objects_idx) and filter_mode else []
+            'feasible_idx': torch.from_numpy(feasible_idx)
+            if (moving_only or stationary_only or return_stationary_objects_idx) and filter_mode else torch.zeros((0, 2))
             }
 
 
