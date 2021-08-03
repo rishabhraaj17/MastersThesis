@@ -272,10 +272,10 @@ def extract_locations(cfg):
             else:
                 logger.warning('More than expected heads')
 
-        viz_locations_for_3_heads(
-            head0_locations, head1_locations, head2_locations,
-            interpolate(frames, size=meta[0]['original_shape']).squeeze(0).permute(0, 2, 3, 1),
-            frame_numbers=[m['item'] for m in meta], show=False)
+        # viz_locations_for_3_heads(
+        #     head0_locations, head1_locations, head2_locations,
+        #     interpolate(frames, size=meta[0]['original_shape']).squeeze(0).permute(0, 2, 3, 1),
+        #     frame_numbers=[m['item'] for m in meta], show=False)
 
     save_dict = {
         'locations': ExtractedLocations(
@@ -472,5 +472,5 @@ def extract_locations_for_all(cfg):
 
 
 if __name__ == '__main__':
-    # extract_locations()
-    extract_locations_for_all()
+    extract_locations()
+    # extract_locations_for_all()
