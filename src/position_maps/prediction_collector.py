@@ -942,39 +942,92 @@ def visualize_from_locations_and_generate_curves_for_all_and_all_multi_processin
     logger.info(f'Evaluating metrics from locations')
 
     video_classes_to_use = [
-        SDDVideoClasses.DEATH_CIRCLE,
-        SDDVideoClasses.GATES,
+        # SDDVideoClasses.DEATH_CIRCLE,
+        # SDDVideoClasses.GATES,
         SDDVideoClasses.HYANG,
-        SDDVideoClasses.LITTLE,
+        # SDDVideoClasses.LITTLE,
         SDDVideoClasses.NEXUS,
         SDDVideoClasses.QUAD,
         SDDVideoClasses.BOOKSTORE,
         SDDVideoClasses.COUPA,
     ]
     video_numbers_to_use = [
-        [i for i in range(5)],
-        [i for i in range(9)],
+        # [i for i in range(5)],
+        # [i for i in range(9)],
         [i for i in range(15)],
-        [i for i in range(4)],
+        # [i for i in range(4)],
         [i for i in range(12) if i not in [3, 4, 5]],
         [i for i in range(4)],
         [i for i in range(7)],
         [i for i in range(4)],
+    ]
+    heads_to_use = [
+        # [],
+        # [],
+        [
+            [],
+            [],
+            [],
+            [],
+            [2],
+            [0, 1, 2],
+            [],
+            [],
+            [],
+            [],
+            [2],
+            [0, 1, 2],
+            [0, 1, 2],
+            [0, 1, 2],
+            [],
+        ],
+        # [],
+        [
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [1, 2],
+        ],
+        [
+            [0, 1, 2],
+            [0, 1, 2],
+            [],
+            [],
+        ],
+        [
+            [2],
+            [0, 1, 2],
+            [0, 1, 2],
+            [0, 1, 2],
+            [0, 1, 2],
+        ],
+        [
+            [0, 1, 2],
+            [0, 1, 2],
+            [0, 1, 2],
+            [0, 1, 2],
+        ],
     ]
 
     with multiprocessing.Pool(processes=4) as pool:
         results = pool.starmap(
             extract_for_a_sequence_core,
             [(cfg, location_version_to_use, max_distance, prune_radius, run_analysis_on,
-              step_between_frames, vid_clz, vid_num) for v_idx, vid_clz in enumerate(video_classes_to_use) for vid_num
-             in video_numbers_to_use[v_idx]])
+              step_between_frames, vid_clz, vid_num, head_in_use)
+             for v_idx, vid_clz in enumerate(video_classes_to_use) for vid_num, head_in_use
+             in zip(video_numbers_to_use[v_idx], heads_to_use[v_idx])])
 
     torch.save(results, os.path.join(os.getcwd(), 'analysis_dict.pt'))
     logger.info(f"Saved results at {os.path.join(os.getcwd(), 'analysis_dict.pt')}")
 
 
 def extract_for_a_sequence_core(cfg, location_version_to_use, max_distance, prune_radius, run_analysis_on,
-                                step_between_frames, vid_clz, vid_num):
+                                step_between_frames, vid_clz, vid_num, heads_to_use=(0, 1, 2)):
     logger.info(f'Running analysis for {vid_clz.name} - {vid_num}')
     load_path = os.path.join(os.getcwd(),
                              f'ExtractedLocations'
@@ -984,12 +1037,18 @@ def extract_for_a_sequence_core(cfg, location_version_to_use, max_distance, prun
     out_head_0, out_head_1, out_head_2 = \
         extracted_locations.head0, extracted_locations.head1, extracted_locations.head2
     all_heads = [out_head_0, out_head_1, out_head_2]
+    # filer all heads
+    # all_heads = [all_heads[idx] for idx in heads_to_use]  # will mess up indexing
 
     # load validity information
     # valid_locs = get_valid_locations_from_segmentation_maps(cfg, vid_clz, vid_num)
 
     out_dict = {}
     for h_idx, head in enumerate(all_heads):
+        if h_idx not in heads_to_use:
+            logger.info(f'{vid_clz.name} | {vid_num} -- Skipping head {h_idx}')
+            continue
+
         locations = head
 
         locations.locations = [locations.locations[idx]
@@ -1133,5 +1192,6 @@ if __name__ == '__main__':
         # evaluate_metrics()
         # evaluate_metrics_for_each_threshold()
         # visualize_from_locations()
-        visualize_from_locations_and_generate_curves()
-        # visualize_from_locations_and_generate_curves_for_all_and_all_multi_processing()
+        # visualize_from_locations_and_generate_curves()
+        # visualize_from_locations_and_generate_curves_for_all_and_all()
+        visualize_from_locations_and_generate_curves_for_all_and_all_multi_processing()
