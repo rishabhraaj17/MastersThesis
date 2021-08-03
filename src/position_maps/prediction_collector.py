@@ -986,7 +986,7 @@ def extract_for_a_sequence_core(cfg, location_version_to_use, max_distance, prun
     all_heads = [out_head_0, out_head_1, out_head_2]
 
     # load validity information
-    valid_locs = get_valid_locations_from_segmentation_maps(cfg, vid_clz, vid_num)
+    # valid_locs = get_valid_locations_from_segmentation_maps(cfg, vid_clz, vid_num)
 
     out_dict = {}
     for h_idx, head in enumerate(all_heads):
@@ -1044,11 +1044,13 @@ def extract_for_a_sequence_core(cfg, location_version_to_use, max_distance, prun
                         if len(pred_object_locations_scaled) != 0 else np.zeros((0, 2))
                     # valid_locations_to_use_idx = np.all(
                     #     np.equal(np.round(locations_to_use).astype(np.int), valid_locs), axis=-1).any()
-                    valid_locations_to_use_idx = []
-                    for candidate_loc in np.round(locations_to_use).astype(np.int):
-                        valid_locations_to_use_idx.append(
-                            np.all(np.equal(candidate_loc[None, :], valid_locs), axis=-1).any())
-                    locations_to_use = locations_to_use[np.array(valid_locations_to_use_idx)]
+
+                    # Only improves marginally little bit in the first experiment
+                    # valid_locations_to_use_idx = []
+                    # for candidate_loc in np.round(locations_to_use).astype(np.int):
+                    #     valid_locations_to_use_idx.append(
+                    #         np.all(np.equal(candidate_loc[None, :], valid_locs), axis=-1).any())
+                    # locations_to_use = locations_to_use[np.array(valid_locations_to_use_idx)]
                 else:
                     print('Bad path')
 
