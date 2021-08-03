@@ -230,7 +230,11 @@ def evaluate_stochastic(cfg):
     linear_ade_list, linear_fde_list = [], []
 
     for b_idx, batch in enumerate(tqdm(loader)):
-        # batch = preprocess_dataset_elements_from_dict(batch, moving_only=False, stationary_only=True)
+        batch = preprocess_dataset_elements_from_dict(batch, filter_mode=False, moving_only=True, stationary_only=False)
+
+        if batch['in_xy'].shape[1] == 0:
+            continue
+
         batch = {k: v.to(cfg.tp_module.device) for k, v in batch.items()}
 
         batch = model.get_k_batches(batch, model.config.tp_module.datasets.batch_multiplier)
@@ -284,7 +288,8 @@ def evaluate_stochastic(cfg):
         frame_nums = batch['in_frames'].view(model.config.tp_module.datasets.batch_multiplier, 8, batch_size)
         track_lists = batch['in_tracks'].view(model.config.tp_module.datasets.batch_multiplier, 8, batch_size)
 
-        random_trajectory_idx = np.random.choice(batch['dataset_idx'].shape[-1], 1, replace=False).item()
+        random_trajectory_idx = np.random.choice(
+            min(batch['dataset_idx'].shape[-1], obs_separated.shape[2]), 1, replace=False).item()
 
         dataset_idx = batch['dataset_idx'][random_trajectory_idx].item()
 
@@ -307,8 +312,8 @@ def evaluate_stochastic(cfg):
             video_path = f"{cfg.root}videos/{current_dataset.video_class.value}" \
                          f"/video{current_dataset.video_number}/video.mov"
 
-        ade = ade.squeeze()[random_trajectory_idx]
-        fde = fde.squeeze()[random_trajectory_idx]
+        ade = ade.squeeze(0)[random_trajectory_idx]
+        fde = fde.squeeze(0)[random_trajectory_idx]
 
         # single for give data
         obs_trajectory = obs_trajectory[:, 0, :]
@@ -321,7 +326,7 @@ def evaluate_stochastic(cfg):
                 plot_trajectory_alongside_frame_stochastic(
                     frame, obs_trajectory.cpu(), gt_trajectory.cpu(), pred_trajectory.cpu(),
                     frame_num, track_id=track_num,
-                    best_idx=best_idx.squeeze()[random_trajectory_idx],
+                    best_idx=best_idx.squeeze(0)[random_trajectory_idx],
                     additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
             except InvalidFrameException:
                 continue
