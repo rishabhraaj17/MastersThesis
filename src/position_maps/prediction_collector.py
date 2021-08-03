@@ -52,9 +52,9 @@ def adjust_config(cfg):
     cfg.eval.test.single_video_mode.multiple_videos = False
 
     # one video at a time
-    cfg.eval.video_class = 'COUPA'
-    cfg.eval.video_meta_class = 'COUPA'
-    cfg.eval.test.video_number_to_use = 1
+    cfg.eval.video_class = 'HYANG'
+    cfg.eval.video_meta_class = 'HYANG'
+    cfg.eval.test.video_number_to_use = 8
     cfg.eval.test.num_videos = -1
     cfg.eval.dataset_workers = 12
     cfg.eval.test.multiple_videos = False
@@ -868,7 +868,7 @@ def visualize_from_locations_and_generate_curves(cfg):
                 f'Video Number: {cfg.eval.test.video_number_to_use}')
     logger.info(f"Threshold: {cfg.eval.gt_pred_loc_distance_threshold}m | "
                 f"Max-Pool kernel size: {cfg.eval.objectness.kernel} | "
-                f"Head Used: {cfg.eval.objectness.index_select}")
+                f"Head Used: {head_to_use}")
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -1133,5 +1133,5 @@ if __name__ == '__main__':
         # evaluate_metrics()
         # evaluate_metrics_for_each_threshold()
         # visualize_from_locations()
-        # visualize_from_locations_and_generate_curves()
-        visualize_from_locations_and_generate_curves_for_all_and_all_multi_processing()
+        visualize_from_locations_and_generate_curves()
+        # visualize_from_locations_and_generate_curves_for_all_and_all_multi_processing()
