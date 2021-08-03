@@ -185,8 +185,8 @@ def extract_locations(cfg):
 
     if cfg.single_video_mode.enabled:
         # config adapt
-        cfg.single_video_mode.video_classes_to_use = ['DEATH_CIRCLE']
-        cfg.single_video_mode.video_numbers_to_use = [[2]]
+        cfg.single_video_mode.video_classes_to_use = ['HYANG']
+        cfg.single_video_mode.video_numbers_to_use = [[8]]
         cfg.desired_pixel_to_meter_ratio_rgb = 0.07
         cfg.desired_pixel_to_meter_ratio = 0.07
 
@@ -202,9 +202,11 @@ def extract_locations(cfg):
                                  desired_output_shape=None)
 
     # load model
-    checkpoint_path = f'{cfg.interplay_v0.use_pretrained.checkpoint.root}' \
-                      f'{cfg.interplay_v0.use_pretrained.checkpoint.path}' \
-                      f'{cfg.interplay_v0.use_pretrained.checkpoint.version}/checkpoints/'
+    checkpoint_path = os.path.join(
+            MODEL_PATH_MAPPING[
+                getattr(SDDVideoClasses, cfg.single_video_mode.video_classes_to_use[0])]
+            [cfg.single_video_mode.video_numbers_to_use[0][0]], 'checkpoints/')
+
     checkpoint_files = os.listdir(checkpoint_path)
 
     epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
