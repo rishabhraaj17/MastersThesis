@@ -39,7 +39,7 @@ tp_module:
 
     filename: 'trajectories.pt'
 
-    use_generated: True
+    use_generated: False
     from_temp_file: True
 
     frame_rate: 30.
@@ -174,8 +174,8 @@ trainer:
 root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
 video_class: DEATH_CIRCLE
 video_meta_class: DEATH_CIRCLE
-desired_pixel_to_meter_ratio: 0.32 # 0.35
-desired_pixel_to_meter_ratio_rgb: 0.32 # 0.25 # 0.05
+desired_pixel_to_meter_ratio: 0.30 # 0.35
+desired_pixel_to_meter_ratio_rgb: 0.30 # 0.25 # 0.05
 downscale_only_target_maps: False
 using_replay_compose: True
 manual_annotation_processing: False
@@ -213,8 +213,10 @@ train:
   # Portraits -> H > W
   #  video_classes_to_use: [ DEATH_CIRCLE, GATES, LITTLE ]
   #  video_numbers_to_use: [ [ 2, 4 ], [5], [0] ] # nexus 3, 4 are bad
-  video_classes_to_use: [ GATES ]
-  video_numbers_to_use: [ [ 2 ] ] # nexus 3, 4 are bad
+  #  video_classes_to_use: [ GATES ]
+  #  video_numbers_to_use: [ [ 2 ] ] # nexus 3, 4 are bad
+  video_classes_to_use: [ HYANG ]
+  video_numbers_to_use: [ [ 2, 3, 6, 10, 11, 12, 13 ] ] # nexus 3, 4 are bad
   multiple_videos: False
 
 val:
@@ -229,8 +231,10 @@ val:
   #  video_numbers_to_use: [ [ 3 ], [ 4 ], [ 7 ], [ 0 ], [ 6 ] ]
   #  video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG ]
   #  video_numbers_to_use: [ [ 3 ], [ 4 ], [ 7 ] ]
-  video_classes_to_use: [ GATES, LITTLE ]
-  video_numbers_to_use: [ [ 4 ], [ 0 ] ]
+  #  video_classes_to_use: [ GATES, LITTLE ]
+  #  video_numbers_to_use: [ [ 4 ], [ 0 ] ]
+  video_classes_to_use: [ HYANG ]
+  video_numbers_to_use: [ [ 14 ] ]
   #  video_classes_to_use: [ HYANG ]
   #  video_numbers_to_use: [ [ 7, 8, 9 ] ]
   #  video_classes_to_use: [ NEXUS ]

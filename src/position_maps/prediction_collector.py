@@ -52,9 +52,9 @@ def adjust_config(cfg):
     cfg.eval.test.single_video_mode.multiple_videos = False
 
     # one video at a time
-    cfg.eval.video_class = 'HYANG'
-    cfg.eval.video_meta_class = 'HYANG'
-    cfg.eval.test.video_number_to_use = 8
+    cfg.eval.video_class = 'NEXUS'
+    cfg.eval.video_meta_class = 'NEXUS'
+    cfg.eval.test.video_number_to_use = 10
     cfg.eval.test.num_videos = -1
     cfg.eval.dataset_workers = 12
     cfg.eval.test.multiple_videos = False
@@ -92,7 +92,7 @@ def adjust_config(cfg):
 
     # video + plot
     cfg.eval.show_plots = False
-    cfg.eval.make_video = False
+    cfg.eval.make_video = True
 
 
 def area_under_the_pr_curve(precision, recall):
@@ -576,7 +576,7 @@ def visualize_from_locations(cfg):
 
     location_version_to_use = 'runtime_pruned_scaled'  # 'pruned_scaled' 'runtime_pruned_scaled'
     head_to_use = 0
-    prune_radius = 45  # dc3
+    prune_radius = 30  # dc3
     max_distance = float('inf')
 
     step_between_frames = 12
@@ -1191,7 +1191,7 @@ if __name__ == '__main__':
         # join_parts_prediction(os.path.join(os.getcwd(), f'logs/HeatMapPredictions/DEATH_CIRCLE/4/'))
         # evaluate_metrics()
         # evaluate_metrics_for_each_threshold()
-        # visualize_from_locations()
+        visualize_from_locations()
         # visualize_from_locations_and_generate_curves()
         # visualize_from_locations_and_generate_curves_for_all_and_all()
-        visualize_from_locations_and_generate_curves_for_all_and_all_multi_processing()
+        # visualize_from_locations_and_generate_curves_for_all_and_all_multi_processing()
