@@ -13,6 +13,7 @@ from pytorch_lightning import seed_everything
 from torch.nn.functional import pad
 from tqdm import tqdm
 
+from average_image.constants import SDDVideoDatasets
 from baselinev2.improve_metrics.crop_utils import show_image_with_crop_boxes
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import add_box_to_axes_with_annotation, add_box_to_axes
@@ -150,26 +151,27 @@ class PosMapToConventional(TracksAnalyzer):
         return fig
 
     def save_as_csv(self, metrics):
-        video_class, video_number, ade, fde, precision, recall, radius = [], [], [], [], [], [], []
+        video_class, video_number, classic_precision, classic_recall, \
+        classic_nn_precision, classic_nn_recall, radius = [], [], [], [], [], [], []
         for k, v in metrics.items():
             for vk, vv in v.items():
                 video_class.append(k)
                 video_number.append(vk)
-                ade.append(vv['ade'])
-                fde.append(vv['fde'])
-                precision.append(vv['precision'])
-                recall.append(vv['recall'])
+                classic_precision.append(vv['classic_precision'])
+                classic_recall.append(vv['classic_recall'])
+                classic_nn_precision.append(vv['classic_nn_precision'])
+                classic_nn_recall.append(vv['classic_nn_recall'])
                 radius.append(vv['neighbourhood_radius'])
         df: pd.DataFrame = pd.DataFrame({
             'class': video_class,
             'number': video_number,
-            'ade': ade,
-            'fde': fde,
-            'precision': precision,
-            'recall': recall,
+            'classic_precision': classic_precision,
+            'classic_recall': classic_recall,
+            'classic_nn_precision': classic_nn_precision,
+            'classic_nn_recall': classic_nn_recall,
             'neighbourhood_radius': radius
         })
-        df.to_csv(f"{self.root}/{self.extracted_folder}/metrics_{self.config.threshold}m.csv", index=False)
+        df.to_csv(f"{self.root}/classic_nn_extracted_annotations/metrics_{self.config.threshold}m.csv", index=False)
 
     def perform_analysis_on_multiple_sequences(self, show_extracted_tracks_only=False):
         metrics = {}
@@ -202,19 +204,25 @@ class PosMapToConventional(TracksAnalyzer):
                         v_clz, v_meta_clz, v_num,
                         (ref_img.shape[1:]),
                         video_path)
-                    ade, fde = self.calculate_ade_fde_for_associations(
-                        video_sequence_track_data=data, meta_class=v_meta_clz, video_number=v_num)
+                    df, \
+                    (overall_gt_classic_precision, overall_gt_classic_recall), \
+                    (overall_gt_classic_nn_precision, overall_gt_classic_nn_recall) = \
+                        self.generate_annotation_from_data(data)
                     if v_clz.name in metrics.keys():
                         metrics[v_clz.name][v_num] = {
-                            'ade': ade, 'fde': fde,
-                            'precision': p, 'recall': r,
+                            'classic_precision': overall_gt_classic_precision,
+                            'classic_recall': overall_gt_classic_recall,
+                            'classic_nn_precision': overall_gt_classic_nn_precision,
+                            'classic_nn_recall': overall_gt_classic_nn_recall,
                             'neighbourhood_radius': self.config.threshold
                         }
                     else:
                         metrics[v_clz.name] = {
                             v_num: {
-                                'ade': ade, 'fde': fde,
-                                'precision': p, 'recall': r,
+                                'classic_precision': overall_gt_classic_precision,
+                                'classic_recall': overall_gt_classic_recall,
+                                'classic_nn_precision': overall_gt_classic_nn_precision,
+                                'classic_nn_recall': overall_gt_classic_nn_recall,
                                 'neighbourhood_radius': self.config.threshold
                             }
                         }
@@ -294,13 +302,16 @@ class PosMapToConventional(TracksAnalyzer):
                     candidate_track_ids.append(candidate.track_id)
                     candidate_centers.append(candidate.center)
 
-                selected_boxes, selected_centers, selected_track_idx = self.get_classified_candidates(
-                    candidate_boxes, candidate_centers, candidate_track_ids, rgb_frame)
+                if len(candidate_pos_map_idx) != 0:
+                    selected_boxes, selected_centers, selected_track_idx = self.get_classified_candidates(
+                        candidate_boxes, candidate_centers, candidate_track_ids, rgb_frame)
 
-                classified_detection_list = [
-                    GenericDetection(center=c, box=b, track_id=t)
-                    for c, b, t in zip(selected_centers, selected_boxes, selected_track_idx)
-                ]
+                    classified_detection_list = [
+                        GenericDetection(center=c, box=b, track_id=t)
+                        for c, b, t in zip(selected_centers, selected_boxes, selected_track_idx)
+                    ]
+                else:
+                    classified_detection_list = []
 
             detections_list.detections.append(Detections(
                 frame_number=frame.item(),
@@ -413,11 +424,94 @@ class PosMapToConventional(TracksAnalyzer):
 
         return selected_boxes, selected_centers, selected_track_idx
 
+    def generate_annotation_from_data(self, video_detection_data: VideoDetections):
+        save_path = os.path.join(
+            self.config.root,
+            f"classic_nn_extracted_annotations/{video_detection_data.video_class.value}"
+            f"/video{video_detection_data.video_number}/")
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+
+        ratio = self.get_ratio(
+            meta_class=getattr(SDDVideoDatasets, video_detection_data.video_class.name),
+            video_number=video_detection_data.video_number)
+
+        frame, track_id, x, y = [], [], [], []
+
+        gt_classic_tp_list, gt_classic_fp_list, gt_classic_fn_list = [], [], []
+        gt_classic_nn_tp_list, gt_classic_nn_fp_list, gt_classic_nn_fn_list = [], [], []
+
+        for detection_data in tqdm(video_detection_data.detections):
+            for common_detection in detection_data.common_detections:
+                frame.append(detection_data.frame_number)
+                # giving classic data as we want to extend them
+                track_id.append(common_detection.classic_track_id)
+                x.append(common_detection.classic_center[0])
+                y.append(common_detection.classic_center[1])
+            for classified_detection in detection_data.classified_detections:
+                frame.append(detection_data.frame_number)
+                # giving -1 as track id as they are not associated to any track
+                track_id.append(-1)
+                x.append(classified_detection.center[0].item())
+                y.append(classified_detection.center[1].item())
+
+            (match_rows, match_cols), (fn, fp, precision_c, recall_c, tp) = self.get_associations_and_metrics(
+                gt_centers=np.stack([b.center for b in detection_data.gt_detections]),
+                extracted_centers=np.stack([b.center for b in detection_data.classic_detections])
+                if len(detection_data.classic_detections) != 0 else [],
+                max_distance=float(self.config.match_distance),
+                ratio=ratio,
+                threshold=self.config.threshold
+            )
+            gt_classic_tp_list.append(tp)
+            gt_classic_fp_list.append(fp)
+            gt_classic_fn_list.append(fn)
+
+            (match_rows, match_cols), (fn, fp, precision_c_nn, recall_c_nn, tp) = self.get_associations_and_metrics(
+                gt_centers=np.stack([b.center for b in detection_data.gt_detections]),
+                extracted_centers=
+                np.concatenate(
+                    (np.stack([b.center for b in detection_data.classic_detections]),
+                     np.stack([b.center for b in detection_data.classified_detections])),
+                    axis=0) if ((len(detection_data.classic_detections) != 0)
+                                and (len(detection_data.classified_detections) != 0)) else [],
+                max_distance=float(self.config.match_distance),
+                ratio=ratio,
+                threshold=self.config.threshold
+            )
+            gt_classic_nn_tp_list.append(tp)
+            gt_classic_nn_fp_list.append(fp)
+            gt_classic_nn_fn_list.append(fn)
+
+        annotation_df = pd.DataFrame.from_dict(
+            {
+                'frame': frame,
+                'track_id': track_id,
+                'x': x,
+                'y': y,
+            }
+        )
+        overall_gt_classic_precision = np.array(gt_classic_tp_list).sum() / \
+                                       (np.array(gt_classic_tp_list).sum() + np.array(gt_classic_fp_list).sum())
+        overall_gt_classic_recall = np.array(gt_classic_tp_list).sum() / \
+                                    (np.array(gt_classic_tp_list).sum() + np.array(gt_classic_fn_list).sum())
+
+        overall_gt_classic_nn_precision = np.array(gt_classic_nn_tp_list).sum() / \
+                                          (np.array(gt_classic_nn_tp_list).sum() + np.array(
+                                              gt_classic_nn_fp_list).sum())
+        overall_gt_classic_nn_recall = np.array(gt_classic_nn_tp_list).sum() / \
+                                       (np.array(gt_classic_nn_tp_list).sum() + np.array(gt_classic_nn_fn_list).sum())
+
+        annotation_df.to_csv(os.path.join(save_path, 'annotation.csv'), index=False)
+        return annotation_df, (overall_gt_classic_precision, overall_gt_classic_recall), \
+               (overall_gt_classic_nn_precision, overall_gt_classic_nn_recall)
+
 
 if __name__ == '__main__':
     cfg = OmegaConf.load('config/training/training.yaml')
     classifier_network = CropClassifier(config=cfg, train_dataset=None, val_dataset=None, desired_output_shape=None,
                                         loss_function=None)
     analyzer = PosMapToConventional(cfg, use_patch_filtered=True, classifier=classifier_network)
-    out = analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=False)
+    # out = analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=False)
+    # out = analyzer.generate_annotation_from_data(torch.load(
+    #     '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/dummy_classic_nn.pt'))
     print()
