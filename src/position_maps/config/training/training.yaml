@@ -555,7 +555,7 @@ metrics_analysis:
   use_classifier: True
   crop_size: [ 64, 64 ]  # h, w
 
-  device: 'cpu'
+  device: 'cuda:0'
 
   debug:
     enabled: False

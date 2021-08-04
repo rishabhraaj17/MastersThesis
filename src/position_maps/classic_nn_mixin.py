@@ -10,6 +10,7 @@ import torchvision.transforms.functional as tvf
 from matplotlib import pyplot as plt, patches
 from omegaconf import OmegaConf
 from pytorch_lightning import seed_everything
+from torch.nn.functional import pad
 from tqdm import tqdm
 
 from baselinev2.improve_metrics.crop_utils import show_image_with_crop_boxes
@@ -81,6 +82,7 @@ class PosMapToConventional(TracksAnalyzer):
     def __init__(self, config, use_patch_filtered, classifier=None):
         super(PosMapToConventional, self).__init__(config=config)
         self.classifier = classifier
+        classifier.to(config.device)
         self.use_patch_filtered = use_patch_filtered
         if use_patch_filtered:
             self.extracted_folder = 'filtered_generated_annotations'
@@ -343,6 +345,22 @@ class PosMapToConventional(TracksAnalyzer):
         print(f"Analysis done for {video_class.name} - {video_number}")
         return detections_list, overall_precision, overall_recall
 
+    @staticmethod
+    def get_processed_patches_to_train_rgb_only(crops, crop_h, crop_w):
+        crops_filtered, filtered_idx = [], []
+        for f_idx, c in enumerate(crops):
+            if c.numel() != 0:
+                if c.shape[-1] != crop_w or c.shape[-2] != crop_h:
+                    diff_h = crop_h - c.shape[-2]
+                    diff_w = crop_w - c.shape[-1]
+
+                    c = pad(c.unsqueeze(0), [diff_w // 2, diff_w - diff_w // 2, diff_h // 2, diff_h - diff_h // 2],
+                            mode='replicate').squeeze(0)
+                crops_filtered.append(c)
+                filtered_idx.append(f_idx)
+        crops_filtered = torch.stack(crops_filtered) if len(crops_filtered) != 0 else []
+        return crops_filtered, filtered_idx
+
     def get_classified_candidates(self, candidate_boxes, candidate_centers, candidate_track_ids, rgb_frame):
         candidate_track_ids = torch.tensor(candidate_track_ids)
         candidate_boxes = torch.tensor(candidate_boxes)
@@ -362,8 +380,18 @@ class PosMapToConventional(TracksAnalyzer):
         track_idx = candidate_track_ids[valid_boxes]
         candidate_boxes = candidate_boxes[valid_boxes]
         candidate_centers = candidate_centers[valid_boxes]
-        crops = torch.stack(crops)
-        crops = (crops.float() / 255.0).to(self.config.device)
+
+        crops = [(c.float() / 255.0).to(self.config.device) for i, c in enumerate(crops) if i in valid_boxes]
+        crops, filtered_idx = self.get_processed_patches_to_train_rgb_only(
+            crops, crop_h=self.config.crop_size[0], crop_w=self.config.crop_size[1])
+        filtered_idx = torch.tensor(filtered_idx)
+        boxes_xywh = boxes_xywh[filtered_idx]
+        track_idx = candidate_track_ids[filtered_idx]
+        candidate_boxes = candidate_boxes[filtered_idx]
+        candidate_centers = candidate_centers[filtered_idx]
+
+        # crops = torch.stack(crops)
+        # crops = (crops.float() / 255.0).to(self.config.device)
 
         if self.config.debug.enabled:
             show_image_with_crop_boxes(rgb_frame,
@@ -378,6 +406,7 @@ class PosMapToConventional(TracksAnalyzer):
 
         pred_labels = torch.round(torch.sigmoid(patch_predictions))
         selected_boxes_idx = torch.where(pred_labels.squeeze(-1))
+
         selected_track_idx = track_idx[selected_boxes_idx]
         selected_boxes = boxes_xywh[selected_boxes_idx]
         selected_centers = candidate_centers[selected_boxes_idx]
