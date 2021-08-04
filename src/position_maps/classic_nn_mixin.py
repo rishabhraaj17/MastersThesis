@@ -292,45 +292,8 @@ class PosMapToConventional(TracksAnalyzer):
                     candidate_track_ids.append(candidate.track_id)
                     candidate_centers.append(candidate.center)
 
-                candidate_track_ids = torch.tensor(candidate_track_ids)
-                candidate_boxes = torch.tensor(candidate_boxes)
-                candidate_centers = torch.tensor(candidate_centers)
-
-                boxes_xywh = torchvision.ops.box_convert(candidate_boxes, 'cxcywh', 'xywh')
-                boxes_xywh = [torch.tensor((b[1], b[0], b[2], b[3])) for b in boxes_xywh]
-
-                boxes_xywh = torch.stack(boxes_xywh)
-
-                crops = [tvf.crop(torch.from_numpy(rgb_frame).permute(2, 0, 1),
-                                  top=b[0], left=b[1], width=b[2], height=b[3])
-                         for b in boxes_xywh.to(dtype=torch.int)]
-                # feasible boxes
-                valid_boxes = [c_i for c_i, c in enumerate(crops) if c.shape[1] != 0 and c.shape[2] != 0]
-                boxes_xywh = boxes_xywh[valid_boxes]
-                track_idx = candidate_track_ids[valid_boxes]
-                candidate_boxes = candidate_boxes[valid_boxes]
-                candidate_centers = candidate_centers[valid_boxes]
-                crops = torch.stack(crops)
-                crops = (crops.float() / 255.0).to(self.config.device)
-
-                if self.config.debug.enabled:
-                    show_image_with_crop_boxes(rgb_frame,
-                                               [], boxes_xywh, xywh_mode_v2=False, xyxy_mode=False,
-                                               title='xywh')
-                    gt_crops_grid = torchvision.utils.make_grid(crops)
-                    plt.imshow(gt_crops_grid.cpu().permute(1, 2, 0))
-                    plt.show()
-
-                with torch.no_grad():
-                    patch_predictions = self.classifier(crops)
-
-                pred_labels = torch.round(torch.sigmoid(patch_predictions))
-
-                selected_boxes_idx = torch.where(pred_labels.squeeze(-1))
-
-                selected_track_idx = track_idx[selected_boxes_idx]
-                selected_boxes = boxes_xywh[selected_boxes_idx]
-                selected_centers = candidate_centers[selected_boxes_idx]
+                selected_boxes, selected_centers, selected_track_idx = self.get_classified_candidates(
+                    candidate_boxes, candidate_centers, candidate_track_ids, rgb_frame)
 
                 classified_detection_list = [
                     GenericDetection(center=c, box=b, track_id=t)
@@ -379,6 +342,47 @@ class PosMapToConventional(TracksAnalyzer):
                 self.config.video_fps)
         print(f"Analysis done for {video_class.name} - {video_number}")
         return detections_list, overall_precision, overall_recall
+
+    def get_classified_candidates(self, candidate_boxes, candidate_centers, candidate_track_ids, rgb_frame):
+        candidate_track_ids = torch.tensor(candidate_track_ids)
+        candidate_boxes = torch.tensor(candidate_boxes)
+        candidate_centers = torch.tensor(candidate_centers)
+
+        boxes_xywh = torchvision.ops.box_convert(candidate_boxes, 'cxcywh', 'xywh')
+        boxes_xywh = [torch.tensor((b[1], b[0], b[2], b[3])) for b in boxes_xywh]
+        boxes_xywh = torch.stack(boxes_xywh)
+
+        crops = [tvf.crop(torch.from_numpy(rgb_frame).permute(2, 0, 1),
+                          top=b[0], left=b[1], width=b[2], height=b[3])
+                 for b in boxes_xywh.to(dtype=torch.int)]
+
+        # feasible boxes
+        valid_boxes = [c_i for c_i, c in enumerate(crops) if c.shape[1] != 0 and c.shape[2] != 0]
+        boxes_xywh = boxes_xywh[valid_boxes]
+        track_idx = candidate_track_ids[valid_boxes]
+        candidate_boxes = candidate_boxes[valid_boxes]
+        candidate_centers = candidate_centers[valid_boxes]
+        crops = torch.stack(crops)
+        crops = (crops.float() / 255.0).to(self.config.device)
+
+        if self.config.debug.enabled:
+            show_image_with_crop_boxes(rgb_frame,
+                                       [], boxes_xywh, xywh_mode_v2=False, xyxy_mode=False,
+                                       title='xywh')
+            gt_crops_grid = torchvision.utils.make_grid(crops)
+            plt.imshow(gt_crops_grid.cpu().permute(1, 2, 0))
+            plt.show()
+
+        with torch.no_grad():
+            patch_predictions = self.classifier(crops)
+
+        pred_labels = torch.round(torch.sigmoid(patch_predictions))
+        selected_boxes_idx = torch.where(pred_labels.squeeze(-1))
+        selected_track_idx = track_idx[selected_boxes_idx]
+        selected_boxes = boxes_xywh[selected_boxes_idx]
+        selected_centers = candidate_centers[selected_boxes_idx]
+
+        return selected_boxes, selected_centers, selected_track_idx
 
 
 if __name__ == '__main__':
