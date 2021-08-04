@@ -6,11 +6,13 @@ import numpy as np
 import pandas as pd
 import torch
 import torchvision
+import torchvision.transforms.functional as tvf
 from matplotlib import pyplot as plt, patches
 from omegaconf import OmegaConf
 from pytorch_lightning import seed_everything
 from tqdm import tqdm
 
+from baselinev2.improve_metrics.crop_utils import show_image_with_crop_boxes
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import add_box_to_axes_with_annotation, add_box_to_axes
 from log import get_logger
@@ -281,18 +283,73 @@ class PosMapToConventional(TracksAnalyzer):
                 for i in candidate_pos_map_idx
             ]
 
+            rgb_frame = extract_frame_from_video(video_path, frame_number=frame)
+
+            if self.config.use_classifier:
+                candidate_boxes, candidate_track_ids, candidate_centers = [], [], []
+                for candidate in candidate_detection_list:
+                    candidate_boxes.append([*np.round(candidate.center).astype(np.int), *self.config.crop_size])
+                    candidate_track_ids.append(candidate.track_id)
+                    candidate_centers.append(candidate.center)
+
+                candidate_track_ids = torch.tensor(candidate_track_ids)
+                candidate_boxes = torch.tensor(candidate_boxes)
+                candidate_centers = torch.tensor(candidate_centers)
+
+                boxes_xywh = torchvision.ops.box_convert(candidate_boxes, 'cxcywh', 'xywh')
+                boxes_xywh = [torch.tensor((b[1], b[0], b[2], b[3])) for b in boxes_xywh]
+
+                boxes_xywh = torch.stack(boxes_xywh)
+
+                crops = [tvf.crop(torch.from_numpy(rgb_frame).permute(2, 0, 1),
+                                  top=b[0], left=b[1], width=b[2], height=b[3])
+                         for b in boxes_xywh.to(dtype=torch.int)]
+                # feasible boxes
+                valid_boxes = [c_i for c_i, c in enumerate(crops) if c.shape[1] != 0 and c.shape[2] != 0]
+                boxes_xywh = boxes_xywh[valid_boxes]
+                track_idx = candidate_track_ids[valid_boxes]
+                candidate_boxes = candidate_boxes[valid_boxes]
+                candidate_centers = candidate_centers[valid_boxes]
+                crops = torch.stack(crops)
+                crops = (crops.float() / 255.0).to(self.config.device)
+
+                if self.config.debug.enabled:
+                    show_image_with_crop_boxes(rgb_frame,
+                                               [], boxes_xywh, xywh_mode_v2=False, xyxy_mode=False,
+                                               title='xywh')
+                    gt_crops_grid = torchvision.utils.make_grid(crops)
+                    plt.imshow(gt_crops_grid.cpu().permute(1, 2, 0))
+                    plt.show()
+
+                with torch.no_grad():
+                    patch_predictions = self.classifier(crops)
+
+                pred_labels = torch.round(torch.sigmoid(patch_predictions))
+
+                selected_boxes_idx = torch.where(pred_labels.squeeze(-1))
+
+                selected_track_idx = track_idx[selected_boxes_idx]
+                selected_boxes = boxes_xywh[selected_boxes_idx]
+                selected_centers = candidate_centers[selected_boxes_idx]
+
+                classified_detection_list = [
+                    GenericDetection(center=c, box=b, track_id=t)
+                    for c, b, t in zip(selected_centers, selected_boxes, selected_track_idx)
+                ]
+
             detections_list.detections.append(Detections(
                 frame_number=frame.item(),
                 gt_detections=gt_detection_list,
                 classic_detections=classic_detection_list,
                 pos_map_detections=pos_map_detection_list,
                 common_detections=common_detection_list,
-                candidate_detections=candidate_detection_list
+                candidate_detections=candidate_detection_list,
+                classified_detections=classified_detection_list if self.config.use_classifier else None
             ))
 
             if self.config.show_plot or self.config.make_video:
                 fig = self.plot_detections(
-                    frame=extract_frame_from_video(video_path, frame_number=frame),
+                    frame=rgb_frame,
                     boxes=classic_extracted_boxes,
                     gt_features=classic_extracted_centers[:, None, :],
                     extracted_features=pos_map_extracted_centers[:, None, :],
