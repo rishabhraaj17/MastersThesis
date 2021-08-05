@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torchvision.utils
+from albumentations import Compose, HorizontalFlip, VerticalFlip, Rotate, RandomBrightnessContrast, ShiftScaleRotate
 from omegaconf import ListConfig
 from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -15,9 +16,10 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import Subset, DataLoader, Dataset, random_split
 from tqdm import tqdm
 
+from average_image.constants import SDDVideoClasses
 from baselinev2.exceptions import TimeoutException
 from baselinev2.improve_metrics.crop_utils import sample_random_crops, replace_overlapping_boxes, REPLACEMENT_TIMEOUT
-from baselinev2.improve_metrics.model import plot_predictions
+from baselinev2.improve_metrics.model import plot_predictions, make_datasets_simple, people_collate_fn
 from baselinev2.plot_utils import add_box_to_axes
 from baselinev2.utils import get_bbox_center
 from log import get_logger
@@ -47,17 +49,17 @@ class CropsTensorDataset(Dataset):
 
                 self.tn_crops.append(tn_data['images'])
                 self.tn_labels.append(torch.zeros_like(tn_data['labels']))
-                
+
             self.gt_crops = torch.cat(self.gt_crops)
             self.gt_labels = torch.cat(self.gt_labels)
             self.tn_crops = torch.cat(self.tn_crops)
             self.tn_labels = torch.cat(self.tn_labels)
         else:
             gt_data, tn_data = torch.load(self.path)
-    
+
             self.gt_crops = gt_data['images']
             self.gt_labels = gt_data['labels']
-    
+
             self.tn_crops = tn_data['images']
             self.tn_labels = torch.zeros_like(tn_data['labels'])
 
@@ -75,7 +77,7 @@ def train_crop_classifier(cfg):
     # todo: train with augmentations
     # path = 'death_circle_crops0_1.pt'
     # path = os.path.join(os.getcwd(), path)
-    
+
     path = ['death_circle_crops0_1.pt', 'death_circle_crops_2_3_4.pt']
     path = [os.path.join(os.getcwd(), p) for p in path]
 
@@ -88,7 +90,7 @@ def train_crop_classifier(cfg):
 
     model = CropClassifier(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset, desired_output_shape=None,
                            loss_function=nn.BCEWithLogitsLoss())
-    
+
     checkpoint_callback = ModelCheckpoint(
         monitor=cfg.crop_classifier.monitor,
         save_top_k=cfg.crop_classifier.num_checkpoints_to_save,
@@ -98,6 +100,43 @@ def train_crop_classifier(cfg):
 
     trainer = Trainer(max_epochs=cfg.crop_classifier.num_epochs, gpus=1,
                       fast_dev_run=False, callbacks=[checkpoint_callback],
+                      deterministic=True, gradient_clip_val=2.0,
+                      accumulate_grad_batches=1)
+    trainer.fit(model)
+
+
+@hydra.main(config_path="config", config_name="config")
+def train_crop_classifier_v1(cfg):
+    crop_cfg = cfg.crop_classifier
+    img_t = Compose([
+        HorizontalFlip(p=0.4),
+        VerticalFlip(p=0.4),
+        Rotate(p=0.4),
+        RandomBrightnessContrast(p=0.2),
+        ShiftScaleRotate(p=0.2),
+    ], p=0.7)
+
+    logger.info(f'Setting up datasets...')
+    video_class = getattr(SDDVideoClasses, crop_cfg.dataset.video_class)
+    logger.info(f'Video Class: {video_class.name}')
+    train_dataset, val_dataset = make_datasets_simple(
+        crop_cfg, video_class=video_class, return_test_split=False, plot=False,
+        server_mode=crop_cfg.server_mode,
+        transforms=img_t if crop_cfg.data_augmentation else None)
+    logger.info(f'Setting up model...')
+
+    model = CropClassifier(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset, desired_output_shape=None,
+                           loss_function=nn.BCEWithLogitsLoss(), collate_fn=people_collate_fn)
+
+    checkpoint_callback = ModelCheckpoint(
+        monitor=crop_cfg.monitor,
+        save_top_k=crop_cfg.num_checkpoints_to_save,
+        mode=crop_cfg.mode,
+        verbose=crop_cfg.verbose
+    )
+
+    trainer = Trainer(max_epochs=crop_cfg.trainer.num_epochs, gpus=crop_cfg.trainer.gpus,
+                      fast_dev_run=crop_cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
                       deterministic=True, gradient_clip_val=2.0,
                       accumulate_grad_batches=1)
     trainer.fit(model)
@@ -407,5 +446,6 @@ def viz_crops(crops_filtered, show=True):
 
 if __name__ == '__main__':
     # train_crop_classifier()
-    eval_crop_classifier()
+    train_crop_classifier_v1()
+    # eval_crop_classifier()
     # generate_crops_v0()
