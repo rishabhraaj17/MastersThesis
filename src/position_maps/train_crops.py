@@ -128,9 +128,14 @@ def train_crop_classifier_v1(cfg):
         transforms=img_t if crop_cfg.data_augmentation else None)
     logger.info(f'Setting up model...')
 
-    model = CropClassifierDDP(
-        config=cfg, train_dataset=train_dataset, val_dataset=val_dataset, desired_output_shape=None,
-        loss_function=nn.BCEWithLogitsLoss(), collate_fn=people_collate_fn_tuple)
+    if crop_cfg.trainer.accelerator in ['ddp', 'ddp_cpu']:
+        model = CropClassifierDDP(
+            config=cfg, train_dataset=train_dataset, val_dataset=val_dataset, desired_output_shape=None,
+            loss_function=nn.BCEWithLogitsLoss(), collate_fn=people_collate_fn_tuple)
+    else:
+        model = CropClassifier(
+            config=cfg, train_dataset=train_dataset, val_dataset=val_dataset, desired_output_shape=None,
+            loss_function=nn.BCEWithLogitsLoss(), collate_fn=people_collate_fn_tuple)
 
     checkpoint_callback = ModelCheckpoint(
         monitor=crop_cfg.monitor,

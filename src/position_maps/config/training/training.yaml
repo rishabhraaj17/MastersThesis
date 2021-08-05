@@ -452,7 +452,7 @@ crop_classifier:
     fast_dev_run: False
     num_checkpoints_to_save: 2
     deterministic: True
-    accelerator: 'ddp' #'ddp_cpu' # null  # 'ddp', 'ddp_cpu'
+    accelerator: null #'ddp_cpu' # null  # 'ddp', 'ddp_cpu'
     replace_sampler_ddp: True
     num_nodes: 1
     find_unused_parameters: True
