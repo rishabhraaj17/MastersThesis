@@ -324,10 +324,24 @@ def get_single_dataset(cfg, video_class, v_num, split_dataset, smooth_trajectori
     return train_dataset, val_dataset
 
 
-def get_single_gt_dataset_from_tempfile(cfg, video_class, video_number, split_dataset,
-                                        smooth_trajectories=False, smoother=lambda x: x, threshold=1,
-                                        frame_rate=30., time_step=0.4):
-    load_path = f"{cfg.root}{video_class}/{video_number}/trajectories.csv"
+def get_single_generated_dataset_from_tempfile(cfg, video_class, video_number, split_dataset,
+                                               smooth_trajectories=False, smoother=lambda x: x, threshold=1,
+                                               frame_rate=30., time_step=0.4):
+    filename = cfg.unsupervised_csv
+    dataset_folder = 'filtered_generated_annotations'
+
+    if cfg.unsupervised_root == 'generated_annotations':
+        dataset_folder = 'generated_annotations'
+    elif cfg.unsupervised_root == 'filtered_generated_annotations':
+        dataset_folder = 'filtered_generated_annotations'
+    elif cfg.unsupervised_root == 'pm_extracted_annotations':
+        dataset_folder = 'pm_extracted_annotations'
+        filename = 'trajectories.csv'
+    elif cfg.unsupervised_root == 'classic_nn_extracted_annotations':
+        dataset_folder = 'classic_nn_extracted_annotations'
+
+    load_path = f"{cfg.root}{dataset_folder}/" \
+                f"{getattr(SDDVideoClasses, video_class).value}/video{video_number}/{filename}"
 
     data_df = pd.read_csv(load_path)
     data_df = adjust_dataframe_framerate(data_df, for_gt=False, frame_rate=frame_rate, time_step=time_step)
@@ -365,10 +379,10 @@ def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True,
         for v_num in video_numbers[v_idx]:
             if split_dataset:
                 if from_temp_file:
-                    t_dset, v_dset = get_single_gt_dataset_from_tempfile(conf, video_class, v_num, split_dataset,
-                                                                         smooth_trajectories=smooth_trajectories,
-                                                                         smoother=smoother, threshold=threshold,
-                                                                         frame_rate=frame_rate, time_step=time_step)
+                    t_dset, v_dset = get_single_generated_dataset_from_tempfile(conf, video_class, v_num, split_dataset,
+                                                                                smooth_trajectories=smooth_trajectories,
+                                                                                smoother=smoother, threshold=threshold,
+                                                                                frame_rate=frame_rate, time_step=time_step)
                 else:
                     t_dset, v_dset = get_single_dataset(conf, video_class, v_num, split_dataset,
                                                         smooth_trajectories=smooth_trajectories,
@@ -377,10 +391,10 @@ def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True,
                 val_datasets.append(v_dset)
             else:
                 if from_temp_file:
-                    dset = get_single_gt_dataset_from_tempfile(cfg, video_class, v_num, split_dataset,
-                                                               smooth_trajectories=smooth_trajectories,
-                                                               smoother=smoother, threshold=threshold,
-                                                               frame_rate=frame_rate, time_step=time_step)
+                    dset = get_single_generated_dataset_from_tempfile(cfg, video_class, v_num, split_dataset,
+                                                                      smooth_trajectories=smooth_trajectories,
+                                                                      smoother=smoother, threshold=threshold,
+                                                                      frame_rate=frame_rate, time_step=time_step)
                 else:
                     dset = get_single_dataset(cfg, video_class, v_num, split_dataset,
                                               smooth_trajectories=smooth_trajectories,

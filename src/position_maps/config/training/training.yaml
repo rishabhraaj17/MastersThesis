@@ -33,7 +33,18 @@ tp_module:
 
   datasets:
     root_gt: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/OpenTraj/datasets/SDD/'
-    root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/Trajectories/'
+    root_log: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/Trajectories/'
+    root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
+
+    supervised_root: 'annotations'
+    supervised_csv: 'annotation_augmented.csv'
+
+    # generated_annotations - vanilla method
+    # filtered_generated_annotations - patch filtered
+    # pm_extracted_annotations - position map vanilla detections
+    # classic_nn_extracted_annotations - classic patch filtered + position_map new detections
+    unsupervised_root: 'filtered_generated_annotations'
+    unsupervised_csv: 'generated_annotations.csv'
 
     use_standard_dataset: True
 
