@@ -89,6 +89,27 @@ class CropClassifier(Base):
             drop_last=self.config.crop_classifier.drop_last)
 
 
+class CropClassifierDDP(CropClassifier):
+    def __init__(self, config: DictConfig, train_dataset: Dataset, val_dataset: Dataset,
+                 desired_output_shape: Tuple[int, int] = None, loss_function: nn.Module = None,
+                 additional_loss_functions: List[nn.Module] = None, collate_fn: Optional[Callable] = None):
+        super(CropClassifierDDP, self).__init__(
+            config=config, train_dataset=train_dataset, val_dataset=val_dataset,
+            desired_output_shape=desired_output_shape, loss_function=loss_function,
+            additional_loss_functions=additional_loss_functions, collate_fn=collate_fn
+        )
+
+    def training_step(self, batch, batch_idx):
+        loss = self._one_step(batch)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss = self._one_step(batch)
+        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        return loss
+
+
 if __name__ == '__main__':
     m = CropClassifier.from_config({})
     inp = torch.randn((2, 3, 64, 64))

@@ -28,7 +28,7 @@ from baselinev2.utils import get_bbox_center
 from log import get_logger
 from src.position_maps.location_utils import locations_from_heatmaps, \
     get_adjusted_object_locations_rgb, get_processed_patches_to_train_rgb_only
-from src_lib.models_hub.crop_classifiers import CropClassifier
+from src_lib.models_hub.crop_classifiers import CropClassifier, CropClassifierDDP
 from train import setup_single_video_dataset, setup_multiple_datasets, build_model, build_loss
 from utils import heat_map_collate_fn, ImagePadder
 
@@ -128,8 +128,9 @@ def train_crop_classifier_v1(cfg):
         transforms=img_t if crop_cfg.data_augmentation else None)
     logger.info(f'Setting up model...')
 
-    model = CropClassifier(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset, desired_output_shape=None,
-                           loss_function=nn.BCEWithLogitsLoss(), collate_fn=people_collate_fn_tuple)
+    model = CropClassifierDDP(
+        config=cfg, train_dataset=train_dataset, val_dataset=val_dataset, desired_output_shape=None,
+        loss_function=nn.BCEWithLogitsLoss(), collate_fn=people_collate_fn_tuple)
 
     checkpoint_callback = ModelCheckpoint(
         monitor=crop_cfg.monitor,
