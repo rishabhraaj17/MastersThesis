@@ -344,6 +344,12 @@ def get_single_generated_dataset_from_tempfile(cfg, video_class, video_number, s
                 f"{getattr(SDDVideoClasses, video_class).value}/video{video_number}/{filename}"
 
     data_df = pd.read_csv(load_path)
+
+    # check out for classic_nn_extracted_annotations
+    if cfg.unsupervised_root in ['generated_annotations', 'filtered_generated_annotations']:
+        data_df = data_df[['frame_number', 'track_id', 'center_x', 'center_y']]
+        data_df = data_df.rename(columns={"frame_number": "frame"})
+
     data_df = adjust_dataframe_framerate(data_df, for_gt=False, frame_rate=frame_rate, time_step=time_step)
 
     temp_file = tempfile.NamedTemporaryFile(suffix='.txt')
