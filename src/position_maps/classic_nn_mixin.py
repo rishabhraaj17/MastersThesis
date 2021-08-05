@@ -18,8 +18,11 @@ from scipy.spatial import cKDTree
 from torch.nn.functional import pad
 from tqdm import tqdm
 
-from average_image.constants import SDDVideoDatasets
+from average_image.constants import SDDVideoDatasets, SDDVideoClasses
 from baselinev2.improve_metrics.crop_utils import show_image_with_crop_boxes
+from baselinev2.improve_metrics.model import make_conv_blocks, Activations, PersonClassifier, people_collate_fn, \
+    make_classifier_block
+from baselinev2.improve_metrics.modules import resnet18, resnet9
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import add_box_to_axes_with_annotation, add_box_to_axes
 from log import get_logger
@@ -28,6 +31,52 @@ from src_lib.models_hub.crop_classifiers import CropClassifier
 
 seed_everything(42)
 logger = get_logger(__name__)
+
+# MODEL_ROOT = '/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/'
+MODEL_ROOT = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/'
+
+MODEL_PATH = f'{MODEL_ROOT}baselinev2/improve_metrics/logs/lightning_logs/version_'
+
+DATASET_TO_MODEL = {
+    SDDVideoClasses.BOOKSTORE: f"{MODEL_PATH}376647",
+    SDDVideoClasses.COUPA: f"{MODEL_PATH}377095",
+    SDDVideoClasses.GATES: f"{MODEL_PATH}373993",
+    SDDVideoClasses.HYANG: f"{MODEL_PATH}373994",
+    SDDVideoClasses.LITTLE: f"{MODEL_PATH}376650",
+    SDDVideoClasses.NEXUS: f"{MODEL_PATH}377688",
+    SDDVideoClasses.QUAD: f"{MODEL_PATH}377576",
+    SDDVideoClasses.DEATH_CIRCLE: f"{MODEL_PATH}11",
+}
+
+
+def setup_person_classifier(cfg, video_class):
+    logger.info(f'Setting up PersonalClassifier model...')
+
+    if cfg.eval.use_resnet:
+        conv_layers = resnet18(pretrained=cfg.eval.use_pretrained) \
+            if not cfg.eval.smaller_resnet else resnet9(pretrained=cfg.eval.use_pretrained,
+                                                        first_in_channel=cfg.eval.first_in_channel,
+                                                        first_stride=cfg.eval.first_stride,
+                                                        first_padding=cfg.eval.first_padding)
+    else:
+        conv_layers = make_conv_blocks(cfg.input_dim, cfg.out_channels, cfg.kernel_dims, cfg.stride, cfg.padding,
+                                       cfg.batch_norm, non_lin=Activations.RELU, dropout=cfg.dropout)
+    classifier_layers = make_classifier_block(cfg.in_feat, cfg.out_feat, Activations.RELU)
+
+    model = PersonClassifier(conv_block=conv_layers, classifier_block=classifier_layers,
+                             train_dataset=None, val_dataset=None, batch_size=cfg.eval.batch_size,
+                             num_workers=cfg.eval.num_workers, shuffle=cfg.eval.shuffle,
+                             pin_memory=cfg.eval.pin_memory, lr=cfg.lr, collate_fn=people_collate_fn,
+                             hparams=cfg)
+    checkpoint_path = f'{DATASET_TO_MODEL[video_class]}/checkpoints/'
+    checkpoint_file = checkpoint_path + os.listdir(checkpoint_path)[0]
+    load_dict = torch.load(checkpoint_file)
+
+    model.load_state_dict(load_dict['state_dict'])
+    model.to(cfg.eval.device)
+    model.eval()
+
+    return model
 
 
 class Detections(object):
@@ -88,7 +137,6 @@ class PosMapToConventional(TracksAnalyzer):
     def __init__(self, config, use_patch_filtered, classifier=None):
         super(PosMapToConventional, self).__init__(config=config)
         self.classifier = classifier
-        classifier.to(config.device)
         self.use_patch_filtered = use_patch_filtered
         if use_patch_filtered:
             self.extracted_folder = 'filtered_generated_annotations'
@@ -182,6 +230,16 @@ class PosMapToConventional(TracksAnalyzer):
         metrics = {}
         for v_idx, (v_clz, v_meta_clz) in enumerate(zip(self.video_classes, self.video_meta_classes)):
             for v_num in self.video_numbers[v_idx]:
+                if self.config.use_classifier and self.config.use_old_model:
+                    self.classifier = setup_person_classifier(
+                        OmegaConf.merge(
+                            OmegaConf.load(f'{MODEL_ROOT}baselinev2/improve_metrics/config/eval/eval.yaml'),
+                            OmegaConf.load(f'{MODEL_ROOT}baselinev2/improve_metrics/config/model/model.yaml'),
+                            OmegaConf.load(f'{MODEL_ROOT}baselinev2/improve_metrics/config/training/training.yaml'),
+                        ),
+                        video_class=v_clz
+                    )
+                    self.classifier.to(self.config.device)
                 gt_annotation_path = f"{self.root}annotations/{v_clz.value}/video{v_num}/annotation_augmented.csv"
                 classic_extracted_annotation_path = f"{self.root}{self.extracted_folder}/{v_clz.value}/" \
                                                     f"video{v_num}/generated_annotations.csv"
@@ -377,6 +435,26 @@ class PosMapToConventional(TracksAnalyzer):
         crops_filtered = torch.stack(crops_filtered) if len(crops_filtered) != 0 else []
         return crops_filtered, filtered_idx
 
+    @staticmethod
+    def plot_predictions(crops, pred_labels, n=4, batch_idx=-1, save_path=None, additional_text=''):
+        k = 0
+        fig, ax = plt.subplots(n, n, figsize=(16, 14))
+        for i in range(n):
+            for j in range(n):
+                ax[i, j].axis('off')
+                ax[i, j].set_title(f'{pred_labels[k].int().item()}')
+                ax[i, j].imshow(crops[k].permute(1, 2, 0).cpu())
+
+                k += 1
+        plt.suptitle(f'Predictions\n GT | Prediction\n 1 -> Person/Object | 0 -> Background\n{additional_text}')
+
+        if save_path is not None:
+            Path(save_path).mkdir(parents=True, exist_ok=True)
+            plt.savefig(save_path + f'batch_idx_{batch_idx}.png')
+            plt.close()
+        else:
+            plt.show()
+
     def get_classified_candidates(self, candidate_boxes, candidate_centers, candidate_track_ids, rgb_frame):
         candidate_track_ids = torch.tensor(candidate_track_ids)
         candidate_boxes = torch.tensor(candidate_boxes)
@@ -409,6 +487,10 @@ class PosMapToConventional(TracksAnalyzer):
         # crops = torch.stack(crops)
         # crops = (crops.float() / 255.0).to(self.config.device)
 
+        # for position map model
+        if self.config.use_classifier and self.config.use_old_model:
+            crops = torch.stack([tvf.resize(c, [50, 50]) for c in crops if c.shape[1] != 0 and c.shape[2] != 0])
+
         if self.config.debug.enabled:
             show_image_with_crop_boxes(rgb_frame,
                                        [], boxes_xywh, xywh_mode_v2=False, xyxy_mode=False,
@@ -421,6 +503,10 @@ class PosMapToConventional(TracksAnalyzer):
             patch_predictions = self.classifier(crops)
 
         pred_labels = torch.round(torch.sigmoid(patch_predictions))
+
+        if self.config.debug.enabled:
+            self.plot_predictions(crops, pred_labels.squeeze(), n=5)
+
         selected_boxes_idx = torch.where(pred_labels.squeeze(-1))
 
         selected_track_idx = track_idx[selected_boxes_idx]
@@ -617,11 +703,19 @@ def find_connected_components():
 
 if __name__ == '__main__':
     # find_connected_components()
-    cfg = OmegaConf.load('config/training/training.yaml')
-    classifier_network = CropClassifier(config=cfg, train_dataset=None, val_dataset=None, desired_output_shape=None,
-                                        loss_function=None)
-    analyzer = PosMapToConventional(cfg, use_patch_filtered=True, classifier=classifier_network)
-    # out = analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=False)
+    conf = OmegaConf.load('config/training/training.yaml')
+    # classifier_network = CropClassifier(config=conf, train_dataset=None, val_dataset=None, desired_output_shape=None,
+    #                                     loss_function=None)
+    # classifier_network = setup_person_classifier(
+    #     OmegaConf.merge(
+    #         OmegaConf.load(f'{MODEL_ROOT}baselinev2/improve_metrics/config/eval/eval.yaml'),
+    #         OmegaConf.load(f'{MODEL_ROOT}baselinev2/improve_metrics/config/model/model.yaml'),
+    #         OmegaConf.load(f'{MODEL_ROOT}baselinev2/improve_metrics/config/training/training.yaml'),
+    #     ),
+    #     SDDVideoClasses.BOOKSTORE
+    # )
+    analyzer = PosMapToConventional(conf, use_patch_filtered=True, classifier=None)
+    out = analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=False)
     # out = analyzer.generate_annotation_from_data(torch.load(
     #     '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/dummy_classic_nn.pt'))
     print()

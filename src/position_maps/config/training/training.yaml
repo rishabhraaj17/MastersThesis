@@ -564,7 +564,10 @@ metrics_analysis:
   show_extracted_tracks_for: 'gt'  # 'classic', 'pos_map', 'gt
 
   use_classifier: True
-  crop_size: [ 64, 64 ]  # h, w
+
+  use_old_model: True
+
+  crop_size: [ 70, 70 ]  # [ 64, 64 ]  # h, w
 
   device: 'cuda:0'
 
