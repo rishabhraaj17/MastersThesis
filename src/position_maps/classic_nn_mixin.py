@@ -2,14 +2,19 @@ import os
 from pathlib import Path
 from typing import List
 
+import cv2
+import networkx as nx
 import numpy as np
 import pandas as pd
+import scipy.ndimage
+import skimage
 import torch
 import torchvision
 import torchvision.transforms.functional as tvf
 from matplotlib import pyplot as plt, patches
 from omegaconf import OmegaConf
 from pytorch_lightning import seed_everything
+from scipy.spatial import cKDTree
 from torch.nn.functional import pad
 from tqdm import tqdm
 
@@ -506,7 +511,112 @@ class PosMapToConventional(TracksAnalyzer):
                (overall_gt_classic_nn_precision, overall_gt_classic_nn_recall)
 
 
+def get_components(boolean_array, r=1, p=1):
+    # find neighbours
+    coordinates = list(zip(*np.where(boolean_array)))
+    tree = cKDTree(coordinates)
+    neighbours_by_pixel = tree.query_ball_tree(tree, r=r, p=p)
+    # p=1 -> Manhatten distance; r=1 -> what would be 4-connectivity in 2D
+
+    # create graph and find components
+    G = nx.Graph()
+    for ii, neighbours in enumerate(neighbours_by_pixel):
+        if len(neighbours) > 1:
+            G.add_edges_from([(ii, jj) for jj in neighbours[1:]])  # skip first neighbour as that is a self-loop
+    components = nx.connected_components(G)
+    components_out = list(nx.connected_components(G))
+
+    # create output image
+    output = np.zeros_like(boolean_array, dtype=np.int)
+    for ii, component in enumerate(components):
+        for idx in component:
+            output[coordinates[idx]] = ii + 1
+
+    return output, components_out
+
+
+def find_connected_components():
+    # skipping for now
+    fig, axs = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(8, 6))
+    original_ax, component_axis = axs
+
+    blur_radius = 2.0
+    threshold = 0.05
+
+    masks = torch.load('logs/heat_masks_little3.pt')
+    masks = masks[0]
+
+    single_mask = masks[0].sigmoid().numpy()
+
+    # 0 - ok - best so far
+    single_mask = scipy.ndimage.gaussian_filter(single_mask, sigma=blur_radius)
+    lab, n = scipy.ndimage.label(single_mask > threshold,
+                                 structure=np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]))
+    object_slices = scipy.ndimage.find_objects(lab)
+    center_of_mass = scipy.ndimage.center_of_mass(single_mask, lab)
+
+    # 1 - ok n similar
+    # ret, thresh = cv2.threshold((single_mask * 255).astype(np.uint8), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # # You need to choose 4 or 8 for connectivity type
+    # connectivity = 4
+    # # Perform the operation
+    # output = cv2.connectedComponentsWithStats(thresh, connectivity, cv2.CV_32S)
+    # # Get the results
+    # # The first cell is the number of labels
+    # n = output[0]
+    # # The second cell is the label matrix
+    # lab = output[1]
+    # # The third cell is the stat matrix
+    # stats = output[2]
+    # # The fourth cell is the centroid matrix
+    # centroids = output[3]
+
+    # 2 - ok but similar
+    # ret, thresh = cv2.threshold((single_mask * 255).astype(np.uint8), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # lab, components = get_components(thresh, p=2, r=8)
+    # n = len(components)
+
+    # 3 - not good
+    # ret, thresh = cv2.threshold((single_mask * 255).astype(np.uint8), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    #
+    # # blur and grayscale before thresholding
+    # blur = skimage.filters.gaussian(thresh, sigma=blur_radius)
+    #
+    # # perform inverse binary thresholding
+    # mask = blur < threshold
+    #
+    # # Perform CCA on the mask
+    # lab, n = skimage.measure.label(mask, connectivity=4, return_num=True)
+
+    original_ax.imshow(single_mask)
+    component_axis.imshow(lab)
+
+    original_ax.set_title('Mask')
+    component_axis.set_title('Connected Components')
+
+    # plt.scatter(centroids[:, 0], centroids[:, 1])
+
+    plt.tight_layout(pad=1.58)
+    plt.title(f"Components Found: {n}")
+    plt.show()
+
+    for l_idx in np.unique(lab):
+        fig, axs = plt.subplots(1, 2, sharex='none', sharey='none', figsize=(8, 6))
+        original_ax, component_axis = axs
+
+        im = np.zeros_like(lab)
+        im[lab == l_idx] = 255
+
+        original_ax.imshow(single_mask)
+        component_axis.imshow(im)
+        plt.tight_layout(pad=1.58)
+        plt.title(f"Component: {l_idx}")
+        plt.show()
+    print()
+
+
 if __name__ == '__main__':
+    # find_connected_components()
     cfg = OmegaConf.load('config/training/training.yaml')
     classifier_network = CropClassifier(config=cfg, train_dataset=None, val_dataset=None, desired_output_shape=None,
                                         loss_function=None)
