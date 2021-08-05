@@ -44,7 +44,9 @@ class CropClassifier(Base):
     
     def _one_step(self, batch):
         crops, labels = batch
-        crops, labels = crops.view(-1, *crops.shape[2:]), labels.view(-1, 1)
+        # for offline mode
+        # crops, labels = crops.view(-1, *crops.shape[2:]), labels.view(-1, 1)
+        labels = labels.view(-1, 1)
         out = self(crops)
         
         loss = self.calculate_loss(out, labels)

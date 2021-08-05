@@ -61,8 +61,11 @@ tp_module:
     mode_dist_threshold: 2
 
     # we split same dataset into train & val (in time)
-    video_classes: [ LITTLE ]
-    video_numbers: [ [ 0 ] ]
+#    video_classes: [ LITTLE ]
+#    video_numbers: [ [ 0 ] ]
+
+    video_classes: [ QUAD ]
+    video_numbers: [ [ 3 ] ]
 
 #    video_classes: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
 #    video_numbers: [ [ 0, 1, 2, 3, 4, 5, 6 ], [ 0, 1, 2, 3 ], [ 0, 1, 2, 3, 4 ], [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ],
@@ -441,13 +444,32 @@ crop_classifier:
 
   server_mode: False
 
+  project_name: CropClassifier
+
   trainer:
-    max_epochs: 400
+    num_epochs: 400
     gpus: 1
     fast_dev_run: False
+    num_checkpoints_to_save: 2
+    deterministic: False
+    accelerator: 'ddp' #'ddp_cpu' # null  # 'ddp', 'ddp_cpu'
+    replace_sampler_ddp: False
+    num_nodes: 1
+    find_unused_parameters: True
+    gradient_clip_val: 2.0
+    accumulate_grad_batches: 1
 
   use_generated_dataset: True
   data_augmentation: True
+
+  warm_restart:
+    enable: False
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/wandb/"
+      tail_path: "/files/"
+      project_name: 'CropClassifier'
+      run_name: "run-20210721_163402-1zebiwjj"
+      top_k: 1
 
   dataset:
     name: 'stanford'

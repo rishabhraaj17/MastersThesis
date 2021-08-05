@@ -11,6 +11,8 @@ from albumentations import Compose, HorizontalFlip, VerticalFlip, Rotate, Random
 from omegaconf import ListConfig
 from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.plugins import DDPPlugin
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import Subset, DataLoader, Dataset, random_split
@@ -19,7 +21,8 @@ from tqdm import tqdm
 from average_image.constants import SDDVideoClasses
 from baselinev2.exceptions import TimeoutException
 from baselinev2.improve_metrics.crop_utils import sample_random_crops, replace_overlapping_boxes, REPLACEMENT_TIMEOUT
-from baselinev2.improve_metrics.model import plot_predictions, make_datasets_simple, people_collate_fn
+from baselinev2.improve_metrics.model import plot_predictions, make_datasets_simple, people_collate_fn, \
+    people_collate_fn_tuple
 from baselinev2.plot_utils import add_box_to_axes
 from baselinev2.utils import get_bbox_center
 from log import get_logger
@@ -126,7 +129,7 @@ def train_crop_classifier_v1(cfg):
     logger.info(f'Setting up model...')
 
     model = CropClassifier(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset, desired_output_shape=None,
-                           loss_function=nn.BCEWithLogitsLoss(), collate_fn=people_collate_fn)
+                           loss_function=nn.BCEWithLogitsLoss(), collate_fn=people_collate_fn_tuple)
 
     checkpoint_callback = ModelCheckpoint(
         monitor=crop_cfg.monitor,
@@ -135,10 +138,48 @@ def train_crop_classifier_v1(cfg):
         verbose=crop_cfg.verbose
     )
 
+    train_logger = WandbLogger(project=crop_cfg.project_name, name='DC_Classifier')
+    train_logger.log_hyperparams(cfg)
+    # train_logger = False
+
+    sync_bn = False
+    plugins = None
+    if crop_cfg.trainer.accelerator in ['ddp', 'ddp_cpu']:
+        plugins = DDPPlugin(find_unused_parameters=crop_cfg.trainer.find_unused_parameters)
+        sync_bn = True
+
+    if crop_cfg.warm_restart.enable:
+        version_name = f"{crop_cfg.checkpoint.run_name}".split('-')[-1]
+        checkpoint_root_path = f'{crop_cfg.checkpoint.root}' \
+                               f'{crop_cfg.checkpoint.run_name}' \
+                               f'{crop_cfg.checkpoint.tail_path}' \
+                               f'{crop_cfg.checkpoint.project_name}/' \
+                               f'{version_name}/checkpoints/'
+
+        checkpoint_files = os.listdir(checkpoint_root_path)
+
+        epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
+        epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
+        checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
+
+        model_path = checkpoint_root_path + checkpoint_files[-cfg.warm_restart.checkpoint.top_k]
+
+        logger.info(f'Loading weights manually as custom load is {cfg.warm_restart.custom_load}')
+        load_dict = torch.load(model_path, map_location=cfg.device)
+
+        model.load_state_dict(load_dict['state_dict'])
+        model.to(cfg.device)
+        model.train()
+
     trainer = Trainer(max_epochs=crop_cfg.trainer.num_epochs, gpus=crop_cfg.trainer.gpus,
                       fast_dev_run=crop_cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
-                      deterministic=True, gradient_clip_val=2.0,
-                      accumulate_grad_batches=1)
+                      accelerator=crop_cfg.trainer.accelerator, deterministic=crop_cfg.trainer.deterministic,
+                      replace_sampler_ddp=crop_cfg.trainer.replace_sampler_ddp,
+                      num_nodes=crop_cfg.trainer.num_nodes, plugins=plugins,
+                      gradient_clip_val=crop_cfg.trainer.gradient_clip_val,
+                      sync_batchnorm=sync_bn,
+                      accumulate_grad_batches=crop_cfg.trainer.accumulate_grad_batches,
+                      logger=train_logger)
     trainer.fit(model)
 
 
