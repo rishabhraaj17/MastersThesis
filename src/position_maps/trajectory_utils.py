@@ -355,7 +355,7 @@ def get_single_generated_dataset_from_tempfile(cfg, video_class, video_number, s
     temp_file = tempfile.NamedTemporaryFile(suffix='.txt')
     data_df.to_csv(temp_file, header=False, index=False, sep=' ')
     dataset = TrajectoryDatasetFromFile(
-        temp_file, obs_len=cfg.obs_len, pred_len=cfg.pred_len, skip=cfg.skip,
+        temp_file, obs_len=cfg.obs_len, pred_len=cfg.pred_len, skip=cfg.skip, min_ped=cfg.min_ped,
         delim=cfg.delim, video_class=video_class, video_number=video_number, construct_graph=cfg.construct_graph)
 
     if smooth_trajectories:
