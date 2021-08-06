@@ -89,8 +89,10 @@ MODEL_PATH_MAPPING = {
         7: f'{ROOT}wandb/run-20210724_111012-5ebp711y/files/PositionMap/5ebp711y',
         8: f'{ROOT}wandb/run-20210724_111012-5ebp711y/files/PositionMap/5ebp711y',
         9: f'{ROOT}wandb/run-20210722_110438-102uqaua/files/PositionMap/102uqaua',
-        10: f'{ROOT}wandb/run-20210722_110438-102uqaua/files/PositionMap/102uqaua',
-        11: f'{ROOT}wandb/run-20210722_110438-102uqaua/files/PositionMap/102uqaua'
+        # 10: f'{ROOT}wandb/run-20210722_110438-102uqaua/files/PositionMap/102uqaua',
+        10: f'{ROOT}wandb/run-20210806_164718-22exv8d4/files/PositionMap/22exv8d4',
+        # 11: f'{ROOT}wandb/run-20210722_110438-102uqaua/files/PositionMap/102uqaua'
+        11: f'{ROOT}wandb/run-20210806_165255-kfpbg1sv/files/PositionMap/kfpbg1sv'
     },
     SDDVideoClasses.QUAD: {
         0: f'{ROOT}wandb/run-20210722_104400-3e76emv1/files/PositionMap/3e76emv1',

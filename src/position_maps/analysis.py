@@ -21,6 +21,85 @@ from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import add_box_to_axes, add_box_to_axes_with_annotation
 from src.position_maps.evaluate import get_image_array_from_figure, process_numpy_video_frame_to_tensor
 
+VIDEO_TO_PRUNE_RADIUS_MAPPING = {
+    SDDVideoClasses.DEATH_CIRCLE: {
+        0: {'head': 0, 'radius': 0},
+        1: {'head': 0, 'radius': 0},
+        2: {'head': 0, 'radius': 0},
+        3: {'head': 0, 'radius': 0},
+        4: {'head': 0, 'radius': 0}
+    },
+    SDDVideoClasses.GATES: {
+        0: {'head': 0, 'radius': 0},
+        1: {'head': 0, 'radius': 0},
+        2: {'head': 0, 'radius': 0},
+        3: {'head': 0, 'radius': 0},
+        4: {'head': 0, 'radius': 0},
+        5: {'head': 0, 'radius': 0},
+        6: {'head': 0, 'radius': 0},
+        7: {'head': 0, 'radius': 0},
+        8: {'head': 0, 'radius': 0},
+    },
+    SDDVideoClasses.HYANG: {
+        0: {'head': 0, 'radius': 0},
+        1: {'head': 0, 'radius': 0},
+        2: {'head': 0, 'radius': 0},
+        3: {'head': 0, 'radius': 0},
+        4: {'head': 0, 'radius': 0},
+        5: {'head': 0, 'radius': 0},
+        6: {'head': 0, 'radius': 0},
+        7: {'head': 0, 'radius': 0},
+        8: {'head': 0, 'radius': 0},
+        9: {'head': 0, 'radius': 0},
+        10: {'head': 0, 'radius': 0},
+        11: {'head': 0, 'radius': 0},
+        12: {'head': 0, 'radius': 0},
+        13: {'head': 0, 'radius': 0},
+        14: {'head': 0, 'radius': 0},
+    },
+    SDDVideoClasses.LITTLE: {
+        0: {'head': 0, 'radius': 0},
+        1: {'head': 0, 'radius': 0},
+        2: {'head': 0, 'radius': 0},
+        3: {'head': 0, 'radius': 0}
+    },
+    SDDVideoClasses.NEXUS: {
+        0: {'head': 0, 'radius': 0},
+        1: {'head': 0, 'radius': 0},
+        2: {'head': 0, 'radius': 0},
+        3: 'BAD_DATASET',
+        4: 'BAD_DATASET',
+        5: 'BAD_DATASET',
+        6: {'head': 0, 'radius': 0},
+        7: {'head': 0, 'radius': 0},
+        8: {'head': 0, 'radius': 0},
+        9: {'head': 0, 'radius': 0},
+        10: {'head': 0, 'radius': 0},
+        11: {'head': 0, 'radius': 0},
+    },
+    SDDVideoClasses.QUAD: {
+        0: {'head': 0, 'radius': 0},
+        1: {'head': 0, 'radius': 0},
+        2: {'head': 0, 'radius': 0},
+        3: {'head': 0, 'radius': 0}
+    },
+    SDDVideoClasses.BOOKSTORE: {
+        0: {'head': 0, 'radius': 0},
+        1: {'head': 0, 'radius': 0},
+        2: {'head': 0, 'radius': 0},
+        3: {'head': 0, 'radius': 0},
+        4: {'head': 0, 'radius': 0},
+        5: {'head': 0, 'radius': 0},
+        6: {'head': 0, 'radius': 0},
+    },
+    SDDVideoClasses.COUPA: {
+        0: {'head': 0, 'radius': 0},
+        1: {'head': 0, 'radius': 0},
+        2: {'head': 0, 'radius': 0},
+        3: {'head': 0, 'radius': 0}
+    }
+}
+
 
 class Track(object):
     def __init__(self, idx):
@@ -205,7 +284,7 @@ class TracksAnalyzer(object):
         existing_track.extracted_frames.append(frame)
         existing_track.gt_coordinates.append(gt_coordinates.tolist())
         existing_track.extracted_coordinates.append(extracted_coordinates.tolist())
-        
+
     @staticmethod
     def get_frame_from_figure(fig, original_shape):
         video_frame = get_image_array_from_figure(fig)
@@ -225,14 +304,14 @@ class TracksAnalyzer(object):
         for f in features:
             ax.plot(f[:, 0], f[:, 1], marker_shape, markerfacecolor=marker_color, markeredgecolor='k',
                     markersize=marker_size)
-        
+
     def plot(self, frame, boxes, gt_features, extracted_features, frame_number, box_annotation,
              marker_size=1, radius=None, fig_title='', footnote_text='', video_mode=False,
              boxes_with_annotation=True):
         fig, axs = plt.subplots(1, 1, sharex='none', sharey='none', figsize=(8, 10))
 
         axs.imshow(frame)
-        
+
         legends_dict = {}
         if gt_features is not None:
             self.add_features_to_axis(axs, gt_features, marker_size=marker_size, marker_color='b')
@@ -366,7 +445,7 @@ class TracksAnalyzer(object):
                                                          gt_track_id)
 
                         video_sequence_track_data.tracks.append(track)
-                        
+
             if self.config.show_plot or self.config.make_video:
                 fig = self.plot(
                     frame=extract_frame_from_video(video_path, frame_number=frame),
@@ -754,8 +833,8 @@ class TracksAnalyzerClassical(TracksAnalyzer):
                 self.config.video_fps)
         print(f"Analysis done for {video_class.name} - {video_number}")
         return video_sequence_track_data
-    
-    
+
+
 def internal_csv_mover():
     video_classes_to_use = [
         SDDVideoClasses.GATES,
