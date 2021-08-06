@@ -550,7 +550,8 @@ class PosMapToConventional(TracksAnalyzer):
                 y.append(classified_detection.center[1].item())
 
             (match_rows, match_cols), (fn, fp, precision_c, recall_c, tp) = self.get_associations_and_metrics(
-                gt_centers=np.stack([b.center for b in detection_data.gt_detections]),
+                gt_centers=np.stack([b.center for b in detection_data.gt_detections])
+                if len(detection_data.gt_detections) != 0 else np.zeros((0, 2)),
                 extracted_centers=np.stack([b.center for b in detection_data.classic_detections])
                 if len(detection_data.classic_detections) != 0 else [],
                 max_distance=float(self.config.match_distance),
@@ -565,7 +566,8 @@ class PosMapToConventional(TracksAnalyzer):
                 gt_centers=np.stack([b.center for b in detection_data.gt_detections]),
                 extracted_centers=
                 np.concatenate(
-                    (np.stack([b.center for b in detection_data.classic_detections]),
+                    (np.stack([b.center for b in detection_data.classic_detections])
+                     if len(detection_data.gt_detections) != 0 else np.zeros((0, 2)),
                      np.stack([b.center for b in detection_data.classified_detections])),
                     axis=0) if ((len(detection_data.classic_detections) != 0)
                                 and (len(detection_data.classified_detections) != 0)) else [],
