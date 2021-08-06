@@ -1209,6 +1209,8 @@ def extract_trajectories_from_locations_multiple_videos(cfg):
                 raise NotImplementedError
 
             prune_radius = VIDEO_TO_PRUNE_RADIUS_MAPPING[v_clz][v_num]['radius']
+            logger.info(f"Using head: {VIDEO_TO_PRUNE_RADIUS_MAPPING[v_clz][v_num]['head']}, "
+                        f"with radius: {prune_radius}")
 
             if use_minimal_version:
                 video_path = f"{cfg.root}videos/" \
