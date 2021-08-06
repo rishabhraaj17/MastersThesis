@@ -479,10 +479,11 @@ class PosMapToConventional(TracksAnalyzer):
         crops, filtered_idx = self.get_processed_patches_to_train_rgb_only(
             crops, crop_h=self.config.crop_size[0], crop_w=self.config.crop_size[1])
         filtered_idx = torch.tensor(filtered_idx)
-        boxes_xywh = boxes_xywh[filtered_idx]
-        track_idx = candidate_track_ids[filtered_idx]
-        candidate_boxes = candidate_boxes[filtered_idx]
-        candidate_centers = candidate_centers[filtered_idx]
+        if filtered_idx.numel() != 0:
+            boxes_xywh = boxes_xywh[filtered_idx]
+            track_idx = candidate_track_ids[filtered_idx]
+            candidate_boxes = candidate_boxes[filtered_idx]
+            candidate_centers = candidate_centers[filtered_idx]
 
         # crops = torch.stack(crops)
         # crops = (crops.float() / 255.0).to(self.config.device)
