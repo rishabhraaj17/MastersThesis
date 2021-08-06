@@ -23,6 +23,7 @@ from location_utils import locations_from_heatmaps, get_adjusted_object_location
     prune_locations_proximity_based, ExtractedLocations, Locations, Location
 from log import get_logger
 from models import TrajectoryModel
+from src.position_maps.analysis import VIDEO_TO_PRUNE_RADIUS_MAPPING
 from trajectory_utils import viz_raw_tracks_from_active_inactive
 from train import setup_single_video_dataset, setup_multiple_datasets, build_model, build_loss
 from utils import heat_map_collate_fn, ImagePadder, get_scaled_shapes_with_pad_values
@@ -1134,12 +1135,12 @@ def extract_trajectories_from_locations(cfg):
 def extract_trajectories_from_locations_multiple_videos(cfg):
     use_minimal_version = True
 
-    location_version_to_use = 'pruned_scaled'  # 'pruned_scaled' 'runtime_pruned_scaled'
-    head_to_use = 0
+    location_version_to_use = 'runtime_pruned_scaled'  # 'pruned_scaled' 'runtime_pruned_scaled'
+    # head_to_use = 0
     # 50 - as small we go more trajectories but shorter trajectories
     max_matching_euclidean_distance = 500.  # 1000 ~ 500. > 200. looks good
 
-    prune_radius = 40  # dc3
+    # prune_radius = 40  # dc3
 
     init_track_each_frame = True
     enable_forward_pass = False
@@ -1189,14 +1190,25 @@ def extract_trajectories_from_locations_multiple_videos(cfg):
             uc_gt = uc > 1
             repeating_frames = uq[uc_gt]
 
-            if head_to_use == 0:
+            # if head_to_use == 0:
+            #     out_head = out_head_0
+            # elif head_to_use == 1:
+            #     out_head = out_head_1
+            # elif head_to_use == 2:
+            #     out_head = out_head_2
+            # else:
+            #     raise NotImplementedError
+            
+            if VIDEO_TO_PRUNE_RADIUS_MAPPING[v_clz][v_num]['head'] == 0:
                 out_head = out_head_0
-            elif head_to_use == 1:
+            elif VIDEO_TO_PRUNE_RADIUS_MAPPING[v_clz][v_num]['head'] == 1:
                 out_head = out_head_1
-            elif head_to_use == 2:
+            elif VIDEO_TO_PRUNE_RADIUS_MAPPING[v_clz][v_num]['head'] == 2:
                 out_head = out_head_2
             else:
                 raise NotImplementedError
+
+            prune_radius = VIDEO_TO_PRUNE_RADIUS_MAPPING[v_clz][v_num]['radius']
 
             if use_minimal_version:
                 video_path = f"{cfg.root}videos/" \
