@@ -489,6 +489,9 @@ class PosMapToConventional(TracksAnalyzer):
         # crops = (crops.float() / 255.0).to(self.config.device)
 
         # for position map model
+        if len(crops) == 0:
+            return boxes_xywh, candidate_centers, track_idx
+
         if self.config.use_classifier and self.config.use_old_model:
             crops = torch.stack([tvf.resize(c, [50, 50]) for c in crops if c.shape[1] != 0 and c.shape[2] != 0])
 
