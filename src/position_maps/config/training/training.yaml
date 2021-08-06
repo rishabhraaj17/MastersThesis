@@ -41,16 +41,17 @@ tp_module:
 
     # generated_annotations - vanilla method
     # filtered_generated_annotations - patch filtered
+    # filtered_generated_annotations_augmented - patch filtered with some manual augmentations
     # pm_extracted_annotations - position map vanilla detections
     # classic_nn_extracted_annotations - classic patch filtered + position_map new detections
-    unsupervised_root: 'filtered_generated_annotations'
+    unsupervised_root: 'filtered_generated_annotations_augmented'
     unsupervised_csv: 'generated_annotations.csv'
 
     use_standard_dataset: True
 
     filename: 'trajectories.pt'
 
-    use_generated: False
+    use_generated: True
     from_temp_file: True
 
     frame_rate: 30.
@@ -88,6 +89,7 @@ tp_module:
     skip: 1
     delim: 'space'
     construct_graph: False
+    min_ped: 0  # 1 is default
 
   loader:
     batch_size: 8

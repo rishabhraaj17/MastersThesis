@@ -563,7 +563,8 @@ class PosMapToConventional(TracksAnalyzer):
             gt_classic_fn_list.append(fn)
 
             (match_rows, match_cols), (fn, fp, precision_c_nn, recall_c_nn, tp) = self.get_associations_and_metrics(
-                gt_centers=np.stack([b.center for b in detection_data.gt_detections]),
+                gt_centers=np.stack([b.center for b in detection_data.gt_detections])
+                if len(detection_data.gt_detections) != 0 else np.zeros((0, 2)),
                 extracted_centers=
                 np.concatenate(
                     (np.stack([b.center for b in detection_data.classic_detections])

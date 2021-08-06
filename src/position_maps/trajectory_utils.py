@@ -328,12 +328,14 @@ def get_single_generated_dataset_from_tempfile(cfg, video_class, video_number, s
                                                smooth_trajectories=False, smoother=lambda x: x, threshold=1,
                                                frame_rate=30., time_step=0.4):
     filename = cfg.unsupervised_csv
-    dataset_folder = 'filtered_generated_annotations'
+    dataset_folder = 'filtered_generated_annotations_augmented'
 
     if cfg.unsupervised_root == 'generated_annotations':
         dataset_folder = 'generated_annotations'
     elif cfg.unsupervised_root == 'filtered_generated_annotations':
         dataset_folder = 'filtered_generated_annotations'
+    elif cfg.unsupervised_root == 'filtered_generated_annotations_augmented':
+        dataset_folder = 'filtered_generated_annotations_augmented'
     elif cfg.unsupervised_root == 'pm_extracted_annotations':
         dataset_folder = 'pm_extracted_annotations'
         filename = 'trajectories.csv'
@@ -346,7 +348,8 @@ def get_single_generated_dataset_from_tempfile(cfg, video_class, video_number, s
     data_df = pd.read_csv(load_path)
 
     # check out for classic_nn_extracted_annotations
-    if cfg.unsupervised_root in ['generated_annotations', 'filtered_generated_annotations']:
+    if cfg.unsupervised_root in \
+            ['generated_annotations', 'filtered_generated_annotations', 'filtered_generated_annotations_augmented']:
         data_df = data_df[['frame_number', 'track_id', 'center_x', 'center_y']]
         data_df = data_df.rename(columns={"frame_number": "frame"})
 
