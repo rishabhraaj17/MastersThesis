@@ -161,7 +161,7 @@ def dump_tracks_to_file(min_track_length: int = 20, duplicate_frames_to_filter=(
 
 
 def dump_tracks_to_file_multiple(
-        min_track_length: int = 20, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None,
+        min_track_length: int = 0, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None,
         dump_as_csv_only=False):
     video_classes_to_use = [
         SDDVideoClasses.GATES,
@@ -192,17 +192,24 @@ def dump_tracks_to_file_multiple(
                 filter_nth_frame_from_middle = repeating_frames.tolist()[1:]
 
             # lists for frame_id, track_id, x, y
-            frame_id, track_id, x, y = split_tracks_into_lists(min_track_length, total_tracks,
-                                                               duplicate_frames_to_filter=duplicate_frames_to_filter,
-                                                               filter_nth_frame_from_middle=filter_nth_frame_from_middle)
+            frame_id, track_id, x, y = split_tracks_into_lists(
+                min_track_length, total_tracks,
+                duplicate_frames_to_filter=duplicate_frames_to_filter,
+                filter_nth_frame_from_middle=filter_nth_frame_from_middle)
 
             df: pd.DataFrame = get_dataframe_from_lists(frame_id, track_id, x, y)
 
-            save_path = os.path.join(os.getcwd(), f'logs/Trajectories/{v_clz.name}/{v_num}/')
+            save_path = os.path.join(os.getcwd(), f'logs/Trajectories/{v_clz.name}/{v_num}/v1/')
+            save_path_csv = os.path.join(
+                '/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/pm_extracted_annotations/',
+                f'{v_clz.value}/video{v_num}/v0/')
             Path(save_path).mkdir(parents=True, exist_ok=True)
+            Path(save_path_csv).mkdir(parents=True, exist_ok=True)
             if dump_as_csv_only:
-                df.to_csv(f"{save_path}trajectories.csv", index=False)
-                print(f"Dumping Trajectories to {save_path}trajectories.csv")
+                # df.to_csv(f"{save_path}trajectories.csv", index=False)
+                # print(f"Dumping Trajectories to {save_path}trajectories.csv")
+                df.to_csv(f"{save_path_csv}generated_annotations.csv", index=False)
+                print(f"Dumping Trajectories to {save_path_csv}trajectories.csv")
                 # return None
 
             with open(f"{save_path}trajectories.txt", 'w') as f:
@@ -391,7 +398,8 @@ def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True,
                     t_dset, v_dset = get_single_generated_dataset_from_tempfile(conf, video_class, v_num, split_dataset,
                                                                                 smooth_trajectories=smooth_trajectories,
                                                                                 smoother=smoother, threshold=threshold,
-                                                                                frame_rate=frame_rate, time_step=time_step)
+                                                                                frame_rate=frame_rate,
+                                                                                time_step=time_step)
                 else:
                     t_dset, v_dset = get_single_dataset(conf, video_class, v_num, split_dataset,
                                                         smooth_trajectories=smooth_trajectories,
