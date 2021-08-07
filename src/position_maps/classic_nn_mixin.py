@@ -55,10 +55,20 @@ class AgentTrack(object):
         self.idx = idx
         self.frames = []
         self.locations = []
-        self.inactive = -1  # -1 is active
+        self.inactive = 0  # 0 is active
 
     def __repr__(self):
         return f"Track: {self.idx}"
+
+
+class CandidateAgentTrack(object):
+    def __init__(self, frame, location):
+        super(CandidateAgentTrack, self).__init__()
+        self.frame = frame
+        self.location = location
+
+    def __repr__(self):
+        return f"Location: {self.location}"
 
 
 class VideoSequenceAgentTracks(object):
@@ -741,7 +751,7 @@ class PosMapToConventional(TracksAnalyzer):
         df[frame_txt] /= int(round(frame_rate * time_step))
         return df
 
-    def perform_collection_on_multiple_sequences(self):
+    def perform_collection_on_multiple_sequences(self, classic_nn_extracted_annotations_version='v0'):
         extended_tracks = {}
         for v_idx, (v_clz, v_meta_clz) in enumerate(zip(self.video_classes, self.video_meta_classes)):
             for v_num in self.video_numbers[v_idx]:
@@ -751,8 +761,10 @@ class PosMapToConventional(TracksAnalyzer):
                 # gt_annotation_path = f"{self.root}annotations/{v_clz.value}/video{v_num}/annotation_augmented.csv"
                 classic_extracted_annotation_path = f"{self.root}{self.extracted_folder}/{v_clz.value}/" \
                                                     f"video{v_num}/generated_annotations.csv"
-                nn_classic_extracted_annotation_path = f"{self.root}classic_nn_extracted_annotations/{v_clz.value}/" \
-                                                       f"video{v_num}/annotation.csv"
+                nn_classic_extracted_annotation_path = \
+                    f"{self.root}classic_nn_extracted_annotations_" \
+                    f"{classic_nn_extracted_annotations_version}/{v_clz.value}/" \
+                    f"video{v_num}/annotation.csv"
 
                 ref_img = torchvision.io.read_image(f"{self.root}annotations/{v_clz.value}/video{v_num}/reference.jpg")
                 video_path = f"{self.root}/videos/{v_clz.value}/video{v_num}/video.mov"
@@ -761,7 +773,7 @@ class PosMapToConventional(TracksAnalyzer):
                     classic_extracted_annotation_path, nn_classic_extracted_annotation_path,
                     v_clz, v_meta_clz, v_num,
                     (ref_img.shape[1:]),
-                    video_path)
+                    video_path, trajectory_model=model)
 
                 if v_clz.name in extended_tracks.keys():
                     extended_tracks[v_clz.name][v_num] = extended_tracks_per_seq
@@ -775,8 +787,9 @@ class PosMapToConventional(TracksAnalyzer):
     def perform_collection_on_single_sequence(
             self, classic_extracted_annotation_path,
             nn_classic_extracted_annotation_path, video_class, video_meta_class, video_number, image_shape,
-            video_path):
+            video_path, trajectory_model):
         extended_tracks = VideoSequenceAgentTracks(video_class, video_number, [])
+        inactive_tracks = VideoSequenceAgentTracks(video_class, video_number, [])
         ratio = self.get_ratio(meta_class=video_meta_class, video_number=video_number)
 
         # turn into 0.4 seconds apart
@@ -802,12 +815,56 @@ class PosMapToConventional(TracksAnalyzer):
             if frame == 0:
                 running_track_idx = classic_extracted_track_ids.tolist()
                 # add to running tracks - only final tracks
-                print()
+                for track_idx, loc in track_id_to_location.items():
+                    agent_track = AgentTrack(idx=track_idx)
+                    agent_track.frames.append(frame)
+                    agent_track.locations.append(loc.tolist())
+                    extended_tracks.tracks.append(agent_track)
             else:
                 # look for a died track - track id not alive in next frame
                 # predict
                 # associate - try for next K frames
-                pass
+                candidate_agents = [CandidateAgentTrack(frame=frame, location=l)
+                                    for t, l in zip(nn_classic_extracted_track_ids, nn_classic_extracted_centers)
+                                    if t == -1]
+
+                continuing_tracks = np.intersect1d(np.array(running_track_idx), classic_extracted_track_ids)
+                for c_track in continuing_tracks:
+                    continuing_track: AgentTrack = extended_tracks[c_track]
+                    continuing_track.frames.append(frame)
+                    continuing_track.locations.append(track_id_to_location[c_track].tolist())
+
+                killed_tracks = np.setdiff1d(np.array(running_track_idx), classic_extracted_track_ids)
+                new_tracks = np.setdiff1d(classic_extracted_track_ids, np.array(running_track_idx))
+
+                for n_track in new_tracks:
+                    agent_track = AgentTrack(idx=n_track)
+                    agent_track.frames.append(frame)
+                    agent_track.locations.append(track_id_to_location[n_track].tolist())
+                    extended_tracks.tracks.append(agent_track)
+                    running_track_idx.append(n_track)
+
+                for k_track in killed_tracks:
+                    candidate_track = extended_tracks[k_track]
+                    if len(candidate_track.frames) > 1:
+                        in_xy = np.stack(candidate_track.locations)
+                        in_dxdy = np.diff(in_xy, axis=0)
+                        batch = {'in_xy': in_xy, 'in_dxdy': in_dxdy}
+                        trajectory_out = trajectory_model(batch)
+                        # take 1st location - create a distance matrix with candidate agents
+                        # if match add and extend
+                        # else add to inactives
+                        print()
+                    else:
+                        inactive_track = extended_tracks[k_track]
+                        inactive_track.inactive += 1
+                        inactive_tracks.tracks.append(inactive_track)
+                        # don't remove it from extended tracks
+                        # just replace it if it becomes active
+                        # add to inactives
+                        print()
+                    running_track_idx.remove(k_track)
+                print()
 
         return extended_tracks
 
@@ -931,8 +988,8 @@ if __name__ == '__main__':
     # )
     analyzer = PosMapToConventional(conf, use_patch_filtered=True, classifier=None)
     # out = analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=False)
-    # out = analyzer.perform_collection_on_multiple_sequences()
-    out = analyzer.get_metrics_for_multiple_sequences()
+    out = analyzer.perform_collection_on_multiple_sequences()
+    # out = analyzer.get_metrics_for_multiple_sequences()
     # out = analyzer.generate_annotation_from_data(torch.load(
     #     '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/dummy_classic_nn.pt'))
     print()
