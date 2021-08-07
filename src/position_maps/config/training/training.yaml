@@ -621,6 +621,7 @@ metrics_analysis:
 
   match_distance: 'inf'
   threshold: 2  # meters
+  dead_threshold: 5  # frames
 
   trajectory_threshold: 1
 

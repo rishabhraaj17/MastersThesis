@@ -57,10 +57,10 @@ class AgentTrack(object):
         self.idx = idx
         self.frames = []
         self.locations = []
-        self.inactive = 0  # 0 is active
+        self.inactive = 0  # 0 is active, -1 dead for sure
 
     def __repr__(self):
-        return f"Track: {self.idx}"
+        return f"Track: {self.idx} | Frames: {self.frames}"
 
 
 class CandidateAgentTrack(object):
@@ -839,9 +839,7 @@ class PosMapToConventional(TracksAnalyzer):
                     agent_track.locations.append(loc.tolist())
                     extended_tracks.tracks.append(agent_track)
             else:
-                # look for a died track - track id not alive in next frame
-                # predict
-                # associate - try for next K frames
+                # associate - try for next K frames - todo
                 candidate_agents = [CandidateAgentTrack(frame=frame, location=l)
                                     for t, l in zip(nn_classic_extracted_track_ids, nn_classic_extracted_centers)
                                     if t == -1]
@@ -852,6 +850,7 @@ class PosMapToConventional(TracksAnalyzer):
                     continuing_track.frames.append(frame)
                     continuing_track.locations.append(track_id_to_location[c_track].tolist())
 
+                # look for a died track - track id not alive in next frame
                 killed_tracks = np.setdiff1d(np.array(running_track_idx), classic_extracted_track_ids)
                 new_tracks = np.setdiff1d(classic_extracted_track_ids, np.array(running_track_idx))
 
@@ -865,6 +864,7 @@ class PosMapToConventional(TracksAnalyzer):
                 for k_track in killed_tracks:
                     candidate_track = extended_tracks[k_track]
                     if len(candidate_track.frames) > 1:
+                        # predict
                         in_xy = np.stack(candidate_track.locations)
                         in_dxdy = np.diff(in_xy, axis=0)
                         batch = {
@@ -896,10 +896,14 @@ class PosMapToConventional(TracksAnalyzer):
                             killed_track = extended_tracks[k_track]
                             killed_track.frames.append(frame)
                             killed_track.locations.append(chosen_candidate.location.tolist())
+                            killed_track.inactive = 0
+
+                            if killed_track.idx in inactive_tracks:
+                                inactive_tracks.tracks.remove(killed_track)
                         else:
                             # else add to inactives
                             inactive_track = extended_tracks[k_track]
-                            inactive_track.inactive += 1
+                            # inactive_track.inactive += 1
                             inactive_tracks.tracks.append(inactive_track)
                             running_track_idx.remove(k_track)
                     else:
@@ -907,11 +911,17 @@ class PosMapToConventional(TracksAnalyzer):
                         # just replace it if it becomes active
                         # add to inactives
                         inactive_track = extended_tracks[k_track]
-                        inactive_track.inactive += 1
+                        # inactive_track.inactive += 1
                         inactive_tracks.tracks.append(inactive_track)
                         running_track_idx.remove(k_track)
-            # handle inactives
-            print()
+
+                # increment all inactives together
+                for dead_track in inactive_tracks.tracks:
+                    if dead_track.inactive == -1:
+                        continue
+                    dead_track.inactive += 1
+                    if dead_track.inactive > self.config.dead_threshold:
+                        dead_track.inactive = -1
 
         return extended_tracks
 
