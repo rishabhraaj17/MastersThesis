@@ -258,7 +258,9 @@ class PosMapToConventional(TracksAnalyzer):
         })
         df.to_csv(f"{self.root}/classic_nn_extracted_annotations/metrics_{self.config.threshold}m.csv", index=False)
 
-    def perform_analysis_on_multiple_sequences(self, show_extracted_tracks_only=False):
+    def perform_analysis_on_multiple_sequences(self, show_extracted_tracks_only=False, pm_extracted_version='v0',
+                                               pm_extracted_filename='generated_annotations.csv'):
+        # pm_extracted_filename='trajectories.csv'
         metrics = {}
         for v_idx, (v_clz, v_meta_clz) in enumerate(zip(self.video_classes, self.video_meta_classes)):
             for v_num in self.video_numbers[v_idx]:
@@ -276,7 +278,7 @@ class PosMapToConventional(TracksAnalyzer):
                 classic_extracted_annotation_path = f"{self.root}{self.extracted_folder}/{v_clz.value}/" \
                                                     f"video{v_num}/generated_annotations.csv"
                 pos_map_extracted_annotation_path = f"{self.root}pm_extracted_annotations/{v_clz.value}/" \
-                                                    f"video{v_num}/trajectories.csv"
+                                                    f"video{v_num}/{pm_extracted_version}/{pm_extracted_filename}"
 
                 ref_img = torchvision.io.read_image(f"{self.root}annotations/{v_clz.value}/video{v_num}/reference.jpg")
                 video_path = f"{self.root}/videos/{v_clz.value}/video{v_num}/video.mov"
