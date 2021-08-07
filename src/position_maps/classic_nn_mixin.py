@@ -49,6 +49,38 @@ DATASET_TO_MODEL = {
 }
 
 
+class AgentTrack(object):
+    def __init__(self, idx):
+        super(AgentTrack, self).__init__()
+        self.idx = idx
+        self.frames = []
+        self.locations = []
+        self.inactive = -1  # -1 is active
+
+    def __repr__(self):
+        return f"Track: {self.idx}"
+
+
+class VideoSequenceAgentTracks(object):
+    def __init__(self, video_class, video_number, tracks: List[AgentTrack]):
+        super(VideoSequenceAgentTracks, self).__init__()
+        self.video_class = video_class
+        self.video_number = video_number
+        self.tracks = tracks
+
+    def __getitem__(self, item):
+        return [t for t in self.tracks if t.idx == item][0]
+
+    def __contains__(self, item):
+        for t in self.tracks:
+            if t.idx == item:
+                return True
+        return False
+
+    def __repr__(self):
+        return f"{self.video_class.name} | {self.video_number}\n{self.tracks}"
+
+
 def setup_person_classifier(cfg, video_class):
     logger.info(f'Setting up PersonalClassifier model...')
 
@@ -219,8 +251,8 @@ class PosMapToConventional(TracksAnalyzer):
             'class': video_class,
             'number': video_number,
             'classic_precision': classic_precision,
-            'classic_recall': classic_recall,
             'classic_nn_precision': classic_nn_precision,
+            'classic_recall': classic_recall,
             'classic_nn_recall': classic_nn_recall,
             'neighbourhood_radius': radius
         })
@@ -603,6 +635,180 @@ class PosMapToConventional(TracksAnalyzer):
         return annotation_df, (overall_gt_classic_precision, overall_gt_classic_recall), \
                (overall_gt_classic_nn_precision, overall_gt_classic_nn_recall)
 
+    def get_metrics_for_multiple_sequences(self):
+        metrics = {}
+        for v_idx, (v_clz, v_meta_clz) in enumerate(zip(self.video_classes, self.video_meta_classes)):
+            for v_num in self.video_numbers[v_idx]:
+                ref_img = torchvision.io.read_image(f"{self.root}annotations/{v_clz.value}/video{v_num}/reference.jpg")
+                video_path = f"{self.root}/videos/{v_clz.value}/video{v_num}/video.mov"
+                (overall_gt_classic_precision, overall_gt_classic_recall), \
+                (overall_gt_classic_nn_precision, overall_gt_classic_nn_recall) = \
+                    self.get_metrics_from_data(v_clz=v_clz, v_num=v_num, image_shape=(ref_img.shape[1:]))
+                if v_clz.name in metrics.keys():
+                    metrics[v_clz.name][v_num] = {
+                        'classic_precision': overall_gt_classic_precision,
+                        'classic_recall': overall_gt_classic_recall,
+                        'classic_nn_precision': overall_gt_classic_nn_precision,
+                        'classic_nn_recall': overall_gt_classic_nn_recall,
+                        'neighbourhood_radius': self.config.threshold
+                    }
+                else:
+                    metrics[v_clz.name] = {
+                        v_num: {
+                            'classic_precision': overall_gt_classic_precision,
+                            'classic_recall': overall_gt_classic_recall,
+                            'classic_nn_precision': overall_gt_classic_nn_precision,
+                            'classic_nn_recall': overall_gt_classic_nn_recall,
+                            'neighbourhood_radius': self.config.threshold
+                        }
+                    }
+        self.save_as_csv(metrics=metrics)
+        return metrics
+
+    def get_metrics_from_data(self, v_clz, v_num, image_shape):
+        gt_annotation_path = f"{self.root}annotations/{v_clz.value}/video{v_num}/annotation_augmented.csv"
+        nn_classic_extracted_annotation_path = f"{self.root}classic_nn_extracted_annotations/{v_clz.value}/" \
+                                               f"video{v_num}/annotation.csv"
+        classic_extracted_annotation_path = f"{self.root}{self.extracted_folder}/{v_clz.value}/" \
+                                            f"video{v_num}/generated_annotations.csv"
+
+        ratio = self.get_ratio(
+            meta_class=getattr(SDDVideoDatasets, v_clz.name),
+            video_number=v_num)
+
+        gt_df = self.get_gt_df(gt_annotation_path)
+        classic_extracted_df = pd.read_csv(classic_extracted_annotation_path)
+        nn_classic_extracted_df = pd.read_csv(nn_classic_extracted_annotation_path)
+
+        gt_classic_tp_list, gt_classic_fp_list, gt_classic_fn_list = [], [], []
+        gt_classic_nn_tp_list, gt_classic_nn_fp_list, gt_classic_nn_fn_list = [], [], []
+
+        for frame in tqdm(gt_df.frame.unique()):
+            gt_bbox_centers, supervised_boxes, gt_track_ids = self.get_gt_annotation(
+                frame_number=frame, gt_annotation_df=gt_df, original_shape=tuple(image_shape))
+            classic_extracted_centers, classic_extracted_track_ids, classic_extracted_boxes = \
+                self.get_classic_extracted_centers(
+                    classic_extracted_df, frame)
+            nn_classic_extracted_centers, nn_classic_extracted_track_ids = \
+                self.get_extracted_centers(
+                    nn_classic_extracted_df, frame)
+
+            (match_rows, match_cols), (fn, fp, precision_c, recall_c, tp) = self.get_associations_and_metrics(
+                gt_centers=np.stack(gt_bbox_centers)
+                if len(gt_bbox_centers) != 0 else np.zeros((0, 2)),
+                extracted_centers=np.stack(classic_extracted_centers)
+                if len(classic_extracted_centers) != 0 else [],
+                max_distance=float(self.config.match_distance),
+                ratio=ratio,
+                threshold=self.config.threshold
+            )
+            gt_classic_tp_list.append(tp)
+            gt_classic_fp_list.append(fp)
+            gt_classic_fn_list.append(fn)
+
+            (match_rows, match_cols), (fn, fp, precision_c_nn, recall_c_nn, tp) = self.get_associations_and_metrics(
+                gt_centers=np.stack(gt_bbox_centers)
+                if len(gt_bbox_centers) != 0 else np.zeros((0, 2)),
+                extracted_centers=np.stack(nn_classic_extracted_centers)
+                if len(nn_classic_extracted_centers) != 0 else [],
+                max_distance=float(self.config.match_distance),
+                ratio=ratio,
+                threshold=self.config.threshold
+            )
+            gt_classic_nn_tp_list.append(tp)
+            gt_classic_nn_fp_list.append(fp)
+            gt_classic_nn_fn_list.append(fn)
+
+        overall_gt_classic_precision = np.array(gt_classic_tp_list).sum() / \
+                                       (np.array(gt_classic_tp_list).sum() + np.array(gt_classic_fp_list).sum())
+        overall_gt_classic_recall = np.array(gt_classic_tp_list).sum() / \
+                                    (np.array(gt_classic_tp_list).sum() + np.array(gt_classic_fn_list).sum())
+
+        overall_gt_classic_nn_precision = np.array(gt_classic_nn_tp_list).sum() / \
+                                          (np.array(gt_classic_nn_tp_list).sum() + np.array(
+                                              gt_classic_nn_fp_list).sum())
+        overall_gt_classic_nn_recall = np.array(gt_classic_nn_tp_list).sum() / \
+                                       (np.array(gt_classic_nn_tp_list).sum() + np.array(gt_classic_nn_fn_list).sum())
+
+        return (overall_gt_classic_precision, overall_gt_classic_recall), \
+               (overall_gt_classic_nn_precision, overall_gt_classic_nn_recall)
+
+    @staticmethod
+    def adjust_dataframe_framerate(df, frame_txt, frame_rate=30., time_step=0.4):
+        df = df[df[frame_txt] % int(round(frame_rate * time_step)) == 0]
+        df[frame_txt] /= int(round(frame_rate * time_step))
+        return df
+
+    def perform_collection_on_multiple_sequences(self):
+        extended_tracks = {}
+        for v_idx, (v_clz, v_meta_clz) in enumerate(zip(self.video_classes, self.video_meta_classes)):
+            for v_num in self.video_numbers[v_idx]:
+                # dummy
+                model = torch.nn.Sequential(torch.nn.Identity())
+                model.to(self.config.device)
+                # gt_annotation_path = f"{self.root}annotations/{v_clz.value}/video{v_num}/annotation_augmented.csv"
+                classic_extracted_annotation_path = f"{self.root}{self.extracted_folder}/{v_clz.value}/" \
+                                                    f"video{v_num}/generated_annotations.csv"
+                nn_classic_extracted_annotation_path = f"{self.root}classic_nn_extracted_annotations/{v_clz.value}/" \
+                                                       f"video{v_num}/annotation.csv"
+
+                ref_img = torchvision.io.read_image(f"{self.root}annotations/{v_clz.value}/video{v_num}/reference.jpg")
+                video_path = f"{self.root}/videos/{v_clz.value}/video{v_num}/video.mov"
+
+                extended_tracks_per_seq = self.perform_collection_on_single_sequence(
+                    classic_extracted_annotation_path, nn_classic_extracted_annotation_path,
+                    v_clz, v_meta_clz, v_num,
+                    (ref_img.shape[1:]),
+                    video_path)
+
+                if v_clz.name in extended_tracks.keys():
+                    extended_tracks[v_clz.name][v_num] = extended_tracks_per_seq
+                else:
+                    extended_tracks[v_clz.name] = {
+                        v_num: extended_tracks_per_seq
+                    }
+
+        return extended_tracks
+
+    def perform_collection_on_single_sequence(
+            self, classic_extracted_annotation_path,
+            nn_classic_extracted_annotation_path, video_class, video_meta_class, video_number, image_shape,
+            video_path):
+        extended_tracks = VideoSequenceAgentTracks(video_class, video_number, [])
+        ratio = self.get_ratio(meta_class=video_meta_class, video_number=video_number)
+
+        # turn into 0.4 seconds apart
+        classic_extracted_df = pd.read_csv(classic_extracted_annotation_path)
+        classic_extracted_df = self.adjust_dataframe_framerate(classic_extracted_df, 'frame_number', 30, 0.4)
+
+        nn_classic_extracted_df = pd.read_csv(nn_classic_extracted_annotation_path)
+        nn_classic_extracted_df = self.adjust_dataframe_framerate(nn_classic_extracted_df, 'frame', 30, 0.4)
+
+        running_track_idx = []
+
+        for frame in tqdm(classic_extracted_df.frame_number.unique()):
+            classic_extracted_centers, classic_extracted_track_ids, classic_extracted_boxes = \
+                self.get_classic_extracted_centers(
+                    classic_extracted_df, frame)
+            nn_classic_extracted_centers, nn_classic_extracted_track_ids = \
+                self.get_extracted_centers(
+                    nn_classic_extracted_df, frame)
+
+            track_id_to_location = dict(zip(classic_extracted_track_ids, classic_extracted_centers))
+
+            frame = int(frame)
+            if frame == 0:
+                running_track_idx = classic_extracted_track_ids.tolist()
+                # add to running tracks - only final tracks
+                print()
+            else:
+                # look for a died track - track id not alive in next frame
+                # predict
+                # associate - try for next K frames
+                pass
+
+        return extended_tracks
+
 
 def get_components(boolean_array, r=1, p=1):
     # find neighbours
@@ -722,7 +928,9 @@ if __name__ == '__main__':
     #     SDDVideoClasses.BOOKSTORE
     # )
     analyzer = PosMapToConventional(conf, use_patch_filtered=True, classifier=None)
-    out = analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=False)
+    # out = analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=False)
+    # out = analyzer.perform_collection_on_multiple_sequences()
+    out = analyzer.get_metrics_for_multiple_sequences()
     # out = analyzer.generate_annotation_from_data(torch.load(
     #     '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/dummy_classic_nn.pt'))
     print()

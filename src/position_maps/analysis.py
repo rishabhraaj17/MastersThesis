@@ -351,13 +351,15 @@ class TracksAnalyzer(object):
 
         return fig
 
-    def perform_analysis_on_multiple_sequences(self, show_extracted_tracks_only=False):
+    def perform_analysis_on_multiple_sequences(self, show_extracted_tracks_only=False, pm_extracted_version='v0',
+                                               pm_extracted_filename='generated_annotations.csv'):
+        # pm_extracted_filename='trajectories.csv'
         metrics = {}
         for v_idx, (v_clz, v_meta_clz) in enumerate(zip(self.video_classes, self.video_meta_classes)):
             for v_num in self.video_numbers[v_idx]:
                 gt_annotation_path = f"{self.root}annotations/{v_clz.value}/video{v_num}/annotation_augmented.csv"
                 extracted_annotation_path = f"{self.root}pm_extracted_annotations/{v_clz.value}/" \
-                                            f"video{v_num}/trajectories.csv"
+                                            f"video{v_num}/{pm_extracted_version}/{pm_extracted_filename}"
                 ref_img = torchvision.io.read_image(f"{self.root}annotations/{v_clz.value}/video{v_num}/reference.jpg")
                 video_path = f"{self.root}/videos/{v_clz.value}/video{v_num}/video.mov"
                 if show_extracted_tracks_only:
@@ -534,7 +536,7 @@ class TracksAnalyzer(object):
             'recall': recall,
             'neighbourhood_radius': radius
         })
-        df.to_csv(f"{self.root}/pm_extracted_annotations/metrics.csv", index=False)
+        df.to_csv(f"{self.root}/pm_extracted_annotations/metrics_{self.config.threshold}m.csv", index=False)
 
     def construct_extracted_tracks_only(
             self, extracted_annotation_path, video_class, video_number, video_path, image_shape):
