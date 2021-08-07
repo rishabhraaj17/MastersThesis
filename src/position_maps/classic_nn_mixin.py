@@ -29,6 +29,7 @@ from baselinev2.plot_utils import add_box_to_axes_with_annotation, add_box_to_ax
 from baselinev2.stochastic.model import BaselineGAN
 from log import get_logger
 from src.position_maps.analysis import TracksAnalyzer
+from src.position_maps.trajectory_utils import plot_trajectory_with_one_frame
 from src_lib.models_hub.crop_classifiers import CropClassifier
 
 seed_everything(42)
@@ -58,6 +59,7 @@ class AgentTrack(object):
         self.frames = []
         self.locations = []
         self.inactive = 0  # 0 is active, -1 dead for sure
+        self.extended_at_frames = []
 
     def __repr__(self):
         return f"Track: {self.idx} | Frames: {self.frames}"
@@ -840,9 +842,10 @@ class PosMapToConventional(TracksAnalyzer):
                     extended_tracks.tracks.append(agent_track)
             else:
                 # associate - try for next K frames - todo
-                candidate_agents = [CandidateAgentTrack(frame=frame, location=l)
-                                    for t, l in zip(nn_classic_extracted_track_ids, nn_classic_extracted_centers)
-                                    if t == -1]
+                candidate_agents = [
+                    CandidateAgentTrack(frame=frame, location=l)
+                    for t, l in zip(nn_classic_extracted_track_ids, nn_classic_extracted_centers) if t == -1
+                ]
 
                 continuing_tracks = np.intersect1d(np.array(running_track_idx), classic_extracted_track_ids)
                 for c_track in continuing_tracks:
@@ -896,11 +899,13 @@ class PosMapToConventional(TracksAnalyzer):
                             killed_track = extended_tracks[k_track]
                             killed_track.frames.append(frame)
                             killed_track.locations.append(chosen_candidate.location.tolist())
+                            killed_track.extended_at_frames.append(frame)
                             killed_track.inactive = 0
 
                             if killed_track.idx in inactive_tracks:
                                 inactive_tracks.tracks.remove(killed_track)
                         else:
+                            # can go in future but what if we grab some other track's identity going in future
                             # else add to inactives
                             inactive_track = extended_tracks[k_track]
                             # inactive_track.inactive += 1
@@ -923,6 +928,22 @@ class PosMapToConventional(TracksAnalyzer):
                     if dead_track.inactive > self.config.dead_threshold:
                         dead_track.inactive = -1
 
+        # debug
+        predicted_tracks = [e for e in extended_tracks.tracks if len(e.extended_at_frames) > 0]
+        for p_track in predicted_tracks:
+            f_no = p_track.frames[0]
+            plot_trajectory_with_one_frame(
+                frame=extract_frame_from_video(video_path, f_no),
+                last_frame=None,
+                trajectory=np.stack(p_track.locations),
+                obs_trajectory=None,
+                frame_number=f_no,
+                track_id=0,
+                active_tracks=None,
+                current_frame_locations=None,
+                last_frame_locations=None,
+                plot_first_and_last=False
+            )
         return extended_tracks
 
 
