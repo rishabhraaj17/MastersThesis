@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List
 
 import cv2
+import motmetrics as mm
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -25,6 +26,7 @@ from baselinev2.improve_metrics.model import make_conv_blocks, Activations, Pers
 from baselinev2.improve_metrics.modules import resnet18, resnet9
 from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import add_box_to_axes_with_annotation, add_box_to_axes
+from baselinev2.stochastic.model import BaselineGAN
 from log import get_logger
 from src.position_maps.analysis import TracksAnalyzer
 from src_lib.models_hub.crop_classifiers import CropClassifier
@@ -751,12 +753,28 @@ class PosMapToConventional(TracksAnalyzer):
         df[frame_txt] /= int(round(frame_rate * time_step))
         return df
 
+    @staticmethod
+    def setup_trajectory_model():
+        version = 18
+        epoch = 109
+        step = 929623
+
+        base_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/stochastic/'
+        model_path = f'{base_path}' + f'logs/lightning_logs/version_{version}/checkpoints/' \
+                                      f'epoch={epoch}-step={step}.ckpt'
+        hparam_path = f'{base_path}' + f'logs/lightning_logs/version_{version}/hparams.yaml'
+
+        m = BaselineGAN.load_from_checkpoint(checkpoint_path=model_path, hparams_file=hparam_path,
+                                             map_location='cuda:0')
+        m.eval()
+        return m
+
     def perform_collection_on_multiple_sequences(self, classic_nn_extracted_annotations_version='v0'):
         extended_tracks = {}
         for v_idx, (v_clz, v_meta_clz) in enumerate(zip(self.video_classes, self.video_meta_classes)):
             for v_num in self.video_numbers[v_idx]:
                 # dummy
-                model = torch.nn.Sequential(torch.nn.Identity())
+                model = self.setup_trajectory_model()
                 model.to(self.config.device)
                 # gt_annotation_path = f"{self.root}annotations/{v_clz.value}/video{v_num}/annotation_augmented.csv"
                 classic_extracted_annotation_path = f"{self.root}{self.extracted_folder}/{v_clz.value}/" \
@@ -849,22 +867,51 @@ class PosMapToConventional(TracksAnalyzer):
                     if len(candidate_track.frames) > 1:
                         in_xy = np.stack(candidate_track.locations)
                         in_dxdy = np.diff(in_xy, axis=0)
-                        batch = {'in_xy': in_xy, 'in_dxdy': in_dxdy}
-                        trajectory_out = trajectory_model(batch)
+                        batch = {
+                            'in_xy': torch.tensor(in_xy).unsqueeze(1).float().cuda(),
+                            'in_dxdy': torch.tensor(in_dxdy).unsqueeze(1).float().cuda()
+                        }
+                        with torch.no_grad():
+                            trajectory_out = trajectory_model.test(batch)
+
+                        out_locations = trajectory_out['out_xy'].squeeze(1)
                         # take 1st location - create a distance matrix with candidate agents
+                        candidate_location = out_locations[0].cpu().numpy()
+                        candidate_distance_matrix = np.sqrt(mm.distances.norm2squared_matrix(
+                            objs=np.stack([c.location for c in candidate_agents]),
+                            hyps=candidate_location,
+                        )) * ratio
+
+                        candidate_distance_matrix = self.config.threshold - candidate_distance_matrix
+                        candidate_distance_matrix[candidate_distance_matrix < 0] = 1000
+                        # Hungarian
+                        match_rows, match_cols = scipy.optimize.linear_sum_assignment(candidate_distance_matrix)
+                        actually_matched_mask = candidate_distance_matrix[match_rows, match_cols] < 1000
+                        match_rows = match_rows[actually_matched_mask]
+                        match_cols = match_cols[actually_matched_mask]
+
                         # if match add and extend
-                        # else add to inactives
-                        print()
+                        if len(match_rows) > 0:
+                            chosen_candidate = candidate_agents[match_rows[0].item()]
+                            killed_track = extended_tracks[k_track]
+                            killed_track.frames.append(frame)
+                            killed_track.locations.append(chosen_candidate.location.tolist())
+                        else:
+                            # else add to inactives
+                            inactive_track = extended_tracks[k_track]
+                            inactive_track.inactive += 1
+                            inactive_tracks.tracks.append(inactive_track)
+                            running_track_idx.remove(k_track)
                     else:
-                        inactive_track = extended_tracks[k_track]
-                        inactive_track.inactive += 1
-                        inactive_tracks.tracks.append(inactive_track)
                         # don't remove it from extended tracks
                         # just replace it if it becomes active
                         # add to inactives
-                        print()
-                    running_track_idx.remove(k_track)
-                print()
+                        inactive_track = extended_tracks[k_track]
+                        inactive_track.inactive += 1
+                        inactive_tracks.tracks.append(inactive_track)
+                        running_track_idx.remove(k_track)
+            # handle inactives
+            print()
 
         return extended_tracks
 
