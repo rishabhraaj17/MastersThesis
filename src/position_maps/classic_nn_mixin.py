@@ -867,12 +867,22 @@ class PosMapToConventional(TracksAnalyzer):
 
                         # if match add and extend
                         if len(match_rows) > 0:
-                            self.add_and_extend_for_associated_agent_for_collection_task(
-                                candidate_agents,
-                                extended_tracks, frame,
-                                inactive_tracks, k_track,
-                                match_rows,
-                                nn_classic_extracted_extended_df)
+                            if self.config.check_in_future:
+                                if frame not in candidate_track.frames or \
+                                        frame not in candidate_track.extended_at_frames:
+                                    self.add_and_extend_for_associated_agent_for_collection_task(
+                                        candidate_agents,
+                                        extended_tracks, frame,
+                                        inactive_tracks, k_track,
+                                        match_rows,
+                                        nn_classic_extracted_extended_df)
+                            else:
+                                self.add_and_extend_for_associated_agent_for_collection_task(
+                                    candidate_agents,
+                                    extended_tracks, frame,
+                                    inactive_tracks, k_track,
+                                    match_rows,
+                                    nn_classic_extracted_extended_df)
                         else:
                             if self.config.check_in_future:
                                 track_extended = False
@@ -903,13 +913,15 @@ class PosMapToConventional(TracksAnalyzer):
                                     match_cols = match_cols[actually_matched_mask]
 
                                     if len(match_rows) > 0:
-                                        self.add_and_extend_for_associated_agent_for_collection_task(
-                                            candidate_agents_future,
-                                            extended_tracks, frame + i,
-                                            inactive_tracks, k_track,
-                                            match_rows,
-                                            nn_classic_extracted_extended_df)
-                                        track_extended = True
+                                        if (frame + i) not in candidate_track.frames or \
+                                                (frame + i) not in candidate_track.extended_at_frames:
+                                            self.add_and_extend_for_associated_agent_for_collection_task(
+                                                candidate_agents_future,
+                                                extended_tracks, frame + i,
+                                                inactive_tracks, k_track,
+                                                match_rows,
+                                                nn_classic_extracted_extended_df)
+                                            track_extended = True
                                     else:
                                         continue
                                 if not track_extended:
@@ -940,7 +952,9 @@ class PosMapToConventional(TracksAnalyzer):
                     if dead_track.inactive > self.config.dead_threshold:
                         dead_track.inactive = -1
 
+        self.sort_track_in_time_for_collection_task(extended_tracks)
         # to add
+        # - interpolate
         # - segmentation map
         # - backward in time
         # - refactor
@@ -967,6 +981,21 @@ class PosMapToConventional(TracksAnalyzer):
                 marker_size=2
             )
         return extended_tracks
+
+    @staticmethod
+    def sort_track_in_time_for_collection_task(extended_tracks):
+        """For future/past in time"""
+        for ex_track in extended_tracks.tracks:
+            frames = np.array(ex_track.frames)
+            sorted_idx = frames.argsort()
+            frames = frames[sorted_idx]
+            locations = np.array(ex_track.locations)[sorted_idx]
+
+            ex_track.frames = frames.tolist()
+            ex_track.locations = locations.tolist()
+
+            if len(ex_track.frames) - len(set(ex_track.frames)) != 0:
+                logger.warning(f"Potential bug detected for track: {ex_track}")
 
     def add_and_extend_for_associated_agent_for_collection_task(self, candidate_agents, extended_tracks, frame,
                                                                 inactive_tracks, k_track, match_rows,
