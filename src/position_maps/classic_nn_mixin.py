@@ -812,16 +812,10 @@ class PosMapToConventional(TracksAnalyzer):
         inactive_tracks = VideoSequenceAgentTracks(video_class, video_number, [])
         ratio = self.get_ratio(meta_class=video_meta_class, video_number=video_number)
 
-        # turn into 0.4 seconds apart
-        classic_extracted_df = pd.read_csv(classic_extracted_annotation_path)
-        classic_extracted_df = self.adjust_dataframe_framerate(classic_extracted_df, 'frame_number', 30, 0.4)
-
-        nn_classic_extracted_df = pd.read_csv(nn_classic_extracted_annotation_path)
-        nn_classic_extracted_df = self.adjust_dataframe_framerate(nn_classic_extracted_df, 'frame', 30, 0.4)
-
-        nn_classic_extracted_extended_df = pd.read_csv(nn_classic_extracted_annotation_path)
-        nn_classic_extracted_extended_df = self.adjust_dataframe_framerate(
-            nn_classic_extracted_extended_df, 'frame', 30, 0.4)
+        classic_extracted_df, nn_classic_extracted_df, nn_classic_extracted_extended_df = \
+            self.get_dfs_for_collection_task(
+                classic_extracted_annotation_path, nn_classic_extracted_annotation_path
+            )
 
         running_track_idx = []
 
@@ -837,19 +831,13 @@ class PosMapToConventional(TracksAnalyzer):
 
             frame = int(frame)
             if frame == 0:
-                running_track_idx = classic_extracted_track_ids.tolist()
-                # add to running tracks - only final tracks
-                for track_idx, loc in track_id_to_location.items():
-                    agent_track = AgentTrack(idx=track_idx)
-                    agent_track.frames.append(frame)
-                    agent_track.locations.append(loc.tolist())
-                    extended_tracks.tracks.append(agent_track)
+                running_track_idx = self.handle_first_frame_for_collection_task(
+                    classic_extracted_track_ids,
+                    extended_tracks, frame,
+                    running_track_idx, track_id_to_location)
             else:
-                # associate - try for next K frames - todo
-                candidate_agents = [
-                    CandidateAgentTrack(frame=frame, location=l)
-                    for t, l in zip(nn_classic_extracted_track_ids, nn_classic_extracted_centers) if t == -1
-                ]
+                candidate_agents = self.get_candidate_agents_for_collection_task(frame, nn_classic_extracted_centers,
+                                                                                 nn_classic_extracted_track_ids)
 
                 continuing_tracks = np.intersect1d(np.array(running_track_idx), classic_extracted_track_ids)
                 for c_track in continuing_tracks:
@@ -872,60 +860,32 @@ class PosMapToConventional(TracksAnalyzer):
                     candidate_track = extended_tracks[k_track]
                     if len(candidate_track.frames) > 1:
                         # predict
-                        in_xy = np.stack(candidate_track.locations)
-                        in_dxdy = np.diff(in_xy, axis=0)
-                        batch = {
-                            'in_xy': torch.tensor(in_xy).unsqueeze(1).float().cuda(),
-                            'in_dxdy': torch.tensor(in_dxdy).unsqueeze(1).float().cuda()
-                        }
-                        with torch.no_grad():
-                            trajectory_out = trajectory_model.test(batch)
+                        trajectory_out = self.predict_in_future_for_collection_task(candidate_track, trajectory_model)
 
-                        out_locations = trajectory_out['out_xy'].squeeze(1)
-                        # take 1st location - create a distance matrix with candidate agents
-                        candidate_location = out_locations[0].cpu().numpy()
-                        candidate_distance_matrix = np.sqrt(mm.distances.norm2squared_matrix(
-                            objs=np.stack([c.location for c in candidate_agents]),
-                            hyps=candidate_location,
-                        )) * ratio
-
-                        candidate_distance_matrix = self.config.threshold - candidate_distance_matrix
-                        candidate_distance_matrix[candidate_distance_matrix < 0] = 1000
-                        # Hungarian
-                        match_rows, match_cols = scipy.optimize.linear_sum_assignment(candidate_distance_matrix)
-                        actually_matched_mask = candidate_distance_matrix[match_rows, match_cols] < 1000
-                        match_rows = match_rows[actually_matched_mask]
-                        match_cols = match_cols[actually_matched_mask]
+                        match_rows, out_locations = self.associate_with_predicted_location_for_collection_task(
+                            candidate_agents, ratio, trajectory_out)
 
                         # if match add and extend
                         if len(match_rows) > 0:
-                            chosen_candidate = candidate_agents[match_rows[0].item()]
-                            killed_track = extended_tracks[k_track]
-                            killed_track.frames.append(frame)
-                            killed_track.locations.append(chosen_candidate.location.tolist())
-                            killed_track.extended_at_frames.append(frame)
-                            killed_track.inactive = 0
-
-                            row_idx = nn_classic_extracted_extended_df[
-                                (nn_classic_extracted_extended_df['frame'] == float(frame)) &
-                                (nn_classic_extracted_extended_df['x'] == chosen_candidate.location[0]) &
-                                (nn_classic_extracted_extended_df['y'] == chosen_candidate.location[1])].index.item()
-                            nn_classic_extracted_extended_df.at[row_idx, 'track_id'] = killed_track.idx
-
-                            if killed_track.idx in inactive_tracks:
-                                inactive_tracks.tracks.remove(killed_track)
+                            self.add_and_extend_for_associated_agent_for_collection_task(
+                                candidate_agents,
+                                extended_tracks, frame,
+                                inactive_tracks, k_track,
+                                match_rows,
+                                nn_classic_extracted_extended_df)
                         else:
                             if self.config.check_in_future:
+                                track_extended = False
                                 for i in range(1, self.config.dead_threshold + 1):
+                                    if track_extended:
+                                        break
                                     nn_classic_extracted_centers_future, nn_classic_extracted_track_ids_future = \
                                         self.get_extracted_centers(
                                             nn_classic_extracted_df, frame + i)
-                                    candidate_agents_future = [
-                                        CandidateAgentTrack(frame=frame, location=l)
-                                        for t, l in
-                                        zip(nn_classic_extracted_track_ids_future,
-                                            nn_classic_extracted_centers_future) if t == -1
-                                    ]
+                                    candidate_agents_future = self.get_candidate_agents_for_collection_task(
+                                        frame,
+                                        nn_classic_extracted_centers_future,
+                                        nn_classic_extracted_track_ids_future)
 
                                     candidate_location_f = out_locations[i].cpu().numpy()
                                     candidate_distance_matrix_f = np.sqrt(mm.distances.norm2squared_matrix(
@@ -943,30 +903,26 @@ class PosMapToConventional(TracksAnalyzer):
                                     match_cols = match_cols[actually_matched_mask]
 
                                     if len(match_rows) > 0:
-                                        chosen_candidate = candidate_agents_future[match_rows[0].item()]
-                                        killed_track = extended_tracks[k_track]
-                                        killed_track.frames.append(frame + i)
-                                        killed_track.locations.append(chosen_candidate.location.tolist())
-                                        killed_track.extended_at_frames.append(frame + i)
-                                        killed_track.inactive = 0
-
-                                        row_idx = nn_classic_extracted_extended_df[
-                                            (nn_classic_extracted_extended_df['frame'] == float(frame + i)) &
-                                            (nn_classic_extracted_extended_df['x'] == chosen_candidate.location[0]) &
-                                            (nn_classic_extracted_extended_df['y'] == chosen_candidate.location[
-                                                1])].index.item()
-                                        nn_classic_extracted_extended_df.at[row_idx, 'track_id'] = killed_track.idx
-
-                                        if killed_track.idx in inactive_tracks:
-                                            inactive_tracks.tracks.remove(killed_track)
+                                        self.add_and_extend_for_associated_agent_for_collection_task(
+                                            candidate_agents_future,
+                                            extended_tracks, frame + i,
+                                            inactive_tracks, k_track,
+                                            match_rows,
+                                            nn_classic_extracted_extended_df)
+                                        track_extended = True
                                     else:
                                         continue
-                            # can go in future but what if we grab some other track's identity going in future
-                            # else add to inactives
-                            inactive_track = extended_tracks[k_track]
-                            # inactive_track.inactive += 1
-                            inactive_tracks.tracks.append(inactive_track)
-                            running_track_idx.remove(k_track)
+                                if not track_extended:
+                                    inactive_track = extended_tracks[k_track]
+                                    # inactive_track.inactive += 1
+                                    inactive_tracks.tracks.append(inactive_track)
+                                    running_track_idx.remove(k_track)
+                            else:
+                                # else add to inactives
+                                inactive_track = extended_tracks[k_track]
+                                # inactive_track.inactive += 1
+                                inactive_tracks.tracks.append(inactive_track)
+                                running_track_idx.remove(k_track)
                     else:
                         # don't remove it from extended tracks
                         # just replace it if it becomes active
@@ -984,7 +940,15 @@ class PosMapToConventional(TracksAnalyzer):
                     if dead_track.inactive > self.config.dead_threshold:
                         dead_track.inactive = -1
 
+        # to add
+        # - segmentation map
+        # - backward in time
+        # - refactor
+
         # debug
+        unknown_tracks_before = nn_classic_extracted_df.track_id.value_counts().values[0]
+        unknown_tracks_after = nn_classic_extracted_extended_df.track_id.value_counts().values[0]
+        diff = unknown_tracks_before - unknown_tracks_after
         predicted_tracks = [e for e in extended_tracks.tracks if len(e.extended_at_frames) > 0]
         for p_track in predicted_tracks:
             f_no = p_track.frames[0]
@@ -1003,6 +967,81 @@ class PosMapToConventional(TracksAnalyzer):
                 marker_size=2
             )
         return extended_tracks
+
+    def add_and_extend_for_associated_agent_for_collection_task(self, candidate_agents, extended_tracks, frame,
+                                                                inactive_tracks, k_track, match_rows,
+                                                                nn_classic_extracted_extended_df):
+        chosen_candidate = candidate_agents[match_rows[0].item()]
+        killed_track = extended_tracks[k_track]
+        killed_track.frames.append(frame)
+        killed_track.locations.append(chosen_candidate.location.tolist())
+        killed_track.extended_at_frames.append(frame)
+        killed_track.inactive = 0
+        row_idx = nn_classic_extracted_extended_df[
+            (nn_classic_extracted_extended_df['frame'] == float(frame)) &
+            (nn_classic_extracted_extended_df['x'] == chosen_candidate.location[0]) &
+            (nn_classic_extracted_extended_df['y'] == chosen_candidate.location[1])].index[0].item()
+        nn_classic_extracted_extended_df.at[row_idx, 'track_id'] = killed_track.idx
+        if killed_track.idx in inactive_tracks:
+            inactive_tracks.tracks.remove(killed_track)
+
+    def associate_with_predicted_location_for_collection_task(self, candidate_agents, ratio, trajectory_out):
+        out_locations = trajectory_out['out_xy'].squeeze(1)
+        # take 1st location - create a distance matrix with candidate agents
+        candidate_location = out_locations[0].cpu().numpy()
+        candidate_distance_matrix = np.sqrt(mm.distances.norm2squared_matrix(
+            objs=np.stack([c.location for c in candidate_agents]),
+            hyps=candidate_location,
+        )) * ratio
+        candidate_distance_matrix = self.config.threshold - candidate_distance_matrix
+        candidate_distance_matrix[candidate_distance_matrix < 0] = 1000
+        # Hungarian
+        match_rows, match_cols = scipy.optimize.linear_sum_assignment(candidate_distance_matrix)
+        actually_matched_mask = candidate_distance_matrix[match_rows, match_cols] < 1000
+        match_rows = match_rows[actually_matched_mask]
+        match_cols = match_cols[actually_matched_mask]
+        return match_rows, out_locations
+
+    def predict_in_future_for_collection_task(self, candidate_track, trajectory_model):
+        in_xy = np.stack(candidate_track.locations)
+        in_dxdy = np.diff(in_xy, axis=0)
+        batch = {
+            'in_xy': torch.tensor(in_xy).unsqueeze(1).float().cuda(),
+            'in_dxdy': torch.tensor(in_dxdy).unsqueeze(1).float().cuda()
+        }
+        with torch.no_grad():
+            trajectory_out = trajectory_model.test(batch)
+        return trajectory_out
+
+    def get_candidate_agents_for_collection_task(self, frame, nn_classic_extracted_centers,
+                                                 nn_classic_extracted_track_ids):
+        candidate_agents = [
+            CandidateAgentTrack(frame=frame, location=l)
+            for t, l in zip(nn_classic_extracted_track_ids, nn_classic_extracted_centers) if t == -1
+        ]
+        return candidate_agents
+
+    def handle_first_frame_for_collection_task(self, classic_extracted_track_ids, extended_tracks, frame,
+                                               running_track_idx, track_id_to_location):
+        running_track_idx = classic_extracted_track_ids.tolist()
+        # add to running tracks - only final tracks
+        for track_idx, loc in track_id_to_location.items():
+            agent_track = AgentTrack(idx=track_idx)
+            agent_track.frames.append(frame)
+            agent_track.locations.append(loc.tolist())
+            extended_tracks.tracks.append(agent_track)
+        return running_track_idx
+
+    def get_dfs_for_collection_task(self, classic_extracted_annotation_path, nn_classic_extracted_annotation_path):
+        # turn into 0.4 seconds apart
+        classic_extracted_df = pd.read_csv(classic_extracted_annotation_path)
+        classic_extracted_df = self.adjust_dataframe_framerate(classic_extracted_df, 'frame_number', 30, 0.4)
+        nn_classic_extracted_df = pd.read_csv(nn_classic_extracted_annotation_path)
+        nn_classic_extracted_df = self.adjust_dataframe_framerate(nn_classic_extracted_df, 'frame', 30, 0.4)
+        nn_classic_extracted_extended_df = pd.read_csv(nn_classic_extracted_annotation_path)
+        nn_classic_extracted_extended_df = self.adjust_dataframe_framerate(
+            nn_classic_extracted_extended_df, 'frame', 30, 0.4)
+        return classic_extracted_df, nn_classic_extracted_df, nn_classic_extracted_extended_df
 
 
 def get_components(boolean_array, r=1, p=1):
