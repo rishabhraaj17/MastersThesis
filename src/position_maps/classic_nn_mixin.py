@@ -918,27 +918,7 @@ class PosMapToConventional(TracksAnalyzer):
 
         self.sort_track_in_time_for_collection_task(extended_tracks)
 
-        for ex_track in extended_tracks.tracks:
-            frames = np.array(ex_track.frames)
-            frames_diff = np.diff(frames)
-
-            locations = np.array(ex_track.locations)
-            for idx in range(len(frames_diff)):
-                time_gap = frames_diff[idx]
-                if time_gap > 1:
-                    step0, step1 = locations[idx], locations[idx + 1]
-                    # step_mid = self.linear_interpolate_simple(points=[step0, step1])
-                    k_t = 0
-                    for k in range(2, time_gap+1):
-                        step_mid = self.linear_interpolate(t=k, times=[1, time_gap+1],
-                                                           points=[step0, step1])
-                        ex_track.frames.insert(idx + (1 + k_t), frames[idx] + (1 + k_t))
-                        ex_track.locations.insert(idx + (1 + k_t), list(step_mid))
-                        ex_track.extended_at_frames.insert(idx + (1 + k_t), frames[idx] + (1 + k_t))
-                        k_t += 1
-
-                    frames = np.array(ex_track.frames)
-                    frames_diff = np.diff(frames)
+        self.interpolate_tracks_for_collection_task(extended_tracks)
         # to add
         # - interpolate
         # - segmentation map
@@ -967,6 +947,29 @@ class PosMapToConventional(TracksAnalyzer):
                 marker_size=2
             )
         return extended_tracks
+
+    def interpolate_tracks_for_collection_task(self, extended_tracks):
+        for ex_track in extended_tracks.tracks:
+            frames = np.array(ex_track.frames)
+            frames_diff = np.diff(frames)
+
+            locations = np.array(ex_track.locations)
+            for idx in range(len(frames_diff)):
+                time_gap = frames_diff[idx]
+                if time_gap > 1:
+                    step0, step1 = locations[idx], locations[idx + 1]
+                    # step_mid = self.linear_interpolate_simple(points=[step0, step1])
+                    k_t = 0
+                    for k in range(2, time_gap + 1):
+                        step_mid = self.linear_interpolate(t=k, times=[1, time_gap + 1],
+                                                           points=[step0, step1])
+                        ex_track.frames.insert(idx + (1 + k_t), frames[idx] + (1 + k_t))
+                        ex_track.locations.insert(idx + (1 + k_t), list(step_mid))
+                        ex_track.extended_at_frames.insert(idx + (1 + k_t), frames[idx] + (1 + k_t))
+                        k_t += 1
+
+                    frames = np.array(ex_track.frames)
+                    frames_diff = np.diff(frames)
 
     @staticmethod
     def linear_interpolate(t, times, points):
