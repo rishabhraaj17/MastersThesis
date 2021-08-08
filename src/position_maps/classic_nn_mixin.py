@@ -918,12 +918,13 @@ class PosMapToConventional(TracksAnalyzer):
 
         self.sort_track_in_time_for_collection_task(extended_tracks)
 
-        self.interpolate_tracks_for_collection_task(extended_tracks)
+        nn_classic_extracted_extended_df = self.interpolate_tracks_for_collection_task(
+            extended_tracks, nn_classic_extracted_extended_df)
+
+        nn_classic_extracted_extended_df = self.sort_df_by_key(nn_classic_extracted_extended_df)
         # to add
-        # - interpolate
         # - segmentation map
         # - backward in time
-        # - refactor
 
         # debug
         unknown_tracks_before = nn_classic_extracted_df.track_id.value_counts().values[0]
@@ -948,7 +949,13 @@ class PosMapToConventional(TracksAnalyzer):
             )
         return extended_tracks
 
-    def interpolate_tracks_for_collection_task(self, extended_tracks):
+    @staticmethod
+    def sort_df_by_key(df, key='frame'):
+        df = df.sort_values(by=[key]).reset_index()
+        df = df.drop(columns=['index'])
+        return df
+
+    def interpolate_tracks_for_collection_task(self, extended_tracks, nn_classic_extracted_extended_df):
         for ex_track in extended_tracks.tracks:
             frames = np.array(ex_track.frames)
             frames_diff = np.diff(frames)
@@ -966,10 +973,21 @@ class PosMapToConventional(TracksAnalyzer):
                         ex_track.frames.insert(idx + (1 + k_t), frames[idx] + (1 + k_t))
                         ex_track.locations.insert(idx + (1 + k_t), list(step_mid))
                         ex_track.extended_at_frames.insert(idx + (1 + k_t), frames[idx] + (1 + k_t))
+
+                        nn_classic_extracted_extended_df = nn_classic_extracted_extended_df.append(
+                            {
+                                'frame': frames[idx] + (1 + k_t),
+                                'track_id': ex_track.idx,
+                                'x': step_mid[0],
+                                'y': step_mid[1],
+                            }, ignore_index=True
+                        )
+
                         k_t += 1
 
                     frames = np.array(ex_track.frames)
                     frames_diff = np.diff(frames)
+        return nn_classic_extracted_extended_df
 
     @staticmethod
     def linear_interpolate(t, times, points):
