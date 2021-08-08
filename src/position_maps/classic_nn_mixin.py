@@ -885,50 +885,14 @@ class PosMapToConventional(TracksAnalyzer):
                                     nn_classic_extracted_extended_df)
                         else:
                             if self.config.check_in_future:
-                                track_extended = False
-                                for i in range(1, self.config.dead_threshold + 1):
-                                    if track_extended:
-                                        break
-                                    nn_classic_extracted_centers_future, nn_classic_extracted_track_ids_future = \
-                                        self.get_extracted_centers(
-                                            nn_classic_extracted_df, frame + i)
-                                    candidate_agents_future = self.get_candidate_agents_for_collection_task(
-                                        frame,
-                                        nn_classic_extracted_centers_future,
-                                        nn_classic_extracted_track_ids_future)
-
-                                    candidate_location_f = out_locations[i].cpu().numpy()
-                                    candidate_distance_matrix_f = np.sqrt(mm.distances.norm2squared_matrix(
-                                        objs=np.stack([c.location for c in candidate_agents_future]),
-                                        hyps=candidate_location_f,
-                                    )) * ratio
-
-                                    candidate_distance_matrix_f = self.config.threshold - candidate_distance_matrix_f
-                                    candidate_distance_matrix_f[candidate_distance_matrix_f < 0] = 1000
-                                    # Hungarian
-                                    match_rows, match_cols = scipy.optimize.linear_sum_assignment(
-                                        candidate_distance_matrix_f)
-                                    actually_matched_mask = candidate_distance_matrix_f[match_rows, match_cols] < 1000
-                                    match_rows = match_rows[actually_matched_mask]
-                                    match_cols = match_cols[actually_matched_mask]
-
-                                    if len(match_rows) > 0:
-                                        if (frame + i) not in candidate_track.frames or \
-                                                (frame + i) not in candidate_track.extended_at_frames:
-                                            self.add_and_extend_for_associated_agent_for_collection_task(
-                                                candidate_agents_future,
-                                                extended_tracks, frame + i,
-                                                inactive_tracks, k_track,
-                                                match_rows,
-                                                nn_classic_extracted_extended_df)
-                                            track_extended = True
-                                    else:
-                                        continue
-                                if not track_extended:
-                                    inactive_track = extended_tracks[k_track]
-                                    # inactive_track.inactive += 1
-                                    inactive_tracks.tracks.append(inactive_track)
-                                    running_track_idx.remove(k_track)
+                                self.associate_and_extend_in_future_for_collection_task(
+                                    candidate_track,
+                                    extended_tracks, frame,
+                                    inactive_tracks, k_track,
+                                    nn_classic_extracted_df,
+                                    nn_classic_extracted_extended_df,
+                                    out_locations, ratio,
+                                    running_track_idx)
                             else:
                                 # else add to inactives
                                 inactive_track = extended_tracks[k_track]
@@ -981,6 +945,57 @@ class PosMapToConventional(TracksAnalyzer):
                 marker_size=2
             )
         return extended_tracks
+
+    def associate_and_extend_in_future_for_collection_task(self, candidate_track, extended_tracks, frame,
+                                                           inactive_tracks, k_track, nn_classic_extracted_df,
+                                                           nn_classic_extracted_extended_df, out_locations, ratio,
+                                                           running_track_idx):
+        track_extended = False
+        for i in range(1, self.config.dead_threshold + 1):
+            if track_extended:
+                break
+
+            nn_classic_extracted_centers_future, nn_classic_extracted_track_ids_future = \
+                self.get_extracted_centers(
+                    nn_classic_extracted_df, frame + i)
+            candidate_agents_future = self.get_candidate_agents_for_collection_task(
+                frame,
+                nn_classic_extracted_centers_future,
+                nn_classic_extracted_track_ids_future)
+
+            candidate_location_f = out_locations[i].cpu().numpy()
+            candidate_distance_matrix_f = np.sqrt(mm.distances.norm2squared_matrix(
+                objs=np.stack([c.location for c in candidate_agents_future]),
+                hyps=candidate_location_f,
+            )) * ratio
+
+            candidate_distance_matrix_f = self.config.threshold - candidate_distance_matrix_f
+            candidate_distance_matrix_f[candidate_distance_matrix_f < 0] = 1000
+            # Hungarian
+            match_rows, match_cols = scipy.optimize.linear_sum_assignment(
+                candidate_distance_matrix_f)
+            actually_matched_mask = candidate_distance_matrix_f[match_rows, match_cols] < 1000
+            match_rows = match_rows[actually_matched_mask]
+            match_cols = match_cols[actually_matched_mask]
+
+            if len(match_rows) > 0:
+                if (frame + i) not in candidate_track.frames or \
+                        (frame + i) not in candidate_track.extended_at_frames:
+                    self.add_and_extend_for_associated_agent_for_collection_task(
+                        candidate_agents_future,
+                        extended_tracks, frame + i,
+                        inactive_tracks, k_track,
+                        match_rows,
+                        nn_classic_extracted_extended_df)
+                    track_extended = True
+            else:
+                continue
+
+        if not track_extended:
+            inactive_track = extended_tracks[k_track]
+            # inactive_track.inactive += 1
+            inactive_tracks.tracks.append(inactive_track)
+            running_track_idx.remove(k_track)
 
     @staticmethod
     def sort_track_in_time_for_collection_task(extended_tracks):
