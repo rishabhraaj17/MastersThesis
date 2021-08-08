@@ -819,6 +819,10 @@ class PosMapToConventional(TracksAnalyzer):
         nn_classic_extracted_df = pd.read_csv(nn_classic_extracted_annotation_path)
         nn_classic_extracted_df = self.adjust_dataframe_framerate(nn_classic_extracted_df, 'frame', 30, 0.4)
 
+        nn_classic_extracted_extended_df = pd.read_csv(nn_classic_extracted_annotation_path)
+        nn_classic_extracted_extended_df = self.adjust_dataframe_framerate(
+            nn_classic_extracted_extended_df, 'frame', 30, 0.4)
+
         running_track_idx = []
 
         for frame in tqdm(classic_extracted_df.frame_number.unique()):
@@ -902,9 +906,61 @@ class PosMapToConventional(TracksAnalyzer):
                             killed_track.extended_at_frames.append(frame)
                             killed_track.inactive = 0
 
+                            row_idx = nn_classic_extracted_extended_df[
+                                (nn_classic_extracted_extended_df['frame'] == float(frame)) &
+                                (nn_classic_extracted_extended_df['x'] == chosen_candidate.location[0]) &
+                                (nn_classic_extracted_extended_df['y'] == chosen_candidate.location[1])].index.item()
+                            nn_classic_extracted_extended_df.at[row_idx, 'track_id'] = killed_track.idx
+
                             if killed_track.idx in inactive_tracks:
                                 inactive_tracks.tracks.remove(killed_track)
                         else:
+                            if self.config.check_in_future:
+                                for i in range(1, self.config.dead_threshold + 1):
+                                    nn_classic_extracted_centers_future, nn_classic_extracted_track_ids_future = \
+                                        self.get_extracted_centers(
+                                            nn_classic_extracted_df, frame + i)
+                                    candidate_agents_future = [
+                                        CandidateAgentTrack(frame=frame, location=l)
+                                        for t, l in
+                                        zip(nn_classic_extracted_track_ids_future,
+                                            nn_classic_extracted_centers_future) if t == -1
+                                    ]
+
+                                    candidate_location_f = out_locations[i].cpu().numpy()
+                                    candidate_distance_matrix_f = np.sqrt(mm.distances.norm2squared_matrix(
+                                        objs=np.stack([c.location for c in candidate_agents_future]),
+                                        hyps=candidate_location_f,
+                                    )) * ratio
+
+                                    candidate_distance_matrix_f = self.config.threshold - candidate_distance_matrix_f
+                                    candidate_distance_matrix_f[candidate_distance_matrix_f < 0] = 1000
+                                    # Hungarian
+                                    match_rows, match_cols = scipy.optimize.linear_sum_assignment(
+                                        candidate_distance_matrix_f)
+                                    actually_matched_mask = candidate_distance_matrix_f[match_rows, match_cols] < 1000
+                                    match_rows = match_rows[actually_matched_mask]
+                                    match_cols = match_cols[actually_matched_mask]
+
+                                    if len(match_rows) > 0:
+                                        chosen_candidate = candidate_agents_future[match_rows[0].item()]
+                                        killed_track = extended_tracks[k_track]
+                                        killed_track.frames.append(frame + i)
+                                        killed_track.locations.append(chosen_candidate.location.tolist())
+                                        killed_track.extended_at_frames.append(frame + i)
+                                        killed_track.inactive = 0
+
+                                        row_idx = nn_classic_extracted_extended_df[
+                                            (nn_classic_extracted_extended_df['frame'] == float(frame + i)) &
+                                            (nn_classic_extracted_extended_df['x'] == chosen_candidate.location[0]) &
+                                            (nn_classic_extracted_extended_df['y'] == chosen_candidate.location[
+                                                1])].index.item()
+                                        nn_classic_extracted_extended_df.at[row_idx, 'track_id'] = killed_track.idx
+
+                                        if killed_track.idx in inactive_tracks:
+                                            inactive_tracks.tracks.remove(killed_track)
+                                    else:
+                                        continue
                             # can go in future but what if we grab some other track's identity going in future
                             # else add to inactives
                             inactive_track = extended_tracks[k_track]
@@ -942,7 +998,9 @@ class PosMapToConventional(TracksAnalyzer):
                 active_tracks=None,
                 current_frame_locations=None,
                 last_frame_locations=None,
-                plot_first_and_last=False
+                plot_first_and_last=False,
+                use_lines=True,
+                marker_size=2
             )
         return extended_tracks
 
