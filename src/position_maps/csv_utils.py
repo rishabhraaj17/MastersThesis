@@ -145,6 +145,25 @@ def pm_annotation_versions_diff_save_as_markdown(out_df, path):
         index=False)
 
 
+def load_df_and_diff_save_as_markdown_for_precision_recall(out_df_path, path):
+    out_df = pd.read_csv(out_df_path)
+    series_list = []
+    for r_idx, row in out_df.iterrows():
+        row_numpy = row.values
+
+        precision_winner = np.argmax(row_numpy[2:4])
+        row[2 + precision_winner] = f"**{row[2 + precision_winner]}**"
+
+        recall_winner = np.argmax(row_numpy[4:6])
+        row[4 + recall_winner] = f"**{row[4 + recall_winner]}**"
+        series_list.append(row.values)
+
+    out_df_bold = pd.DataFrame(series_list, columns=out_df.columns.values)
+    out_df_bold.to_markdown(
+        path,
+        index=False)
+
+
 if __name__ == '__main__':
     # d_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/generated_annotations/metrics_2m.csv'
     # b_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/' \
@@ -154,9 +173,16 @@ if __name__ == '__main__':
     # csv_merge(d_path, b_path, n_path,
     #           save_root_path='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/')
     
-    v0_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/' \
-             'pm_extracted_annotations_v0/metrics.csv'
-    v1_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/' \
-             'pm_extracted_annotations/metrics_2m.csv'
-    pm_annotation_versions_diff_csv(v0_path, v1_path, 
-                                    '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/')
+    # v0_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/' \
+    #          'pm_extracted_annotations_v0/metrics.csv'
+    # v1_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/' \
+    #          'pm_extracted_annotations/metrics_2m.csv'
+    # pm_annotation_versions_diff_csv(v0_path, v1_path,
+    #                                 '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/')
+
+    load_df_and_diff_save_as_markdown_for_precision_recall(
+        '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD'
+        '/classic_nn_extracted_annotations_v1/metrics_2m.csv',
+        '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/classic_nn_extracted_annotations_v1/'
+        'metrics_2m.md'
+    )
