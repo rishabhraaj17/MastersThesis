@@ -135,7 +135,7 @@ def setup_trajectory_dataset(cfg):
         val_meta_label=[getattr(SDDVideoDatasets, v_c) for v_c in cfg.tp_module.datasets.val.video_classes],
         get_generated=cfg.tp_module.datasets.use_generated,
         meta_path='../../../Datasets/SDD/H_SDD.txt',
-        root='../../../Datasets/SDD/pm_extracted_annotations/'
+        root='../../../Datasets/SDD/pm_extracted_annotations_v0/'
         if cfg.tp_module.datasets.use_generated else '../../../Datasets/SDD_Features/'
     )
     test_dataset = get_test_datasets(
@@ -144,7 +144,7 @@ def setup_trajectory_dataset(cfg):
         meta_label=[getattr(SDDVideoDatasets, v_c) for v_c in cfg.tp_module.datasets.test.video_classes],
         get_generated=cfg.tp_module.datasets.use_generated,
         meta_path='../../../Datasets/SDD/H_SDD.txt',
-        root='../../../Datasets/SDD/pm_extracted_annotations/'
+        root='../../../Datasets/SDD/pm_extracted_annotations_v0/'
         if cfg.tp_module.datasets.use_generated else '../../../Datasets/SDD_Features/'
     )
     trajectory_dataset = ConcatDataset([train_dataset, val_dataset, test_dataset])
