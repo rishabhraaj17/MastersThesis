@@ -29,6 +29,7 @@ from baselinev2.plot_utils import add_box_to_axes_with_annotation, add_box_to_ax
 from baselinev2.stochastic.model import BaselineGAN
 from log import get_logger
 from src.position_maps.analysis import TracksAnalyzer
+from src.position_maps.segmentation_utils import dump_image_mapping, dump_class_mapping
 from src.position_maps.trajectory_utils import plot_trajectory_with_one_frame
 from src_lib.models_hub.crop_classifiers import CropClassifier
 
@@ -771,6 +772,33 @@ class PosMapToConventional(TracksAnalyzer):
         m.eval()
         return m
 
+    def get_valid_locations_from_segmentation_maps(self, vid_clz, vid_num):
+        seg_root = os.path.split(os.path.split(self.config.root)[0])[0]
+        video_mappings = dump_image_mapping(os.path.join(seg_root, f"SDD_SEG_MAPS/"))
+
+        instance_mask = torchvision.io.read_image(
+            os.path.join(
+                seg_root,
+                f"SDD_SEG_MAPS/{video_mappings[vid_clz.value][vid_num][0]}/GLAY/"
+                f"{video_mappings[vid_clz.value][vid_num][1]}"))
+        instance_mask = instance_mask.permute(1, 2, 0).numpy()
+
+        instance_class_mappings = dump_class_mapping(os.path.join(seg_root, f"SDD_SEG_MAPS/"))
+
+        valid_classes = [v for k, v in instance_class_mappings.items()
+                         if k in ['foot_path', 'street', 'grass_path', 'parking']]
+        valid_x_axis_locs, valid_y_axis_locs = [], []
+        for v in valid_classes:
+            y_points, x_points, z_points = np.where(instance_mask == v)
+            valid_x_axis_locs.append(x_points)
+            valid_y_axis_locs.append(y_points)
+
+        valid_x_axis_locs = np.concatenate(valid_x_axis_locs)
+        valid_y_axis_locs = np.concatenate(valid_y_axis_locs)
+        valid_locs = np.stack((valid_x_axis_locs, valid_y_axis_locs), axis=-1)
+
+        return valid_locs
+
     def perform_collection_on_multiple_sequences(self, classic_nn_extracted_annotations_version='v0'):
         extended_tracks = {}
         for v_idx, (v_clz, v_meta_clz) in enumerate(zip(self.video_classes, self.video_meta_classes)):
@@ -808,6 +836,8 @@ class PosMapToConventional(TracksAnalyzer):
             self, classic_extracted_annotation_path,
             nn_classic_extracted_annotation_path, video_class, video_meta_class, video_number, image_shape,
             video_path, trajectory_model):
+        valid_locations = self.get_valid_locations_from_segmentation_maps(video_class, video_number)
+
         extended_tracks = VideoSequenceAgentTracks(video_class, video_number, [])
         inactive_tracks = VideoSequenceAgentTracks(video_class, video_number, [])
         ratio = self.get_ratio(meta_class=video_meta_class, video_number=video_number)
@@ -875,14 +905,14 @@ class PosMapToConventional(TracksAnalyzer):
                                         extended_tracks, frame,
                                         inactive_tracks, k_track,
                                         match_rows,
-                                        nn_classic_extracted_extended_df)
+                                        nn_classic_extracted_extended_df, valid_locs=valid_locations)
                             else:
                                 self.add_and_extend_for_associated_agent_for_collection_task(
                                     candidate_agents,
                                     extended_tracks, frame,
                                     inactive_tracks, k_track,
                                     match_rows,
-                                    nn_classic_extracted_extended_df)
+                                    nn_classic_extracted_extended_df, valid_locs=valid_locations)
                         else:
                             if self.config.check_in_future:
                                 self.associate_and_extend_in_future_for_collection_task(
@@ -892,7 +922,7 @@ class PosMapToConventional(TracksAnalyzer):
                                     nn_classic_extracted_df,
                                     nn_classic_extracted_extended_df,
                                     out_locations, ratio,
-                                    running_track_idx)
+                                    running_track_idx, valid_locs=valid_locations)
                             else:
                                 # else add to inactives
                                 inactive_track = extended_tracks[k_track]
@@ -923,7 +953,6 @@ class PosMapToConventional(TracksAnalyzer):
 
         nn_classic_extracted_extended_df = self.sort_df_by_key(nn_classic_extracted_extended_df)
         # to add
-        # - segmentation map
         # - backward in time
 
         # debug
@@ -1006,7 +1035,7 @@ class PosMapToConventional(TracksAnalyzer):
     def associate_and_extend_in_future_for_collection_task(self, candidate_track, extended_tracks, frame,
                                                            inactive_tracks, k_track, nn_classic_extracted_df,
                                                            nn_classic_extracted_extended_df, out_locations, ratio,
-                                                           running_track_idx):
+                                                           running_track_idx, valid_locs):
         track_extended = False
         for i in range(1, self.config.dead_threshold + 1):
             if track_extended:
@@ -1043,7 +1072,7 @@ class PosMapToConventional(TracksAnalyzer):
                         extended_tracks, frame + i,
                         inactive_tracks, k_track,
                         match_rows,
-                        nn_classic_extracted_extended_df)
+                        nn_classic_extracted_extended_df, valid_locs=valid_locs)
                     track_extended = True
             else:
                 continue
@@ -1071,20 +1100,38 @@ class PosMapToConventional(TracksAnalyzer):
 
     def add_and_extend_for_associated_agent_for_collection_task(self, candidate_agents, extended_tracks, frame,
                                                                 inactive_tracks, k_track, match_rows,
-                                                                nn_classic_extracted_extended_df):
+                                                                nn_classic_extracted_extended_df, valid_locs):
         chosen_candidate = candidate_agents[match_rows[0].item()]
-        killed_track = extended_tracks[k_track]
-        killed_track.frames.append(frame)
-        killed_track.locations.append(chosen_candidate.location.tolist())
-        killed_track.extended_at_frames.append(frame)
-        killed_track.inactive = 0
-        row_idx = nn_classic_extracted_extended_df[
-            (nn_classic_extracted_extended_df['frame'] == float(frame)) &
-            (nn_classic_extracted_extended_df['x'] == chosen_candidate.location[0]) &
-            (nn_classic_extracted_extended_df['y'] == chosen_candidate.location[1])].index[0].item()
-        nn_classic_extracted_extended_df.at[row_idx, 'track_id'] = killed_track.idx
-        if killed_track.idx in inactive_tracks:
-            inactive_tracks.tracks.remove(killed_track)
+
+        valid_locations_to_use_idx = np.all(
+            np.equal(np.round(chosen_candidate.location).astype(np.int), valid_locs), axis=-1).any()
+        if self.config.use_seg_map:
+            if valid_locations_to_use_idx.item():
+                killed_track = extended_tracks[k_track]
+                killed_track.frames.append(frame)
+                killed_track.locations.append(chosen_candidate.location.tolist())
+                killed_track.extended_at_frames.append(frame)
+                killed_track.inactive = 0
+                row_idx = nn_classic_extracted_extended_df[
+                    (nn_classic_extracted_extended_df['frame'] == float(frame)) &
+                    (nn_classic_extracted_extended_df['x'] == chosen_candidate.location[0]) &
+                    (nn_classic_extracted_extended_df['y'] == chosen_candidate.location[1])].index[0].item()
+                nn_classic_extracted_extended_df.at[row_idx, 'track_id'] = killed_track.idx
+                if killed_track.idx in inactive_tracks:
+                    inactive_tracks.tracks.remove(killed_track)
+        else:
+            killed_track = extended_tracks[k_track]
+            killed_track.frames.append(frame)
+            killed_track.locations.append(chosen_candidate.location.tolist())
+            killed_track.extended_at_frames.append(frame)
+            killed_track.inactive = 0
+            row_idx = nn_classic_extracted_extended_df[
+                (nn_classic_extracted_extended_df['frame'] == float(frame)) &
+                (nn_classic_extracted_extended_df['x'] == chosen_candidate.location[0]) &
+                (nn_classic_extracted_extended_df['y'] == chosen_candidate.location[1])].index[0].item()
+            nn_classic_extracted_extended_df.at[row_idx, 'track_id'] = killed_track.idx
+            if killed_track.idx in inactive_tracks:
+                inactive_tracks.tracks.remove(killed_track)
 
     def associate_with_predicted_location_for_collection_task(self, candidate_agents, ratio, trajectory_out):
         out_locations = trajectory_out['out_xy'].squeeze(1)
