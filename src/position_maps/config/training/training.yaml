@@ -641,6 +641,10 @@ metrics_analysis:
 
   device: 'cuda:0'
 
+  check_in_future: True
+  check_in_past: False
+  use_seg_map: False
+
   debug:
     enabled: False
 
