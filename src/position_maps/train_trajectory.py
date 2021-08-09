@@ -148,11 +148,7 @@ def evaluate(cfg):
     model = setup_model(cfg, train_dataset, val_dataset)
 
     # load dict
-    path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/wandb/' \
-           'run-20210720_204724-3ebzenze/files/' \
-           'TrajectoryPredictionBaseline/3ebzenze/checkpoints/epoch=46-step=125677.ckpt'
-    state_dict = torch.load(path)['state_dict']
-    model.load_state_dict(state_dict)
+    model = load_checkpoint(cfg, model)
 
     if cfg.tp_module.datasets.use_standard_dataset:
         collate_fn = seq_collate_with_dataset_idx_dict
@@ -162,16 +158,52 @@ def evaluate(cfg):
     loader = DataLoader(val_dataset, batch_size=1, shuffle=True, pin_memory=True, drop_last=False,
                         collate_fn=collate_fn)
 
-    for batch in loader:
+    constant_linear_baseline_caller = ConstantLinearBaselineV2()
+
+    ade_list, fde_list, loss_list = [], [], []
+    linear_ade_list, linear_fde_list = [], []
+
+    for b_idx, batch in enumerate(tqdm(loader)):
+        batch = preprocess_dataset_elements_from_dict(
+            batch, filter_mode=True, moving_only=True, stationary_only=False)
+
+        if batch['in_xy'].shape[1] == 0:
+            continue
+
+        batch = {k: v.to(cfg.tp_module.device) for k, v in batch.items()}
+
         target = batch['gt_xy']
 
         with torch.no_grad():
             out = model(batch)
 
+        constant_linear_baseline_pred_trajectory, constant_linear_baseline_ade, constant_linear_baseline_fde = \
+            constant_linear_baseline_caller.eval(
+                obs_trajectory=batch['in_xy'].permute(1, 0, 2).cpu().numpy(),
+                obs_distances=batch['in_dxdy'].permute(1, 0, 2).cpu().numpy(),
+                gt_trajectory=batch['gt_xy'].permute(1, 0, 2).cpu().numpy()
+                , ratio=batch['ratio'].squeeze(), batch_size=target.shape[1])
+
         pred = out['out_xy']
 
-        loss = model.calculate_loss(pred, target)
-        ade, fde = model.calculate_metrics(pred, target, model.config.tp_module.metrics.mode)
+        loss = model.calculate_loss(pred, target, batch['ratio'])
+        # ade, fde = model.calculate_metrics(pred, target, model.config.tp_module.metrics.mode)
+
+        obs_separated = batch['in_xy'].view(batch['in_xy'].shape[0], -1, target.shape[1], batch['in_xy'].shape[-1])
+        target_separated = target.view(target.shape[0], -1, target.shape[1], target.shape[-1])
+        pred_separated = pred.view(pred.shape[0], -1, target.shape[1], pred.shape[-1])
+
+        ade, fde, best_idx = cal_ade_fde_stochastic(target_separated, pred_separated)
+
+        ade *= batch['ratio'].squeeze()
+        fde *= batch['ratio'].squeeze()
+
+        ade_list.append(ade.mean().item())
+        fde_list.append(fde.mean().item())
+        loss_list.append(loss.item())
+
+        linear_ade_list.append(constant_linear_baseline_ade.mean().item())
+        linear_fde_list.append(constant_linear_baseline_fde.mean().item())
 
         dataset_idx = batch['dataset_idx'].item()
         seq_start_end = batch['seq_start_end']
@@ -199,11 +231,25 @@ def evaluate(cfg):
             video_path = f"{cfg.root}videos/{current_dataset.video_class.value}" \
                          f"/video{current_dataset.video_number}/video.mov"
 
-        frame = extract_frame_from_video(video_path, frame_num)
+        if b_idx % 500 == 0:
+            try:
+                frame = extract_frame_from_video(video_path, frame_num)
 
-        plot_trajectory_alongside_frame(
-            frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_num, track_id=track_num,
-            additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
+                plot_trajectory_alongside_frame(
+                    frame, obs_trajectory.cpu(), gt_trajectory.cpu(), pred_trajectory.cpu(),
+                    frame_num, track_id=track_num,
+                    additional_text=f"ADE: {ade.mean().item()} | FDE: {fde.mean().item()}")
+            except InvalidFrameException:
+                continue
+
+    loss_list = np.array(loss_list).mean()
+    ade_list = np.array(ade_list).mean()
+    fde_list = np.array(fde_list).mean()
+    linear_ade_list = np.array(linear_ade_list).mean()
+    linear_fde_list = np.array(linear_fde_list).mean()
+
+    logger.info(f"Loss: {loss_list}\nADE: {ade_list} | FDE: {fde_list}\n"
+                f"Linear ADE: {linear_ade_list} | Linear FDE: {linear_fde_list}")
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -667,6 +713,6 @@ def overfit(cfg):
 if __name__ == '__main__':
     # overfit()
     # overfit_gan()
-    # evaluate()
-    train_lightning()
+    evaluate()
+    # train_lightning()
     # evaluate_stochastic()
