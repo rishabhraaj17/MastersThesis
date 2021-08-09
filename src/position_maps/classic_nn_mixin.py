@@ -836,6 +836,7 @@ class PosMapToConventional(TracksAnalyzer):
             self, classic_extracted_annotation_path,
             nn_classic_extracted_annotation_path, video_class, video_meta_class, video_number, image_shape,
             video_path, trajectory_model):
+        # from segmentation maps
         valid_locations = self.get_valid_locations_from_segmentation_maps(video_class, video_number)
 
         extended_tracks = VideoSequenceAgentTracks(video_class, video_number, [])
@@ -861,6 +862,7 @@ class PosMapToConventional(TracksAnalyzer):
 
             frame = int(frame)
             if frame == 0:
+                # at frame zero no candidate tracks
                 running_track_idx = self.handle_first_frame_for_collection_task(
                     classic_extracted_track_ids,
                     extended_tracks, frame,
@@ -878,6 +880,9 @@ class PosMapToConventional(TracksAnalyzer):
                 # look for a died track - track id not alive in next frame
                 killed_tracks = np.setdiff1d(np.array(running_track_idx), classic_extracted_track_ids)
                 new_tracks = np.setdiff1d(classic_extracted_track_ids, np.array(running_track_idx))
+
+                if len(np.intersect1d(killed_tracks, new_tracks)) > 0:
+                    print()
 
                 for n_track in new_tracks:
                     agent_track = AgentTrack(idx=n_track)
