@@ -22,7 +22,7 @@ from baselinev2.stochastic.model_modules import preprocess_dataset_elements_from
 from log import get_logger
 from src.position_maps.trajectory_utils import get_multiple_datasets, bezier_smoother, splrep_smoother
 from src_lib.datasets.extracted_dataset import get_train_and_val_datasets, extracted_collate
-from src_lib.datasets.opentraj_based import get_multiple_gt_dataset
+from src_lib.datasets.opentraj_based import get_multiple_gt_dataset, get_eth_dataset, get_ucy_dataset
 from src_lib.datasets.trajectory_stgcnn import seq_collate_with_dataset_idx_dict, SmoothTrajectoryDataset
 from src_lib.models_hub import TransformerNoisyMotionGenerator, TrajectoryGANTransformerV2
 
@@ -33,7 +33,13 @@ logger = get_logger(__name__)
 
 
 def setup_foreign_dataset(cfg):
-    dataset = None
+    if cfg.tp_module.datasets.foreign_dataset == 'eth':
+        dataset = get_eth_dataset(cfg, split_dataset=False, world_to_image=False)
+    elif cfg.tp_module.datasets.foreign_dataset == 'ucy':
+        dataset = get_ucy_dataset(cfg, split_dataset=False, world_to_image=False)
+    else:
+        raise NotImplemented
+
     return dataset, None
 
 
