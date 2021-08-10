@@ -49,6 +49,10 @@ tp_module:
 
     use_standard_dataset: True
 
+    open_traj_root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/OpenTraj'
+    use_foreign_dataset: True
+    foreign_dataset: 'eth'  # 'ucy', 'eth'
+
     filename: 'trajectories.pt'
 
     use_generated: True
@@ -644,6 +648,8 @@ metrics_analysis:
   check_in_future: True
   check_in_past: False
   use_seg_map: False
+  use_each_12th_frames: True
+  remove_unassociated_tracks: False
 
   debug:
     enabled: False
