@@ -3,9 +3,11 @@
 import glob
 import os
 import tempfile
+from collections import namedtuple
 
 import numpy as np
 import pandas as pd
+import scipy
 import torch
 import yaml
 from omegaconf import OmegaConf
@@ -427,6 +429,243 @@ def load_sdd_dir(path: str, **kwargs):
     return traj_dataset
 
 
+TrackRow = namedtuple('Row', ['frame', 'pedestrian', 'x', 'y', 'prediction_number', 'scene_id'])
+TrackRow.__new__.__defaults__ = (None, None, None, None, None, None)
+
+
+# SceneRow = namedtuple('Row', ['scene', 'pedestrian', 'start', 'end', 'fps', 'tag'])
+
+
+class CrowdLoader:
+    def __init__(self, homog=[]):
+        if len(homog):
+            self.homog = homog
+        else:
+            self.homog = np.eye(3)
+
+    def to_world_coord(self, homog, loc):
+        """Given H^-1 and world coordinates, returns (u, v) in image coordinates."""
+
+        locHomogenous = np.hstack((loc, np.ones((loc.shape[0], 1))))
+        loc_tr = np.transpose(locHomogenous)
+        loc_tr = np.matmul(homog, loc_tr)  # to camera frame
+        locXYZ = np.transpose(loc_tr / loc_tr[2])  # to pixels (from millimeters)
+        return locXYZ[:, :2]
+
+    def crowds_interpolate_person(self, ped_id, person_xyf):
+        ## Earlier
+        # xs = np.array([x for x, _, _ in person_xyf]) / 720 * 12 # 0.0167
+        # ys = np.array([y for _, y, _ in person_xyf]) / 576 * 12 # 0.0208
+
+        ## Pixel-to-meter scale conversion according to
+        ## https://github.com/agrimgupta92/sgan/issues/5
+        # xs_ = np.array([x for x, _, _ in person_xyf]) * 0.0210
+        # ys_ = np.array([y for _, y, _ in person_xyf]) * 0.0239
+
+        xys = self.to_world_coord(self.homog, np.array([[x, y] for x, y, _ in person_xyf]))
+        xs, ys = xys[:, 0], xys[:, 1]
+
+        fs = np.array([f for _, _, f in person_xyf])
+
+        kind = 'linear'
+        # if len(fs) > 5:
+        #    kind = 'cubic'
+
+        x_fn = scipy.interpolate.interp1d(fs, xs, kind=kind)
+        y_fn = scipy.interpolate.interp1d(fs, ys, kind=kind)
+
+        frames = np.arange(min(fs) // 10 * 10 + 10, max(fs), 10)
+
+        return [TrackRow(int(f), ped_id, x, y)
+                for x, y, f in np.stack([x_fn(frames), y_fn(frames), frames]).T]
+
+    def load(self, filename):
+        with open(filename) as annot_file:
+            whole_file = annot_file.read()
+
+            pedestrians = []
+            current_pedestrian = []
+
+            for line in whole_file.split('\n'):
+                if '- Num of control points' in line or \
+                        '- the number of splines' in line:
+                    if current_pedestrian:
+                        pedestrians.append(current_pedestrian)
+                    current_pedestrian = []
+                    continue
+
+                # strip comments
+                if ' - ' in line:
+                    line = line[:line.find(' - ')]
+
+                # tokenize
+                entries = [e for e in line.split(' ') if e]
+                if len(entries) != 4:
+                    continue
+
+                x, y, f, _ = entries
+
+                current_pedestrian.append([float(x), float(y), int(f)])
+
+            if current_pedestrian:
+                pedestrians.append(current_pedestrian)
+        return [row for i, p in enumerate(pedestrians) for row in self.crowds_interpolate_person(i, p)]
+
+
+def load_crowds(path, **kwargs):
+    """
+        Note: pass the homography matrix as well
+        :param path: string, path to folder
+    """
+
+    homog_file = kwargs.get("homog_file", "")
+    load_homog = kwargs.get("load_homog", False)
+    Homog = (np.loadtxt(homog_file)) if os.path.exists(homog_file) and load_homog else np.eye(3)
+    raw_dataset = pd.DataFrame()
+
+    data = CrowdLoader(Homog).load(path)
+    raw_dataset["frame_id"] = [data[i].frame for i in range(len(data))]
+    raw_dataset["agent_id"] = [data[i].pedestrian for i in range(len(data))]
+    raw_dataset["pos_x"] = [data[i].x for i in range(len(data))]
+    raw_dataset["pos_y"] = [data[i].y for i in range(len(data))]
+
+    traj_dataset = TrajDataset()
+
+    traj_dataset.title = kwargs.get('title', "Crowds")
+    # copy columns
+    traj_dataset.data[["frame_id", "agent_id", "pos_x", "pos_y"]] = \
+        raw_dataset[["frame_id", "agent_id", "pos_x", "pos_y"]]
+
+    traj_dataset.data["scene_id"] = kwargs.get('scene_id', 0)
+    traj_dataset.data["label"] = "pedestrian"
+
+    # post-process
+    fps = kwargs.get('fps', 25)
+
+    sampling_rate = kwargs.get('sampling_rate', 1)
+    use_kalman = kwargs.get('use_kalman', False)
+    traj_dataset.postprocess(fps=fps, sampling_rate=sampling_rate, use_kalman=use_kalman)
+
+    return traj_dataset
+
+
+def load_eth(path, **kwargs):
+    traj_dataset = TrajDataset()
+
+    csv_columns = ["frame_id", "agent_id", "pos_x", "pos_z", "pos_y", "vel_x", "vel_z", "vel_y"]
+    # read from csv => fill traj table
+    raw_dataset = pd.read_csv(path, sep=r"\s+", header=None, names=csv_columns)
+
+    traj_dataset.title = kwargs.get('title', "no_title")
+
+    # copy columns
+    traj_dataset.data[["frame_id", "agent_id",
+                       "pos_x", "pos_y",
+                       "vel_x", "vel_y"
+                       ]] = \
+        raw_dataset[["frame_id", "agent_id",
+                     "pos_x", "pos_y",
+                     "vel_x", "vel_y"
+                     ]]
+
+    traj_dataset.data["scene_id"] = kwargs.get('scene_id', 0)
+    traj_dataset.data["label"] = "pedestrian"
+
+    # post-process
+    fps = kwargs.get('fps', -1)
+    if fps < 0:
+        d_frame = np.diff(pd.unique(raw_dataset["frame_id"]))
+        fps = d_frame[0] * 2.5  # 2.5 is the common annotation fps for all (ETH+UCY) datasets
+
+    sampling_rate = kwargs.get('sampling_rate', 1)
+    use_kalman = kwargs.get('use_kalman', False)
+    traj_dataset.postprocess(fps=fps, sampling_rate=sampling_rate, use_kalman=use_kalman)
+
+    return traj_dataset
+
+
+def eth_world_to_image(open_traj_root, traj):
+    def world2image(traj_w, H_inv):
+        # Converts points from Euclidean to homogeneous space, by (x, y) → (x, y, 1)
+        traj_homog = np.hstack((traj_w, np.ones((traj_w.shape[0], 1)))).T
+        # to camera frame
+        traj_cam = np.matmul(H_inv, traj_homog)
+        # to pixel coords
+        traj_uvz = np.transpose(traj_cam / traj_cam[2])
+        return traj_uvz[:, :2].astype(int)
+
+    H = (np.loadtxt(os.path.join(open_traj_root, "datasets/ETH/seq_eth/H.txt")))
+    H_inv = np.linalg.inv(H)
+    return world2image(traj, H_inv)  # TRAJ: Tx2 numpy array
+
+
+def get_eth_dataset(cfg, split_dataset=False, smooth_trajectories=False, smoother=lambda x: x, threshold=1,
+                    world_to_image=False):
+    open_traj_dataset = load_eth(os.path.join(cfg.open_traj_root, "datasets/ETH/seq_eth/obsmat.txt"))
+    data_df = open_traj_dataset.data[open_traj_dataset.critical_columns]
+    data_df = data_df.sort_values(by=['frame_id']).reset_index()
+    data_df: pd.DataFrame = data_df.drop(columns=['index'])
+
+    if world_to_image:
+        in_image = eth_world_to_image(cfg.open_traj_root, np.stack((data_df['pos_x'], data_df['pos_y']), axis=-1))
+        data_df['pos_x'] = in_image[:, 0]
+        data_df['pos_y'] = in_image[:, 1]
+
+
+    temp_file = tempfile.NamedTemporaryFile(suffix='.txt')
+    data_df.to_csv(temp_file, header=False, index=False, sep=' ')
+    dataset = TrajectoryDatasetFromFile(
+        temp_file, obs_len=cfg.obs_len, pred_len=cfg.pred_len, skip=cfg.skip, min_ped=cfg.min_ped,
+        delim=cfg.delim, video_class='eth', video_number=-1, construct_graph=cfg.construct_graph,
+        compute_homography=False)
+
+    if smooth_trajectories:
+        dataset = SmoothTrajectoryDataset(base_dataset=dataset, smoother=smoother, threshold=threshold)
+
+    if not split_dataset:
+        return dataset
+
+    val_dataset_len = round(len(dataset) * cfg.val_ratio)
+    train_indices = torch.arange(start=0, end=len(dataset) - val_dataset_len)
+    val_indices = torch.arange(start=len(dataset) - val_dataset_len, end=len(dataset))
+
+    train_dataset = Subset(dataset, train_indices)
+    val_dataset = Subset(dataset, val_indices)
+    return train_dataset, val_dataset
+
+
+def get_ucy_dataset(cfg, split_dataset=False, smooth_trajectories=False, smoother=lambda x: x, threshold=1,
+                    world_to_image=False):
+    zara01_annot = os.path.join(cfg.open_traj_root, 'datasets/UCY/zara01/annotation.vsp')
+    zara01_H_file = os.path.join(cfg.open_traj_root, 'datasets/UCY/zara01/H.txt')
+    open_traj_dataset = load_crowds(zara01_annot, use_kalman=False, homog_file=zara01_H_file, load_homog=world_to_image)
+
+    data_df = open_traj_dataset.data[open_traj_dataset.critical_columns]
+    data_df = data_df.sort_values(by=['frame_id']).reset_index()
+    data_df: pd.DataFrame = data_df.drop(columns=['index'])
+
+    temp_file = tempfile.NamedTemporaryFile(suffix='.txt')
+    data_df.to_csv(temp_file, header=False, index=False, sep=' ')
+    dataset = TrajectoryDatasetFromFile(
+        temp_file, obs_len=cfg.obs_len, pred_len=cfg.pred_len, skip=cfg.skip, min_ped=cfg.min_ped,
+        delim=cfg.delim, video_class='eth', video_number=-1, construct_graph=cfg.construct_graph,
+        compute_homography=False)
+
+    if smooth_trajectories:
+        dataset = SmoothTrajectoryDataset(base_dataset=dataset, smoother=smoother, threshold=threshold)
+
+    if not split_dataset:
+        return dataset
+
+    val_dataset_len = round(len(dataset) * cfg.val_ratio)
+    train_indices = torch.arange(start=0, end=len(dataset) - val_dataset_len)
+    val_indices = torch.arange(start=len(dataset) - val_dataset_len, end=len(dataset))
+
+    train_dataset = Subset(dataset, train_indices)
+    val_dataset = Subset(dataset, val_indices)
+    return train_dataset, val_dataset
+
+
 def get_single_gt_dataset(cfg, video_class, video_number, split_dataset,
                           smooth_trajectories=False, smoother=lambda x: x, threshold=1,
                           frame_rate=30., time_step=0.4):
@@ -490,5 +729,8 @@ def get_multiple_gt_dataset(cfg, split_dataset=True, with_dataset_idx=True,
 
 
 if __name__ == '__main__':
+    # get_eth_dataset(OmegaConf.load('../../src/position_maps/config/training/training.yaml').tp_module.datasets,
+    #                 world_to_image=True)
+    get_ucy_dataset(OmegaConf.load('../../src/position_maps/config/training/training.yaml').tp_module.datasets)
     out = get_multiple_gt_dataset(OmegaConf.load('../../src/position_maps/config/training/training.yaml'))
     print()

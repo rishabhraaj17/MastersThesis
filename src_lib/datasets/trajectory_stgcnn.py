@@ -441,7 +441,7 @@ class TrajectoryDatasetFromFile(Dataset):
     def __init__(
             self, annotation_file, obs_len=8, pred_len=8, skip=1, threshold=0.002,
             min_ped=1, delim='\t', norm_lap_matr=True, construct_graph=False,
-            video_class=None, video_number=None):
+            video_class=None, video_number=None, compute_homography=True):
         """
         Args:
         - data_dir: Directory containing dataset files in the format
@@ -471,7 +471,7 @@ class TrajectoryDatasetFromFile(Dataset):
         self.sdd_ratio = float(
             self.sdd_meta.get_meta(
                 getattr(SDDVideoDatasets, video_class),
-                video_number)[0]['Ratio'].to_numpy()[0])
+                video_number)[0]['Ratio'].to_numpy()[0]) if compute_homography else 1
 
         all_files = [self.annotation_file]
         num_peds_in_seq = []

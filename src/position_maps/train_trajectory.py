@@ -32,7 +32,14 @@ seed_everything(42)
 logger = get_logger(__name__)
 
 
+def setup_foreign_dataset(cfg):
+    dataset = None
+    return dataset, None
+
+
 def setup_dataset(cfg):
+    if cfg.tp_module.datasets.use_foreign_dataset:
+        return setup_foreign_dataset(cfg)
     if cfg.tp_module.datasets.use_standard_dataset:
         if cfg.tp_module.datasets.use_generated:
             train_dataset, val_dataset = get_multiple_datasets(
@@ -368,7 +375,7 @@ def evaluate_stochastic(cfg):
         if b_idx % 500 == 0:
             try:
                 frame = extract_frame_from_video(video_path, frame_num)
-    
+
                 plot_trajectory_alongside_frame_stochastic(
                     frame, obs_trajectory.cpu(), gt_trajectory.cpu(), pred_trajectory.cpu(),
                     frame_num, track_id=track_num,
