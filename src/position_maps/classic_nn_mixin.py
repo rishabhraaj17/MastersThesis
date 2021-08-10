@@ -861,8 +861,12 @@ class PosMapToConventional(TracksAnalyzer):
             )
 
         running_track_idx = []
+        last_frame_number = classic_extracted_df.frame_number.unique()[-1]
 
         for frame in tqdm(classic_extracted_df.frame_number.unique()):
+            if frame == last_frame_number:
+                break
+
             classic_extracted_centers, classic_extracted_track_ids, classic_extracted_boxes = \
                 self.get_classic_extracted_centers(
                     classic_extracted_df, frame)
@@ -880,8 +884,13 @@ class PosMapToConventional(TracksAnalyzer):
                     extended_tracks, frame,
                     running_track_idx, track_id_to_location)
             else:
-                candidate_agents = self.get_candidate_agents_for_collection_task(frame, nn_classic_extracted_centers,
-                                                                                 nn_classic_extracted_track_ids)
+                nn_classic_extracted_centers_next_frame, nn_classic_extracted_track_ids_next_frame = \
+                    self.get_extracted_centers(
+                        nn_classic_extracted_df, (frame + 1))
+                candidate_agents = self.get_candidate_agents_for_collection_task(
+                    frame=(frame + 1),
+                    nn_classic_extracted_centers=nn_classic_extracted_centers_next_frame,
+                    nn_classic_extracted_track_ids=nn_classic_extracted_track_ids_next_frame)
 
                 continuing_tracks = np.intersect1d(np.array(running_track_idx), classic_extracted_track_ids)
                 for c_track in continuing_tracks:
@@ -894,7 +903,7 @@ class PosMapToConventional(TracksAnalyzer):
                 new_tracks = np.setdiff1d(classic_extracted_track_ids, np.array(running_track_idx))
 
                 if len(np.intersect1d(killed_tracks, new_tracks)) > 0:
-                    print()
+                    logger.warning('Killed track and New tracks has common elements - Bug alert!')
 
                 for n_track in new_tracks:
                     agent_track = AgentTrack(idx=n_track)
@@ -915,18 +924,18 @@ class PosMapToConventional(TracksAnalyzer):
                         # if match add and extend
                         if len(match_rows) > 0:
                             if self.config.check_in_future:
-                                if frame not in candidate_track.frames or \
-                                        frame not in candidate_track.extended_at_frames:
+                                if (frame + 1) not in candidate_track.frames or \
+                                        (frame + 1) not in candidate_track.extended_at_frames:
                                     self.add_and_extend_for_associated_agent_for_collection_task(
                                         candidate_agents,
-                                        extended_tracks, frame,
+                                        extended_tracks, (frame + 1),
                                         inactive_tracks, k_track,
                                         match_rows,
                                         nn_classic_extracted_extended_df, valid_locs=valid_locations)
                             else:
                                 self.add_and_extend_for_associated_agent_for_collection_task(
                                     candidate_agents,
-                                    extended_tracks, frame,
+                                    extended_tracks, (frame + 1),
                                     inactive_tracks, k_track,
                                     match_rows,
                                     nn_classic_extracted_extended_df, valid_locs=valid_locations)
@@ -934,7 +943,7 @@ class PosMapToConventional(TracksAnalyzer):
                             if self.config.check_in_future:
                                 self.associate_and_extend_in_future_for_collection_task(
                                     candidate_track,
-                                    extended_tracks, frame,
+                                    extended_tracks, (frame + 1),
                                     inactive_tracks, k_track,
                                     nn_classic_extracted_df,
                                     nn_classic_extracted_extended_df,
@@ -969,6 +978,11 @@ class PosMapToConventional(TracksAnalyzer):
             extended_tracks, nn_classic_extracted_extended_df)
 
         nn_classic_extracted_extended_df = self.sort_df_by_key(nn_classic_extracted_extended_df)
+
+        if self.config.remove_unassociated_tracks:
+            nn_classic_extracted_extended_df = nn_classic_extracted_extended_df[
+                nn_classic_extracted_extended_df.track_id != -1
+            ]
         # to add
         # - backward in time
 
@@ -1062,7 +1076,7 @@ class PosMapToConventional(TracksAnalyzer):
                 self.get_extracted_centers(
                     nn_classic_extracted_df, frame + i)
             candidate_agents_future = self.get_candidate_agents_for_collection_task(
-                frame,
+                frame + i,
                 nn_classic_extracted_centers_future,
                 nn_classic_extracted_track_ids_future)
 
@@ -1200,12 +1214,15 @@ class PosMapToConventional(TracksAnalyzer):
     def get_dfs_for_collection_task(self, classic_extracted_annotation_path, nn_classic_extracted_annotation_path):
         # turn into 0.4 seconds apart
         classic_extracted_df = pd.read_csv(classic_extracted_annotation_path)
-        classic_extracted_df = self.adjust_dataframe_framerate(classic_extracted_df, 'frame_number', 30, 0.4)
         nn_classic_extracted_df = pd.read_csv(nn_classic_extracted_annotation_path)
-        nn_classic_extracted_df = self.adjust_dataframe_framerate(nn_classic_extracted_df, 'frame', 30, 0.4)
         nn_classic_extracted_extended_df = pd.read_csv(nn_classic_extracted_annotation_path)
-        nn_classic_extracted_extended_df = self.adjust_dataframe_framerate(
-            nn_classic_extracted_extended_df, 'frame', 30, 0.4)
+
+        if self.config.use_each_12th_frames:
+            classic_extracted_df = self.adjust_dataframe_framerate(classic_extracted_df, 'frame_number', 30, 0.4)
+            nn_classic_extracted_df = self.adjust_dataframe_framerate(nn_classic_extracted_df, 'frame', 30, 0.4)
+            nn_classic_extracted_extended_df = self.adjust_dataframe_framerate(
+                nn_classic_extracted_extended_df, 'frame', 30, 0.4)
+
         return classic_extracted_df, nn_classic_extracted_df, nn_classic_extracted_extended_df
 
 
