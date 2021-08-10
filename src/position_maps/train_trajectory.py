@@ -713,6 +713,6 @@ def overfit(cfg):
 if __name__ == '__main__':
     # overfit()
     # overfit_gan()
-    evaluate()
+    # evaluate()
     # train_lightning()
-    # evaluate_stochastic()
+    evaluate_stochastic()

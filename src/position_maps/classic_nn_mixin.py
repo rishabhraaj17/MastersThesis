@@ -611,20 +611,32 @@ class PosMapToConventional(TracksAnalyzer):
             gt_classic_fp_list.append(fp)
             gt_classic_fn_list.append(fn)
 
+            if ((len(detection_data.classic_detections) != 0)
+                    and (len(detection_data.classified_detections) != 0)):
+                classic_nn_classified_combined_detections = np.concatenate(
+                    (np.stack([b.center for b in detection_data.classic_detections]),
+                     np.stack([b.center for b in detection_data.classified_detections])),
+                    axis=0)
+            elif ((len(detection_data.classic_detections) != 0)
+                  and (len(detection_data.classified_detections) == 0)):
+                classic_nn_classified_combined_detections = \
+                    np.stack([b.center for b in detection_data.classic_detections])
+            elif ((len(detection_data.classic_detections) == 0)
+                  and (len(detection_data.classified_detections) != 0)):
+                classic_nn_classified_combined_detections = \
+                    np.stack([b.center for b in detection_data.classified_detections])
+            else:
+                classic_nn_classified_combined_detections = []
+
             (match_rows, match_cols), (fn, fp, precision_c_nn, recall_c_nn, tp) = self.get_associations_and_metrics(
                 gt_centers=np.stack([b.center for b in detection_data.gt_detections])
                 if len(detection_data.gt_detections) != 0 else np.zeros((0, 2)),
-                extracted_centers=
-                np.concatenate(
-                    (np.stack([b.center for b in detection_data.classic_detections])
-                     if len(detection_data.gt_detections) != 0 else np.zeros((0, 2)),
-                     np.stack([b.center for b in detection_data.classified_detections])),
-                    axis=0) if ((len(detection_data.classic_detections) != 0)
-                                and (len(detection_data.classified_detections) != 0)) else [],
+                extracted_centers=classic_nn_classified_combined_detections,
                 max_distance=float(self.config.match_distance),
                 ratio=ratio,
                 threshold=self.config.threshold
             )
+
             gt_classic_nn_tp_list.append(tp)
             gt_classic_nn_fp_list.append(fp)
             gt_classic_nn_fn_list.append(fn)
