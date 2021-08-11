@@ -600,8 +600,8 @@ def eth_world_to_image(open_traj_root, traj):
 
 
 def get_eth_dataset(cfg, split_dataset=False, smooth_trajectories=False, smoother=lambda x: x, threshold=1,
-                    world_to_image=False):
-    open_traj_dataset = load_eth(os.path.join(cfg.open_traj_root, "datasets/ETH/seq_eth/obsmat.txt"))
+                    world_to_image=False, seq='eth'):
+    open_traj_dataset = load_eth(os.path.join(cfg.open_traj_root, f"datasets/ETH/seq_{seq}/obsmat.txt"))
     data_df = open_traj_dataset.data[open_traj_dataset.critical_columns]
     data_df = data_df.sort_values(by=['frame_id']).reset_index()
     data_df: pd.DataFrame = data_df.drop(columns=['index'])
@@ -635,10 +635,10 @@ def get_eth_dataset(cfg, split_dataset=False, smooth_trajectories=False, smoothe
 
 
 def get_ucy_dataset(cfg, split_dataset=False, smooth_trajectories=False, smoother=lambda x: x, threshold=1,
-                    world_to_image=False):
-    zara01_annot = os.path.join(cfg.open_traj_root, 'datasets/UCY/zara01/annotation.vsp')
-    zara01_H_file = os.path.join(cfg.open_traj_root, 'datasets/UCY/zara01/H.txt')
-    open_traj_dataset = load_crowds(zara01_annot, use_kalman=False, homog_file=zara01_H_file, load_homog=world_to_image)
+                    world_to_image=False, seq='zara01'):
+    annot = os.path.join(cfg.open_traj_root, f'datasets/UCY/{seq}/annotation.vsp')
+    H_file = os.path.join(cfg.open_traj_root, f'datasets/UCY/{seq}/H.txt')
+    open_traj_dataset = load_crowds(annot, use_kalman=False, homog_file=H_file, load_homog=world_to_image)
 
     data_df = open_traj_dataset.data[open_traj_dataset.critical_columns]
     data_df = data_df.sort_values(by=['frame_id']).reset_index()

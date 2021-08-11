@@ -17,7 +17,8 @@ META_ROOT = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD
 
 def seq_collate(data):
     (obs_seq_list, pred_seq_list, obs_seq_rel_list, pred_seq_rel_list,
-     obs_frames_list, pred_frames_list, non_linear_ped_list, loss_mask_list) = zip(*data)
+     obs_frames_list, pred_frames_list, obs_tracks_list, pred_tracks_list,
+     non_linear_ped_list, loss_mask_list, ratio_list) = zip(*data)
 
     _len = [len(seq) for seq in obs_seq_list]
     cum_start_idx = [0] + np.cumsum(_len).tolist()
@@ -32,12 +33,15 @@ def seq_collate(data):
     pred_traj_rel = torch.cat(pred_seq_rel_list, dim=0).permute(2, 0, 1)
     obs_frames = torch.cat(obs_frames_list, dim=0).permute(2, 0, 1)
     pred_frames = torch.cat(pred_frames_list, dim=0).permute(2, 0, 1)
+    obs_tracks = torch.cat(obs_tracks_list, dim=0).permute(2, 0, 1)
+    pred_tracks = torch.cat(pred_tracks_list, dim=0).permute(2, 0, 1)
     non_linear_ped = torch.cat(non_linear_ped_list)
     loss_mask = torch.cat(loss_mask_list, dim=0)
     seq_start_end = torch.LongTensor(seq_start_end)
+    ratio = torch.tensor(ratio_list)
     out = [
-        obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, obs_frames, pred_frames, non_linear_ped,
-        loss_mask, seq_start_end
+        obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, obs_frames, pred_frames, obs_tracks, pred_tracks,
+        non_linear_ped, loss_mask, seq_start_end, ratio
     ]
 
     return tuple(out)
@@ -45,14 +49,15 @@ def seq_collate(data):
 
 def seq_collate_dict(data):
     obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, obs_frames, \
-    pred_frames, non_linear_ped, loss_mask, seq_start_end = seq_collate(data)
+    pred_frames, obs_tracks, pred_tracks, non_linear_ped, loss_mask, seq_start_end, ratio = seq_collate(data)
 
     return {
         'in_xy': obs_traj, 'in_dxdy': obs_traj_rel[1:, ...],
         'gt_xy': pred_traj, 'gt_dxdy': pred_traj_rel,
         'in_frames': obs_frames, 'gt_frames': pred_frames,
+        'in_tracks': obs_tracks, 'gt_tracks': pred_tracks,
         'non_linear_ped': non_linear_ped, 'loss_mask': loss_mask,
-        'seq_start_end': seq_start_end
+        'seq_start_end': seq_start_end, 'ratio': ratio
     }
 
 

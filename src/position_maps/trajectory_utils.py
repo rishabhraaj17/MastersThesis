@@ -23,7 +23,7 @@ from baselinev2.plot_utils import add_line_to_axis, add_features_to_axis, plot_t
 from src.position_maps.interplay_utils import Track, Tracks
 from src_lib.datasets.dataset_utils import adjust_dataframe_framerate
 from src_lib.datasets.extracted_dataset import get_train_and_val_datasets, extracted_collate
-from src_lib.datasets.opentraj_based import get_multiple_gt_dataset
+from src_lib.datasets.opentraj_based import get_multiple_gt_dataset, get_eth_dataset, get_ucy_dataset
 from src_lib.datasets.trajectory_stgcnn import STGCNNTrajectoryDataset, seq_collate, seq_collate_dict, \
     seq_collate_with_graphs, seq_collate_with_graphs_dict, seq_collate_with_dataset_idx_dict, SmoothTrajectoryDataset, \
     TrajectoryDatasetFromFile
@@ -862,7 +862,47 @@ def verify_rel_velocities(batch, frame, frame_num, obs_trajectory,
             frame, obs_constructed, pred_constructed, pred_trajectory, frame_num, track_id=track_num)
 
 
+def viz_foreign_dataset_trajectories():
+    cfg = OmegaConf.load('config/training/training.yaml').tp_module.datasets
+
+    if cfg.foreign_dataset == 'eth':
+        dataset = get_eth_dataset(cfg, split_dataset=False, world_to_image=True)
+        video_path = os.path.join(cfg.open_traj_root, 'datasets/ETH/seq_eth/video.avi')
+    elif cfg.foreign_dataset == 'ucy':
+        dataset = get_ucy_dataset(cfg, split_dataset=False, world_to_image=True)
+        video_path = os.path.join(cfg.open_traj_root, 'datasets/UCY/zara01/video.avi')
+    else:
+        raise NotImplemented
+
+    loader = DataLoader(dataset, batch_size=1, collate_fn=seq_collate_dict, shuffle=True)
+    for batch in tqdm(loader):
+        target = pred = batch['gt_xy']
+
+        # dataset_idx = batch['dataset_idx'].item()
+        seq_start_end = batch['seq_start_end']
+        frame_nums = batch['in_frames']
+        track_lists = batch['in_tracks']
+
+        random_trajectory_idx = np.random.choice(frame_nums.shape[1], 1, replace=False).item()
+
+        obs_trajectory = batch['in_xy'][:, random_trajectory_idx, ...]
+        gt_trajectory = target[:, random_trajectory_idx, ...]
+        pred_trajectory = pred[:, random_trajectory_idx, ...]
+
+        frame_num = int(frame_nums[:, random_trajectory_idx, ...][0].item())
+        track_num = int(track_lists[:, random_trajectory_idx, ...][0].item())
+
+        frame = extract_frame_from_video(video_path, frame_num)
+
+        plot_trajectory_alongside_frame(
+            frame, obs_trajectory, gt_trajectory, pred_trajectory, frame_num, track_id=track_num)
+
+        # verify_rel_velocities(batch, frame, frame_num, obs_trajectory, pred_trajectory, random_trajectory_idx,
+        #                       track_num)
+
+
 if __name__ == '__main__':
+    viz_foreign_dataset_trajectories()
     viz_dataset_trajectories()
     # viz_raw_tracks()
 
