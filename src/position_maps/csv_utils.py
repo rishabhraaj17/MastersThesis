@@ -164,7 +164,34 @@ def load_df_and_diff_save_as_markdown_for_precision_recall(out_df_path, path):
         index=False)
 
 
+def sdd_stats_from_website():
+    columns = ['Scenes', 'Videos', 'Bicyclist', 'Pedestrian', 'Skateboarder', 'Cart', 'Car', 'Bus']
+    scenes = ['gates', 'little', 'nexus', 'coupa', 'bookstore', 'deathCircle', 'quad', 'hyang']
+    videos = [9, 4, 12, 4, 7, 5, 4, 15]
+    bicyclist = [51.94, 56.04, 4.22, 18.89, 32.89, 56.30, 12.50, 27.68]
+    pedes = [43.36, 42.46, 64.02, 80.61, 63.94, 33.13, 87.50, 70.01]
+    skateb = [2.55, 0.67, 0.60, 0.17, 1.63, 2.33, 0, 1.29]
+    cart = [0.29, 0, 0.40, 0.17, 0.34, 3.10, 0, 0.43]
+    car = [1.08, 0.17, 29.51, 0.17, 0.83, 4.71, 0, 0.50]
+    bus = [0.78, 0.67, 1.25, 0, 0.37, 0.42, 0, 0.09]
+
+    df = pd.DataFrame.from_dict(
+        {
+            columns[0]: scenes,
+            columns[1]: videos,
+            columns[2]: bicyclist,
+            columns[3]: pedes,
+            columns[4]: skateb,
+            columns[5]: cart,
+            columns[6]: car,
+            columns[7]: bus,
+        }
+    )
+    df.to_latex('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/sdd_stats.tex')
+
+
 if __name__ == '__main__':
+    # sdd_stats_from_website()
     # d_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/generated_annotations/metrics_2m.csv'
     # b_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/' \
     #          'filtered_generated_annotations/metrics_2m.csv'
