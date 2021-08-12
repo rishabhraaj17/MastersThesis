@@ -48,7 +48,8 @@ class SDDDatasetV0(Dataset):
                  single_track_mode: bool = False, track_id: int = 0, video_number_to_use: int = 0,
                  multiple_videos: bool = False, use_generated: bool = False):
         _mid_path = video_label.value
-        _annotation_decider = "generated_annotations/" if use_generated else "annotations/"
+        # _annotation_decider = "generated_annotations/" if use_generated else "annotations/"
+        _annotation_decider = "filtered_generated_annotations_augmented/" if use_generated else "annotations/"
         video_path = root + "videos/" + _mid_path
         annotation_path = root + _annotation_decider + _mid_path
         video_extensions = ('mov',)
