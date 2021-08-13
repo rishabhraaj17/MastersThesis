@@ -155,11 +155,11 @@ def train_crop_classifier_v1(cfg):
         sync_bn = True
 
     if crop_cfg.warm_restart.enable:
-        version_name = f"{crop_cfg.checkpoint.run_name}".split('-')[-1]
-        checkpoint_root_path = f'{crop_cfg.checkpoint.root}' \
-                               f'{crop_cfg.checkpoint.run_name}' \
-                               f'{crop_cfg.checkpoint.tail_path}' \
-                               f'{crop_cfg.checkpoint.project_name}/' \
+        version_name = f"{crop_cfg.warm_restart.checkpoint.run_name}".split('-')[-1]
+        checkpoint_root_path = f'{crop_cfg.warm_restart.checkpoint.root}' \
+                               f'{crop_cfg.warm_restart.checkpoint.run_name}' \
+                               f'{crop_cfg.warm_restart.checkpoint.tail_path}' \
+                               f'{crop_cfg.warm_restart.checkpoint.project_name}/' \
                                f'{version_name}/checkpoints/'
 
         checkpoint_files = os.listdir(checkpoint_root_path)
