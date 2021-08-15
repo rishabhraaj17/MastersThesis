@@ -768,20 +768,44 @@ class PosMapToConventional(TracksAnalyzer):
         df[frame_txt] /= int(round(frame_rate * time_step))
         return df
 
-    @staticmethod
-    def setup_trajectory_model():
-        version = 18
-        epoch = 109
-        step = 929623
+    def setup_trajectory_model(self):
+        if self.config.use_old_model:
+            version = 18
+            epoch = 109
+            step = 929623
 
-        base_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/stochastic/'
-        model_path = f'{base_path}' + f'logs/lightning_logs/version_{version}/checkpoints/' \
-                                      f'epoch={epoch}-step={step}.ckpt'
-        hparam_path = f'{base_path}' + f'logs/lightning_logs/version_{version}/hparams.yaml'
+            base_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/stochastic/'
+            model_path = f'{base_path}' + f'logs/lightning_logs/version_{version}/checkpoints/' \
+                                          f'epoch={epoch}-step={step}.ckpt'
+            hparam_path = f'{base_path}' + f'logs/lightning_logs/version_{version}/hparams.yaml'
 
-        m = BaselineGAN.load_from_checkpoint(checkpoint_path=model_path, hparams_file=hparam_path,
-                                             map_location='cuda:0')
-        m.eval()
+            m = BaselineGAN.load_from_checkpoint(checkpoint_path=model_path, hparams_file=hparam_path,
+                                                 map_location='cuda:0')
+            m.eval()
+        else:
+            version_name = f"{self.config.checkpoint.run_name}".split('-')[-1]
+            checkpoint_root_path = f'{self.config.checkpoint.root}' \
+                                   f'{self.config.checkpoint.run_name}' \
+                                   f'{self.config.checkpoint.tail_path}' \
+                                   f'{self.config.checkpoint.project_name}/' \
+                                   f'{version_name}/checkpoints/'
+
+            checkpoint_files = os.listdir(checkpoint_root_path)
+
+            epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
+            epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
+            checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
+
+            model_path = checkpoint_root_path + checkpoint_files[-self.config.checkpoint.top_k]
+
+            logger.info(f'Loading weights manually as custom load is {self.config.custom_load}')
+            load_dict = torch.load(model_path, map_location=self.config.device)
+
+            m = CropClassifier(config=OmegaConf.load('config/training/training.yaml'),
+                               train_dataset=None, val_dataset=None)
+            m.load_state_dict(load_dict['state_dict'])
+            m.to(self.config.device)
+            m.eval()
         return m
 
     def get_valid_locations_from_segmentation_maps(self, vid_clz, vid_num):
