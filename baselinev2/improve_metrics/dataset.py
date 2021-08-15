@@ -49,7 +49,9 @@ class SDDDatasetV0(Dataset):
                  multiple_videos: bool = False, use_generated: bool = False):
         _mid_path = video_label.value
         # _annotation_decider = "generated_annotations/" if use_generated else "annotations/"
-        _annotation_decider = "filtered_generated_annotations_augmented/" if use_generated else "annotations/"
+        # _annotation_decider = "filtered_generated_annotations_augmented/" if use_generated else "annotations/"
+        _annotation_decider = "filtered_generated_annotations_augmented_for_classifier/" \
+            if use_generated else "annotations/"
         video_path = root + "videos/" + _mid_path
         annotation_path = root + _annotation_decider + _mid_path
         video_extensions = ('mov',)
@@ -266,7 +268,11 @@ class PatchesDataset(SDDDatasetV0):
             aspect_ratios=self.aspect_ratios,
             track_length_threshold_for_random_crops=self.track_length_threshold_for_random_crops)
         while len(gt_patches_and_labels) == 0 and len(fp_patches_and_labels) == 0:
-            random_frame_num = np.random.choice(len(self), 1, replace=False).item()
+            random_frame_num = np.random.choice(
+                # len(self),
+                self.annotations_df[0].frame_number.unique(),
+                # self.video_clips.resampling_idxs[0].numpy().squeeze(-1),
+                1, replace=False).item()
             frames, frame_numbers, video_idx = super(PatchesDataset, self).__getitem__(item=random_frame_num)
             gt_patches_and_labels, fp_patches_and_labels = patches_and_labels_with_anchors_different_crop_track_threshold(
                 image=frames.squeeze(0),
