@@ -16,6 +16,7 @@ from matplotlib import pyplot as plt, patches
 from omegaconf import OmegaConf
 from pytorch_lightning import seed_everything
 from scipy.spatial import cKDTree
+from torch import nn
 from torch.nn.functional import pad
 from tqdm import tqdm
 
@@ -40,6 +41,7 @@ logger = get_logger(__name__)
 MODEL_ROOT = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/'
 
 MODEL_PATH = f'{MODEL_ROOT}baselinev2/improve_metrics/logs/lightning_logs/version_'
+CROP_MODEL_PATH = f'{MODEL_ROOT}src/position_maps/logs/wandb/'
 
 DATASET_TO_MODEL = {
     SDDVideoClasses.BOOKSTORE: f"{MODEL_PATH}376647",
@@ -50,6 +52,26 @@ DATASET_TO_MODEL = {
     SDDVideoClasses.NEXUS: f"{MODEL_PATH}377688",
     SDDVideoClasses.QUAD: f"{MODEL_PATH}377576",
     SDDVideoClasses.DEATH_CIRCLE: f"{MODEL_PATH}11",
+}
+
+
+DATASET_TO_CROP_MODEL = {
+    SDDVideoClasses.BOOKSTORE:
+        f"{CROP_MODEL_PATH}wandb/run-20210813_133849-3gdxk6ss/files/CropClassifier/3gdxk6ss/checkpoints/",
+    SDDVideoClasses.COUPA:
+        f"{CROP_MODEL_PATH}wandb/run-20210813_135017-2978wfe5/files/CropClassifier/2978wfe5/checkpoints/",
+    SDDVideoClasses.GATES:
+        f"{CROP_MODEL_PATH}wandb/run-20210813_142357-2j3vkg27/files/CropClassifier/2j3vkg27/checkpoints/",
+    SDDVideoClasses.HYANG:
+        f"{CROP_MODEL_PATH}wandb/run-20210816_142502-1d30kmn6/files/CropClassifier/1d30kmn6/checkpoints/",
+    SDDVideoClasses.LITTLE:
+        f"{CROP_MODEL_PATH}wandb/run-20210813_191047-1n62qtzi/files/CropClassifier/1n62qtzi/checkpoints/",
+    SDDVideoClasses.NEXUS:
+        f"{CROP_MODEL_PATH}wandb/run-20210814_004752-661tsvc1/files/CropClassifier/661tsvc1/checkpoints/",
+    SDDVideoClasses.QUAD:
+        f"{CROP_MODEL_PATH}wandb/run-20210815_174701-3jrxnwwl/files/CropClassifier/3jrxnwwl/checkpoints/",
+    SDDVideoClasses.DEATH_CIRCLE:
+        f"{CROP_MODEL_PATH}wandb/run-20210813_140422-2fdnbzl5/files/CropClassifier/2fdnbzl5/checkpoints/",
 }
 
 
@@ -121,6 +143,30 @@ def setup_person_classifier(cfg, video_class):
 
     model.load_state_dict(load_dict['state_dict'])
     model.to(cfg.eval.device)
+    model.eval()
+
+    return model
+
+
+def setup_crop_classifier(cfg, video_class, top_k, device):
+    logger.info(f'Setting up CropClassifier model...')
+    model = CropClassifier(
+            config=cfg, train_dataset=None, val_dataset=None, desired_output_shape=None,
+            loss_function=nn.BCEWithLogitsLoss(), collate_fn=None)
+
+    checkpoint_root_path = f'{DATASET_TO_CROP_MODEL[video_class]}'
+    checkpoint_files = os.listdir(checkpoint_root_path)
+
+    epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
+    epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
+    checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
+
+    model_path = checkpoint_root_path + checkpoint_files[-top_k]
+
+    load_dict = torch.load(model_path, map_location=device)
+
+    model.load_state_dict(load_dict['state_dict'])
+    model.to(device)
     model.eval()
 
     return model
@@ -289,6 +335,17 @@ class PosMapToConventional(TracksAnalyzer):
                         video_class=v_clz
                     )
                     self.classifier.to(self.config.device)
+                elif self.config.use_classifier and not self.config.use_old_model:
+                    self.classifier = setup_crop_classifier(
+                        OmegaConf.merge(
+                            OmegaConf.load(f'{MODEL_ROOT}baselinev2/improve_metrics/config/eval/eval.yaml'),
+                            OmegaConf.load(f'{MODEL_ROOT}baselinev2/improve_metrics/config/model/model.yaml'),
+                            OmegaConf.load(f'{MODEL_ROOT}baselinev2/improve_metrics/config/training/training.yaml'),
+                        ),
+                        video_class=v_clz, top_k=1, device=self.config.device
+                    )
+                    self.classifier.to(self.config.device)
+                    
                 gt_annotation_path = f"{self.root}annotations/{v_clz.value}/video{v_num}/annotation_augmented.csv"
                 classic_extracted_annotation_path = f"{self.root}{self.extracted_folder}/{v_clz.value}/" \
                                                     f"video{v_num}/generated_annotations.csv"

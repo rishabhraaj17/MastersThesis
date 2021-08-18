@@ -1118,7 +1118,9 @@ def evaluate_models(cfg):
                 device='cuda:0',
                 use_standard_dataset=True,
                 root=cfg.root,
-                save_path=f"logs/trajectory_model_eval/{model_key_name}/{run_name}/",
+                save_path=f"logs/trajectory_model_eval/"
+                          f"moving_only_{moving_only}_"
+                          f"stationary_only_{stationary_only}_batch_k_{batch_multiplier}/{run_name}/",
                 batch_size=2 if is_gan else 1,
                 filter_mode=filter_mode,
                 moving_only=moving_only,
@@ -1141,7 +1143,8 @@ def evaluate_models(cfg):
         }
     )
     df.to_csv(
-        f"logs/trajectory_model_eval/eval_moving_only_{moving_only}_"
+        f"logs/trajectory_model_eval/moving_only_{moving_only}_stationary_only_{stationary_only}_"
+        f"batch_k_{batch_multiplier}/eval_moving_only_{moving_only}_"
         f"stationary_only_{stationary_only}_batch_k_{batch_multiplier}.csv")
     return df
 
