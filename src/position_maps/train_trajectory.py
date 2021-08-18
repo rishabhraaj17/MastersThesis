@@ -3,6 +3,7 @@ import warnings
 
 import hydra
 import numpy as np
+import pandas as pd
 import torch
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -34,9 +35,9 @@ logger = get_logger(__name__)
 
 def setup_foreign_dataset(cfg):
     if cfg.tp_module.datasets.foreign_dataset == 'eth':
-        dataset = get_eth_dataset(cfg, split_dataset=False, world_to_image=False)
+        dataset = get_eth_dataset(cfg.tp_module.datasets, split_dataset=False, world_to_image=False)
     elif cfg.tp_module.datasets.foreign_dataset == 'ucy':
-        dataset = get_ucy_dataset(cfg, split_dataset=False, world_to_image=False)
+        dataset = get_ucy_dataset(cfg.tp_module.datasets, split_dataset=False, world_to_image=False)
     else:
         raise NotImplemented
 
@@ -263,6 +264,7 @@ def evaluate(cfg):
 
     logger.info(f"Loss: {loss_list}\nADE: {ade_list} | FDE: {fde_list}\n"
                 f"Linear ADE: {linear_ade_list} | Linear FDE: {linear_fde_list}")
+    return loss_list, ade_list, fde_list, linear_ade_list, linear_fde_list
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -398,6 +400,7 @@ def evaluate_stochastic(cfg):
 
     logger.info(f"Loss: {loss_list}\nADE: {ade_list} | FDE: {fde_list}\n"
                 f"Linear ADE: {linear_ade_list} | Linear FDE: {linear_fde_list}")
+    return loss_list, ade_list, fde_list, linear_ade_list, linear_fde_list
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -723,9 +726,430 @@ def overfit(cfg):
                         track_id=track_num, additional_text=f"ADE: {ade.item()} | FDE: {fde.item()}")
 
 
+def evaluate_deterministic(
+        model, dataset, collate_fn, constant_linear_baseline_caller, device, use_standard_dataset, root,
+        save_path, batch_size=1, filter_mode=False, moving_only=True, stationary_only=False, batch_multiplier=-1):
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, pin_memory=True, drop_last=False,
+                        collate_fn=collate_fn)
+
+    ade_list, fde_list, loss_list = [], [], []
+    linear_ade_list, linear_fde_list = [], []
+
+    for b_idx, batch in enumerate(tqdm(loader)):
+        batch = preprocess_dataset_elements_from_dict(
+            batch, filter_mode=filter_mode, moving_only=moving_only, stationary_only=stationary_only)
+
+        if batch['in_xy'].shape[1] == 0:
+            continue
+
+        batch = {k: v.to(device) for k, v in batch.items()}
+
+        target = batch['gt_xy']
+
+        with torch.no_grad():
+            out = model(batch)
+
+        constant_linear_baseline_pred_trajectory, constant_linear_baseline_ade, constant_linear_baseline_fde = \
+            constant_linear_baseline_caller.eval(
+                obs_trajectory=batch['in_xy'].permute(1, 0, 2).cpu().numpy(),
+                obs_distances=batch['in_dxdy'].permute(1, 0, 2).cpu().numpy(),
+                gt_trajectory=batch['gt_xy'].permute(1, 0, 2).cpu().numpy()
+                , ratio=batch['ratio'].squeeze(), batch_size=target.shape[1])
+
+        pred = out['out_xy']
+
+        loss = model.calculate_loss(pred, target, batch['ratio'])
+        # ade, fde = model.calculate_metrics(pred, target, model.config.tp_module.metrics.mode)
+
+        obs_separated = batch['in_xy'].view(batch['in_xy'].shape[0], -1, target.shape[1], batch['in_xy'].shape[-1])
+        target_separated = target.view(target.shape[0], -1, target.shape[1], target.shape[-1])
+        pred_separated = pred.view(pred.shape[0], -1, target.shape[1], pred.shape[-1])
+
+        ade, fde, best_idx = cal_ade_fde_stochastic(target_separated, pred_separated)
+
+        ade *= batch['ratio'].squeeze()
+        fde *= batch['ratio'].squeeze()
+
+        ade_list.append(ade.mean().item())
+        fde_list.append(fde.mean().item())
+        loss_list.append(loss.item())
+
+        linear_ade_list.append(constant_linear_baseline_ade.mean().item())
+        linear_fde_list.append(constant_linear_baseline_fde.mean().item())
+
+        dataset_idx = batch['dataset_idx'].item()
+        seq_start_end = batch['seq_start_end']
+        frame_nums = batch['in_frames']
+        track_lists = batch['in_tracks']
+
+        random_trajectory_idx = np.random.choice(frame_nums.shape[1], 1, replace=False).item()
+
+        obs_trajectory = batch['in_xy'][:, random_trajectory_idx, ...]
+        gt_trajectory = batch['gt_xy'][:, random_trajectory_idx, ...]
+        pred_trajectory = out['out_xy'][:, random_trajectory_idx, ...]
+
+        frame_num = int(frame_nums[:, random_trajectory_idx, ...][0].item())
+        track_num = int(track_lists[:, random_trajectory_idx, ...][0].item())
+
+        current_dataset = loader.dataset.datasets[dataset_idx].dataset \
+            if use_standard_dataset else loader.dataset.datasets[dataset_idx]
+        if isinstance(current_dataset, SmoothTrajectoryDataset):
+            current_dataset = current_dataset.base_dataset
+
+        if use_standard_dataset:
+            video_path = f"{root}videos/{getattr(SDDVideoClasses, current_dataset.video_class).value}" \
+                         f"/video{current_dataset.video_number}/video.mov"
+        else:
+            video_path = f"{root}videos/{current_dataset.video_class.value}" \
+                         f"/video{current_dataset.video_number}/video.mov"
+
+        if b_idx % 500 == 0:
+            try:
+                frame = extract_frame_from_video(video_path, frame_num)
+
+                plot_trajectory_alongside_frame(
+                    frame, obs_trajectory.cpu(), gt_trajectory.cpu(), pred_trajectory.cpu(),
+                    frame_num, track_id=track_num,
+                    additional_text=
+                    f"ADE: {ade.mean().item()} | FDE: {fde.mean().item()}\n"
+                    f"Linear ADE: {constant_linear_baseline_ade.mean().item()} | "
+                    f"Linear FDE: {constant_linear_baseline_fde.mean().item()}",
+                    save_path=save_path,
+                )
+            except InvalidFrameException:
+                continue
+
+    loss_list = np.array(loss_list).mean()
+    ade_list = np.array(ade_list).mean()
+    fde_list = np.array(fde_list).mean()
+    linear_ade_list = np.array(linear_ade_list).mean()
+    linear_fde_list = np.array(linear_fde_list).mean()
+
+    logger.info(f"Loss: {loss_list}\nADE: {ade_list} | FDE: {fde_list}\n"
+                f"Linear ADE: {linear_ade_list} | Linear FDE: {linear_fde_list}")
+    return loss_list, ade_list, fde_list, linear_ade_list, linear_fde_list
+
+
+def evaluate_stochastic_core(
+        model, dataset, collate_fn, constant_linear_baseline_caller, device, use_standard_dataset, root,
+        save_path, batch_size=2, filter_mode=False, moving_only=True, stationary_only=False, batch_multiplier=10):
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, pin_memory=True, drop_last=False,
+                        collate_fn=collate_fn)
+
+    ade_list, fde_list, loss_list = [], [], []
+    linear_ade_list, linear_fde_list = [], []
+
+    for b_idx, batch in enumerate(tqdm(loader)):
+        batch = preprocess_dataset_elements_from_dict(
+            batch, filter_mode=filter_mode, moving_only=moving_only, stationary_only=stationary_only)
+
+        if batch['in_xy'].shape[1] == 0:
+            continue
+
+        batch = {k: v.to(device) for k, v in batch.items()}
+
+        batch = model.get_k_batches(batch, batch_multiplier)
+        batch_size = batch["size"]
+
+        with torch.no_grad():
+            model.generator.eval()
+            out = model.generator(batch)
+            model.generator.train()
+
+        constant_linear_baseline_pred_trajectory, constant_linear_baseline_ade, constant_linear_baseline_fde = \
+            constant_linear_baseline_caller.eval(
+                obs_trajectory=batch['in_xy'].permute(1, 0, 2).cpu().numpy(),
+                obs_distances=batch['in_dxdy'].permute(1, 0, 2).cpu().numpy(),
+                gt_trajectory=batch['gt_xy'].permute(1, 0, 2).cpu().numpy()
+                , ratio=batch['ratio'].squeeze(), batch_size=batch_size)
+
+        target = batch['gt_xy']
+        pred = out['out_xy']
+
+        obs_separated = batch['in_xy'].view(batch['in_xy'].shape[0], -1, batch_size, batch['in_xy'].shape[-1])
+        target_separated = target.view(target.shape[0], -1, batch_size, target.shape[-1])
+        pred_separated = pred.view(pred.shape[0], -1, batch_size, pred.shape[-1])
+
+        loss = model.calculate_loss(pred, target)
+        loss = loss.view(model.config.tp_module.datasets.batch_multiplier, -1)
+        loss, _ = loss.min(dim=0, keepdim=True)
+        loss = torch.mean(loss)
+
+        ade, fde, best_idx = cal_ade_fde_stochastic(target_separated, pred_separated)
+        modes_caught = (fde < model.config.tp_module.datasets.mode_dist_threshold).float()
+
+        ade *= batch['ratio'].squeeze()
+        fde *= batch['ratio'].squeeze()
+
+        ade_list.append(ade.mean().item())
+        fde_list.append(fde.mean().item())
+        loss_list.append(loss.item())
+
+        linear_ade_list.append(constant_linear_baseline_ade.mean().item())
+        linear_fde_list.append(constant_linear_baseline_fde.mean().item())
+
+        # seq_start_end = batch['seq_start_end']
+        frame_nums = batch['in_frames'].view(model.config.tp_module.datasets.batch_multiplier, 8, batch_size)
+        track_lists = batch['in_tracks'].view(model.config.tp_module.datasets.batch_multiplier, 8, batch_size)
+
+        random_trajectory_idx = np.random.choice(
+            min(batch['dataset_idx'].shape[-1], obs_separated.shape[2]), 1, replace=False).item()
+
+        dataset_idx = batch['dataset_idx'][random_trajectory_idx].item()
+
+        obs_trajectory = obs_separated[:, :, random_trajectory_idx, ...]
+        gt_trajectory = target_separated[:, :, random_trajectory_idx, ...]
+        pred_trajectory = pred_separated[:, :, random_trajectory_idx, ...]
+
+        frame_num = int(frame_nums[0, random_trajectory_idx, ...][0].item())
+        track_num = int(track_lists[0, random_trajectory_idx, ...][0].item())
+
+        current_dataset = loader.dataset.datasets[dataset_idx].dataset \
+            if use_standard_dataset else loader.dataset.datasets[dataset_idx]
+        if isinstance(current_dataset, SmoothTrajectoryDataset):
+            current_dataset = current_dataset.base_dataset
+
+        if use_standard_dataset:
+            video_path = f"{root}videos/{getattr(SDDVideoClasses, current_dataset.video_class).value}" \
+                         f"/video{current_dataset.video_number}/video.mov"
+        else:
+            video_path = f"{root}videos/{current_dataset.video_class.value}" \
+                         f"/video{current_dataset.video_number}/video.mov"
+
+        ade = ade.squeeze(0)[random_trajectory_idx]
+        fde = fde.squeeze(0)[random_trajectory_idx]
+
+        # single for give data
+        obs_trajectory = obs_trajectory[:, 0, :]
+        gt_trajectory = gt_trajectory[:, 0, :]
+
+        if b_idx % 500 == 0:
+            try:
+                frame = extract_frame_from_video(video_path, frame_num)
+
+                plot_trajectory_alongside_frame_stochastic(
+                    frame, obs_trajectory.cpu(), gt_trajectory.cpu(), pred_trajectory.cpu(),
+                    frame_num, track_id=track_num,
+                    best_idx=best_idx.squeeze(0)[random_trajectory_idx],
+                    additional_text=
+                    f"ADE: {ade.item()} | FDE: {fde.item()}"
+                    f"Linear ADE: {constant_linear_baseline_ade.mean().item()} | "
+                    f"Linear FDE: {constant_linear_baseline_fde.mean().item()}",
+                    save_path=save_path,
+                )
+            except InvalidFrameException:
+                continue
+
+    loss_list = np.array(loss_list).mean()
+    ade_list = np.array(ade_list).mean()
+    fde_list = np.array(fde_list).mean()
+    linear_ade_list = np.array(linear_ade_list).mean()
+    linear_fde_list = np.array(linear_fde_list).mean()
+
+    logger.info(f"Loss: {loss_list}\nADE: {ade_list} | FDE: {fde_list}\n"
+                f"Linear ADE: {linear_ade_list} | Linear FDE: {linear_fde_list}")
+    return loss_list, ade_list, fde_list, linear_ade_list, linear_fde_list
+
+
+def build_single_model(cfg, model_str, wandb_enabled, run_name, tb_dict={}, top_k=1):
+    if run_name == "":
+        return None, run_name
+    model = getattr(hub, model_str)(
+        config=cfg, train_dataset=None, val_dataset=None,
+        desired_output_shape=None, loss_function=None,
+        additional_loss_functions=None, collate_fn=None
+    )
+    # load dict
+    if wandb_enabled:
+        version_name = f"{run_name}".split('-')[-1]
+        checkpoint_root_path = f'{cfg.tp_module.warm_restart.wandb.checkpoint.root}' \
+                               f'{run_name}' \
+                               f'{cfg.tp_module.warm_restart.wandb.checkpoint.tail_path}' \
+                               f'{cfg.tp_module.warm_restart.wandb.checkpoint.project_name}/' \
+                               f'{version_name}/checkpoints/'
+    else:
+        checkpoint_root_path = \
+            f'{cfg.tp_module.warm_restart.checkpoint.root}{cfg.tp_module.warm_restart.checkpoint.path}' \
+            f'{tb_dict["version"]}/checkpoints/'
+
+    checkpoint_files = os.listdir(checkpoint_root_path)
+    epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
+    epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
+    checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
+    model_path = checkpoint_root_path + checkpoint_files[-top_k]
+
+    logger.info(f'Resuming from : {model_path}')
+    logger.info(f'Loading weights manually as custom load is {cfg.tp_module.warm_restart.custom_load}')
+    load_dict = torch.load(model_path, map_location=cfg.tp_module.device)
+
+    model.load_state_dict(load_dict['state_dict'])
+    model.to(cfg.tp_module.device)
+    model.eval()
+
+    return model, run_name
+
+
+@hydra.main(config_path="config", config_name="config")
+def evaluate_models(cfg):
+    filter_mode = False
+    moving_only = False
+    stationary_only = False
+    batch_multiplier = 10
+
+    logger.info(f"Evaluation - Setting up dataset and model")
+    train_dataset, val_dataset = setup_dataset(cfg)
+
+    if cfg.tp_module.datasets.use_standard_dataset:
+        collate_fn = seq_collate_with_dataset_idx_dict
+    else:
+        collate_fn = extracted_collate
+
+    constant_linear_baseline_caller = ConstantLinearBaselineV2()
+
+    model_dict = {
+        'lstm_gt':
+            (
+                False,
+                build_single_model(
+                    cfg=cfg,
+                    model_str="RNNBaseline",
+                    wandb_enabled=True,
+                    run_name="run-20210814_130503-2xzajz05",
+                    tb_dict={},
+                    top_k=1,
+                )
+            ),
+        'lstm_gan_gt':
+            (
+                True,
+                build_single_model(
+                    cfg=cfg,
+                    model_str="RNNGANBaseline",
+                    wandb_enabled=True,
+                    run_name="run-20210805_151420-2itkkx4b",
+                    tb_dict={},
+                    top_k=1,
+                )
+            ),
+        'unsupervised_classic_lstm':
+            (
+                False,
+                build_single_model(
+                    cfg=cfg,
+                    model_str="RNNBaseline",
+                    wandb_enabled=True,
+                    run_name="run-20210809_173947-1b6f1143",
+                    tb_dict={},
+                    top_k=1,
+                )
+            ),
+        'unsupervised_classic_lstm_gan':
+            (
+                True,
+                build_single_model(
+                    cfg=cfg,
+                    model_str="RNNGANBaseline",
+                    wandb_enabled=True,
+                    run_name="run-20210810_185312-2ajr83w5",
+                    tb_dict={},
+                    top_k=1,
+                )
+            ),
+        'unsupervised_classic_filtered_lstm':
+            (
+                False,
+                build_single_model(
+                    cfg=cfg,
+                    model_str="RNNBaseline",
+                    wandb_enabled=True,
+                    run_name="run-20210809_172936-2lgrlxat",
+                    tb_dict={},
+                    top_k=1,
+                )
+            ),
+        'unsupervised_classic_lstm_filtered_gan':
+            (
+                True,
+                build_single_model(
+                    cfg=cfg,
+                    model_str="RNNGANBaseline",
+                    wandb_enabled=True,
+                    run_name="run-20210809_215129-3f9646gs",
+                    tb_dict={},
+                    top_k=1,
+                )
+            ),
+        'unsupervised_classic_filtered_extended_lstm':
+            (
+                False,
+                build_single_model(
+                    cfg=cfg,
+                    model_str="RNNBaseline",
+                    wandb_enabled=True,
+                    run_name="",
+                    tb_dict={},
+                    top_k=1,
+                )
+            ),
+        'unsupervised_classic_lstm_filtered_extended_gan':
+            (
+                True,
+                build_single_model(
+                    cfg=cfg,
+                    model_str="RNNGANBaseline",
+                    wandb_enabled=True,
+                    run_name="",
+                    tb_dict={},
+                    top_k=1,
+                )
+            ),
+    }
+
+    model_name_list, ade_list, fde_list, linear_ade_list, linear_fde_list = [], [], [], [], []
+    for model_key_name, model_tuple in model_dict.items():
+        is_gan, (model, run_name) = model_tuple
+        evaluator = evaluate_stochastic_core if is_gan else evaluate_deterministic
+        if model is not None:
+            loss, ade, fde, linear_ade, linear_fde = evaluator(
+                model=model,
+                dataset=val_dataset,
+                collate_fn=collate_fn,
+                constant_linear_baseline_caller=constant_linear_baseline_caller,
+                device='cuda:0',
+                use_standard_dataset=True,
+                root=cfg.root,
+                save_path=f"logs/trajectory_model_eval/{model_key_name}/{run_name}/",
+                batch_size=2 if is_gan else 1,
+                filter_mode=filter_mode,
+                moving_only=moving_only,
+                stationary_only=stationary_only,
+                batch_multiplier=batch_multiplier if is_gan else -1,
+            )
+            model_name_list.append(model_key_name)
+            ade_list.append(ade)
+            fde_list.append(fde)
+            linear_ade_list.append(linear_ade)
+            linear_fde_list.append(linear_fde)
+
+    df: pd.DataFrame = pd.DataFrame.from_dict(
+        {
+            'model': model_name_list,
+            'ade': ade_list,
+            'fde': fde_list,
+            'linear_ade': linear_ade_list,
+            'linear_fde': linear_fde_list,
+        }
+    )
+    df.to_csv(
+        f"logs/trajectory_model_eval/eval_moving_only_{moving_only}_"
+        f"stationary_only_{stationary_only}_batch_k_{batch_multiplier}.csv")
+    return df
+
+
 if __name__ == '__main__':
     # overfit()
     # overfit_gan()
     # evaluate()
     # train_lightning()
-    evaluate_stochastic()
+    # evaluate_stochastic()
+    evaluate_models()
