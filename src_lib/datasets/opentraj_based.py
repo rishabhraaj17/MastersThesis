@@ -611,7 +611,6 @@ def get_eth_dataset(cfg, split_dataset=False, smooth_trajectories=False, smoothe
         data_df['pos_x'] = in_image[:, 0]
         data_df['pos_y'] = in_image[:, 1]
 
-
     temp_file = tempfile.NamedTemporaryFile(suffix='.txt')
     data_df.to_csv(temp_file, header=False, index=False, sep=' ')
     dataset = TrajectoryDatasetFromFile(
@@ -689,13 +688,22 @@ def get_single_gt_dataset(cfg, video_class, video_number, split_dataset,
     if not split_dataset:
         return dataset
 
-    val_dataset_len = round(len(dataset) * cfg.val_ratio)
-    train_indices = torch.arange(start=0, end=len(dataset) - val_dataset_len)
-    val_indices = torch.arange(start=len(dataset) - val_dataset_len, end=len(dataset))
+    # val_dataset_len = round(len(dataset) * cfg.val_ratio)
+    # train_indices = torch.arange(start=0, end=len(dataset) - val_dataset_len)
+    # val_indices = torch.arange(start=len(dataset) - val_dataset_len, end=len(dataset))
+
+    test_dataset_len = round(len(dataset) * cfg.test_ratio)
+    train_indices = torch.arange(start=0, end=len(dataset) - test_dataset_len)
+    test_indices = torch.arange(start=len(dataset) - test_dataset_len, end=len(dataset))
+
+    val_dataset_len = round(len(train_indices) * cfg.val_ratio)
+    train_indices = torch.arange(start=0, end=len(train_indices) - val_dataset_len)
+    val_indices = torch.arange(start=len(train_indices), end=len(train_indices) + val_dataset_len)
 
     train_dataset = Subset(dataset, train_indices)
     val_dataset = Subset(dataset, val_indices)
-    return train_dataset, val_dataset
+    test_dataset = Subset(dataset, test_indices)
+    return train_dataset, val_dataset, test_dataset
 
 
 def get_multiple_gt_dataset(cfg, split_dataset=True, with_dataset_idx=True,
@@ -705,16 +713,18 @@ def get_multiple_gt_dataset(cfg, split_dataset=True, with_dataset_idx=True,
     video_classes = conf.video_classes
     video_numbers = conf.video_numbers
 
-    train_datasets, val_datasets = [], []
+    train_datasets, val_datasets, test_datasets = [], [], []
     for v_idx, video_class in enumerate(tqdm(video_classes)):
         for v_num in video_numbers[v_idx]:
             if split_dataset:
-                t_dset, v_dset = get_single_gt_dataset(conf, video_class, v_num, split_dataset,
-                                                       smooth_trajectories=smooth_trajectories,
-                                                       smoother=smoother, threshold=threshold,
-                                                       frame_rate=frame_rate, time_step=time_step)
+                t_dset, v_dset, test_dset = get_single_gt_dataset(
+                    conf, video_class, v_num, split_dataset,
+                    smooth_trajectories=smooth_trajectories,
+                    smoother=smoother, threshold=threshold,
+                    frame_rate=frame_rate, time_step=time_step)
                 train_datasets.append(t_dset)
                 val_datasets.append(v_dset)
+                test_datasets.append(test_dset)
             else:
                 dset = get_single_gt_dataset(cfg, video_class, v_num, split_dataset,
                                              smooth_trajectories=smooth_trajectories,
@@ -723,8 +733,10 @@ def get_multiple_gt_dataset(cfg, split_dataset=True, with_dataset_idx=True,
                 train_datasets.append(dset)
 
     if split_dataset:
-        return (ConcatenateDataset(train_datasets), ConcatenateDataset(val_datasets)) \
-            if with_dataset_idx else (ConcatDataset(train_datasets), ConcatDataset(val_datasets))
+        return (ConcatenateDataset(train_datasets), ConcatenateDataset(val_datasets),
+                ConcatenateDataset(test_datasets)) \
+            if with_dataset_idx else (ConcatDataset(train_datasets), ConcatDataset(val_datasets),
+                                      ConcatDataset(test_datasets))
     return ConcatenateDataset(train_datasets) if with_dataset_idx else ConcatDataset(train_datasets)
 
 

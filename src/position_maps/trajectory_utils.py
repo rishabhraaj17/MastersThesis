@@ -374,13 +374,22 @@ def get_single_generated_dataset_from_tempfile(cfg, video_class, video_number, s
     if not split_dataset:
         return dataset
 
-    val_dataset_len = round(len(dataset) * cfg.val_ratio)
-    train_indices = torch.arange(start=0, end=len(dataset) - val_dataset_len)
-    val_indices = torch.arange(start=len(dataset) - val_dataset_len, end=len(dataset))
+    # val_dataset_len = round(len(dataset) * cfg.val_ratio)
+    # train_indices = torch.arange(start=0, end=len(dataset) - val_dataset_len)
+    # val_indices = torch.arange(start=len(dataset) - val_dataset_len, end=len(dataset))
+
+    test_dataset_len = round(len(dataset) * cfg.test_ratio)
+    train_indices = torch.arange(start=0, end=len(dataset) - test_dataset_len)
+    test_indices = torch.arange(start=len(dataset) - test_dataset_len, end=len(dataset))
+
+    val_dataset_len = round(len(train_indices) * cfg.val_ratio)
+    train_indices = torch.arange(start=0, end=len(train_indices) - val_dataset_len)
+    val_indices = torch.arange(start=len(train_indices), end=len(train_indices) + val_dataset_len)
 
     train_dataset = Subset(dataset, train_indices)
     val_dataset = Subset(dataset, val_indices)
-    return train_dataset, val_dataset
+    test_dataset = Subset(dataset, test_indices)
+    return train_dataset, val_dataset, test_dataset
 
 
 def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True,
@@ -390,22 +399,25 @@ def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True,
     video_classes = conf.video_classes
     video_numbers = conf.video_numbers
 
-    train_datasets, val_datasets = [], []
+    train_datasets, val_datasets, test_datasets = [], [], []
     for v_idx, video_class in enumerate(tqdm(video_classes)):
         for v_num in video_numbers[v_idx]:
             if split_dataset:
                 if from_temp_file:
-                    t_dset, v_dset = get_single_generated_dataset_from_tempfile(conf, video_class, v_num, split_dataset,
-                                                                                smooth_trajectories=smooth_trajectories,
-                                                                                smoother=smoother, threshold=threshold,
-                                                                                frame_rate=frame_rate,
-                                                                                time_step=time_step)
+                    t_dset, v_dset, test_dset = get_single_generated_dataset_from_tempfile(
+                        conf, video_class, v_num, split_dataset,
+                        smooth_trajectories=smooth_trajectories,
+                        smoother=smoother, threshold=threshold,
+                        frame_rate=frame_rate,
+                        time_step=time_step)
                 else:
-                    t_dset, v_dset = get_single_dataset(conf, video_class, v_num, split_dataset,
-                                                        smooth_trajectories=smooth_trajectories,
-                                                        smoother=smoother, threshold=threshold)
+                    t_dset, v_dset, test_dset = get_single_dataset(
+                        conf, video_class, v_num, split_dataset,
+                        smooth_trajectories=smooth_trajectories,
+                        smoother=smoother, threshold=threshold)
                 train_datasets.append(t_dset)
                 val_datasets.append(v_dset)
+                test_datasets.append(test_dset)
             else:
                 if from_temp_file:
                     dset = get_single_generated_dataset_from_tempfile(cfg, video_class, v_num, split_dataset,
@@ -419,8 +431,10 @@ def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True,
                 train_datasets.append(dset)
 
     if split_dataset:
-        return (ConcatenateDataset(train_datasets), ConcatenateDataset(val_datasets)) \
-            if with_dataset_idx else (ConcatDataset(train_datasets), ConcatDataset(val_datasets))
+        return (ConcatenateDataset(train_datasets),
+                ConcatenateDataset(val_datasets), ConcatenateDataset(test_datasets)) \
+            if with_dataset_idx else (ConcatDataset(train_datasets), ConcatDataset(val_datasets),
+                                      ConcatDataset(test_datasets))
     return ConcatenateDataset(train_datasets) if with_dataset_idx else ConcatDataset(train_datasets)
 
 
@@ -778,7 +792,7 @@ def viz_dataset_trajectories():
     if cfg.tp_module.datasets.use_standard_dataset:
         collate_fn = seq_collate_with_dataset_idx_dict
         if cfg.tp_module.datasets.use_generated:
-            train_dataset, val_dataset = get_multiple_datasets(
+            train_dataset, val_dataset, test_dataset = get_multiple_datasets(
                 cfg=cfg, split_dataset=True, with_dataset_idx=True,
                 smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
                 smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
@@ -788,7 +802,7 @@ def viz_dataset_trajectories():
                 time_step=cfg.tp_module.datasets.time_step
             )
         else:
-            train_dataset, val_dataset = get_multiple_gt_dataset(
+            train_dataset, val_dataset, test_dataset = get_multiple_gt_dataset(
                 cfg=cfg, split_dataset=True, with_dataset_idx=True,
                 smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
                 smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,

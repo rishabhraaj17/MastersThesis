@@ -49,7 +49,7 @@ def setup_dataset(cfg):
         return setup_foreign_dataset(cfg)
     if cfg.tp_module.datasets.use_standard_dataset:
         if cfg.tp_module.datasets.use_generated:
-            train_dataset, val_dataset = get_multiple_datasets(
+            train_dataset, val_dataset, test_dataset = get_multiple_datasets(
                 cfg=cfg, split_dataset=True, with_dataset_idx=True,
                 smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
                 smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
@@ -59,13 +59,14 @@ def setup_dataset(cfg):
                 time_step=cfg.tp_module.datasets.time_step
             )
         else:
-            train_dataset, val_dataset = get_multiple_gt_dataset(
+            train_dataset, val_dataset, test_dataset = get_multiple_gt_dataset(
                 cfg=cfg, split_dataset=True, with_dataset_idx=True,
                 smooth_trajectories=cfg.tp_module.smooth_trajectories.enabled,
                 smoother=bezier_smoother if cfg.tp_module.smooth_trajectories.smoother == 'bezier' else splrep_smoother,
                 threshold=cfg.tp_module.smooth_trajectories.min_length,
                 frame_rate=cfg.tp_module.datasets.frame_rate,
                 time_step=cfg.tp_module.datasets.time_step)
+        return train_dataset, val_dataset, test_dataset
     else:
         train_dataset, val_dataset = get_train_and_val_datasets(
             video_classes=[getattr(SDDVideoClasses, v_c) for v_c in cfg.tp_module.datasets.train.video_classes],
@@ -79,7 +80,7 @@ def setup_dataset(cfg):
             root='../../../Datasets/SDD/pm_extracted_annotations/'
             if cfg.tp_module.datasets.use_generated else '../../../Datasets/SDD_Features/'
         )
-    return train_dataset, val_dataset
+        return train_dataset, val_dataset
 
 
 def setup_model(cfg, train_dataset, val_dataset):
