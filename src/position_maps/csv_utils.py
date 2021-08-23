@@ -190,6 +190,42 @@ def sdd_stats_from_website():
     df.to_latex('/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/sdd_stats.tex')
 
 
+def compare_crop_classifiers():
+    old_path = "../../Datasets/SDD/classic_nn_extracted_annotations_v1/metrics_2m.csv"
+    new_path = "../../Datasets/SDD/classic_nn_extracted_annotations_new_v0/metrics_2m.csv"
+
+    old_df = pd.read_csv(old_path)
+    new_df = pd.read_csv(new_path)
+
+    out_df = old_df[['class', 'number']]
+
+    out_df['classic_precision'] = old_df.loc[:, 'classic_precision']
+    out_df['nn_precision_v0'] = old_df.loc[:, 'classic_nn_precision']
+    out_df['nn_precision_v1'] = new_df.loc[:, 'classic_nn_precision']
+
+    out_df['classic_recall'] = old_df.loc[:, 'classic_recall']
+    out_df['nn_recall_v0'] = old_df.loc[:, 'classic_nn_recall']
+    out_df['nn_recall_v1'] = new_df.loc[:, 'classic_nn_recall']
+
+    out_df['neighbourhood_radius'] = old_df.loc[:, 'neighbourhood_radius']
+
+    series_list = []
+    for r_idx, row in out_df.iterrows():
+        row_numpy = row.values
+
+        precision_winner = np.argmax(row_numpy[3:5])
+        row[3 + precision_winner] = f"**{row[3 + precision_winner]}**"
+
+        recall_winner = np.argmax(row_numpy[6:8])
+        row[6 + recall_winner] = f"**{row[6 + recall_winner]}**"
+        series_list.append(row.values)
+
+    out_df_bold = pd.DataFrame(series_list, columns=out_df.columns.values)
+    out_df_bold.to_markdown(
+        "../../Datasets/SDD/classic_nn_extracted_annotations_new_v0/metrics_2m.md",
+        index=False)
+
+
 if __name__ == '__main__':
     # sdd_stats_from_website()
     # d_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/generated_annotations/metrics_2m.csv'
@@ -207,6 +243,7 @@ if __name__ == '__main__':
     # pm_annotation_versions_diff_csv(v0_path, v1_path,
     #                                 '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/')
 
+    compare_crop_classifiers()
     load_df_and_diff_save_as_markdown_for_precision_recall(
         '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD'
         '/classic_nn_extracted_annotations_v1/metrics_2m.csv',
