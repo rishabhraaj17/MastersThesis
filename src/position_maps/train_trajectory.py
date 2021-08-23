@@ -112,7 +112,8 @@ def train_lightning(cfg):
         mode=cfg.mode,
         verbose=cfg.verbose
     )
-    wandb_logger = WandbLogger(project='TrajectoryPredictionBaseline', name=cfg.tp_module.model)
+    wandb_logger = WandbLogger(project='TrajectoryPredictionBaseline',
+                               name=cfg.tp_module.model + ' ' + cfg.tp_module.run_name_postfix)
     wandb_logger.log_hyperparams({**cfg.tp_module, **cfg.trajectory_based})
     trainer = Trainer(max_epochs=cfg.tp_module.trainer.max_epochs, gpus=cfg.tp_module.trainer.gpus,
                       fast_dev_run=cfg.tp_module.trainer.fast_dev_run, callbacks=[checkpoint_callback],
@@ -1154,6 +1155,6 @@ if __name__ == '__main__':
     # overfit()
     # overfit_gan()
     # evaluate()
-    # train_lightning()
+    train_lightning()
     # evaluate_stochastic()
-    evaluate_models()
+    # evaluate_models()
