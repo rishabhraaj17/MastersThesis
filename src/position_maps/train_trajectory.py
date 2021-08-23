@@ -99,7 +99,7 @@ def setup_model(cfg, train_dataset, val_dataset):
 @hydra.main(config_path="config", config_name="config")
 def train_lightning(cfg):
     logger.info(f"Setting up dataset and model")
-    train_dataset, val_dataset = setup_dataset(cfg)
+    train_dataset, val_dataset, test_dataset = setup_dataset(cfg)
 
     model = setup_model(cfg, train_dataset, val_dataset)
 
@@ -159,7 +159,7 @@ def load_checkpoint(cfg, model):
 @hydra.main(config_path="config", config_name="config")
 def evaluate(cfg):
     logger.info(f"Setting up dataset and model")
-    train_dataset, val_dataset = setup_dataset(cfg)
+    train_dataset, val_dataset, test_dataset = setup_dataset(cfg)
 
     model = setup_model(cfg, train_dataset, val_dataset)
 
@@ -272,7 +272,7 @@ def evaluate(cfg):
 @hydra.main(config_path="config", config_name="config")
 def evaluate_stochastic(cfg):
     logger.info(f"Stochastic - Setting up dataset and model")
-    train_dataset, val_dataset = setup_dataset(cfg)
+    train_dataset, val_dataset, test_dataset = setup_dataset(cfg)
 
     model = setup_model(cfg, train_dataset, val_dataset)
 
@@ -413,7 +413,7 @@ def overfit_gan(cfg):
     batch_size = 4
 
     logger.info(f"Overfit GAN - Setting up dataset and model")
-    train_dataset, val_dataset = setup_dataset(cfg)
+    train_dataset, val_dataset, test_dataset = setup_dataset(cfg)
 
     model = setup_model(cfg, train_dataset, val_dataset)
     model.to(device)
@@ -624,7 +624,7 @@ def overfit(cfg):
     batch_size = 8
 
     logger.info(f"Overfit - Setting up dataset and model")
-    train_dataset, val_dataset = setup_dataset(cfg)
+    train_dataset, val_dataset, test_dataset = setup_dataset(cfg)
 
     model = setup_model(cfg, train_dataset, val_dataset)
     model.to(device)
@@ -999,7 +999,7 @@ def evaluate_models(cfg):
     batch_multiplier = 10
 
     logger.info(f"Evaluation - Setting up dataset and model")
-    train_dataset, val_dataset = setup_dataset(cfg)
+    train_dataset, val_dataset, test_dataset = setup_dataset(cfg)
 
     if cfg.tp_module.datasets.use_standard_dataset:
         collate_fn = seq_collate_with_dataset_idx_dict
