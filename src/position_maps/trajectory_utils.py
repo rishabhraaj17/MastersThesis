@@ -164,21 +164,25 @@ def dump_tracks_to_file_multiple(
         min_track_length: int = 0, duplicate_frames_to_filter=(0,), filter_nth_frame_from_middle=None,
         dump_as_csv_only=False):
     video_classes_to_use = [
+        SDDVideoClasses.DEATH_CIRCLE,
         SDDVideoClasses.GATES,
         SDDVideoClasses.HYANG,
         SDDVideoClasses.LITTLE,
         SDDVideoClasses.NEXUS,
         SDDVideoClasses.QUAD,
         SDDVideoClasses.BOOKSTORE,
-        SDDVideoClasses.COUPA]
+        SDDVideoClasses.COUPA
+    ]
     video_numbers_to_use = [
+        [i for i in range(5)],
         [i for i in range(9)],
         [i for i in range(15)],
         [i for i in range(4)],
         [i for i in range(12) if i not in [3, 4, 5]],
         [i for i in range(4)],
         [i for i in range(7)],
-        [i for i in range(4)], ]
+        [i for i in range(4)],
+    ]
 
     for v_idx, v_clz in enumerate(video_classes_to_use):
         for v_num in video_numbers_to_use[v_idx]:
