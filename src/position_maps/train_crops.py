@@ -144,7 +144,7 @@ def train_crop_classifier_v1(cfg):
         verbose=crop_cfg.verbose
     )
 
-    train_logger = WandbLogger(project=crop_cfg.project_name, name='DC_Classifier')
+    train_logger = WandbLogger(project=crop_cfg.project_name, name=f'{video_class.name}_Classifier')
     train_logger.log_hyperparams(cfg)
     # train_logger = False
 
@@ -170,22 +170,43 @@ def train_crop_classifier_v1(cfg):
 
         model_path = checkpoint_root_path + checkpoint_files[-cfg.warm_restart.checkpoint.top_k]
 
-        logger.info(f'Loading weights manually as custom load is {cfg.warm_restart.custom_load}')
-        load_dict = torch.load(model_path, map_location=cfg.device)
+        if crop_cfg.warm_restart.custom_load:
+            logger.info(f'Loading weights manually as custom load is {cfg.warm_restart.custom_load}')
+            load_dict = torch.load(model_path, map_location=cfg.device)
 
-        model.load_state_dict(load_dict['state_dict'])
-        model.to(cfg.device)
-        model.train()
+            model.load_state_dict(load_dict['state_dict'])
+            model.to(cfg.device)
+            model.train()
 
-    trainer = Trainer(max_epochs=crop_cfg.trainer.num_epochs, gpus=crop_cfg.trainer.gpus,
-                      fast_dev_run=crop_cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
-                      accelerator=crop_cfg.trainer.accelerator, deterministic=crop_cfg.trainer.deterministic,
-                      replace_sampler_ddp=crop_cfg.trainer.replace_sampler_ddp,
-                      num_nodes=crop_cfg.trainer.num_nodes, plugins=plugins,
-                      gradient_clip_val=crop_cfg.trainer.gradient_clip_val,
-                      sync_batchnorm=sync_bn,
-                      accumulate_grad_batches=crop_cfg.trainer.accumulate_grad_batches,
-                      logger=train_logger)
+            trainer = Trainer(max_epochs=crop_cfg.trainer.num_epochs, gpus=crop_cfg.trainer.gpus,
+                              fast_dev_run=crop_cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
+                              accelerator=crop_cfg.trainer.accelerator, deterministic=crop_cfg.trainer.deterministic,
+                              replace_sampler_ddp=crop_cfg.trainer.replace_sampler_ddp,
+                              num_nodes=crop_cfg.trainer.num_nodes, plugins=plugins,
+                              gradient_clip_val=crop_cfg.trainer.gradient_clip_val,
+                              sync_batchnorm=sync_bn,
+                              accumulate_grad_batches=crop_cfg.trainer.accumulate_grad_batches,
+                              logger=train_logger)
+        else:
+            trainer = Trainer(max_epochs=crop_cfg.trainer.num_epochs, gpus=crop_cfg.trainer.gpus,
+                              fast_dev_run=crop_cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
+                              accelerator=crop_cfg.trainer.accelerator, deterministic=crop_cfg.trainer.deterministic,
+                              replace_sampler_ddp=crop_cfg.trainer.replace_sampler_ddp,
+                              num_nodes=crop_cfg.trainer.num_nodes, plugins=plugins,
+                              gradient_clip_val=crop_cfg.trainer.gradient_clip_val,
+                              sync_batchnorm=sync_bn,
+                              accumulate_grad_batches=crop_cfg.trainer.accumulate_grad_batches,
+                              logger=train_logger, resume_from_checkpoint=model_path)
+    else:
+        trainer = Trainer(max_epochs=crop_cfg.trainer.num_epochs, gpus=crop_cfg.trainer.gpus,
+                          fast_dev_run=crop_cfg.trainer.fast_dev_run, callbacks=[checkpoint_callback],
+                          accelerator=crop_cfg.trainer.accelerator, deterministic=crop_cfg.trainer.deterministic,
+                          replace_sampler_ddp=crop_cfg.trainer.replace_sampler_ddp,
+                          num_nodes=crop_cfg.trainer.num_nodes, plugins=plugins,
+                          gradient_clip_val=crop_cfg.trainer.gradient_clip_val,
+                          sync_batchnorm=sync_bn,
+                          accumulate_grad_batches=crop_cfg.trainer.accumulate_grad_batches,
+                          logger=train_logger)
     trainer.fit(model)
 
 

@@ -317,7 +317,8 @@ class PosMapToConventional(TracksAnalyzer):
             'classic_nn_recall': classic_nn_recall,
             'neighbourhood_radius': radius
         })
-        df.to_csv(f"{self.root}/classic_nn_extracted_annotations/metrics_{self.config.threshold}m.csv", index=False)
+        # df.to_csv(f"{self.root}/classic_nn_extracted_annotations/metrics_{self.config.threshold}m.csv", index=False)
+        df.to_csv(f"{self.root}/classic_nn_extracted_annotations_new_v0/metrics_{self.config.threshold}m.csv", index=False)
 
     def perform_analysis_on_multiple_sequences(self, show_extracted_tracks_only=False, pm_extracted_version='v0',
                                                pm_extracted_filename='generated_annotations.csv'):
