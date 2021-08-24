@@ -602,7 +602,7 @@ class PosMapToConventional(TracksAnalyzer):
         if len(crops) == 0:
             return boxes_xywh, candidate_centers, track_idx
 
-        if self.config.use_classifier and self.config.use_old_model:
+        if self.config.use_classifier:  # and self.config.use_old_model:
             crops = torch.stack([tvf.resize(c, [50, 50]) for c in crops if c.shape[1] != 0 and c.shape[2] != 0])
 
         if self.config.debug.enabled:
@@ -618,8 +618,14 @@ class PosMapToConventional(TracksAnalyzer):
 
         pred_labels = torch.round(torch.sigmoid(patch_predictions))
 
+        if pred_labels.min().item() == 0.:
+            logger.info("Found a 0 pred!")
+
         if self.config.debug.enabled:
-            self.plot_predictions(crops, pred_labels.squeeze(), n=5)
+            try:
+                self.plot_predictions(crops, pred_labels.squeeze(), n=5)
+            except IndexError:
+                plt.show()
 
         selected_boxes_idx = torch.where(pred_labels.squeeze(-1))
 

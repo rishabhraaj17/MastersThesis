@@ -26,6 +26,7 @@ from baselinev2.improve_metrics.model import plot_predictions, make_datasets_sim
 from baselinev2.plot_utils import add_box_to_axes
 from baselinev2.utils import get_bbox_center
 from log import get_logger
+from src.position_maps.classic_nn_mixin import DATASET_TO_CROP_MODEL
 from src.position_maps.location_utils import locations_from_heatmaps, \
     get_adjusted_object_locations_rgb, get_processed_patches_to_train_rgb_only
 from src_lib.models_hub.crop_classifiers import CropClassifier, CropClassifierDDP
@@ -238,6 +239,56 @@ def eval_crop_classifier(cfg):
         crops, labels = data
         crops, labels = crops.view(-1, *crops.shape[2:]).cuda(), labels.view(-1, 1).cuda()
         out = model(crops)
+
+        loss = model.calculate_loss(out, labels)
+        val_loss.append(loss.item())
+
+        acc = out.sigmoid().round().eq(labels).float().mean()
+        accuracies.append(acc.item())
+
+        if acc.item() < 0.96:
+            plot_predictions(labels, crops, out.sigmoid().round(), b_idx)
+
+    logger.info(f"Test Loss: {np.array(val_loss).mean()} | Accuracy: {np.array(accuracies).mean()}")
+
+
+@hydra.main(config_path="config", config_name="config")
+def eval_crop_classifier_v1(cfg):
+    crop_cfg = cfg.crop_classifier
+    train_dataset, val_dataset = make_datasets_simple(
+        crop_cfg, video_class=SDDVideoClasses.BOOKSTORE, return_test_split=False, plot=False,
+        server_mode=False,
+        transforms=None)
+
+    val_loader = DataLoader(
+        val_dataset, batch_size=cfg.crop_classifier.batch_size, shuffle=cfg.crop_classifier.shuffle,
+        num_workers=cfg.crop_classifier.num_workers * 0, collate_fn=people_collate_fn_tuple,
+        pin_memory=cfg.crop_classifier.pin_memory, drop_last=cfg.interplay_v0.drop_last)
+
+    model = CropClassifier(config=cfg, train_dataset=train_dataset, val_dataset=val_dataset, desired_output_shape=None,
+                           loss_function=nn.BCEWithLogitsLoss())
+    checkpoint_root_path = f'{DATASET_TO_CROP_MODEL[SDDVideoClasses.BOOKSTORE]}'
+    checkpoint_files = os.listdir(checkpoint_root_path)
+
+    epoch_part_list = [c.split('-')[0] for c in checkpoint_files]
+    epoch_part_list = np.array([int(c.split('=')[-1]) for c in epoch_part_list]).argsort()
+    checkpoint_files = np.array(checkpoint_files)[epoch_part_list]
+
+    model_path = checkpoint_root_path + checkpoint_files[-1]
+
+    load_dict = torch.load(model_path, map_location='cuda:0')
+
+    model.load_state_dict(load_dict['state_dict'])
+    model.to('cuda:0')
+    model.eval()
+
+    val_loss, accuracies = [], []
+    for b_idx, data in enumerate(tqdm(val_loader)):
+        crops, labels = data
+        crops, labels = crops.cuda(), labels.view(-1, 1).cuda()
+        out = model(crops)
+
+        pred_labels = out.sigmoid().round()
 
         loss = model.calculate_loss(out, labels)
         val_loss.append(loss.item())
@@ -514,6 +565,7 @@ def viz_crops(crops_filtered, show=True):
 
 if __name__ == '__main__':
     # train_crop_classifier()
-    train_crop_classifier_v1()
+    # train_crop_classifier_v1()
+    eval_crop_classifier_v1()
     # eval_crop_classifier()
     # generate_crops_v0()
