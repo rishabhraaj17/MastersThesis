@@ -32,6 +32,7 @@ from log import get_logger
 from src.position_maps.analysis import TracksAnalyzer
 from src.position_maps.segmentation_utils import dump_image_mapping, dump_class_mapping
 from src.position_maps.trajectory_utils import plot_trajectory_with_one_frame
+from src_lib.models_hub import RNNBaseline, RNNGANBaseline
 from src_lib.models_hub.crop_classifiers import CropClassifier
 
 seed_everything(42)
@@ -54,22 +55,21 @@ DATASET_TO_MODEL = {
     SDDVideoClasses.DEATH_CIRCLE: f"{MODEL_PATH}11",
 }
 
-
 DATASET_TO_CROP_MODEL = {
     SDDVideoClasses.BOOKSTORE:
         f"{CROP_MODEL_PATH}wandb/run-20210813_133849-3gdxk6ss/files/CropClassifier/3gdxk6ss/checkpoints/",
     SDDVideoClasses.COUPA:
         f"{CROP_MODEL_PATH}wandb/run-20210813_135017-2978wfe5/files/CropClassifier/2978wfe5/checkpoints/",
     SDDVideoClasses.GATES:
-        # f"{CROP_MODEL_PATH}wandb/run-20210813_142357-2j3vkg27/files/CropClassifier/2j3vkg27/checkpoints/",
+    # f"{CROP_MODEL_PATH}wandb/run-20210813_142357-2j3vkg27/files/CropClassifier/2j3vkg27/checkpoints/",
         f"{CROP_MODEL_PATH}wandb/run-20210823_115433-ki2d4iwl/files/CropClassifier/ki2d4iwl/checkpoints/",
     SDDVideoClasses.HYANG:
         f"{CROP_MODEL_PATH}wandb/run-20210816_142502-1d30kmn6/files/CropClassifier/1d30kmn6/checkpoints/",
     SDDVideoClasses.LITTLE:
-        # f"{CROP_MODEL_PATH}wandb/run-20210813_191047-1n62qtzi/files/CropClassifier/1n62qtzi/checkpoints/",
+    # f"{CROP_MODEL_PATH}wandb/run-20210813_191047-1n62qtzi/files/CropClassifier/1n62qtzi/checkpoints/",
         f"{CROP_MODEL_PATH}wandb/run-20210823_123122-1ra2loyt/files/CropClassifier/1ra2loyt/checkpoints/",
     SDDVideoClasses.NEXUS:
-        # f"{CROP_MODEL_PATH}wandb/run-20210814_004752-661tsvc1/files/CropClassifier/661tsvc1/checkpoints/",
+    # f"{CROP_MODEL_PATH}wandb/run-20210814_004752-661tsvc1/files/CropClassifier/661tsvc1/checkpoints/",
         f"{CROP_MODEL_PATH}wandb/run-20210823_132331-3rl6azww/files/CropClassifier/3rl6azww/checkpoints/",
     SDDVideoClasses.QUAD:
         f"{CROP_MODEL_PATH}wandb/run-20210815_174701-3jrxnwwl/files/CropClassifier/3jrxnwwl/checkpoints/",
@@ -154,8 +154,8 @@ def setup_person_classifier(cfg, video_class):
 def setup_crop_classifier(cfg, video_class, top_k, device):
     logger.info(f'Setting up CropClassifier model...')
     model = CropClassifier(
-            config=cfg, train_dataset=None, val_dataset=None, desired_output_shape=None,
-            loss_function=nn.BCEWithLogitsLoss(), collate_fn=None)
+        config=cfg, train_dataset=None, val_dataset=None, desired_output_shape=None,
+        loss_function=nn.BCEWithLogitsLoss(), collate_fn=None)
 
     checkpoint_root_path = f'{DATASET_TO_CROP_MODEL[video_class]}'
     checkpoint_files = os.listdir(checkpoint_root_path)
@@ -352,7 +352,7 @@ class PosMapToConventional(TracksAnalyzer):
                         video_class=v_clz, top_k=1, device=self.config.device
                     )
                     self.classifier.to(self.config.device)
-                    
+
                 gt_annotation_path = f"{self.root}annotations/{v_clz.value}/video{v_num}/annotation_augmented.csv"
                 classic_extracted_annotation_path = f"{self.root}{self.extracted_folder}/{v_clz.value}/" \
                                                     f"video{v_num}/generated_annotations.csv"
@@ -876,11 +876,17 @@ class PosMapToConventional(TracksAnalyzer):
 
             model_path = checkpoint_root_path + checkpoint_files[-self.config.checkpoint.top_k]
 
-            logger.info(f'Loading weights manually as custom load is {self.config.custom_load}')
+            logger.info(f'Loading weights from {model_path}')
             load_dict = torch.load(model_path, map_location=self.config.device)
 
-            m = CropClassifier(config=OmegaConf.load('config/training/training.yaml'),
-                               train_dataset=None, val_dataset=None)
+            m = RNNBaseline(
+                config=OmegaConf.merge(
+                    OmegaConf.load('config/training/training.yaml'),
+                    OmegaConf.load('config/eval/eval.yaml'),
+                    OmegaConf.load('config/model/model.yaml'),
+                ),
+                train_dataset=None,
+                val_dataset=None)
             m.load_state_dict(load_dict['state_dict'])
             m.to(self.config.device)
             m.eval()
@@ -927,6 +933,10 @@ class PosMapToConventional(TracksAnalyzer):
                     f"{self.root}classic_nn_extracted_annotations_" \
                     f"{classic_nn_extracted_annotations_version}/{v_clz.value}/" \
                     f"video{v_num}/annotation.csv"
+                nn_classic_extended_annotation_path = \
+                    f"{self.root}classic_nn_extended_annotations_" \
+                    f"{classic_nn_extracted_annotations_version}/{v_clz.value}/" \
+                    f"video{v_num}/"
 
                 ref_img = torchvision.io.read_image(f"{self.root}annotations/{v_clz.value}/video{v_num}/reference.jpg")
                 video_path = f"{self.root}/videos/{v_clz.value}/video{v_num}/video.mov"
@@ -937,6 +947,10 @@ class PosMapToConventional(TracksAnalyzer):
                     (ref_img.shape[1:]),
                     video_path, trajectory_model=model)
 
+                Path(nn_classic_extended_annotation_path).mkdir(parents=True, exist_ok=True)
+                extended_tracks_per_seq['nn_classic_extracted_extended_df'].to_csv(
+                    nn_classic_extended_annotation_path + '/annotation.csv', index=False)
+
                 if v_clz.name in extended_tracks.keys():
                     extended_tracks[v_clz.name][v_num] = extended_tracks_per_seq
                 else:
@@ -944,6 +958,9 @@ class PosMapToConventional(TracksAnalyzer):
                         v_num: extended_tracks_per_seq
                     }
 
+        torch.save(
+            extended_tracks,
+            f"{self.root}classic_nn_extended_annotations_{classic_nn_extracted_annotations_version}/extended_dict.pt")
         return extended_tracks
 
     def perform_collection_on_single_sequence(
@@ -1081,10 +1098,10 @@ class PosMapToConventional(TracksAnalyzer):
 
         nn_classic_extracted_extended_df = self.sort_df_by_key(nn_classic_extracted_extended_df)
 
-        if self.config.remove_unassociated_tracks:
-            nn_classic_extracted_extended_df = nn_classic_extracted_extended_df[
-                nn_classic_extracted_extended_df.track_id != -1
-            ]
+        # if self.config.remove_unassociated_tracks:
+        #     nn_classic_extracted_extended_df = nn_classic_extracted_extended_df[
+        #         nn_classic_extracted_extended_df.track_id != -1
+        #         ]
         # to add
         # - backward in time
 
@@ -1093,23 +1110,35 @@ class PosMapToConventional(TracksAnalyzer):
         unknown_tracks_after = nn_classic_extracted_extended_df.track_id.value_counts().values[0]
         diff = unknown_tracks_before - unknown_tracks_after
         predicted_tracks = [e for e in extended_tracks.tracks if len(e.extended_at_frames) > 0]
-        for p_track in predicted_tracks:
-            f_no = p_track.frames[0]
-            plot_trajectory_with_one_frame(
-                frame=extract_frame_from_video(video_path, f_no),
-                last_frame=None,
-                trajectory=np.stack(p_track.locations),
-                obs_trajectory=None,
-                frame_number=f_no,
-                track_id=0,
-                active_tracks=None,
-                current_frame_locations=None,
-                last_frame_locations=None,
-                plot_first_and_last=False,
-                use_lines=True,
-                marker_size=2
-            )
-        return extended_tracks
+
+        # if self.config.remove_unassociated_tracks:
+        nn_classic_extracted_extended_df = nn_classic_extracted_extended_df[
+                nn_classic_extracted_extended_df.track_id != -1
+                ]
+
+        if self.config.debug.enabled:
+            for p_track in predicted_tracks:
+                f_no = p_track.frames[0]
+                plot_trajectory_with_one_frame(
+                    frame=extract_frame_from_video(video_path, f_no),
+                    last_frame=None,
+                    trajectory=np.stack(p_track.locations),
+                    obs_trajectory=None,
+                    frame_number=f_no,
+                    track_id=0,
+                    active_tracks=None,
+                    current_frame_locations=None,
+                    last_frame_locations=None,
+                    plot_first_and_last=False,
+                    use_lines=True,
+                    marker_size=2
+                )
+        # return extended_tracks
+        return {'extended_tracks': extended_tracks,
+                'nn_classic_extracted_extended_df': nn_classic_extracted_extended_df,
+                'extras': {'unknown_tracks_before': unknown_tracks_before,
+                           'unknown_tracks_after': unknown_tracks_after,
+                           'diff': diff}}
 
     @staticmethod
     def sort_df_by_key(df, key='frame'):
@@ -1183,8 +1212,11 @@ class PosMapToConventional(TracksAnalyzer):
                 nn_classic_extracted_track_ids_future)
 
             candidate_location_f = out_locations[i].cpu().numpy()
+            if candidate_location_f.ndim == 1:
+                candidate_location_f = candidate_location_f[None, :]
             candidate_distance_matrix_f = np.sqrt(mm.distances.norm2squared_matrix(
-                objs=np.stack([c.location for c in candidate_agents_future]),
+                objs=np.stack([c.location for c in candidate_agents_future])
+                if len(candidate_agents_future) != 0 else np.zeros((0, 2)),
                 hyps=candidate_location_f,
             )) * ratio
 
@@ -1270,8 +1302,10 @@ class PosMapToConventional(TracksAnalyzer):
         out_locations = trajectory_out['out_xy'].squeeze(1)
         # take 1st location - create a distance matrix with candidate agents
         candidate_location = out_locations[0].cpu().numpy()
+        if candidate_location.ndim == 1:
+            candidate_location = candidate_location[None, :]
         candidate_distance_matrix = np.sqrt(mm.distances.norm2squared_matrix(
-            objs=np.stack([c.location for c in candidate_agents]),
+            objs=np.stack([c.location for c in candidate_agents]) if len(candidate_agents) != 0 else np.zeros((0, 2)),
             hyps=candidate_location,
         )) * ratio
         candidate_distance_matrix = self.config.threshold - candidate_distance_matrix
@@ -1291,7 +1325,10 @@ class PosMapToConventional(TracksAnalyzer):
             'in_dxdy': torch.tensor(in_dxdy).unsqueeze(1).float().cuda()
         }
         with torch.no_grad():
-            trajectory_out = trajectory_model.test(batch)
+            if isinstance(trajectory_model, (RNNBaseline, RNNGANBaseline)):
+                trajectory_out = trajectory_model(batch)
+            else:
+                trajectory_out = trajectory_model.test(batch)
         return trajectory_out
 
     def get_candidate_agents_for_collection_task(self, frame, nn_classic_extracted_centers,
@@ -1446,8 +1483,8 @@ if __name__ == '__main__':
     #     SDDVideoClasses.BOOKSTORE
     # )
     analyzer = PosMapToConventional(conf, use_patch_filtered=True, classifier=None)
-    out = analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=False, to_save_postfix="_new_v0")
-    # out = analyzer.perform_collection_on_multiple_sequences()
+    # out = analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=False, to_save_postfix="_new_v0")
+    out = analyzer.perform_collection_on_multiple_sequences(classic_nn_extracted_annotations_version='v1')
     # out = analyzer.get_metrics_for_multiple_sequences(to_load_postfix='_new_v0')
     # out = analyzer.generate_annotation_from_data(torch.load(
     #     '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/dummy_classic_nn.pt'))
