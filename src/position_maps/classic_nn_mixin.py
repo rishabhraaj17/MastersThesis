@@ -919,7 +919,7 @@ class PosMapToConventional(TracksAnalyzer):
 
         return valid_locs
 
-    def perform_collection_on_multiple_sequences(self, classic_nn_extracted_annotations_version='v0'):
+    def perform_collection_on_multiple_sequences(self, classic_nn_extracted_annotations_version='v0', is_gan=False):
         extended_tracks = {}
         for v_idx, (v_clz, v_meta_clz) in enumerate(zip(self.video_classes, self.video_meta_classes)):
             for v_num in self.video_numbers[v_idx]:
@@ -935,7 +935,7 @@ class PosMapToConventional(TracksAnalyzer):
                     f"video{v_num}/annotation.csv"
                 nn_classic_extended_annotation_path = \
                     f"{self.root}classic_nn_extended_annotations_" \
-                    f"{classic_nn_extracted_annotations_version}/{v_clz.value}/" \
+                    f"{classic_nn_extracted_annotations_version}/{'gan' if is_gan else 'simple'}/{v_clz.value}/" \
                     f"video{v_num}/"
 
                 ref_img = torchvision.io.read_image(f"{self.root}annotations/{v_clz.value}/video{v_num}/reference.jpg")
@@ -960,7 +960,8 @@ class PosMapToConventional(TracksAnalyzer):
 
         torch.save(
             extended_tracks,
-            f"{self.root}classic_nn_extended_annotations_{classic_nn_extracted_annotations_version}/extended_dict.pt")
+            f"{self.root}classic_nn_extended_annotations_{classic_nn_extracted_annotations_version}/"
+            f"{'gan' if is_gan else 'simple'}/extended_dict.pt")
         return extended_tracks
 
     def perform_collection_on_single_sequence(
@@ -1483,8 +1484,9 @@ if __name__ == '__main__':
     #     SDDVideoClasses.BOOKSTORE
     # )
     analyzer = PosMapToConventional(conf, use_patch_filtered=True, classifier=None)
-    # out = analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=False, to_save_postfix="_new_v0")
-    out = analyzer.perform_collection_on_multiple_sequences(classic_nn_extracted_annotations_version='v1')
+    # out = analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=False, to_save_postfix="_new_v1")
+    out = analyzer.perform_collection_on_multiple_sequences(
+        classic_nn_extracted_annotations_version='v1', is_gan=False)
     # out = analyzer.get_metrics_for_multiple_sequences(to_load_postfix='_new_v0')
     # out = analyzer.generate_annotation_from_data(torch.load(
     #     '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/dummy_classic_nn.pt'))
