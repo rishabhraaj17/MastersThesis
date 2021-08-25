@@ -192,7 +192,7 @@ def sdd_stats_from_website():
 
 def compare_crop_classifiers():
     old_path = "../../Datasets/SDD/classic_nn_extracted_annotations_v1/metrics_2m.csv"
-    new_path = "../../Datasets/SDD/classic_nn_extracted_annotations_new_v0/metrics_2m.csv"
+    new_path = "../../Datasets/SDD/classic_nn_extracted_annotations_new_v1/metrics_2m.csv"
 
     old_df = pd.read_csv(old_path)
     new_df = pd.read_csv(new_path)
@@ -203,9 +203,17 @@ def compare_crop_classifiers():
     out_df['nn_precision_v0'] = old_df.loc[:, 'classic_nn_precision']
     out_df['nn_precision_v1'] = new_df.loc[:, 'classic_nn_precision']
 
+    out_df['p_diff_v0_v1'] = old_df.loc[:, 'classic_nn_precision'] - new_df.loc[:, 'classic_nn_precision']
+    out_df['p_diff_classic_v0'] = old_df.loc[:, 'classic_precision'] - old_df.loc[:, 'classic_nn_precision']
+    out_df['p_diff_classic_v1'] = old_df.loc[:, 'classic_precision'] - new_df.loc[:, 'classic_nn_precision']
+
     out_df['classic_recall'] = old_df.loc[:, 'classic_recall']
     out_df['nn_recall_v0'] = old_df.loc[:, 'classic_nn_recall']
     out_df['nn_recall_v1'] = new_df.loc[:, 'classic_nn_recall']
+
+    out_df['r_diff_v0_v1'] = old_df.loc[:, 'classic_nn_recall'] - new_df.loc[:, 'classic_nn_recall']
+    out_df['r_diff_classic_v0'] = old_df.loc[:, 'classic_recall'] - old_df.loc[:, 'classic_nn_recall']
+    out_df['r_diff_classic_v1'] = old_df.loc[:, 'classic_recall'] - new_df.loc[:, 'classic_nn_recall']
 
     out_df['neighbourhood_radius'] = old_df.loc[:, 'neighbourhood_radius']
 
@@ -216,13 +224,15 @@ def compare_crop_classifiers():
         precision_winner = np.argmax(row_numpy[3:5])
         row[3 + precision_winner] = f"**{row[3 + precision_winner]}**"
 
-        recall_winner = np.argmax(row_numpy[6:8])
-        row[6 + recall_winner] = f"**{row[6 + recall_winner]}**"
+        # recall_winner = np.argmax(row_numpy[6:8])
+        # row[6 + recall_winner] = f"**{row[6 + recall_winner]}**"
+        recall_winner = np.argmax(row_numpy[9:11])
+        row[9 + recall_winner] = f"**{row[9 + recall_winner]}**"
         series_list.append(row.values)
 
     out_df_bold = pd.DataFrame(series_list, columns=out_df.columns.values)
     out_df_bold.to_markdown(
-        "../../Datasets/SDD/classic_nn_extracted_annotations_new_v0/metrics_2m.md",
+        "../../Datasets/SDD/classic_nn_extracted_annotations_new_v1/metrics_2m_extended.md",
         index=False)
 
 

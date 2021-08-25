@@ -61,13 +61,16 @@ DATASET_TO_CROP_MODEL = {
     SDDVideoClasses.COUPA:
         f"{CROP_MODEL_PATH}wandb/run-20210813_135017-2978wfe5/files/CropClassifier/2978wfe5/checkpoints/",
     SDDVideoClasses.GATES:
-        f"{CROP_MODEL_PATH}wandb/run-20210813_142357-2j3vkg27/files/CropClassifier/2j3vkg27/checkpoints/",
+        # f"{CROP_MODEL_PATH}wandb/run-20210813_142357-2j3vkg27/files/CropClassifier/2j3vkg27/checkpoints/",
+        f"{CROP_MODEL_PATH}wandb/run-20210823_115433-ki2d4iwl/files/CropClassifier/ki2d4iwl/checkpoints/",
     SDDVideoClasses.HYANG:
         f"{CROP_MODEL_PATH}wandb/run-20210816_142502-1d30kmn6/files/CropClassifier/1d30kmn6/checkpoints/",
     SDDVideoClasses.LITTLE:
-        f"{CROP_MODEL_PATH}wandb/run-20210813_191047-1n62qtzi/files/CropClassifier/1n62qtzi/checkpoints/",
+        # f"{CROP_MODEL_PATH}wandb/run-20210813_191047-1n62qtzi/files/CropClassifier/1n62qtzi/checkpoints/",
+        f"{CROP_MODEL_PATH}wandb/run-20210823_123122-1ra2loyt/files/CropClassifier/1ra2loyt/checkpoints/",
     SDDVideoClasses.NEXUS:
-        f"{CROP_MODEL_PATH}wandb/run-20210814_004752-661tsvc1/files/CropClassifier/661tsvc1/checkpoints/",
+        # f"{CROP_MODEL_PATH}wandb/run-20210814_004752-661tsvc1/files/CropClassifier/661tsvc1/checkpoints/",
+        f"{CROP_MODEL_PATH}wandb/run-20210823_132331-3rl6azww/files/CropClassifier/3rl6azww/checkpoints/",
     SDDVideoClasses.QUAD:
         f"{CROP_MODEL_PATH}wandb/run-20210815_174701-3jrxnwwl/files/CropClassifier/3jrxnwwl/checkpoints/",
     SDDVideoClasses.DEATH_CIRCLE:
