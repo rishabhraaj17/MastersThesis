@@ -337,7 +337,8 @@ def get_single_dataset(cfg, video_class, v_num, split_dataset, smooth_trajectori
 
 def get_single_generated_dataset_from_tempfile(cfg, video_class, video_number, split_dataset,
                                                smooth_trajectories=False, smoother=lambda x: x, threshold=1,
-                                               frame_rate=30., time_step=0.4):
+                                               frame_rate=30., time_step=0.4, adjust_framerate=True, 
+                                               extended_version='v1'):
     filename = cfg.unsupervised_csv
     dataset_folder = 'filtered_generated_annotations_augmented'
 
@@ -352,9 +353,16 @@ def get_single_generated_dataset_from_tempfile(cfg, video_class, video_number, s
         filename = 'trajectories.csv'
     elif cfg.unsupervised_root == 'classic_nn_extracted_annotations':
         dataset_folder = 'classic_nn_extracted_annotations'
+    elif cfg.unsupervised_root == f'classic_nn_extended_annotations_{extended_version}':
+        dataset_folder = f'classic_nn_extended_annotations_{extended_version}'
+        filename = 'annotation.csv'
 
     load_path = f"{cfg.root}{dataset_folder}/" \
                 f"{getattr(SDDVideoClasses, video_class).value}/video{video_number}/{filename}"
+
+    if cfg.unsupervised_root == f'classic_nn_extended_annotations_{extended_version}':
+        load_path = f"{cfg.root}{dataset_folder}/{'gan' if cfg.gan_extended else 'simple'}/" \
+                    f"{getattr(SDDVideoClasses, video_class).value}/video{video_number}/{filename}"
 
     data_df = pd.read_csv(load_path)
 
@@ -364,7 +372,8 @@ def get_single_generated_dataset_from_tempfile(cfg, video_class, video_number, s
         data_df = data_df[['frame_number', 'track_id', 'center_x', 'center_y']]
         data_df = data_df.rename(columns={"frame_number": "frame"})
 
-    data_df = adjust_dataframe_framerate(data_df, for_gt=False, frame_rate=frame_rate, time_step=time_step)
+    if adjust_framerate:
+        data_df = adjust_dataframe_framerate(data_df, for_gt=False, frame_rate=frame_rate, time_step=time_step)
 
     temp_file = tempfile.NamedTemporaryFile(suffix='.txt')
     data_df.to_csv(temp_file, header=False, index=False, sep=' ')
@@ -398,7 +407,8 @@ def get_single_generated_dataset_from_tempfile(cfg, video_class, video_number, s
 
 def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True,
                           smooth_trajectories=False, smoother=lambda x: x, threshold=1,
-                          from_temp_file=True, frame_rate=30., time_step=0.4):
+                          from_temp_file=True, frame_rate=30., time_step=0.4, adjust_framerate=True,
+                          extended_version='v1'):
     conf = cfg.tp_module.datasets
     video_classes = conf.video_classes
     video_numbers = conf.video_numbers
@@ -413,7 +423,9 @@ def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True,
                         smooth_trajectories=smooth_trajectories,
                         smoother=smoother, threshold=threshold,
                         frame_rate=frame_rate,
-                        time_step=time_step)
+                        time_step=time_step, 
+                        adjust_framerate=adjust_framerate,
+                        extended_version=extended_version)
                 else:
                     t_dset, v_dset, test_dset = get_single_dataset(
                         conf, video_class, v_num, split_dataset,
@@ -427,7 +439,9 @@ def get_multiple_datasets(cfg, split_dataset=True, with_dataset_idx=True,
                     dset = get_single_generated_dataset_from_tempfile(cfg, video_class, v_num, split_dataset,
                                                                       smooth_trajectories=smooth_trajectories,
                                                                       smoother=smoother, threshold=threshold,
-                                                                      frame_rate=frame_rate, time_step=time_step)
+                                                                      frame_rate=frame_rate, time_step=time_step, 
+                                                                      adjust_framerate=adjust_framerate,
+                                                                      extended_version=extended_version)
                 else:
                     dset = get_single_dataset(cfg, video_class, v_num, split_dataset,
                                               smooth_trajectories=smooth_trajectories,
@@ -803,7 +817,9 @@ def viz_dataset_trajectories():
                 threshold=cfg.tp_module.smooth_trajectories.min_length,
                 from_temp_file=cfg.tp_module.datasets.from_temp_file,
                 frame_rate=cfg.tp_module.datasets.frame_rate,
-                time_step=cfg.tp_module.datasets.time_step
+                time_step=cfg.tp_module.datasets.time_step,
+                adjust_framerate=not cfg.tp_module.using_extended_trajectories,
+                extended_version=cfg.tp_module.extended_version
             )
         else:
             train_dataset, val_dataset, test_dataset = get_multiple_gt_dataset(
@@ -920,7 +936,7 @@ def viz_foreign_dataset_trajectories():
 
 
 if __name__ == '__main__':
-    viz_foreign_dataset_trajectories()
+    # viz_foreign_dataset_trajectories()
     viz_dataset_trajectories()
     # viz_raw_tracks()
 

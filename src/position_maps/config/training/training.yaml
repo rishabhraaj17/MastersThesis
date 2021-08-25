@@ -31,6 +31,8 @@ tp_module:
     min_length: 4
     smoother: 'bezier'  # or 'simple'
 
+  using_extended_trajectories: True
+  extended_version: 'v1'
   datasets:
     root_gt: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/OpenTraj/datasets/SDD/'
     root_log: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/Trajectories/'
@@ -44,8 +46,11 @@ tp_module:
     # filtered_generated_annotations_augmented - patch filtered with some manual augmentations
     # pm_extracted_annotations - position map vanilla detections
     # classic_nn_extracted_annotations - classic patch filtered + position_map new detections
-    unsupervised_root: 'filtered_generated_annotations_augmented'
+    # classic_nn_extended_annotations_ - extended (add version)
+    unsupervised_root: 'classic_nn_extended_annotations_v1'
     unsupervised_csv: 'generated_annotations.csv'
+
+    gan_extended: False
 
     use_standard_dataset: True
 

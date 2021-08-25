@@ -56,7 +56,9 @@ def setup_dataset(cfg):
                 threshold=cfg.tp_module.smooth_trajectories.min_length,
                 from_temp_file=cfg.tp_module.datasets.from_temp_file,
                 frame_rate=cfg.tp_module.datasets.frame_rate,
-                time_step=cfg.tp_module.datasets.time_step
+                time_step=cfg.tp_module.datasets.time_step,
+                adjust_framerate=not cfg.tp_module.using_extended_trajectories,
+                extended_version=cfg.tp_module.extended_version
             )
         else:
             train_dataset, val_dataset, test_dataset = get_multiple_gt_dataset(
