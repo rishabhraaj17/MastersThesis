@@ -1114,8 +1114,8 @@ class PosMapToConventional(TracksAnalyzer):
 
         # if self.config.remove_unassociated_tracks:
         nn_classic_extracted_extended_df = nn_classic_extracted_extended_df[
-                nn_classic_extracted_extended_df.track_id != -1
-                ]
+            nn_classic_extracted_extended_df.track_id != -1
+            ]
 
         if self.config.debug.enabled:
             for p_track in predicted_tracks:
@@ -1147,8 +1147,24 @@ class PosMapToConventional(TracksAnalyzer):
         df = df.drop(columns=['index'])
         return df
 
-    def interpolate_tracks_for_collection_task(self, extended_tracks, nn_classic_extracted_extended_df):
+    def interpolate_tracks_for_collection_task_v0(self, extended_tracks, nn_classic_extracted_extended_df):
         for ex_track in extended_tracks.tracks:
+            for fr, lloc in zip(ex_track.frames, ex_track.locations):
+                if nn_classic_extracted_extended_df[
+                    (nn_classic_extracted_extended_df.frame == fr) &
+                    (nn_classic_extracted_extended_df.track_id == ex_track.idx)
+                ].empty:
+                    nn_classic_extracted_extended_df = nn_classic_extracted_extended_df.append(
+                        {
+                            'frame': fr,
+                            'track_id': ex_track.idx,
+                            'x': lloc[0],
+                            'y': lloc[1],
+                        }, ignore_index=True
+                    )
+
+            if ex_track.idx == 542:
+                print()
             frames = np.array(ex_track.frames)
             frames_diff = np.diff(frames)
 
@@ -1179,6 +1195,61 @@ class PosMapToConventional(TracksAnalyzer):
 
                     frames = np.array(ex_track.frames)
                     frames_diff = np.diff(frames)
+        return nn_classic_extracted_extended_df
+
+    def interpolate_tracks_for_collection_task(self, extended_tracks, nn_classic_extracted_extended_df):
+        for ex_track in extended_tracks.tracks:
+            for fr, lloc in zip(ex_track.frames, ex_track.locations):
+                if nn_classic_extracted_extended_df[
+                    (nn_classic_extracted_extended_df.frame == fr) &
+                    (nn_classic_extracted_extended_df.track_id == ex_track.idx)
+                ].empty:
+                    nn_classic_extracted_extended_df = nn_classic_extracted_extended_df.append(
+                        {
+                            'frame': fr,
+                            'track_id': ex_track.idx,
+                            'x': lloc[0],
+                            'y': lloc[1],
+                        }, ignore_index=True
+                    )
+
+            if ex_track.idx == 542:
+                print()
+            frames = np.array(ex_track.frames)
+            frames_diff = np.diff(frames)
+
+            locations = np.array(ex_track.locations)
+            # for idx in range(len(frames_diff)):
+            if len(frames_diff) != 0:
+                while frames_diff.max() != 1:
+                    for idx, diff_value in enumerate(iter(frames_diff)):
+                        time_gap = frames_diff[idx]
+                        if time_gap > 1:
+                            step0, step1 = locations[idx], locations[idx + 1]
+                            # step_mid = self.linear_interpolate_simple(points=[step0, step1])
+                            k_t = 0
+                            for k in range(2, time_gap + 1):
+                                step_mid = self.linear_interpolate(t=k, times=[1, time_gap + 1],
+                                                                   points=[step0, step1])
+                                ex_track.frames.insert(idx + (1 + k_t), frames[idx] + (1 + k_t))
+                                ex_track.locations.insert(idx + (1 + k_t), list(step_mid))
+                                ex_track.extended_at_frames.insert(idx + (1 + k_t), frames[idx] + (1 + k_t))
+
+                                nn_classic_extracted_extended_df = nn_classic_extracted_extended_df.append(
+                                    {
+                                        'frame': frames[idx] + (1 + k_t),
+                                        'track_id': ex_track.idx,
+                                        'x': step_mid[0],
+                                        'y': step_mid[1],
+                                    }, ignore_index=True
+                                )
+
+                                k_t += 1
+
+                            frames = np.array(ex_track.frames)
+                            frames_diff = np.diff(frames)
+                            locations = np.array(ex_track.locations)
+                            break
         return nn_classic_extracted_extended_df
 
     @staticmethod
