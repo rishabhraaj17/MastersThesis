@@ -1126,7 +1126,7 @@ class PosMapToConventional(TracksAnalyzer):
                     trajectory=np.stack(p_track.locations),
                     obs_trajectory=None,
                     frame_number=f_no,
-                    track_id=0,
+                    track_id=p_track.idx,
                     active_tracks=None,
                     current_frame_locations=None,
                     last_frame_locations=None,
@@ -1163,8 +1163,6 @@ class PosMapToConventional(TracksAnalyzer):
                         }, ignore_index=True
                     )
 
-            if ex_track.idx == 542:
-                print()
             frames = np.array(ex_track.frames)
             frames_diff = np.diff(frames)
 
@@ -1213,8 +1211,6 @@ class PosMapToConventional(TracksAnalyzer):
                         }, ignore_index=True
                     )
 
-            if ex_track.idx == 542:
-                print()
             frames = np.array(ex_track.frames)
             frames_diff = np.diff(frames)
 
