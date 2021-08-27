@@ -919,7 +919,8 @@ class PosMapToConventional(TracksAnalyzer):
 
         return valid_locs
 
-    def perform_collection_on_multiple_sequences(self, classic_nn_extracted_annotations_version='v0', is_gan=False):
+    def perform_collection_on_multiple_sequences(self, classic_nn_extracted_annotations_version='v0', is_gan=False, 
+                                                 future_d=2):
         extended_tracks = {}
         for v_idx, (v_clz, v_meta_clz) in enumerate(zip(self.video_classes, self.video_meta_classes)):
             for v_num in self.video_numbers[v_idx]:
@@ -935,7 +936,8 @@ class PosMapToConventional(TracksAnalyzer):
                     f"video{v_num}/annotation.csv"
                 nn_classic_extended_annotation_path = \
                     f"{self.root}classic_nn_extended_annotations_" \
-                    f"{classic_nn_extracted_annotations_version}/{'gan' if is_gan else 'simple'}/{v_clz.value}/" \
+                    f"{classic_nn_extracted_annotations_version}" \
+                    f"/d{future_d}/{'gan' if is_gan else 'simple'}/{v_clz.value}/" \
                     f"video{v_num}/"
 
                 ref_img = torchvision.io.read_image(f"{self.root}annotations/{v_clz.value}/video{v_num}/reference.jpg")
@@ -960,7 +962,8 @@ class PosMapToConventional(TracksAnalyzer):
 
         torch.save(
             extended_tracks,
-            f"{self.root}classic_nn_extended_annotations_{classic_nn_extracted_annotations_version}/"
+            f"{self.root}classic_nn_extended_annotations_{classic_nn_extracted_annotations_version}"
+            f"/d{future_d}/"
             f"{'gan' if is_gan else 'simple'}/extended_dict.pt")
         return extended_tracks
 
