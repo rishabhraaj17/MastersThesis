@@ -356,11 +356,15 @@ def get_single_generated_dataset_from_tempfile(cfg, video_class, video_number, s
     elif cfg.unsupervised_root == f'classic_nn_extended_annotations_{extended_version}':
         dataset_folder = f'classic_nn_extended_annotations_{extended_version}'
         filename = 'annotation.csv'
+    elif cfg.unsupervised_root == f'classic_nn_extended_annotations_new_{extended_version}':
+        dataset_folder = f'classic_nn_extended_annotations_new_{extended_version}'
+        filename = 'annotation.csv'
 
     load_path = f"{cfg.root}{dataset_folder}/" \
                 f"{getattr(SDDVideoClasses, video_class).value}/video{video_number}/{filename}"
 
-    if cfg.unsupervised_root == f'classic_nn_extended_annotations_{extended_version}':
+    if cfg.unsupervised_root == f'classic_nn_extended_annotations_{extended_version}' or \
+            cfg.unsupervised_root == f'classic_nn_extended_annotations_new_{extended_version}':
         load_path = f"{cfg.root}{dataset_folder}/d{cfg.dead_threshold}/{'gan' if cfg.gan_extended else 'simple'}/" \
                     f"{getattr(SDDVideoClasses, video_class).value}/video{video_number}/{filename}"
 

@@ -1195,6 +1195,6 @@ if __name__ == '__main__':
     # overfit()
     # overfit_gan()
     # evaluate()
-    # train_lightning()
+    train_lightning()
     # evaluate_stochastic()
-    evaluate_models()
+    # evaluate_models()
