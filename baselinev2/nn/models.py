@@ -672,10 +672,10 @@ class ConstantLinearBaseline(object):
 
 
 class ConstantLinearBaselineV2(ConstantLinearBaseline):
-    def __init__(self, xy=None, uv=None, prediction_length=12, relative_velocities=False):
+    def __init__(self, xy=None, uv=None, prediction_length=12, relative_velocities=False, foreign_dataset=False):
         super(ConstantLinearBaselineV2, self).__init__(
             xy=xy, uv=uv, prediction_length=prediction_length, relative_velocities=relative_velocities)
-
+        self.foreign_dataset = foreign_dataset
 
     def eval(self, obs_trajectory, obs_distances, gt_trajectory, ratio, batch_size):
         self.reset(xy=obs_trajectory[:, -1, ...], uv=obs_distances[:, -1, ...])
@@ -693,8 +693,9 @@ class ConstantLinearBaselineV2(ConstantLinearBaseline):
         ade = ade.squeeze()
         fde = fde.squeeze()
 
-        ade *= ratio.squeeze().cpu()
-        fde *= ratio.squeeze().cpu()
+        if not self.foreign_dataset:
+            ade *= ratio.squeeze().cpu()
+            fde *= ratio.squeeze().cpu()
 
         return pred_trajectory, ade, fde
 

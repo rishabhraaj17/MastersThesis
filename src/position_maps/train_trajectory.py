@@ -1,5 +1,6 @@
 import os
 import warnings
+from pathlib import Path
 
 import hydra
 import numpy as np
@@ -24,7 +25,8 @@ from log import get_logger
 from src.position_maps.trajectory_utils import get_multiple_datasets, bezier_smoother, splrep_smoother
 from src_lib.datasets.extracted_dataset import get_train_and_val_datasets, extracted_collate
 from src_lib.datasets.opentraj_based import get_multiple_gt_dataset, get_eth_dataset, get_ucy_dataset
-from src_lib.datasets.trajectory_stgcnn import seq_collate_with_dataset_idx_dict, SmoothTrajectoryDataset
+from src_lib.datasets.trajectory_stgcnn import seq_collate_with_dataset_idx_dict, SmoothTrajectoryDataset, \
+    seq_collate_dict
 from src_lib.models_hub import TransformerNoisyMotionGenerator, TrajectoryGANTransformerV2
 
 warnings.filterwarnings("ignore")
@@ -35,9 +37,9 @@ logger = get_logger(__name__)
 
 def setup_foreign_dataset(cfg):
     if cfg.tp_module.datasets.foreign_dataset == 'eth':
-        dataset = get_eth_dataset(cfg.tp_module.datasets, split_dataset=False, world_to_image=False)
+        dataset = get_eth_dataset(cfg.tp_module.datasets, split_dataset=False, world_to_image=True)
     elif cfg.tp_module.datasets.foreign_dataset == 'ucy':
-        dataset = get_ucy_dataset(cfg.tp_module.datasets, split_dataset=False, world_to_image=False)
+        dataset = get_ucy_dataset(cfg.tp_module.datasets, split_dataset=False, world_to_image=True)
     else:
         raise NotImplemented
 
@@ -732,7 +734,8 @@ def overfit(cfg):
 
 def evaluate_deterministic(
         model, dataset, collate_fn, constant_linear_baseline_caller, device, use_standard_dataset, root,
-        save_path, batch_size=1, filter_mode=False, moving_only=True, stationary_only=False, batch_multiplier=-1):
+        save_path, batch_size=1, filter_mode=False, moving_only=True, stationary_only=False, batch_multiplier=-1, 
+        use_foreign_dataset=False, foreign_dataset='eth', open_traj_root=''):
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, pin_memory=True, drop_last=False,
                         collate_fn=collate_fn)
 
@@ -781,7 +784,7 @@ def evaluate_deterministic(
         linear_ade_list.append(constant_linear_baseline_ade.mean().item())
         linear_fde_list.append(constant_linear_baseline_fde.mean().item())
 
-        dataset_idx = batch['dataset_idx'].item()
+        # dataset_idx = batch['dataset_idx'].item()
         seq_start_end = batch['seq_start_end']
         frame_nums = batch['in_frames']
         track_lists = batch['in_tracks']
@@ -795,14 +798,20 @@ def evaluate_deterministic(
         frame_num = int(frame_nums[:, random_trajectory_idx, ...][0].item())
         track_num = int(track_lists[:, random_trajectory_idx, ...][0].item())
 
-        current_dataset = loader.dataset.datasets[dataset_idx].dataset \
-            if use_standard_dataset else loader.dataset.datasets[dataset_idx]
-        if isinstance(current_dataset, SmoothTrajectoryDataset):
-            current_dataset = current_dataset.base_dataset
+        if not use_foreign_dataset:
+            dataset_idx = batch['dataset_idx'].item()
+            current_dataset = loader.dataset.datasets[dataset_idx].dataset \
+                if use_standard_dataset else loader.dataset.datasets[dataset_idx]
+            if isinstance(current_dataset, SmoothTrajectoryDataset):
+                current_dataset = current_dataset.base_dataset
 
-        if use_standard_dataset:
+        if use_standard_dataset and not use_foreign_dataset:
             video_path = f"{root}videos/{getattr(SDDVideoClasses, current_dataset.video_class).value}" \
                          f"/video{current_dataset.video_number}/video.mov"
+        elif use_foreign_dataset and foreign_dataset == 'eth':
+            video_path = os.path.join(open_traj_root, 'datasets/ETH/seq_eth/video.avi')
+        elif use_foreign_dataset and foreign_dataset == 'ucy':
+            video_path = os.path.join(open_traj_root, 'datasets/UCY/zara01/video.avi')
         else:
             video_path = f"{root}videos/{current_dataset.video_class.value}" \
                          f"/video{current_dataset.video_number}/video.mov"
@@ -836,7 +845,8 @@ def evaluate_deterministic(
 
 def evaluate_stochastic_core(
         model, dataset, collate_fn, constant_linear_baseline_caller, device, use_standard_dataset, root,
-        save_path, batch_size=2, filter_mode=False, moving_only=True, stationary_only=False, batch_multiplier=10):
+        save_path, batch_size=2, filter_mode=False, moving_only=True, stationary_only=False, batch_multiplier=10,
+        use_foreign_dataset=False, foreign_dataset='eth', open_traj_root=''):
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, pin_memory=True, drop_last=False,
                         collate_fn=collate_fn)
 
@@ -882,8 +892,9 @@ def evaluate_stochastic_core(
         ade, fde, best_idx = cal_ade_fde_stochastic(target_separated, pred_separated)
         modes_caught = (fde < model.config.tp_module.datasets.mode_dist_threshold).float()
 
-        ade *= batch['ratio'].squeeze()
-        fde *= batch['ratio'].squeeze()
+        if not use_foreign_dataset:
+            ade *= batch['ratio'].squeeze()
+            fde *= batch['ratio'].squeeze()
 
         ade_list.append(ade.mean().item())
         fde_list.append(fde.mean().item())
@@ -899,7 +910,7 @@ def evaluate_stochastic_core(
         random_trajectory_idx = np.random.choice(
             min(batch['dataset_idx'].shape[-1], obs_separated.shape[2]), 1, replace=False).item()
 
-        dataset_idx = batch['dataset_idx'][random_trajectory_idx].item()
+        # dataset_idx = batch['dataset_idx'][random_trajectory_idx].item()
 
         obs_trajectory = obs_separated[:, :, random_trajectory_idx, ...]
         gt_trajectory = target_separated[:, :, random_trajectory_idx, ...]
@@ -908,14 +919,21 @@ def evaluate_stochastic_core(
         frame_num = int(frame_nums[0, random_trajectory_idx, ...][0].item())
         track_num = int(track_lists[0, random_trajectory_idx, ...][0].item())
 
-        current_dataset = loader.dataset.datasets[dataset_idx].dataset \
-            if use_standard_dataset else loader.dataset.datasets[dataset_idx]
-        if isinstance(current_dataset, SmoothTrajectoryDataset):
-            current_dataset = current_dataset.base_dataset
+        if not use_foreign_dataset:
+            dataset_idx = batch['dataset_idx'][random_trajectory_idx].item()
 
-        if use_standard_dataset:
+            current_dataset = loader.dataset.datasets[dataset_idx].dataset \
+                if use_standard_dataset else loader.dataset.datasets[dataset_idx]
+            if isinstance(current_dataset, SmoothTrajectoryDataset):
+                current_dataset = current_dataset.base_dataset
+
+        if use_standard_dataset and not use_foreign_dataset:
             video_path = f"{root}videos/{getattr(SDDVideoClasses, current_dataset.video_class).value}" \
                          f"/video{current_dataset.video_number}/video.mov"
+        elif use_foreign_dataset and foreign_dataset == 'eth':
+            video_path = os.path.join(open_traj_root, 'datasets/ETH/seq_eth/video.avi')
+        elif use_foreign_dataset and foreign_dataset == 'ucy':
+            video_path = os.path.join(open_traj_root, 'datasets/UCY/zara01/video.avi')
         else:
             video_path = f"{root}videos/{current_dataset.video_class.value}" \
                          f"/video{current_dataset.video_number}/video.mov"
@@ -1001,14 +1019,27 @@ def evaluate_models(cfg):
     batch_multiplier = 10
 
     logger.info(f"Evaluation - Setting up dataset and model")
-    train_dataset, val_dataset, test_dataset = setup_dataset(cfg)
+    cfg.tp_module.using_extended_trajectories = False
+    cfg.tp_module.datasets.use_generated = False
+
+    cfg.tp_module.datasets.use_foreign_dataset = True
+    cfg.tp_module.datasets.foreign_dataset = 'ucy'
+
+    if cfg.tp_module.datasets.use_foreign_dataset:
+        test_dataset, _ = setup_dataset(cfg)
+    else:
+        train_dataset, val_dataset, test_dataset = setup_dataset(cfg)
 
     if cfg.tp_module.datasets.use_standard_dataset:
         collate_fn = seq_collate_with_dataset_idx_dict
     else:
         collate_fn = extracted_collate
+        
+    if cfg.tp_module.datasets.use_foreign_dataset:
+        collate_fn = seq_collate_dict
 
-    constant_linear_baseline_caller = ConstantLinearBaselineV2()
+    constant_linear_baseline_caller = ConstantLinearBaselineV2(
+        foreign_dataset=cfg.tp_module.datasets.use_foreign_dataset)
 
     model_dict = {
         'lstm_gt':
@@ -1090,7 +1121,7 @@ def evaluate_models(cfg):
                     cfg=cfg,
                     model_str="RNNBaseline",
                     wandb_enabled=True,
-                    run_name="",
+                    run_name="run-20210830_120436-3q3qs3vy",
                     tb_dict={},
                     top_k=1,
                 )
@@ -1102,7 +1133,7 @@ def evaluate_models(cfg):
                     cfg=cfg,
                     model_str="RNNGANBaseline",
                     wandb_enabled=True,
-                    run_name="",
+                    run_name="run-20210902_161912-2lodals6",
                     tb_dict={},
                     top_k=1,
                 )
@@ -1116,7 +1147,7 @@ def evaluate_models(cfg):
         if model is not None:
             loss, ade, fde, linear_ade, linear_fde = evaluator(
                 model=model,
-                dataset=val_dataset,
+                dataset=test_dataset,
                 collate_fn=collate_fn,
                 constant_linear_baseline_caller=constant_linear_baseline_caller,
                 device='cuda:0',
@@ -1130,6 +1161,9 @@ def evaluate_models(cfg):
                 moving_only=moving_only,
                 stationary_only=stationary_only,
                 batch_multiplier=batch_multiplier if is_gan else -1,
+                use_foreign_dataset=cfg.tp_module.datasets.use_foreign_dataset,
+                foreign_dataset=cfg.tp_module.datasets.foreign_dataset,
+                open_traj_root=cfg.tp_module.datasets.open_traj_root
             )
             model_name_list.append(model_key_name)
             ade_list.append(ade)
@@ -1146,8 +1180,12 @@ def evaluate_models(cfg):
             'linear_fde': linear_fde_list,
         }
     )
+    foreign_appender = ('_' + cfg.tp_module.datasets.foreign_dataset) \
+        if cfg.tp_module.datasets.use_foreign_dataset else ''
+    Path(f"logs/trajectory_model_eval{foreign_appender}/moving_only_{moving_only}"
+         f"_stationary_only_{stationary_only}_batch_k_{batch_multiplier}/").mkdir(parents=True, exist_ok=True)
     df.to_csv(
-        f"logs/trajectory_model_eval/moving_only_{moving_only}_stationary_only_{stationary_only}_"
+        f"logs/trajectory_model_eval{foreign_appender}/moving_only_{moving_only}_stationary_only_{stationary_only}_"
         f"batch_k_{batch_multiplier}/eval_moving_only_{moving_only}_"
         f"stationary_only_{stationary_only}_batch_k_{batch_multiplier}.csv")
     return df
@@ -1157,6 +1195,6 @@ if __name__ == '__main__':
     # overfit()
     # overfit_gan()
     # evaluate()
-    train_lightning()
+    # train_lightning()
     # evaluate_stochastic()
-    # evaluate_models()
+    evaluate_models()

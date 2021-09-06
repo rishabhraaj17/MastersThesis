@@ -57,7 +57,7 @@ def seq_collate_dict(data):
         'in_frames': obs_frames, 'gt_frames': pred_frames,
         'in_tracks': obs_tracks, 'gt_tracks': pred_tracks,
         'non_linear_ped': non_linear_ped, 'loss_mask': loss_mask,
-        'seq_start_end': seq_start_end, 'ratio': ratio
+        'seq_start_end': seq_start_end, 'ratio': ratio, 'dataset_idx': torch.tensor([0])
     }
 
 
