@@ -75,7 +75,8 @@ def plot_relative_distances_line_plot(distances, title, save_path=None):
         plt.show()
 
 
-def whole_dataset_analysis(generated_dataset, split, mem_mode, root_path, use_all_splits=False, for_phase2=False):
+def whole_dataset_analysis(generated_dataset, split, mem_mode, root_path, use_all_splits=False, for_phase2=False,
+                           extra_path=''):
     obs_trajectories, pred_trajectories, obs_relative_distances_list, \
     pred_relative_distances_list, to_meter_list = \
         [], [], [], [], []
@@ -88,7 +89,7 @@ def whole_dataset_analysis(generated_dataset, split, mem_mode, root_path, use_al
             logger.info(f'Generating for {clz.name} - Video {vid}')
             if for_phase2:
                 plot_path = \
-                    f"{ROOT_PATH}Plots/baseline_v2/nn/STATS_NN/{clz.value}{vid}/" \
+                    f"{ROOT_PATH}Plots/baseline_v2/nn/STATS_NN/{extra_path}{clz.value}{vid}/" \
                     f"{'generated/' if generated_dataset else 'gt/'}{'together' if use_all_splits else split.name}/"
             else:
                 plot_path = \
@@ -148,7 +149,7 @@ def whole_dataset_analysis(generated_dataset, split, mem_mode, root_path, use_al
     logger.info(f'Total tracks count: {full_length_trajectory_list.shape}')
 
     if for_phase2:
-        plot_path = f"{ROOT_PATH}Plots/baseline_v2/nn/STATS_NN/full_dataset/" \
+        plot_path = f"{ROOT_PATH}Plots/baseline_v2/nn/STATS_NN/{extra_path}/full_dataset/" \
                     f"{'generated/' if generated_dataset else 'gt/'}{'together' if use_all_splits else split.name}/"
     else:
         plot_path = f"{ROOT_PATH}Plots/baseline_v2/nn/STATS/full_dataset/" \
@@ -259,8 +260,8 @@ def whole_dataset_distribution_analysis(generated_dataset, split, mem_mode, root
 
 
 if __name__ == '__main__':
-    analyze_whole_dataset = True
-    analyze_whole_dataset_for_phase2 = False
+    analyze_whole_dataset = False
+    analyze_whole_dataset_for_phase2 = True
     find_distribution_whole_dataset = False
 
     mem_mode = None
@@ -277,8 +278,8 @@ if __name__ == '__main__':
         logger.info('Whole Dataset Analysis - Phase2')
         whole_dataset_analysis(
             generated_dataset=generated_dataset, split=split, mem_mode=mem_mode,
-            root_path='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/pm_extracted_annotations/',
-            use_all_splits=True, for_phase2=True)
+            root_path='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/extended_splits/classic_nn_extended_annotations_v1/d2/gan/',
+            use_all_splits=True, for_phase2=True, extra_path='d2/gan/')
     elif find_distribution_whole_dataset:
         logger.info('Distribution Analysis')
         whole_dataset_distribution_analysis(generated_dataset=generated_dataset, split=split,
