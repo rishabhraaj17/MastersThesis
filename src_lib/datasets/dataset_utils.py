@@ -13,8 +13,10 @@ from log import get_logger
 
 logger = get_logger(__name__)
 
-EXTRACTION_BASE_PATH = '../../src/position_maps/logs/Trajectories/'
-SAVE_BASE_PATH = '../../Datasets/SDD/pm_extracted_annotations/'
+FUTURE_TIMESTEPS = 2
+IS_GAN = False
+EXTRACTION_BASE_PATH = f'../../Datasets/SDD/classic_nn_extended_annotations_new_v1/d{FUTURE_TIMESTEPS}/{"gan" if IS_GAN else "simple"}/'
+SAVE_BASE_PATH = f'../../Datasets/SDD/classic_nn_extended_annotations_new_v1_splits/d{FUTURE_TIMESTEPS}/{"gan" if IS_GAN else "simple"}/'
 
 ALL_VIDEO_CLASSES = [
     SDDVideoClasses.BOOKSTORE, SDDVideoClasses.COUPA, SDDVideoClasses.DEATH_CIRCLE,
@@ -85,10 +87,13 @@ def make_trainable_trajectory_dataset_by_length(track_obj, length=20):
 
 
 def turn_splits_into_trajectory_dataset(split: pd.DataFrame, num_frames_in_jump=12, time_between_frames=0.4):
-    unique_tracks = split.track.unique()
+    # unique_tracks = split.track.unique()
+    unique_tracks = split.track_id.unique()
+
     final_tracks_save, relative_distances_save = [], []
     for t_id in tqdm(unique_tracks):
-        track_df = split[split.track == t_id]
+        # track_df = split[split.track == t_id]
+        track_df = split[split.track_id == t_id]
 
         tracks_list: List[SingleTrack] = []
         for start_frame in range(len(track_df)):
@@ -119,11 +124,11 @@ def process_annotation(annotation_path, path_to_save):
     train_set, val_set, test_set = split_annotations(df)
 
     logger.info('Processing Train set')
-    train_dataset = turn_splits_into_trajectory_dataset(train_set)
+    train_dataset = turn_splits_into_trajectory_dataset(train_set, num_frames_in_jump=1)
     logger.info('Processing Validation set')
-    val_dataset = turn_splits_into_trajectory_dataset(val_set)
+    val_dataset = turn_splits_into_trajectory_dataset(val_set, num_frames_in_jump=1)
     logger.info('Processing Test set')
-    test_dataset = turn_splits_into_trajectory_dataset(test_set)
+    test_dataset = turn_splits_into_trajectory_dataset(test_set, num_frames_in_jump=1)
 
     Path(path_to_save).mkdir(parents=True, exist_ok=True)
 
@@ -139,17 +144,26 @@ def process_annotation(annotation_path, path_to_save):
     logger.info(f'Saved track datasets at {path_to_save}')
 
 
-def generate_annotation_for_all_extracted_tracks(video_classes, video_numbers):
+def generate_annotation_for_all_extracted_tracks(video_classes, video_numbers, annotation_path=EXTRACTION_BASE_PATH,
+                                                 path_to_save=SAVE_BASE_PATH):
     for idx, video_class in enumerate(video_classes):
         for video_number in video_numbers[idx]:
             logger.info(f'Processing extracted annotation for {video_class.value} - {video_number}')
             process_annotation(
-                annotation_path=f'{EXTRACTION_BASE_PATH}{video_class.name}/{video_number}/trajectories.csv',
-                path_to_save=f'{SAVE_BASE_PATH}{video_class.value}/video{video_number}/v0/')
+                annotation_path=f'{annotation_path}{video_class.value}/video{video_number}/annotation.csv',
+                path_to_save=f'{path_to_save}{video_class.value}/video{video_number}/v0/')
     logger.info('Finished generating all annotations!')
 
 
 if __name__ == '__main__':
-    generate_annotation_for_all_extracted_tracks(
-        video_classes=ALL_VIDEO_CLASSES,
-        video_numbers=ALL_VIDEO_NUMBERS)
+    future_time_steps = [2, 5]
+    model_version = ['simple', 'gan']
+    for ft in future_time_steps:
+        for mv in model_version:
+            annotation_path = f'../../Datasets/SDD/classic_nn_extended_annotations_new_v1/d{ft}/{mv}/'
+            path_to_save = f'../../Datasets/SDD/extended_splits/classic_nn_extended_annotations_new_v1/d{ft}/{mv}/'
+            generate_annotation_for_all_extracted_tracks(
+                video_classes=ALL_VIDEO_CLASSES,
+                video_numbers=ALL_VIDEO_NUMBERS,
+                annotation_path=annotation_path,
+                path_to_save=path_to_save)
