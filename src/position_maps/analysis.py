@@ -388,6 +388,47 @@ class TracksAnalyzer(object):
         self.save_as_csv(metrics=metrics)
         return metrics
 
+    def perform_analysis_on_multiple_sequences_v1(self, show_extracted_tracks_only=False, use_new=False, d=2,
+                                               is_gan=False):
+        # pm_extracted_filename='trajectories.csv'
+        metrics = {}
+        for v_idx, (v_clz, v_meta_clz) in enumerate(zip(self.video_classes, self.video_meta_classes)):
+            for v_num in self.video_numbers[v_idx]:
+                gt_annotation_path = f"{self.root}annotations/{v_clz.value}/video{v_num}/annotation_augmented.csv"
+                # extracted_annotation_path = f"{self.root}pm_extracted_annotations/{v_clz.value}/" \
+                #                             f"video{v_num}/{pm_extracted_version}/{pm_extracted_filename}"
+                extracted_annotation_path = \
+                    f"{self.root}classic_nn_extended_annotations_{'new_' if use_new else ''}v1/d{d}/" \
+                    f"{'gan' if is_gan else 'simple'}/{v_clz.value}/" \
+                    f"video{v_num}/annotation.csv"
+                ref_img = torchvision.io.read_image(f"{self.root}annotations/{v_clz.value}/video{v_num}/reference.jpg")
+                video_path = f"{self.root}/videos/{v_clz.value}/video{v_num}/video.mov"
+                if show_extracted_tracks_only:
+                    self.construct_extracted_tracks_only(
+                        extracted_annotation_path, v_clz, v_num, video_path, (ref_img.shape[1:]))
+                else:
+                    data, p, r = self.perform_analysis_on_single_sequence(
+                        gt_annotation_path, extracted_annotation_path, v_clz, v_meta_clz, v_num, (ref_img.shape[1:]),
+                        video_path)
+                    ade, fde = self.calculate_ade_fde_for_associations(
+                        video_sequence_track_data=data, meta_class=v_meta_clz, video_number=v_num)
+                    if v_clz.name in metrics.keys():
+                        metrics[v_clz.name][v_num] = {
+                            'ade': ade, 'fde': fde,
+                            'precision': p, 'recall': r,
+                            'neighbourhood_radius': self.config.threshold
+                        }
+                    else:
+                        metrics[v_clz.name] = {
+                            v_num: {
+                                'ade': ade, 'fde': fde,
+                                'precision': p, 'recall': r,
+                                'neighbourhood_radius': self.config.threshold
+                            }
+                        }
+        self.save_as_csv(metrics=metrics)
+        return metrics
+
     def perform_analysis_on_single_sequence(
             self, gt_annotation_path, extracted_annotation_path, video_class,
             video_meta_class, video_number, image_shape, video_path):
