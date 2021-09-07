@@ -1022,7 +1022,7 @@ def evaluate_models(cfg):
     cfg.tp_module.using_extended_trajectories = False
     cfg.tp_module.datasets.use_generated = False
 
-    cfg.tp_module.datasets.use_foreign_dataset = True
+    cfg.tp_module.datasets.use_foreign_dataset = False
     cfg.tp_module.datasets.foreign_dataset = 'eth'
 
     if cfg.tp_module.datasets.use_foreign_dataset:
@@ -1040,6 +1040,888 @@ def evaluate_models(cfg):
 
     constant_linear_baseline_caller = ConstantLinearBaselineV2(
         foreign_dataset=cfg.tp_module.datasets.use_foreign_dataset)
+
+    # model_dict = {
+    #     'lstm_gt':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210814_130503-2xzajz05",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gan_gt':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210805_151420-2itkkx4b",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'unsupervised_classic_lstm':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210809_173947-1b6f1143",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'unsupervised_classic_lstm_gan':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210810_185312-2ajr83w5",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'unsupervised_classic_filtered_lstm':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210809_172936-2lgrlxat",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'unsupervised_classic_lstm_filtered_gan':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210809_215129-3f9646gs",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'unsupervised_classic_filtered_extended_lstm':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210830_120436-3q3qs3vy",
+    #                 # run_name="run-20210829_191602-3d9f0muu",  # d5
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'unsupervised_classic_lstm_filtered_extended_gan':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210902_161912-2lodals6",
+    #                 # run_name="run-20210902_165329-2l31sg5p",  # d5
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    # }
+
+    # d5 - gan
+    # model_dict = {
+    #     'lstm_gan_b4':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210829_124927-ehedba4l",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gan_b8':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210831_120742-snraskx7",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gan_b16':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210901_110730-3u62n1jv",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gan_b32':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210901_214547-2u9e914b",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gan_b64':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210902_115850-25w46ph4",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gan_b128':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210902_151404-3txnxaja",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gan_b256':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210902_165329-2l31sg5p",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     # 'unsupervised_classic_lstm_filtered_extended_gan':
+    #     #     (
+    #     #         True,
+    #     #         build_single_model(
+    #     #             cfg=cfg,
+    #     #             model_str="RNNGANBaseline",
+    #     #             wandb_enabled=True,
+    #     #             run_name="run-20210902_161912-2lodals6",
+    #     #             # run_name="run-20210902_165329-2l31sg5p",  # d5
+    #     #             tb_dict={},
+    #     #             top_k=1,
+    #     #         )
+    #     #     ),
+    # }
+
+    # d2
+    # model_dict = {
+    #     'lstm_gan_b4':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210829_122555-1rz1xmnf",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gan_b8':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210831_115738-31a1kby8",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gan_b16':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210901_111502-2gz63i76",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gan_b32':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210901_213914-ep4awjc2",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gan_b64':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210902_121103-3inglq6f",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gan_b128':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210902_144409-1sr7wy48",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gan_b256':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210902_161912-2lodals6",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     # 'unsupervised_classic_lstm_filtered_extended_gan':
+    #     #     (
+    #     #         True,
+    #     #         build_single_model(
+    #     #             cfg=cfg,
+    #     #             model_str="RNNGANBaseline",
+    #     #             wandb_enabled=True,
+    #     #             run_name="run-20210902_161912-2lodals6",
+    #     #             # run_name="run-20210902_165329-2l31sg5p",  # d5
+    #     #             tb_dict={},
+    #     #             top_k=1,
+    #     #         )
+    #     #     ),
+    # }
+
+    # # lstm d2 & d5
+    # model_dict = {
+    #     'lstm_d2_b4':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210827_193218-2f9yn2u6",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_d2_b8':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210828_171440-2mtv379s",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_d2_b16':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210829_122023-q6burz7o",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_d2_b32':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210829_191029-2ypc80z7",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_d2_b64':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210829_222627-16s9zyyv",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_d2_b128':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210830_101252-297mr221",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_d2_b256':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210830_120436-3q3qs3vy",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #
+    #     'lstm_d5_b4':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210826_184557-4ygf57i0",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_d5_b8':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210827_173535-3j5brfz5",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_d5_b16':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210828_104056-225so77y",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_d5_b32':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210828_171402-2esierar",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_d5_b64':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210829_121449-1so4d52c",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_d5_b128':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210829_141651-i5zivpda",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_d5_b256':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210829_191602-3d9f0muu",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    # }
+
+    # # lstm gt + filtered + classic filtered
+    # model_dict = {
+    #     'lstm_gt_b8':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210811_000928-1m84o0rv",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gt_b16':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210812_112917-1sh4y6dx",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gt_b32':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210813_120127-t1ku6j03",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gt_b64':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210813_210355-2gewcxir",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_gt_b256':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210814_130503-2xzajz05",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_classic_b4':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210823_183041-kx97nh5j",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_classic_b16':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210824_231753-3tnarz6d",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #
+    #     'lstm_classic_b32':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210825_112900-yrsnnrke",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_classic_b64':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210825_154437-2wvi3hyx",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_classic_b256':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210825_183351-1lodvdqz",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_classic_filtered_b4':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210824_232521-2trlq4b3",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_classic_filtered_b16':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210825_164943-2djw36pk",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_classic_filtered_b32':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210825_220356-3e8i5okm",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_classic_filtered_b64':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210826_113550-30k3h1h8",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstm_classic_filtered_b256':
+    #         (
+    #             False,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210826_154047-gsib4nuq",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    # }
+
+    # lstmGAN gt + filtered + classic filtered
+    # model_dict = {
+    #     'lstmGAN_gt_b16':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210803_214346-qrxwa1rn",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstmGAN_gt_b32':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210804_095845-27wtko0n",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstmGAN_gt_b128':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210805_151420-2itkkx4b",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     # 'lstmGAN_gt_b64':
+    #     #     (
+    #     #         False,
+    #     #         build_single_model(
+    #     #             cfg=cfg,
+    #     #             model_str="RNNBaseline",
+    #     #             wandb_enabled=True,
+    #     #             run_name="run-20210813_210355-2gewcxir",
+    #     #             tb_dict={},
+    #     #             top_k=1,
+    #     #         )
+    #     #     ),
+    #     # 'lstmGAN_gt_b256':
+    #     #     (
+    #     #         False,
+    #     #         build_single_model(
+    #     #             cfg=cfg,
+    #     #             model_str="RNNBaseline",
+    #     #             wandb_enabled=True,
+    #     #             run_name="run-20210814_130503-2xzajz05",
+    #     #             tb_dict={},
+    #     #             top_k=1,
+    #     #         )
+    #     #     ),
+    #     'lstmGAN_classic_b4':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210823_180851-bk5i0xxu",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstmGAN_classic_b16':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210825_141923-2dmopchy",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #
+    #     'lstmGAN_classic_b32':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210826_115833-dcogwz6f",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstmGAN_classic_b64':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210826_184525-1tnf1cq2",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstmGAN_classic_b128':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210827_112140-3m4hf5ob",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstmGAN_classic_b256':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210827_143512-4fuqxapz",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstmGAN_classic_filtered_b4':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210824_232833-2tgj7xd9",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstmGAN_classic_filtered_b8':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210826_114106-1t5ya1ll",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstmGAN_classic_filtered_b16':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210827_112935-1jct74tu",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstmGAN_classic_filtered_b32':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210827_210539-2whq1sp0",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstmGAN_classic_filtered_b64':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210828_103650-3jn6z2as",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstmGAN_classic_filtered_b128':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210828_171647-1o8r81mi",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    #     'lstmGAN_classic_filtered_b256':
+    #         (
+    #             True,
+    #             build_single_model(
+    #                 cfg=cfg,
+    #                 model_str="RNNGANBaseline",
+    #                 wandb_enabled=True,
+    #                 run_name="run-20210828_184907-1o3fl4z3",
+    #                 tb_dict={},
+    #                 top_k=1,
+    #             )
+    #         ),
+    # }
 
     model_dict = {
         'lstm_gt':
@@ -1073,7 +1955,8 @@ def evaluate_models(cfg):
                     cfg=cfg,
                     model_str="RNNBaseline",
                     wandb_enabled=True,
-                    run_name="run-20210809_173947-1b6f1143",
+                    # run_name="run-20210809_173947-1b6f1143",
+                    run_name="run-20210825_154437-2wvi3hyx",
                     tb_dict={},
                     top_k=1,
                 )
@@ -1085,7 +1968,8 @@ def evaluate_models(cfg):
                     cfg=cfg,
                     model_str="RNNGANBaseline",
                     wandb_enabled=True,
-                    run_name="run-20210810_185312-2ajr83w5",
+                    # run_name="run-20210810_185312-2ajr83w5",
+                    run_name="run-20210826_184525-1tnf1cq2",
                     tb_dict={},
                     top_k=1,
                 )
@@ -1097,7 +1981,8 @@ def evaluate_models(cfg):
                     cfg=cfg,
                     model_str="RNNBaseline",
                     wandb_enabled=True,
-                    run_name="run-20210809_172936-2lgrlxat",
+                    # run_name="run-20210809_172936-2lgrlxat",
+                    run_name="run-20210824_232521-2trlq4b3",
                     tb_dict={},
                     top_k=1,
                 )
@@ -1109,7 +1994,8 @@ def evaluate_models(cfg):
                     cfg=cfg,
                     model_str="RNNGANBaseline",
                     wandb_enabled=True,
-                    run_name="run-20210809_215129-3f9646gs",
+                    # run_name="run-20210809_215129-3f9646gs",
+                    run_name="run-20210828_184907-1o3fl4z3",
                     tb_dict={},
                     top_k=1,
                 )
@@ -1121,7 +2007,8 @@ def evaluate_models(cfg):
                     cfg=cfg,
                     model_str="RNNBaseline",
                     wandb_enabled=True,
-                    run_name="run-20210830_120436-3q3qs3vy",
+                    run_name="run-20210827_193218-2f9yn2u6",  # d2/4
+                    # run_name="run-20210830_120436-3q3qs3vy",
                     # run_name="run-20210829_191602-3d9f0muu",  # d5
                     tb_dict={},
                     top_k=1,
@@ -1134,7 +2021,8 @@ def evaluate_models(cfg):
                     cfg=cfg,
                     model_str="RNNGANBaseline",
                     wandb_enabled=True,
-                    run_name="run-20210902_161912-2lodals6",
+                    run_name="run-20210829_124927-ehedba4l",  # d5/4
+                    # run_name="run-20210902_161912-2lodals6",
                     # run_name="run-20210902_165329-2l31sg5p",  # d5
                     tb_dict={},
                     top_k=1,
@@ -1142,9 +2030,14 @@ def evaluate_models(cfg):
             ),
     }
 
+    comp_name = "best_models_final_result"
     d = 2
     foreign_appender = ('_' + cfg.tp_module.datasets.foreign_dataset + f'_d{d}') \
         if cfg.tp_module.datasets.use_foreign_dataset else ''
+    # root_save_path = f"logs/trajectory_model_eval{foreign_appender}/" \
+    #                  f"moving_only_{moving_only}_stationary_only_{stationary_only}_batch_k_{batch_multiplier}_d{d}/"
+    root_save_path = f"logs/compare_models/{comp_name}/trajectory_model_eval{foreign_appender}/" \
+                     f"moving_only_{moving_only}_stationary_only_{stationary_only}_batch_k_{batch_multiplier}/"
 
     model_name_list, ade_list, fde_list, linear_ade_list, linear_fde_list = [], [], [], [], []
     for model_key_name, model_tuple in model_dict.items():
@@ -1159,9 +2052,7 @@ def evaluate_models(cfg):
                 device='cuda:0',
                 use_standard_dataset=True,
                 root=cfg.root,
-                save_path=f"logs/trajectory_model_eval{foreign_appender}/"
-                          f"moving_only_{moving_only}_"
-                          f"stationary_only_{stationary_only}_batch_k_{batch_multiplier}_d{d}/{run_name}/",
+                save_path=f"{root_save_path}{run_name}/",
                 batch_size=2 if is_gan else 1,
                 filter_mode=filter_mode,
                 moving_only=moving_only,
@@ -1186,11 +2077,9 @@ def evaluate_models(cfg):
             'linear_fde': linear_fde_list,
         }
     )
-    Path(f"logs/trajectory_model_eval{foreign_appender}/moving_only_{moving_only}"
-         f"_stationary_only_{stationary_only}_batch_k_{batch_multiplier}_d{d}/").mkdir(parents=True, exist_ok=True)
+    Path(root_save_path).mkdir(parents=True, exist_ok=True)
     df.to_csv(
-        f"logs/trajectory_model_eval{foreign_appender}/moving_only_{moving_only}_stationary_only_{stationary_only}_"
-        f"batch_k_{batch_multiplier}_d{d}/eval_moving_only_{moving_only}_"
+        f"{root_save_path}eval_moving_only_{moving_only}_"
         f"stationary_only_{stationary_only}_batch_k_{batch_multiplier}.csv")
     return df
 
