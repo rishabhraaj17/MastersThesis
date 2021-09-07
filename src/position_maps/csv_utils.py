@@ -30,11 +30,11 @@ def csv_merge(default_path, boosted_path, nn_path, save_root_path, dump_as_markd
     if dump_as_markdown:
         save_as_markdown(
             out_df,
-            path=f'{save_root_path}metrics_for_all_steps.md')
+            path=f'{save_root_path}final_metrics_for_all_steps.md')
     else:
         save_as_tex(
             out_df,
-            path=f'{save_root_path}metrics_for_all_steps.tex')
+            path=f'{save_root_path}final_metrics_for_all_steps.tex')
 
 
 def save_as_markdown(out_df, path):
@@ -241,10 +241,11 @@ if __name__ == '__main__':
     # d_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/generated_annotations/metrics_2m.csv'
     # b_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/' \
     #          'filtered_generated_annotations/metrics_2m.csv'
-    # n_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/' \
-    #          'pm_extracted_annotations/metrics_2m.csv'
+    # n_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/' \
+    #          'SDD/classic_nn_extended_annotations_v1/d2/simple/metrics_2m.csv'
     # csv_merge(d_path, b_path, n_path,
-    #           save_root_path='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/')
+    #           save_root_path='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/',
+    #           dump_as_markdown=True)
     
     # v0_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/' \
     #          'pm_extracted_annotations_v0/metrics.csv'

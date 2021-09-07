@@ -1035,5 +1035,5 @@ if __name__ == '__main__':
     analyzer = TracksAnalyzer(OmegaConf.load('config/training/training.yaml'))
     # analyzer = TracksAnalyzerClassical(OmegaConf.load('config/training/training.yaml'), use_patch_filtered=True)
     # out = analyzer.perform_analysis_on_multiple_sequences(show_extracted_tracks_only=False)
-    out = analyzer.perform_analysis_on_multiple_sequences_v1(show_extracted_tracks_only=False, is_gan=False, d=5)
+    out = analyzer.perform_analysis_on_multiple_sequences_v1(show_extracted_tracks_only=False, is_gan=False, d=2)
     print()
