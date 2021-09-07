@@ -1023,7 +1023,7 @@ def evaluate_models(cfg):
     cfg.tp_module.datasets.use_generated = False
 
     cfg.tp_module.datasets.use_foreign_dataset = True
-    cfg.tp_module.datasets.foreign_dataset = 'ucy'
+    cfg.tp_module.datasets.foreign_dataset = 'eth'
 
     if cfg.tp_module.datasets.use_foreign_dataset:
         test_dataset, _ = setup_dataset(cfg)
@@ -1122,6 +1122,7 @@ def evaluate_models(cfg):
                     model_str="RNNBaseline",
                     wandb_enabled=True,
                     run_name="run-20210830_120436-3q3qs3vy",
+                    # run_name="run-20210829_191602-3d9f0muu",  # d5
                     tb_dict={},
                     top_k=1,
                 )
@@ -1134,11 +1135,16 @@ def evaluate_models(cfg):
                     model_str="RNNGANBaseline",
                     wandb_enabled=True,
                     run_name="run-20210902_161912-2lodals6",
+                    # run_name="run-20210902_165329-2l31sg5p",  # d5
                     tb_dict={},
                     top_k=1,
                 )
             ),
     }
+
+    d = 2
+    foreign_appender = ('_' + cfg.tp_module.datasets.foreign_dataset + f'_d{d}') \
+        if cfg.tp_module.datasets.use_foreign_dataset else ''
 
     model_name_list, ade_list, fde_list, linear_ade_list, linear_fde_list = [], [], [], [], []
     for model_key_name, model_tuple in model_dict.items():
@@ -1153,9 +1159,9 @@ def evaluate_models(cfg):
                 device='cuda:0',
                 use_standard_dataset=True,
                 root=cfg.root,
-                save_path=f"logs/trajectory_model_eval/"
+                save_path=f"logs/trajectory_model_eval{foreign_appender}/"
                           f"moving_only_{moving_only}_"
-                          f"stationary_only_{stationary_only}_batch_k_{batch_multiplier}/{run_name}/",
+                          f"stationary_only_{stationary_only}_batch_k_{batch_multiplier}_d{d}/{run_name}/",
                 batch_size=2 if is_gan else 1,
                 filter_mode=filter_mode,
                 moving_only=moving_only,
@@ -1180,13 +1186,11 @@ def evaluate_models(cfg):
             'linear_fde': linear_fde_list,
         }
     )
-    foreign_appender = ('_' + cfg.tp_module.datasets.foreign_dataset) \
-        if cfg.tp_module.datasets.use_foreign_dataset else ''
     Path(f"logs/trajectory_model_eval{foreign_appender}/moving_only_{moving_only}"
-         f"_stationary_only_{stationary_only}_batch_k_{batch_multiplier}/").mkdir(parents=True, exist_ok=True)
+         f"_stationary_only_{stationary_only}_batch_k_{batch_multiplier}_d{d}/").mkdir(parents=True, exist_ok=True)
     df.to_csv(
         f"logs/trajectory_model_eval{foreign_appender}/moving_only_{moving_only}_stationary_only_{stationary_only}_"
-        f"batch_k_{batch_multiplier}/eval_moving_only_{moving_only}_"
+        f"batch_k_{batch_multiplier}_d{d}/eval_moving_only_{moving_only}_"
         f"stationary_only_{stationary_only}_batch_k_{batch_multiplier}.csv")
     return df
 
@@ -1195,6 +1199,6 @@ if __name__ == '__main__':
     # overfit()
     # overfit_gan()
     # evaluate()
-    train_lightning()
+    # train_lightning()
     # evaluate_stochastic()
-    # evaluate_models()
+    evaluate_models()
