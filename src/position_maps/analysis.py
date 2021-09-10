@@ -21,6 +21,10 @@ from baselinev2.nn.data_utils import extract_frame_from_video
 from baselinev2.plot_utils import add_box_to_axes, add_box_to_axes_with_annotation
 from src.position_maps.evaluate import get_image_array_from_figure, process_numpy_video_frame_to_tensor
 
+TP_LIST = []
+FP_LIST = []
+FN_LIST = []
+
 VIDEO_TO_PRUNE_RADIUS_MAPPING = {
     SDDVideoClasses.DEATH_CIRCLE: {
         0: {'head': 0, 'radius': 20},
@@ -623,6 +627,9 @@ class TracksAnalyzer(object):
                 torch.cat(video_frames).permute(0, 2, 3, 1),
                 self.config.video_fps)
         print(f"Analysis done for {video_class.name} - {video_number}")
+        # TP_LIST.extend(tp_list)
+        # FP_LIST.extend(fp_list)
+        # FN_LIST.extend(fn_list)
         return video_sequence_track_data, overall_precision, overall_recall
 
     @staticmethod
@@ -937,6 +944,9 @@ class TracksAnalyzerClassical(TracksAnalyzer):
                 torch.cat(video_frames).permute(0, 2, 3, 1),
                 self.config.video_fps)
         print(f"Analysis done for {video_class.name} - {video_number}")
+        # TP_LIST.extend(tp_list)
+        # FP_LIST.extend(fp_list)
+        # FN_LIST.extend(fn_list)
         return video_sequence_track_data, overall_precision, overall_recall
 
     def construct_extracted_tracks_only(

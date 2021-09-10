@@ -27,6 +27,8 @@ def csv_merge(default_path, boosted_path, nn_path, save_root_path, dump_as_markd
 
     out_df['neighbourhood_radius'] = nn_df['neighbourhood_radius']
 
+    out_df.to_csv(f'{save_root_path}final_metrics_for_all_steps.csv', index=False)
+
     if dump_as_markdown:
         save_as_markdown(
             out_df,
@@ -238,14 +240,14 @@ def compare_crop_classifiers():
 
 if __name__ == '__main__':
     # sdd_stats_from_website()
-    # d_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/generated_annotations/metrics_2m.csv'
-    # b_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/' \
-    #          'filtered_generated_annotations/metrics_2m.csv'
-    # n_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/' \
-    #          'SDD/classic_nn_extended_annotations_v1/d2/simple/metrics_2m.csv'
-    # csv_merge(d_path, b_path, n_path,
-    #           save_root_path='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/',
-    #           dump_as_markdown=True)
+    d_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/generated_annotations/metrics_2m.csv'
+    b_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/' \
+             'filtered_generated_annotations/metrics_2m.csv'
+    n_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/' \
+             'SDD/classic_nn_extended_annotations_v1/d2/simple/metrics_2m.csv'
+    csv_merge(d_path, b_path, n_path,
+              save_root_path='/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/',
+              dump_as_markdown=True)
     
     # v0_path = '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/' \
     #          'pm_extracted_annotations_v0/metrics.csv'
