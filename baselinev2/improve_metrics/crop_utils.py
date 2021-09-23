@@ -866,7 +866,10 @@ def patches_and_labels_with_anchors_different_crop_track_threshold(
         # plt.imshow(fp_crops_grid.permute(1, 2, 0))
         # plt.show()
 
-    gt_crops_resized = torch.stack(gt_crops_resized)
+    if len(gt_crops_resized) != 0:
+        gt_crops_resized = torch.stack(gt_crops_resized)
+    else:
+        return {}, {}
 
     # data-augmentation
     if img_transforms:

@@ -388,6 +388,26 @@ def people_collate_fn(batch):
     return [{'patches': gt_patches, 'labels': gt_labels}, {'patches': fp_patches, 'labels': fp_labels}]
 
 
+def people_collate_fn_tuple(batch):
+    gt_patches, fp_patches = [], []
+    gt_labels, fp_labels = [], []
+    for ele in batch:
+        gt, fp = ele
+        gt_patches.append(gt['patches'])
+        fp_patches.append(fp['patches'])
+
+        gt_labels.append(gt['labels'])
+        fp_labels.append(fp['labels'])
+
+    gt_patches = torch.cat(gt_patches, dim=0)
+    fp_patches = torch.cat(fp_patches, dim=0)
+
+    gt_labels = torch.cat(gt_labels)
+    fp_labels = torch.cat(fp_labels)
+
+    return torch.cat((gt_patches, fp_patches)), torch.cat((gt_labels, fp_labels))
+
+
 def init_weights(m):
     classname = m.__class__.__name__
     if classname.find('Linear') != -1:
@@ -616,7 +636,10 @@ def plot_predictions(labels, patches, pred_labels, batch_idx, save_path=None, ad
     for i in range(8):
         for j in range(8):
             ax[i, j].axis('off')
-            ax[i, j].set_title(f'{labels[k].int().item()} | {pred_labels[k].int().item()}')
+            if labels[k].int().item() == pred_labels[k].int().item():
+                ax[i, j].set_title(f'{labels[k].int().item()} | {pred_labels[k].int().item()}')
+            else:
+                ax[i, j].set_title(f'{labels[k].int().item()} | {pred_labels[k].int().item()}', color='r')
             ax[i, j].imshow(patches[k].permute(1, 2, 0).cpu())
 
             k += 1

@@ -1,3 +1,28 @@
 # @package _global_
-mode_dist_threshold: 2
-best_k_test : 20
+
+eval:
+  num_workers: 12
+  data_augmentation: 1
+
+  batch_size: 32
+
+  best_k: 10
+
+  # dataset
+  dataset_name: 'stanford'
+  use_generated_dataset: True
+  supervised_root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD_Features/"
+  unsupervised_root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Plots/baseline_v2/v0/"
+
+  supervised_split: 'splits_v1'
+  unsupervised_split: 'splits_v3'  # 'splits_v1'
+
+  # plot
+  plot_val: False
+
+  device: 'cuda:0'
+
+  checkpoint:
+    root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/baselinev2/stochastic/logs/"
+    path: "lightning_logs/version_"
+    version: 19

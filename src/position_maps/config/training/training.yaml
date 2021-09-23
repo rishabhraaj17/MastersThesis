@@ -1,0 +1,688 @@
+# @package _global_
+
+device: 'cuda:0'  # 'cuda:0'
+data_augmentation: True
+
+# optimizer
+# Adam
+lr: 2e-3
+weight_decay: 0
+amsgrad: False
+
+# scheduler
+# ReduceLROnPlateau
+patience: 5
+verbose: True
+factor: 0.1
+min_lr: 1e-10
+# extra
+monitor: 'val_loss_epoch'
+interval: 'epoch'
+frequency: 1
+mode: 'min'
+
+# TP module
+# scheduler
+tp_module:
+  model: 'RNNGANBaseline'  # 'TransformerNoisyMotionGenerator' # 'TrajectoryGANTransformerV2'  # 'TrajectoryTransformer'  # 'RNNBaseline'  # 'TrajectoryTransformer'
+
+  smooth_trajectories:
+    enabled: False
+    min_length: 4
+    smoother: 'bezier'  # or 'simple'
+
+  using_extended_trajectories: True
+  extended_version: 'v1'
+  datasets:
+    root_gt: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/OpenTraj/datasets/SDD/'
+    root_log: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/Trajectories/'
+    root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
+
+    supervised_root: 'annotations'
+    supervised_csv: 'annotation_augmented.csv'
+
+    # generated_annotations - vanilla method
+    # filtered_generated_annotations - patch filtered
+    # filtered_generated_annotations_augmented - patch filtered with some manual augmentations
+    # pm_extracted_annotations - position map vanilla detections
+    # classic_nn_extracted_annotations - classic patch filtered + position_map new detections
+    # classic_nn_extended_annotations_ - extended (add version)
+    unsupervised_root: 'classic_nn_extended_annotations_v1'
+    unsupervised_csv: 'generated_annotations.csv'
+
+    gan_extended: False
+
+    use_standard_dataset: True
+
+    open_traj_root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/OpenTraj'
+    use_foreign_dataset: True
+    foreign_dataset: 'eth'  # 'ucy', 'eth'
+
+    filename: 'trajectories.pt'
+
+    use_generated: True
+    from_temp_file: True
+
+    frame_rate: 30.
+    time_step: 0.4  # 0.0333 for standard 1 ts per frame
+
+    val_ratio: 0.2
+    test_ratio: 0.2
+    batch_multiplier: 10
+    mode_dist_threshold: 2
+
+    # we split same dataset into train & val (in time)
+#    video_classes: [ LITTLE ]
+#    video_numbers: [ [ 0 ] ]
+
+    video_classes: [ QUAD ]
+    video_numbers: [ [ 3 ] ]
+
+#    video_classes: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
+#    video_numbers: [ [ 0, 1, 2, 3, 4, 5, 6 ], [ 0, 1, 2, 3 ], [ 0, 1, 2, 3, 4 ], [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ],
+#                     [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], [ 0, 1, 2, 3 ],
+#                     [ 0, 1, 2, 6, 7, 8, 9, 10, 11 ], [ 0, 1, 2, 3 ] ]
+
+    # not in use right now
+    train:
+      video_classes: [ DEATH_CIRCLE ]
+      video_numbers: [ [ 0, 2, 4 ] ]
+    val:
+      video_classes: [ DEATH_CIRCLE ]
+      video_numbers: [ [ 2, 4 ] ]
+    test:
+      video_classes: [ DEATH_CIRCLE ]
+      video_numbers: [ [ 2, 4 ] ]
+
+    obs_len: 8
+    pred_len: 12
+    skip: 1
+    delim: 'space'
+    construct_graph: False
+    min_ped: 0  # 1 is default
+
+  loader:
+    batch_size: 8
+    shuffle: True
+    pin_memory: True
+    drop_last: False
+    num_workers: 0
+    val_batch_size_factor: 2
+
+  scheduler:
+    patience: 20
+    verbose: True
+    factor: 0.1
+    min_lr: 1e-10
+    # extra
+    monitor: 'val_loss_epoch'
+    interval: 'epoch'
+    frequency: 1
+    mode: 'min'
+
+  # Adam
+  optimizer:
+    lr: 1e-3
+    weight_decay: 0
+    amsgrad: False
+
+  metrics:
+    mode: 'raw'
+    in_meters: False
+
+  trainer:
+    max_epochs: 400
+    gpus: 1
+    fast_dev_run: False
+    num_checkpoints_to_save: 3
+    deterministic: True
+    accelerator: null #'ddp_cpu' # null  # 'ddp', 'ddp_cpu'
+    replace_sampler_ddp: False
+    num_nodes: 1
+    find_unused_parameters: True
+    gradient_clip_val: 2.0
+    accumulate_grad_batches: 1
+
+  device: 'cuda:0'
+
+  warm_restart:
+    enable: True
+    custom_load: True
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+      path: "lightning_logs/version_"
+      version: 516403
+      top_k: 1
+
+    wandb:
+      enabled: True
+      checkpoint:
+        root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/wandb/"
+        tail_path: "/files/"
+        project_name: 'TrajectoryPredictionBaseline'
+        run_name: "run-20210801_135455-1u8hovb0"
+        top_k: 1
+
+# loaders
+batch_size: 2
+shuffle: False  # keep it always False
+num_workers: 12
+pin_memory: True
+drop_last: True
+val_batch_size_factor: 2
+
+single_video_mode:
+  enabled: False
+
+  num_videos: -1
+  video_classes_to_use: [ GATES ]
+  video_numbers_to_use: [ [ 3 ] ] # nexus 3, 4 are bad
+  multiple_videos: False
+
+  val_percent: 0.2
+
+# trainer
+trainer:
+  max_epochs: 400
+  gpus: 1
+  fast_dev_run: False
+  num_checkpoints_to_save: 4
+  deterministic: False
+  accelerator: 'ddp' #'ddp_cpu' # null  # 'ddp', 'ddp_cpu'
+  replace_sampler_ddp: False
+  num_nodes: 1
+  find_unused_parameters: True
+  gradient_clip_val: 2.0
+  accumulate_grad_batches: 1
+
+
+# dataset
+root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
+video_class: DEATH_CIRCLE
+video_meta_class: DEATH_CIRCLE
+desired_pixel_to_meter_ratio: 0.30 # 0.35
+desired_pixel_to_meter_ratio_rgb: 0.30 # 0.25 # 0.05
+downscale_only_target_maps: False
+using_replay_compose: True
+manual_annotation_processing: False
+frame_rate: 12.  # 5.  # 30.
+
+use_multiple_datasets_v2: False  # fails with multi-gpu training
+
+video_based: # !!!!! Keep an eye !!!!
+  enabled: False
+  frames_per_clip: 4  # 5  # for video based
+  gt_idx: -1
+
+train:
+  num_videos: -1
+  video_number_to_use: 3
+  # all videos
+  #  video_classes_to_use: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
+  #  video_numbers_to_use: [ [ 1, 2, 3, 4, 5 ], [ 0, 1, 2 ], [ 0, 1, 2, 4 ], [ 0, 1, 2, 3, 5, 6, 8 ],
+  #                          [ 0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13 ], [ 1, 2, 3 ],
+  #                          [ 0, 1, 2, 7, 8, 9, 10, 11 ], [ 1, 2, 3 ] ] # nexus 3, 4 are bad
+  #  # Portraits -> H > W
+  #  video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS ]
+  #  video_numbers_to_use: [ [ 0, 1, 2, 4 ], [ 0, 1, 2, 3, 5, 6, 8 ],
+  #                          [ 0, 1, 4, 5, 8 ], [ 1, 2, 3 ],
+  #                          [ 0, 1, 2, 7, 8, 9, 10, 11 ] ] # nexus 3, 4 are bad
+  #  video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG ]
+  #  video_numbers_to_use: [ [ 0, 1, 2, 4 ], [ 0, 1, 2, 3, 5, 6, 8 ],
+  #                          [ 0, 1, 4, 5, 8 ] ] # nexus 3, 4 are bad
+  #  video_classes_to_use: [ GATES, LITTLE ]
+  #  video_numbers_to_use: [ [ 0, 1, 2, 7, 8 ], [ 1, 2, 3 ] ] # nexus 3, 4 are bad
+  #  video_classes_to_use: [ HYANG ]
+  #  video_numbers_to_use: [ [ 0, 1, 4, 5 ] ] # nexus 3, 4 are bad
+  #  video_classes_to_use: [ NEXUS ]
+  #  video_numbers_to_use: [ [ 0, 1, 6, 7, 8, 9, 10, 11 ] ] # nexus 3, 4 are bad
+  # Portraits -> H > W
+  #  video_classes_to_use: [ DEATH_CIRCLE, GATES, LITTLE ]
+  #  video_numbers_to_use: [ [ 2, 4 ], [5], [0] ] # nexus 3, 4 are bad
+  #  video_classes_to_use: [ GATES ]
+  #  video_numbers_to_use: [ [ 2 ] ] # nexus 3, 4 are bad
+  video_classes_to_use: [ HYANG ]
+  video_numbers_to_use: [ [ 2, 3, 6, 10, 11, 12, 13 ] ] # nexus 3, 4 are bad
+  multiple_videos: False
+
+val:
+  num_videos: -1
+  video_number_to_use: 3
+  # all videos
+  #  video_classes_to_use: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
+  #  video_numbers_to_use: [ [ 0 ], [ 3 ], [ 3 ], [ 4 ], [ 7 ], [ 0 ], [ 6 ], [ 0 ] ]
+  # Portraits -> H > W
+  # Portraits -> H > W
+  #  video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS ]
+  #  video_numbers_to_use: [ [ 3 ], [ 4 ], [ 7 ], [ 0 ], [ 6 ] ]
+  #  video_classes_to_use: [ DEATH_CIRCLE, GATES, HYANG ]
+  #  video_numbers_to_use: [ [ 3 ], [ 4 ], [ 7 ] ]
+  #  video_classes_to_use: [ GATES, LITTLE ]
+  #  video_numbers_to_use: [ [ 4 ], [ 0 ] ]
+  video_classes_to_use: [ HYANG ]
+  video_numbers_to_use: [ [ 14 ] ]
+  #  video_classes_to_use: [ HYANG ]
+  #  video_numbers_to_use: [ [ 7, 8, 9 ] ]
+  #  video_classes_to_use: [ NEXUS ]
+  #  video_numbers_to_use: [ [ 2 ] ] # nexus 3, 4 are bad
+  #  video_classes_to_use: [ GATES ]
+  #  video_numbers_to_use: [ [ 4, 6 ] ]
+  multiple_videos: False
+
+dataset_workers: 12
+# keep one of them null at one time
+scale_factor: null # 0.25
+desired_size: [ 490, 360 ]
+
+use_generated_dataset: True
+
+plot_samples: False
+
+# gaussian
+heatmap_shape: null
+return_combined_heatmaps: True
+sigma: 2.5 # 3.2 # 0.7
+
+seg_map_objectness_threshold: 0.5
+heatmap_region_limit_threshold: 0.0
+focal_loss_alpha: 0.8
+gaussuan_focal_loss_alpha: 2.0
+use_center_net_gaussian_focal_loss: True
+
+model: 'DeepLabV3PlusDDP'
+
+preproccesing:
+  pad_factor: 8
+
+loss:
+  reduction: 'mean'
+  gaussian_weight: [ 0.5 ]
+  apply_sigmoid: [ True ]
+  bfl:
+    alpha: 0.85
+    gamma: 4.0
+
+prediction:
+  threshold: 0.4
+  fill_value: 0.0
+
+wandb_position_map:
+  enabled: False
+  log_model: False
+  project_name: 'PositionMap'
+
+warm_restart:
+  enable: True
+  custom_load: True
+  checkpoint:
+    root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+    path: "lightning_logs/version_"
+    version: 516403
+    top_k: 1
+
+  wandb:
+    enabled: False
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/wandb/"
+      tail_path: "/files/"
+      project_name: 'PositionMap'
+      run_name: "run-20210721_163402-1zebiwjj"
+      top_k: 1
+
+resume_mode: False
+resume:
+  checkpoint:
+    path: "lightning_logs/version_"
+    version: 472698
+    top_k: 1
+
+class_map_segmentation: False
+position_map_segmentation: False
+
+# one of 'PositionMapUNetHeatmapRegression', 'PositionMapUNetPositionMapSegmentation',
+# 'PositionMapUNetClassMapSegmentation', 'PositionMapUNetHeatmapSegmentation', 'PositionMapStackedHourGlass',
+# 'HourGlassPositionMapNetwork', 'HourGlassPositionMapNetworkDDP'
+postion_map_network_type: 'HourGlassPositionMapNetworkDDP'
+
+from_model_hub: True
+model_hub:
+  model: 'DeepLabV3Plus'
+
+overfit:
+  num_epochs: 6000
+  batch_size: 2
+  num_workers: 0
+  pin_memory: True
+  drop_last: False
+
+  postion_map_network_type: 'HourGlassPositionMapNetwork'
+  focal_loss_alpha: 0.9
+  gaussuan_focal_loss_alpha: 2.0
+
+  subset_indices: 128  # 450  # [ 0, 85, 32, 5, 125, 200 ]
+  #  subset_indices: [0]
+
+  plot_checkpoint: 99
+
+  temporal_stacked:
+    enabled: True
+    frames_per_clip: 5
+
+  use_pretrained:
+    enabled: False
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+      path: "lightning_logs/version_"
+      version: 509506 # 492265 # 497829 # 492265 #424798 # 437363  # 424798
+      top_k: 1
+
+interplay_v0:
+  num_epochs: 1  # 400
+
+  use_pretrained:
+    enabled: True
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+      path: "lightning_logs/version_"
+      version: 509506 # 492265 # 497829 # 492265 #424798 # 437363  # 424798
+      top_k: 1
+
+  train_position_model: False
+
+  subset_indices: 32  # 450  # [ 0, 85, 32, 5, 125, 200 ]
+
+  batch_size: 2
+  shuffle: False  # keep it always False
+  num_workers: 0
+  pin_memory: False
+  drop_last: False
+
+  min_history: 4  # x batchsize
+  in_trajectory_length: 4  # x batchsize
+  inactive_tracks_keep_alive: 5
+
+  objectness:
+    kernel: 3
+    loc_cutoff: 0.05
+    marker_size: 3
+    index_select: 0
+
+crop_classifier:
+  num_epochs: 400
+
+  crop_size: [ 64, 64 ]  # h, w
+
+  radius_elimination: 200
+
+  use_pretrained:
+    enabled: False
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+      path: "lightning_logs/version_"
+      version: 509506 # 492265 # 497829 # 492265 #424798 # 437363  # 424798
+      top_k: 1
+
+  subset_indices: 32  # 450  # [ 0, 85, 32, 5, 125, 200 ]
+
+  lr: 1e-3
+  weight_decay: 5e-9
+  amsgrad: False
+
+  batch_size: 16
+  shuffle: True  # keep it always False
+  num_workers: 12
+  pin_memory: True
+  drop_last: False
+  val_batch_size_factor: 2
+
+  patience: 5
+  verbose: True
+  factor: 0.1
+  min_lr: 1e-10
+  # extra
+  monitor: 'val_loss_epoch'
+  interval: 'epoch'
+  frequency: 1
+  mode: 'min'
+
+  num_checkpoints_to_save: 3
+
+  objectness:
+    kernel: 3
+    loc_cutoff: 0.05
+    marker_size: 3
+    index_select: 0
+    threshold: 0.10
+
+  server_mode: False
+
+  project_name: CropClassifier
+
+  trainer:
+    num_epochs: 400
+    gpus: 1
+    fast_dev_run: False
+    num_checkpoints_to_save: 2
+    deterministic: True
+    accelerator: null #'ddp_cpu' # null  # 'ddp', 'ddp_cpu'
+    replace_sampler_ddp: True
+    num_nodes: 1
+    find_unused_parameters: True
+    gradient_clip_val: 2.0
+    accumulate_grad_batches: 1
+
+  use_generated_dataset: True
+  data_augmentation: True
+
+  warm_restart:
+    enable: False
+    custom_load: False
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/wandb/"
+      tail_path: "/files/"
+      project_name: 'CropClassifier'
+      run_name: "run-20210721_163402-1zebiwjj"
+      top_k: 1
+
+  dataset:
+    name: 'stanford'
+    num_workers: 12
+    video_to_use: 0
+
+    num_videos: [0]
+    val_num_videos: [ 0 ]
+
+#    video_class: 'DEATH_CIRCLE'
+#    num_videos: [ 0, ] # 1, 3, 4 ]  # [0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13] # [0, 1, 3, 4]  # -1
+#    val_num_videos: [ 2 ]
+#    test_num_videos: [ 3 ]
+
+#    video_class: 'HYANG'
+#    num_videos: [ 0, 1, 2, 3, 4, 5, 8, 9, 10, 12, 13, 14 ]
+#    val_num_videos: [ 6, 7, 11 ]
+#    test_num_videos: [ 6, 7, 11 ]
+
+#    video_class: 'QUAD'
+#    num_videos: [ 0, 1, 2 ]
+#    val_num_videos: [ 3 ]
+#    test_num_videos: [ 3 ]
+
+    multiple_videos: True
+    merge_annotations: True
+    root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/"
+    # root: "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/Datasets/SDD/"
+    only_long_trajectories: True
+    track_length_threshold: 150
+
+    all_train_videos: [ [ 1, 2, 3, 4, 5 ], [ 0, 1, 2 ], [ 0, 1, 2, 4 ], [ 0, 1, 2, 3, 5, 6, 8 ],
+                        [ 0, 1, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13 ], [ 1, 2, 3 ],
+                        [ 0, 1, 2, 7, 8, 9, 10, 11 ], [ 1, 2, 3 ] ]  # nexus 3, 4 are bad
+    all_val_videos: [ [ 0 ], [ 3 ], [ 3 ], [ 4 ], [ 7 ], [ 0 ], [ 6 ], [ 0 ] ]
+    all_test_videos: [ [ 6 ], [ 3 ], [ 3 ], [ 7 ], [ 9, 14 ], [ 0 ], [ 6 ], [ 0 ] ]
+
+    additional_h: 20
+    additional_w: 20
+    #  aspect_ratios: [0.75, 0.5]
+    aspect_ratios: [ ]
+    #  scales: [2.0]
+    scales: [ ]
+    track_length_threshold_for_random_crops: 5
+    radius_elimination: 160
+
+    ratio:
+      train: 0.8
+      test: 0.2
+      val: 0.2
+
+
+interact:
+  device: 'cuda:0'
+
+  lr: 2e-3
+  weight_decay: 0
+  amsgrad: False
+
+  num_epochs: 6000
+  batch_size: 4
+  num_workers: 0
+  pin_memory: True
+  drop_last: False
+
+  num_videos: -1
+  video_classes_to_use: [ DEATH_CIRCLE ]
+  video_numbers_to_use: [ [ 2 ] ]
+  multiple_videos: False
+
+  desired_pixel_to_meter_ratio: 0.25
+  desired_pixel_to_meter_ratio_rgb: 0.25 # 0.05
+
+  postion_map_network_type: 'PositionMapUNetHeatmapSegmentation'
+  focal_loss_alpha: 0.9
+
+  max_trajectory_length: 18
+
+  subset_indices: [ 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85 ]  # [0, 12, 24, 36, 48, 60]
+
+  plot_checkpoint: 99
+
+  blob_threshold: 0.2
+  objectness_threshold: 0.2
+
+  do_validation: False
+
+  checkpoint:
+    root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+    path: "lightning_logs/version_"
+    version: 424798 # 437363  # 424798
+
+patch_mode:
+  use_pretrained:
+    enabled: False
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+      path: "lightning_logs/version_"
+      version: 502496 # 492265 # 497829 # 492265 #424798 # 437363  # 424798
+      top_k: 1
+
+  patch_size: [ 256, 256 ]
+  num_epochs: 6000
+  batch_size: 2
+  mini_batch_size: 2
+  num_workers: 0
+  pin_memory: True
+  drop_last: True
+
+  model: 'DeepLabV3Plus'
+  focal_loss_alpha: 0.9
+  gaussuan_focal_loss_alpha: 2.0
+
+  subset_indices: [ 0, 85, 32, 5, 125, 200, 220, 240, 1024, 1600, 2600, 4000 ]
+  #  subset_indices: [0]
+
+  plot_checkpoint: 99
+
+  patience: 50
+  verbose: True
+  factor: 0.1
+  min_lr: 1e-10
+
+trajectory_extender:
+  num_epochs: 1  # 400
+
+  use_pretrained:
+    enabled: True
+    checkpoint:
+      root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/"
+      path: "lightning_logs/version_"
+      version: 509506 # 492265 # 497829 # 492265 #424798 # 437363  # 424798
+      top_k: 1
+
+  train_position_model: False
+
+  subset_indices: 32  # 450  # [ 0, 85, 32, 5, 125, 200 ]
+
+  batch_size: 2
+  shuffle: False  # keep it always False
+  num_workers: 0
+  pin_memory: False
+  drop_last: False
+
+  video_class: [ BOOKSTORE ]
+  video_number: [ [ 0 ] ]
+
+  objectness:
+    kernel: 3
+    loc_cutoff: 0.05
+    marker_size: 3
+    index_select: 0
+
+metrics_analysis:
+  root: '/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/Datasets/SDD/'
+  #  video_classes: [ DEATH_CIRCLE ]
+  #  video_numbers: [ [ 0, 1, 2, 3, 4 ] ]
+#  video_classes: [ BOOKSTORE, COUPA, DEATH_CIRCLE, GATES, HYANG, LITTLE, NEXUS, QUAD ]
+#  video_numbers: [ [ 0, 1, 2, 3, 4, 5, 6 ], [ 0, 1, 2, 3 ], [ 0, 1, 2, 3, 4 ], [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ],
+#                            [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], [ 0, 1, 2, 3 ],
+#                            [ 0, 1, 2, 6, 7, 8, 9, 10, 11 ], [ 0, 1, 2, 3 ] ]
+
+  video_classes: [ HYANG ]
+  video_numbers: [ [ 7, 8 ] ]
+
+  match_distance: 'inf'
+  threshold: 2  # meters
+  dead_threshold: 5  # frames
+
+  trajectory_threshold: 1
+
+  make_video: False
+  video_fps: 2
+  plot_gt_features: False
+  show_plot: False
+  marker_size: 2
+
+  show_extracted_tracks_for: 'gt'  # 'classic', 'pos_map', 'gt
+
+  use_classifier: True
+
+  use_old_model: True
+
+  crop_size: [ 70, 70 ]  # [ 64, 64 ]  # h, w
+
+  device: 'cuda:0'
+
+  check_in_future: True
+  check_in_past: False
+  use_seg_map: False
+  use_each_12th_frames: True
+  remove_unassociated_tracks: False
+
+  checkpoint:
+    root: "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/src/position_maps/logs/wandb/"
+    tail_path: "/files/"
+    project_name: 'CropClassifier'
+    run_name: "run-20210721_163402-1zebiwjj"
+    top_k: 1
+
+  debug:
+    enabled: False
+

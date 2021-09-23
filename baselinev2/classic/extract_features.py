@@ -11264,8 +11264,9 @@ if __name__ == '__main__':
                           f'/video_annotation_generated/'
         Path(video_save_path).mkdir(parents=True, exist_ok=True)
 
-        annotation_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
-                               f'/csv_annotation/'
+        # annotation_base_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}' \
+        #                        f'/csv_annotation/'
+        annotation_base_path = f'{BASE_PATH}filtered_generated_annotations/{VIDEO_LABEL.value}/video{VIDEO_NUMBER}/'
         annotation_filename = 'generated_annotations.csv'
         annotation_path = annotation_base_path + annotation_filename
 

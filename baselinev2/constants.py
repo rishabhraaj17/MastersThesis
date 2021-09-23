@@ -56,6 +56,8 @@ class SDDVideoClassAndNumbers(Enum):
     DEATH_CIRCLE = (SDDVideoClasses.DEATH_CIRCLE, (0, 1, 2, 3, 4))
     GATES = (SDDVideoClasses.GATES, (0, 1, 2, 3, 4, 5, 6, 7, 8))
     HYANG = (SDDVideoClasses.HYANG, (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
+    # HYANG = (SDDVideoClasses.HYANG, (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 14))
     LITTLE = (SDDVideoClasses.LITTLE, (0, 1, 2, 3))
     NEXUS = (SDDVideoClasses.NEXUS, (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11))
+    # NEXUS = (SDDVideoClasses.NEXUS, (0, 1, 2, 6, 7, 8, 9, 10, 11))
     QUAD = (SDDVideoClasses.QUAD, (0, 1, 2, 3))

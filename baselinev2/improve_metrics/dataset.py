@@ -48,7 +48,10 @@ class SDDDatasetV0(Dataset):
                  single_track_mode: bool = False, track_id: int = 0, video_number_to_use: int = 0,
                  multiple_videos: bool = False, use_generated: bool = False):
         _mid_path = video_label.value
-        _annotation_decider = "generated_annotations/" if use_generated else "annotations/"
+        # _annotation_decider = "generated_annotations/" if use_generated else "annotations/"
+        # _annotation_decider = "filtered_generated_annotations_augmented/" if use_generated else "annotations/"
+        _annotation_decider = "filtered_generated_annotations_augmented_for_classifier/" \
+            if use_generated else "annotations/"
         video_path = root + "videos/" + _mid_path
         annotation_path = root + _annotation_decider + _mid_path
         video_extensions = ('mov',)
@@ -93,7 +96,7 @@ class SDDDatasetV0(Dataset):
             ref_image_path = [os.path.split(p)[0] + '/reference.jpg' for p in annotation_path]
             ref_image = [torchvision.io.read_image(r) for r in ref_image_path]
             self.original_shape = [[r.shape[1], r.shape[2]] for r in ref_image]
-        if multiple_videos and (isinstance(num_videos, list) or isinstance(num_videos, ListConfig)):
+        elif multiple_videos and (isinstance(num_videos, list) or isinstance(num_videos, ListConfig)):
             # restricted to number of videos
             num_videos = list(num_videos)
             annotation_path = [self.annotation_list[n] for n in num_videos]
@@ -231,6 +234,8 @@ class PatchesDataset(SDDDatasetV0):
         self.scales = scales
         self.track_length_threshold_for_random_crops = track_length_threshold_for_random_crops
 
+        self.valid_frames = self.get_valid_frames()
+
         if merge_annotations and multiple_videos and num_videos == -1:
             frame_counts = [d.frame.max() for d in self.annotations_df]
             frame_counts_cumsum = np.cumsum(frame_counts)
@@ -242,6 +247,9 @@ class PatchesDataset(SDDDatasetV0):
                 frame_adjusted_dfs.append(temp)
 
             self.merged_annotations = pd.concat(frame_adjusted_dfs)
+
+    def __len__(self):
+        return super(PatchesDataset, self).__len__() if len(self.valid_frames) != 0 else len(self.valid_frames)
 
     def __getitem__(self, item):
         frames, frame_numbers, video_idx = super(PatchesDataset, self).__getitem__(item=item)
@@ -265,7 +273,15 @@ class PatchesDataset(SDDDatasetV0):
             aspect_ratios=self.aspect_ratios,
             track_length_threshold_for_random_crops=self.track_length_threshold_for_random_crops)
         while len(gt_patches_and_labels) == 0 and len(fp_patches_and_labels) == 0:
-            random_frame_num = np.random.choice(len(self), 1, replace=False).item()
+            random_frame_num = np.random.choice(
+                # len(self),
+                # self.annotations_df[0].frame_number.unique(),
+                # self.video_clips.resampling_idxs[0].numpy().squeeze(-1),
+                # np.intersect1d(
+                #     self.annotations_df[0].frame_number.unique(),
+                #     self.video_clips.resampling_idxs[0].numpy().squeeze(-1)),
+                self.valid_frames,
+                1, replace=False).item()
             frames, frame_numbers, video_idx = super(PatchesDataset, self).__getitem__(item=random_frame_num)
             gt_patches_and_labels, fp_patches_and_labels = patches_and_labels_with_anchors_different_crop_track_threshold(
                 image=frames.squeeze(0),
@@ -288,6 +304,37 @@ class PatchesDataset(SDDDatasetV0):
                 track_length_threshold_for_random_crops=self.track_length_threshold_for_random_crops)
         return gt_patches_and_labels, fp_patches_and_labels
 
+    def get_valid_frames(self):
+        valid_frames_superset = np.intersect1d(
+            self.annotations_df[0].frame_number.unique(),
+            self.video_clips.resampling_idxs[0].numpy().squeeze(-1))
+        valid_frames = []
+        for v in valid_frames_superset:
+            gt_patches_and_labels, fp_patches_and_labels = \
+                patches_and_labels_with_anchors_different_crop_track_threshold(
+                    image=torch.zeros(size=(3, *self.original_shape[0])),
+                    bounding_box_size=self.bounding_box_size,
+                    annotations=self.merged_annotations
+                    if self.merge_annotations and self.multiple_videos and self.num_videos == -1
+                    else self.annotations_df[0],
+                    frame_number=v,
+                    num_patches=self.num_patches,
+                    new_shape=self.new_scale,
+                    use_generated=self.use_generated, plot=self.plot,
+                    radius_elimination=self.radius_elimination,
+                    only_long_trajectories=self.only_long_trajectories,
+                    track_length_threshold=self.track_length_threshold,
+                    img_transforms=self.transforms,
+                    additional_w=self.additional_w,
+                    additional_h=self.additional_h,
+                    scales=self.scales,
+                    aspect_ratios=self.aspect_ratios,
+                    track_length_threshold_for_random_crops=self.track_length_threshold_for_random_crops)
+            if len(gt_patches_and_labels) != 0 and len(fp_patches_and_labels) != 0:
+                valid_frames.append(v)
+
+        return np.array(valid_frames)
+
 
 if __name__ == '__main__':
     video_class = SDDVideoClasses.LITTLE
@@ -298,7 +345,7 @@ if __name__ == '__main__':
                              num_workers=n_workers, num_videos=-1, video_number_to_use=video_number,
                              step_between_clips=1, transform=resize_frames, scale=1, frame_rate=30,
                              single_track_mode=False, track_id=5, multiple_videos=True,
-                             use_generated=False, plot=True, merge_annotations=True)
+                             use_generated=True, plot=True, merge_annotations=False, only_long_trajectories=True)
     loader = DataLoader(dataset, batch_size=8, num_workers=n_workers, shuffle=False, collate_fn=people_collate_fn)
     for data in loader:
         print()

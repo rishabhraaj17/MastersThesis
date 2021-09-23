@@ -7,7 +7,7 @@ from average_image.constants import SDDVideoClasses, SDDVideoDatasets
 from baselinev2.constants import NetworkMode
 from baselinev2.nn.dataset import get_dataset
 from baselinev2.nn.evaluate import filter_on_relative_distances
-from baselinev2.notebooks.utils import get_trajectory_length
+from baselinev2.notebooks.utils import get_trajectory_length, get_trajectory_length_fast
 
 
 def rotate(X, center, alpha):
@@ -611,6 +611,90 @@ def preprocess_dataset_elements(batch, is_generated=False, batch_first=True, fil
             'seq_start_end': seq_start_end,
             'feasible_idx': feasible_idx
             if (moving_only or stationary_only or return_stationary_objects_idx) and filter_mode else []
+            }
+
+
+def preprocess_dataset_elements_from_dict(
+        batch, filter_mode=True, moving_only=False,
+        stationary_only=False, threshold=1.0, relative_distance_filter_threshold=100.,
+        return_stationary_objects_idx=True):
+
+    in_xy, gt_xy, in_uv, gt_uv = batch['in_xy'], batch['gt_xy'], batch['in_dxdy'], batch['gt_dxdy']
+    in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers = \
+        batch['in_tracks'], batch['gt_tracks'], batch['in_frames'], batch['gt_frames']
+    non_linear_ped, loss_mask, seq_start_end, dataset_idx, ratio = \
+        batch['non_linear_ped'], batch['loss_mask'], batch['seq_start_end'], batch['dataset_idx'], batch['ratio']
+
+    if filter_mode:
+        full_xy = torch.cat((in_xy, gt_xy), dim=0)
+        full_length_per_step, full_length = get_trajectory_length_fast(full_xy.cpu().numpy())
+        obs_trajectory_length, obs_trajectory_length_summed = get_trajectory_length_fast(in_xy.cpu().numpy())
+        gt_trajectory_length, gt_trajectory_length_summed = get_trajectory_length_fast(gt_xy.cpu().numpy())
+
+        full_length *= ratio.cpu().numpy().squeeze()
+        obs_trajectory_length_summed *= ratio.cpu().numpy().squeeze()
+        gt_trajectory_length_summed *= ratio.cpu().numpy().squeeze()
+
+        if moving_only:
+            # feasible_idx = np.where(length > threshold)[0]
+            obs_feasible_idx = np.where(obs_trajectory_length_summed > threshold)[0]
+            gt_feasible_idx = np.where(gt_trajectory_length_summed > threshold)[0]
+            # feasible_idx = np.union1d(obs_feasible_idx, gt_feasible_idx)
+            feasible_idx = np.intersect1d(obs_feasible_idx, gt_feasible_idx)
+
+            if relative_distance_filter_threshold is not None:
+                feasible_idx = filter_on_relative_distances(feasible_idx, gt_uv.cpu(), in_uv.cpu(),
+                                                            relative_distance_filter_threshold, axis=0)
+
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = \
+                in_xy[:, feasible_idx, :], gt_xy[:, feasible_idx, :], in_uv[:, feasible_idx, :], gt_uv[:, feasible_idx, :], \
+                in_track_ids[:, feasible_idx, :], gt_track_ids[:, feasible_idx, :], in_frame_numbers[:, feasible_idx, :], \
+                gt_frame_numbers[:, feasible_idx, :], ratio[feasible_idx]
+            non_linear_ped, loss_mask = non_linear_ped[feasible_idx], loss_mask[feasible_idx]
+
+        if stationary_only:
+            # feasible_idx = np.where(length < threshold)[0]
+            obs_feasible_idx = np.where(obs_trajectory_length_summed < threshold)[0]
+            gt_feasible_idx = np.where(gt_trajectory_length_summed < threshold)[0]
+            # feasible_idx = np.union1d(obs_feasible_idx, gt_feasible_idx)
+            feasible_idx = np.intersect1d(obs_feasible_idx, gt_feasible_idx)
+
+            if relative_distance_filter_threshold is not None:
+                feasible_idx = filter_on_relative_distances(feasible_idx, gt_uv.cpu(), in_uv.cpu(),
+                                                            relative_distance_filter_threshold, axis=0)
+
+            in_xy, gt_xy, in_uv, gt_uv, in_track_ids, gt_track_ids, in_frame_numbers, gt_frame_numbers, ratio = \
+                in_xy[:, feasible_idx, :], gt_xy[:, feasible_idx, :], in_uv[:, feasible_idx, :], gt_uv[:, feasible_idx, :], \
+                in_track_ids[:, feasible_idx, :], gt_track_ids[:, feasible_idx, :], in_frame_numbers[:, feasible_idx, :], \
+                gt_frame_numbers[:, feasible_idx, :], ratio[feasible_idx]
+            non_linear_ped, loss_mask = non_linear_ped[feasible_idx], loss_mask[feasible_idx]
+
+        if return_stationary_objects_idx:
+            # feasible_idx = np.where(length < threshold)[0]
+            obs_feasible_idx = np.where(obs_trajectory_length_summed < threshold)[0]
+            gt_feasible_idx = np.where(gt_trajectory_length_summed < threshold)[0]
+            # feasible_idx = np.union1d(obs_feasible_idx, gt_feasible_idx)
+            feasible_idx = np.intersect1d(obs_feasible_idx, gt_feasible_idx)
+
+            if relative_distance_filter_threshold is not None:
+                feasible_idx = filter_on_relative_distances(feasible_idx, gt_uv.cpu(), in_uv.cpu(),
+                                                            relative_distance_filter_threshold, axis=0)
+
+    return {'in_xy': in_xy,
+            'in_dxdy': in_uv,
+            'gt_xy': gt_xy,
+            'gt_dxdy': gt_uv,
+            'in_frames': in_frame_numbers,
+            'gt_frames': gt_frame_numbers,
+            'in_tracks': in_track_ids,
+            'gt_tracks': gt_track_ids,
+            'non_linear_ped': non_linear_ped,
+            'loss_mask': loss_mask,
+            'seq_start_end': seq_start_end,
+            'dataset_idx': dataset_idx,
+            'ratio': ratio,
+            'feasible_idx': torch.from_numpy(feasible_idx)
+            if (moving_only or stationary_only or return_stationary_objects_idx) and filter_mode else torch.zeros((0, 2))
             }
 
 

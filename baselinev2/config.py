@@ -8,7 +8,8 @@ from baselinev2.constants import STEP, SDDVideoClassAndNumbers
 
 SEVER_MODE = False
 
-LOCAL_PATH = "../"
+# LOCAL_PATH = "../"
+LOCAL_PATH = "/home/rishabh/Thesis/TrajectoryPredictionMastersThesis/"
 SERVER_PATH = "/usr/stud/rajr/storage/user/TrajectoryPredictionMastersThesis/"
 
 if SEVER_MODE:
@@ -34,7 +35,7 @@ SAVE_BASE_PATH = f"{ROOT_PATH}Datasets/SDD_Features/"
 
 BASE_PATH = f"{ROOT_PATH}Datasets/SDD/"
 
-EXECUTE_STEP = STEP.MINIMAL
+EXECUTE_STEP = STEP.VERIFY_ANNOTATIONS
 
 version = 0
 video_save_path = f'{ROOT_PATH}Plots/baseline_v2/v{version}/{VIDEO_LABEL.value}{VIDEO_NUMBER}/zero_shot/'

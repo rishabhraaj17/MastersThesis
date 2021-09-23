@@ -9,6 +9,7 @@ from torch.utils.data import Dataset, ConcatDataset, DataLoader, Subset
 import pandas as pd
 
 from average_image.constants import SDDVideoClasses, SDDVideoDatasets
+from average_image.utils import SDDMeta
 from baselinev2.config import SAVE_BASE_PATH, \
     DATASET_META, \
     GENERATED_DATASET_ROOT, BASE_PATH, SDD_VIDEO_CLASSES_LIST_FOR_NN, SDD_PER_CLASS_VIDEOS_LIST_FOR_NN, \
@@ -43,10 +44,10 @@ class BaselineDataset(Dataset):
     def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode,
                  meta_label: SDDVideoDatasets, root: str = SAVE_BASE_PATH,
                  observation_length: int = 8, prediction_length: int = 12,
-                 relative_velocities: bool = False, split_name: str = 'splits_v1'):
+                 relative_velocities: bool = False, split_name: str = 'splits_v1', meta: SDDMeta = DATASET_META):
         super(BaselineDataset, self).__init__()
         try:
-            self.ratio = float(DATASET_META.get_meta(meta_label, video_number)[0]['Ratio'].to_numpy()[0])
+            self.ratio = float(meta.get_meta(meta_label, video_number)[0]['Ratio'].to_numpy()[0])
         except IndexError:
             # Homography not known!
             self.ratio = 1
@@ -64,6 +65,7 @@ class BaselineDataset(Dataset):
         self.video_number = video_number
         self.meta_label = meta_label
         self.split = split
+        self.meta = meta
 
     def __len__(self):
         return len(self.relative_distances)
@@ -90,10 +92,10 @@ class BaselineGeneratedDataset(Dataset):
     def __init__(self, video_class: SDDVideoClasses, video_number: int, split: NetworkMode,
                  meta_label: SDDVideoDatasets, root: str = GENERATED_DATASET_ROOT,
                  observation_length: int = 8, prediction_length: int = 12, relative_velocities: bool = False,
-                 split_name: str = 'splits_v1'):
+                 split_name: str = 'splits_v1', meta: SDDMeta = DATASET_META):
         super(BaselineGeneratedDataset, self).__init__()
         try:
-            self.ratio = float(DATASET_META.get_meta(meta_label, video_number)[0]['Ratio'].to_numpy()[0])
+            self.ratio = float(meta.get_meta(meta_label, video_number)[0]['Ratio'].to_numpy()[0])
         except IndexError:
             # Homography not known!
             self.ratio = 1
@@ -111,6 +113,7 @@ class BaselineGeneratedDataset(Dataset):
         self.video_number = video_number
         self.meta_label = meta_label
         self.split = split
+        self.meta = meta
 
     def __len__(self):
         return len(self.relative_distances)
@@ -208,9 +211,11 @@ class SyntheticDataset(Dataset):
 
 
 def get_dataset(video_clazz: SDDVideoClasses, video_number: int, mode: NetworkMode, meta_label: SDDVideoDatasets,
-                get_generated: bool = False):
-    return BaselineGeneratedDataset(video_clazz, video_number, mode, meta_label=meta_label) if get_generated else \
-        BaselineDataset(video_clazz, video_number, mode, meta_label=meta_label)
+                get_generated: bool = False, split_name: str = 'splits_v1'):
+    return BaselineGeneratedDataset(
+        video_clazz, video_number, mode, meta_label=meta_label, split_name=split_name) \
+        if get_generated \
+        else BaselineDataset(video_clazz, video_number, mode, meta_label=meta_label, split_name=split_name)
 
 
 def get_all_dataset(get_generated: bool = False, root: str = SAVE_BASE_PATH, split_name: str = 'splits_v1'):
